@@ -577,13 +577,34 @@ describe('#469 the release step', () => {
     await uploadAndStart();
 
     // The line exists at once ("running, no percentage yet"); the first poll brings the reading.
-    const live = await screen.findByTestId('engrave-release-live-progress', undefined, { timeout: 10000 });
-    await waitFor(() => expect(live.textContent).toBe('Program 1 of 2 is 20 % done — about 20 s left.'), { timeout: 10000 });
-    expect(live.getAttribute('data-percent')).toBe('20');
+    await screen.findByTestId('engrave-release-live-progress', undefined, { timeout: 10000 });
+    // #1145 — the time is OUR clock's, so at the first reading the run has just begun and no time is
+    // stated (the fake's field 3 — 5 s, or the bench's 4,641 — is never read as seconds).
+    await waitFor(
+      () => expect(screen.getByTestId('engrave-release-live-progress').textContent).toBe('Program 1 of 2 is 20 % done.'),
+      { timeout: 10000 },
+    );
+    expect(screen.getByTestId('engrave-release-live-progress').getAttribute('data-percent')).toBe('20');
     // The next program needs the other cutter; the line names the program and the cutter.
     const next = screen.getByTestId('engrave-release-next-change');
     expect(next.textContent).toContain('Next bit change: program 2 of 2');
     expect(next.textContent).toContain('flat-3.175x12-metal');
+
+    // One minute of OUR clock at 20 % implies about 4 min left — the controller's field 3 never enters.
+    await act(async () => {
+      useMachineRunStore.setState((s) => {
+        const key = `${TARGET.host}:${TARGET.port}`;
+        const entry = s.runs[key]!;
+        return {
+          runs: { ...s.runs, [key]: { ...entry, firstProgressAt: Date.now() - 60_000, pausedMs: 0, pausedAt: null } },
+        };
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-release-live-progress').textContent).toBe(
+        'Program 1 of 2 is 20 % done — about 4 min left.',
+      ),
+    );
 
     // At the pause the progress line belongs to the run that just ended, not the one being set up.
     await screen.findByTestId('engrave-release-change', undefined, { timeout: 20000 });

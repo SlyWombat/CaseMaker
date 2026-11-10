@@ -3535,7 +3535,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "`P:`’s third field — seconds elapsed in the job."
+                      "description": "`P:`’s third field as the controller sends it — its unit is unverified; never read as seconds."
                     },
                     "finished": {
                       "description": "Whether the job has ended: percent 100 AND `Idle` — `Idle` alone appears mid-job.",

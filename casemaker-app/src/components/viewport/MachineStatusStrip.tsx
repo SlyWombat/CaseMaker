@@ -15,7 +15,7 @@ import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
 import { probeNameFor } from '@/engine/cnc/registration/mountContext';
 // #1123-42 — the one formula the Cut step's progress line also draws (`elapsed × (100 − percent) / percent`).
-import { remainingSeconds } from '@/engine/cnc/engrave/runProgress';
+import { remainingSeconds, runClockSeconds } from '@/engine/cnc/engrave/runProgress';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -506,7 +506,12 @@ export function MachineStatusStrip(): JSX.Element | null {
   // shows neither. An Idle below 100 % is a program paused mid-job (the 3–4 s `Idle` at `M05`),
   // and its bar stays. The Stop is already the strip's while the machine is not idle.
   const percent = state === 'Idle' && (progress?.percent ?? 0) >= 100 ? null : progress?.percent ?? null;
-  const remaining = remainingSeconds(progress ?? null);
+  // #1145 — the "left" figure is the RUN WATCH's clock (first `P:` to now), never `P:`'s third
+  // field, whose unit the 2026-11-09 bench samples disproved as seconds. A program started outside
+  // the app has no entry clock, so it shows no time at all — the percent stands alone.
+  // eslint-disable-next-line react-hooks/purity -- wall-clock arithmetic against the run's first-`P:` stamp; recomputed on every poll-driven render (the entry changes every 2 s), never memoised
+  const clockElapsed = prepared !== null && prepared.running ? runClockSeconds(prepared, Date.now()) : null;
+  const remaining = remainingSeconds(percent, clockElapsed);
 
   return (
     <div

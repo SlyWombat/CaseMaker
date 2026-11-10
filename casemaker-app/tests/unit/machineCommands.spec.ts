@@ -165,7 +165,7 @@ describe('#477 machine status — the `?` line, read-only', () => {
     expect(text).toContain('  host       192.0.2.10:2222');
     expect(text).toContain('  status     <Run|MPos:1.0,2.0,3.0|P:12,40,95>');
     expect(text).toContain('  state      Run');
-    expect(text).toContain('  progress   line 12, 40 %, 95 s');
+    expect(text).toContain('  progress   line 12, 40 %, P: third value 95 (unit unverified)');
     expect(text).toContain('  job        not finished yet');
     // The poll is the single status byte (sent as a `?` frame), never a console line.
     expect(transport.lines()).toEqual(['?']);

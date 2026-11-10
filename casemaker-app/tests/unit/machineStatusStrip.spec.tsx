@@ -368,12 +368,28 @@ describe('#647 the DRO — vacuum and progress', () => {
     expect(screen.getByTestId('machine-status-accessory-vacuum').getAttribute('data-mode')).toBe('on');
   });
 
-  it('drives the bar and the remaining time from the P: field', () => {
-    // line 12, 40 %, 75 s elapsed → about 113 s left (1:53).
+  it('drives the bar from the P: percent, and the time left from the RUN CLOCK (#1145)', () => {
     remember('<Run|MPos:-10,-10,-3|WPos:0,0,0|P:12,40,75>');
     render(<MachineStatusStrip />);
     expect(screen.getByTestId('machine-status-percent').textContent).toBe('40 %');
-    expect(screen.getByTestId('machine-status-remaining').textContent).toBe('1:53 left');
+    // No run entry, so no clock: the controller's third field (75 here) is never read as seconds.
+    expect(screen.queryByTestId('machine-status-remaining')).toBeNull();
+    cleanup();
+
+    // The run watch says the program has been RUNNING for 60 s; at 40 % that is 90 s left.
+    useMachineRunStore.setState({
+      runs: {
+        '192.0.2.10:2222': {
+          running: true,
+          firstProgressAt: Date.now() - 60_000,
+          pausedMs: 0,
+          pausedAt: null,
+        } as unknown as RunEntry,
+      },
+    });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-percent').textContent).toBe('40 %');
+    expect(screen.getByTestId('machine-status-remaining').textContent).toBe('1:30 left');
   });
 
   it('omits the progress cell when the line carries no P:', () => {

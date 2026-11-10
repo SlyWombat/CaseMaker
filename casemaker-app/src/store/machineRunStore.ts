@@ -30,6 +30,8 @@ import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
 import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
+// #1145 — the run's own clock: the elapsed time comes from our first `P:` timestamp, never `P:` field 3.
+import { runClockSeconds } from '@/engine/cnc/engrave/runProgress';
 import type { StockItem } from '@/platform/stockClient';
 import type { InventoryItem } from '@/platform/houseClient';
 import type { EngraveJob, FilamentFibre } from '@/types/engraveJob';
@@ -415,6 +417,18 @@ export interface RunEntry {
    */
   paused: boolean;
   /**
+   * #1145 — THE RUN'S OWN CLOCK: wall-clock ms when the watch first saw a `P:` reading, or null
+   * before one. The Cut step's time left and the run's recorded runtime read THIS, never `P:`'s
+   * third field: the 2026-11-09 bench samples showed that field is not seconds on a real program
+   * (1,776 at ~25 s in and 4,641 at ~4 min of the same ~5-minute run). Absent on an entry written
+   * before the field existed, which reads as "no clock".
+   */
+  firstProgressAt?: number | null;
+  /** #1145 — suspended (or operator tool-change) time already completed, ms. */
+  pausedMs?: number;
+  /** #1145 — wall-clock ms the current suspension began, or null when the job is not suspended. */
+  pausedAt?: number | null;
+  /**
    * #655 — the machine is stopped in the firmware's `Tool` state after a `T<n> M6`, waiting for the
    * operator's `M490.2`. Non-null while it waits; `awaited` is the tool the controller names (the
    * T field's third value), null when the line did not say. Absent (an entry written before #655)
@@ -501,6 +515,9 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             outcome: null,
             stopAsked: false,
             paused: false,
+            firstProgressAt: null,
+            pausedMs: 0,
+            pausedAt: null,
             toolWaiting: null,
             context: context ?? null,
             end: null,
@@ -527,7 +544,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       };
       const f: { stop: boolean; pauseAsk: PauseAction | null } = { stop: false, pauseAsk: null };
       flags.set(machine, f);
-      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, toolWaiting: null, end: null });
+      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, firstProgressAt: null, pausedMs: 0, pausedAt: null, toolWaiting: null, end: null });
       const session = attachConsole(target);
       // #1060 — the job's/shop's choice, gated on this machine's own capability (where the target
       // maps to a known machine; an unknown target keeps the choice, as the antistatic does).
@@ -569,14 +586,26 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             onEvent: (e) => {
               const entry = get().runs[machine];
               if (entry === undefined || entry.runId !== runId) return;
-              if (e.kind === 'poll') patchRun({ progress: e.progress });
-              else if (e.kind === 'note') patchRun({ lines: [...entry.lines, `(${e.text})`] });
+              if (e.kind === 'poll') {
+                // #1145 — THE FIRST `P:` IS THE CLOCK'S ANCHOR. A poll before the program reports
+                // progress has no `P:` field: nothing to start a program clock from yet.
+                const first =
+                  entry.firstProgressAt ??
+                  (e.progress.percent !== null || e.progress.line !== null ? Date.now() : null);
+                patch(machine, {
+                  progress: e.progress,
+                  ...(first === null ? {} : { firstProgressAt: first }),
+                });
+              }
+              else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
               else if (e.kind === 'sent' && e.line !== '?') {
                 patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
               } else if (e.kind === 'missed') patchRun({ lines: [...entry.lines, `(no status reply ${e.misses})`] });
               else if (e.kind === 'paused') {
                 patchRun({
                   paused: true,
+                  // #1145 — the clock stops at a suspension: no cutting happens while it is on.
+                  ...(entry.firstProgressAt == null ? {} : { pausedAt: entry.pausedAt ?? Date.now() }),
                   lines: [
                     ...entry.lines,
                     e.unconfirmed
@@ -587,6 +616,8 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               } else if (e.kind === 'tool-waiting') {
                 patchRun({
                   toolWaiting: { awaited: e.awaited },
+                  // #1145 — a tool change is hands-on time, not cutting time: the clock stops too.
+                  ...(entry.firstProgressAt == null ? {} : { pausedAt: entry.pausedAt ?? Date.now() }),
                   lines: [
                     ...entry.lines,
                     `(The machine is waiting for the tool change${
@@ -595,10 +626,18 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                   ],
                 });
               } else if (e.kind === 'tool-continued') {
-                patchRun({ toolWaiting: null });
+                patch(machine, {
+                  toolWaiting: null,
+                  ...(entry.pausedAt == null
+                    ? {}
+                    : { pausedMs: (entry.pausedMs ?? 0) + Math.max(0, Date.now() - entry.pausedAt), pausedAt: null }),
+                });
               } else if (e.kind === 'resumed') {
                 patchRun({
                   paused: false,
+                  ...(entry.pausedAt == null
+                    ? {}
+                    : { pausedMs: (entry.pausedMs ?? 0) + Math.max(0, Date.now() - entry.pausedAt), pausedAt: null }),
                   lines: [
                     ...entry.lines,
                     e.unconfirmed
@@ -609,7 +648,16 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
               }
             },
           });
-          patchRun({ outcome });
+          // #1145 — THE RECORDED ELAPSED IS OURS. The run's clock (first `P:` to now, less the
+          // suspended stretches) replaces `P:`'s third field before anything reads the outcome: the
+          // runtime write, the panel's finished line and the estimate comparison all get our
+          // seconds, whatever the controller's field 3 meant.
+          const clock = runClockSeconds(get().runs[machine] ?? null, Date.now());
+          const withClock =
+            clock === null || !('last' in outcome)
+              ? outcome
+              : { ...outcome, last: { ...outcome.last, elapsedS: clock } };
+          patch(machine, { outcome: withClock });
         } catch (e) {
           outcome = { kind: 'refused', reason: e instanceof Error ? e.message : String(e) };
           patchRun({ outcome });

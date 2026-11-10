@@ -34,7 +34,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 // #1123-42 — the running program's percent, time left and next cutter, from the run watch's own
 // status line and the release list's cut order.
-import { nextBitChange, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
+import { nextBitChange, runClockSeconds, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
 import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -233,6 +233,8 @@ export function EngraveReleaseStep({
   // #1123-42 — the same run entry's progress (the `P:` reading the watch folds in every poll). The
   // object is new per poll; this line is the one thing here that should follow it.
   const liveProgress = useMachineRunStore((s) => (target === null ? null : (s.runs[machineKey(target)]?.progress ?? null)));
+  // #1145 — the time left is OUR clock's: the run watch's first `P:` stamp, never `P:` field 3.
+  const runClock = useMachineRunStore((s) => (target === null ? null : (s.runs[machineKey(target)] ?? null)));
   const toolItems = useToolRegistryStore((s) => s.items);
 
   useEffect(() => {
@@ -283,7 +285,9 @@ export function EngraveReleaseStep({
     ? runningProgramWords({
         active: record.active as number,
         total: record.files.length,
-        progress: liveProgress,
+        percent: liveProgress?.percent ?? null,
+        // eslint-disable-next-line react-hooks/purity -- wall-clock arithmetic against the run's first-`P:` stamp; recomputed on every poll-driven render, never memoised
+        elapsedS: runClock === null ? null : runClockSeconds(runClock, Date.now()),
         paused: runPaused,
       })
     : null;

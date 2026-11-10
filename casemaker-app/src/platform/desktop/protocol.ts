@@ -483,7 +483,12 @@ export interface JobProgress {
   line: number | null;
   /** `P:`'s second field — percent complete, 100 at the end. */
   percent: number | null;
-  /** `P:`'s third field — seconds elapsed in the job. */
+  /**
+   * `P:`'s third field, as the controller sends it. NOT trusted as seconds: the 2026-11-09 bench
+   * samples read 1,776 at ~25 s into a ~5-minute program and 4,641 at ~4 min (#1145), so its unit
+   * is unresolved. The app's elapsed and time left come from the run watch's own clock; nothing
+   * may use this value as a duration.
+   */
   elapsedS: number | null;
 }
 
