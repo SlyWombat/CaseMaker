@@ -714,12 +714,14 @@ accept, and the target width scales the lines with the shapes.
 
 Two ideas hold the chapter together:
 
-- **One job, two modes, three groups.** The CNC surface has a **Design | Cut** switch at the top of
- the panel. **Design** is where the job is described, in three groups — **Job**, **Hold** and
- **Cutter** — under a sticky **Generate** footer that is never below the fold.
+- **One job, two modes, four groups.** The CNC surface has a **Design | Cut** switch at the top of
+ the panel. **Design** is where the job is described, in four groups — **Job**, **Cutter**,
+ **Hold** and **Setups** — under a sticky **Generate** footer that is never below the fold.
  **Cut** asks the preflight gate what it thinks and puts the registration step beside the
- findings. Changing any Design answer marks a frozen Cut package **stale**, so the picture and
- the files cannot drift apart.
+ findings. A Design change that changes the program's **bytes** — the stock, the items, the
+ cutters, the facing or the hold — marks a frozen Cut package **stale**, so the picture and the
+ files cannot drift apart; an approval, a registration, a plan choice or a Cut-strip toggle
+ re-freezes the stored setups on the spot, with no re-plan.
 - **The rail is yours; the strip and the dock are the machine's.** Your answers live in the rail.
  What the machine is doing lives in the **status strip** under the viewport — state, position,
  spindle, tool and a Stop — and what it *said* lives in the dock's **Transcript** tab, out of the
@@ -734,17 +736,20 @@ stock, the mount, the items, the setups and the frozen package; the files a job 
 can prove it is the same file. The older v2 document opens unchanged; the app writes v3 from
 then on.
 
-**The Design rail: three groups, one footer.** The long scrolling column is
-gone. Design mode's rail is three groups, each a heading with a one-line summary that stays
+**The Design rail: four groups, one footer.** The long scrolling column is
+gone. Design mode's rail is four groups, each a heading with a one-line summary that stays
 visible when the body is closed:
 
 - **Job** — the stock, facing (one line when the material refuses it), voids, the item editor and
  the design target objects. The summary states the stock and the item count.
+- **Cutter** — the tool and its recommendation, the cutting feeds and the margin. The summary says
+ "cutter chosen" or "no cutter chosen" plus the margin.
 - **Hold** — how the blank is held: the vise card (one sentence: source · seat · proud/below, with
  the number fields behind **Edit**) and the sacrificial material. The summary is the one vise
  sentence.
-- **Cutter** — the tool and its recommendation, the cutting feeds and the margin. The summary says
- "cutter chosen" or "no cutter chosen" plus the margin.
+- **Setups** — the job's ordered list of holds, and where each setup's registration is planned,
+ re-planned and approved (**Plan registration**, **Re-plan**, **Use this plan**). The summary is
+ the setup count.
 
 Below the groups sits a **sticky Generate footer** — the findings as a count that expands, then
 **Generate** and the run rows. It is the one place the job's state is read, and it is never below
@@ -1113,9 +1118,11 @@ outcome is session state and is the one record the release gate reads; it is not
 the job document.
 
 When every row is green, Cut **freezes the cut package** — the programs, the frame files, the
-plan, the hashes — and reserves the stock on the shelf. Any Design edit marks the package
-**stale**, and a stale package is not uploaded or printed. The run sheet refuses a stale result
-for the same reason: it would describe a job you have since changed.
+plan, the hashes — and reserves the stock on the shelf. A Design edit that changes the program's
+**bytes** marks the package **stale**; an approval, a registration, a plan choice or a Cut-strip
+toggle re-freezes it on the spot instead, with no re-plan and no worker. A stale package is not
+uploaded or printed. The run sheet refuses a stale result for the same reason: it would describe
+a job you have since changed.
 
 **8. Preview as cut, and the plan.** The as-cut preview draws the stock after every setup and
 tool, cumulatively: floors by depth or by layer colour, the **lost layer** (design − as-cut,
@@ -1173,7 +1180,11 @@ the sequence for the job you generated.
 handed to the **release step**: it uploads the frozen list (a first press lists the
 target, every file and the total bytes; only a second press sends), plays the programs in cut
 order, and stops at the **bit change** with the next cutter, its `M491` reading and the Z0
-difference named. Each program needs its own "I am at the machine" tick. Before anything is sent, the upload asks
+difference named. Each program needs its own "I am at the machine" tick. The first **Load** is
+gated by the run's **cutter checklist**: one row per bit, marked **located** or **replaced**
+(with another cutter your shop owns of the same shape and cutting diameter), and the first Load
+waits until every row is accounted for. The checklist is the same list the Cutter group shows; ticking
+is kept with the run, and it never re-plans the job. Before anything is sent, the upload asks
 **"Which cutter is fitted?"** — a selector that defaults to the cutter this file was posted for
 (named the way the bench names it: case colour, label, box code). Naming a *different* cutter is a
 mismatch and **Send stays disabled** until you pick the one the file was written for. The **vacuum stays on
@@ -1227,9 +1238,9 @@ machine on the network; everything up to the upload works in the desktop build w
 
 1. Open the **Cut** surface and press **Open…** in the job file bar; pick
 the single-barrel sample (the picker accepts `.json`).
-2. The Design rail shows the three groups. **Job** states the stock (38.1 × 76.2 × 3.81 mm PLA);
+2. The Design rail shows the four groups. **Job** states the stock (38.1 × 76.2 × 3.81 mm PLA);
  **Hold** states the vise seat; **Cutter** says **no cutter chosen** if your library lacks the
- key the file names — that is expected.
+ key the file names — that is expected; **Setups** lists the job's one setup.
 3. In **Cutter**, read the recommendation and press **Use it** (or pick any flat cutter the panel
  offers).
 4. Press **Generate** in the sticky footer. The run rows report "Toolpath generated · Verified ·
@@ -1982,7 +1993,7 @@ sentence rather than carrying a code of their own. **The Cut screen is their fir
 | `no-cutter` | error | No cutter the library holds can cut this job at all — the recommendation's own refusal, in its words. A job that *names* a tool the library does not have is `tool-missing` instead, and one it can cut only by losing detail is the sweep's `item-detail-lost`. | Add a cutter that can cut it, or change the job. |
 | `stock-refusal` | error | The shelf entry the job asked to start from cannot start it: nothing left, all of it held for other jobs, or a form or size this machine cannot take. The message is the shelf's own. | Pick another blank, or free that one. |
 | `generated-stale` | error | The job, the machine frame or the depth margins changed after the last Generate, so the program the gate is reading no longer describes the job. The row names which one; this is the run store's own stale mark (`staleSince`, with `staleReason` naming the input), stated by the hub beside the collector's rows. | Generate again before cutting. The old result is not treated as current. |
-| `package-stale` | error | The frozen package the job is holding no longer matches the job: re-hashing by value found it changed since the freeze. The message names the package's time and `packageStaleness`'s own reason. The blank the package reserved stays held for this job. | Re-freeze the package. A stale package is not started. |
+| `package-stale` | error | The frozen package the job is holding no longer matches the job: re-hashing by value found it changed since the freeze. The message names the package's time and `packageStaleness`'s own reason — a change to the program's bytes (stock, items, cutters, facing or hold). Approvals, registrations and plan choices do not stale a package; they re-freeze it on the spot. The blank the package reserved stays held for this job. | Generate again: the row names the input that moved. A stale package is not started. |
 | `labels-measuring` | info | A vise job's labels are still being measured: their font faces are loading, and the jaw-clearance check runs on their measured outlines. Until then the hub holds that check back rather than judge cuts from a placeholder box wide enough to seem to touch a jaw. Jobs in the rotary chuck have no jaw check, so the row never appears for them. | Nothing: it clears itself once the label faces load, and the jaw row appears if a cut really does come inside the clearance. |
 
 **The app's own screens** (render boundary). Not a finding about the job: this is the app
