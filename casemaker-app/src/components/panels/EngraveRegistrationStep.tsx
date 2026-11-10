@@ -47,6 +47,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSPro
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { expectedTopOf, thicknessNote } from '@/engine/cnc/registration/thicknessNote';
+import { readDefault } from '@/platform/defaultsClient';
 import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import { implicitJobSetup, implicitSetupFor, registrationOf } from '@/engine/cnc/registration/implicitSetup';
 import type { MountSpec, Setup } from '@/engine/cnc/setups';
@@ -273,6 +275,22 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
     [machineRecord, job.runLog],
   );
+  /**
+   * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK. A finished run of this job keeps the top its
+   * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
+   * continues from THAT top rather than from seat + stated thickness.
+   */
+  const lastRecordedTopMachineZ = useMemo(() => {
+    let latest: { at: string; machineZ: number } | null = null;
+    for (const run of machineRecord?.finishedRuns ?? []) {
+      if (run.jobId !== job.id) continue;
+      const machineZ = run.registration?.surfaceMachineZ;
+      if (machineZ === undefined) continue;
+      const at = run.finishedAt ?? '';
+      if (latest === null || at >= latest.at) latest = { at, machineZ };
+    }
+    return latest?.machineZ ?? null;
+  }, [machineRecord, job.id]);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
@@ -607,6 +625,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const [phase, setPhase] = useState<Phase>('idle');
   const [prompt, setPrompt] = useState<OperatorStep | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
+  /**
+   * #1179 D — THE PLAN THIS RUN MEASURED UNDER, as state rather than the ref: the thickness note
+   * reads the same plan the result's top was compared with, even if the setup edits after the run.
+   */
+  const [runPlanUsed, setRunPlanUsed] = useState<RegistrationPlan | null>(null);
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -897,6 +920,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     // #638 — the plan this run is measured under travels with its result: a later setup edit must
     // not change what the record says was approved and run.
     runPlanRef.current = effectivePlan;
+    setRunPlanUsed(effectivePlan);
     frameSavedRef.current = false;
     setFlipRun(false);
     runJawStartYRef.current = jobVise(job).jawStartY;
@@ -949,6 +973,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           // #1166 — the bracket's surface seek may offer the DERIVED top (seat + stock thickness)
           // when the plan's point has been cut away, but only if this job has actually cut here.
           hasFinishedPrograms,
+          // #1179 D/B4 — the blank's last recorded top, so the derived offer continues from it.
+          lastRecordedTopMachineZ,
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
@@ -1307,6 +1333,21 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const refusal = outcome === null ? null : writerRefusal(outcome);
   const marginOnly = outcome !== null && marginRefusal(outcome);
   const data = result?.ok === true ? result.data : null;
+  /**
+   * #1179 D — THE THICKNESS THE MEASURED TOP IMPLIES, against the job's stated thickness. Only a
+   * MEASURED top speaks (`surfaceDerived` means nothing touched it, F's record keeps it absent);
+   * over the shop's `registration.thicknessNoteMm`, the sentence names both numbers and the
+   * difference. The job is never edited — the measured top is recorded against the blank.
+   */
+  const thickness = useMemo(() => {
+    if (outcome === null || outcome.surfaceDerived !== undefined || runPlanUsed === null) return null;
+    return thicknessNote({
+      statedThicknessMm: runPlanUsed.stockThicknessMm ?? job.stock.thickness,
+      expectedTopMachineZ: expectedTopOf(runPlanUsed),
+      measuredTopMachineZ: outcome.surfaceZ,
+      thresholdMm: readDefault(defaults, 'registration.thicknessNoteMm').value,
+    });
+  }, [outcome, runPlanUsed, job.stock.thickness, defaults]);
 
   // #1088 — a flipped setup the job cannot state (no pins, no measured tip, no carried Z0) keeps the
   // refusal card: no plan, no press, nothing sent.
@@ -1632,6 +1673,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
                     <li key={i}>{note}</li>
                   ))}
                 </ul>
+              )}
+
+              {/* #1179 D — THE MEASURED TOP IMPLIES A THICKNESS. Over the shop's threshold the
+                  step states both numbers and the difference; the job keeps its stated thickness,
+                  and the measured top is what the blank's record keeps. */}
+              {thickness !== null && outcome.withinMargin && (
+                <p style={{ ...MUTED, color: WARN }} data-testid="engrave-registration-thickness-note">
+                  {thickness.text}
+                </p>
               )}
 
               {/* #743 D-2 — THE DISC'S SIZE QUESTION. A blank more than 1 % off the stated ⌀ is

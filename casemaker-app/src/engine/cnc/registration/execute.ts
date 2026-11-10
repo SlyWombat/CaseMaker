@@ -210,6 +210,12 @@ export interface ExecDeps {
    * still applies). A typed Z outside `band` is refused here as well as on the card.
    */
   askTop?: (question: TopQuestion) => Promise<TopChoice>;
+  /**
+   * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK on this machine (F's finished run:
+   * `registration.surfaceMachineZ`, the top its origin was accepted at). The derived offer
+   * continues from THIS top rather than seat + stated thickness; absent/null keeps the arithmetic.
+   */
+  lastRecordedTopMachineZ?: number | null;
 }
 
 export interface Transcript {
@@ -825,11 +831,37 @@ function surfacePointOnStock(plan: RegistrationPlan): boolean {
  * #1166 — the bracket's own top AS THE PLAN STATES IT: the expected surface (its measured seat +
  * the stock's thickness). The seat is the plan's own expected surface less the thickness its input
  * carried — no store is read here, and the card prints the same arithmetic.
+ *
+ * #1179 B4/D — A RECORDED TOP REPLACES THE ARITHMETIC. When this blank's last finished run kept
+ * the top its origin was accepted at, the derived offer continues from that top; the arithmetic
+ * stays in the words, as what the record is compared to.
  */
-function bracketTopOf(plan: RegistrationPlan): { machineZ: number; seat: number | null; thickness: number | null } {
-  const machineZ = r3(plan.seek.band.max - plan.settings.surfaceToleranceMm);
+function bracketTopOf(
+  plan: RegistrationPlan,
+  lastRecordedTopMachineZ: number | null = null,
+): {
+  machineZ: number;
+  seat: number | null;
+  thickness: number | null;
+  /** `seat + stock thickness` — the plan's own expected top, what a record replaces. */
+  derivedMachineZ: number;
+  /** The last accepted top for this blank, or null when there is no record. */
+  recordedMachineZ: number | null;
+} {
+  const derivedMachineZ = r3(plan.seek.band.max - plan.settings.surfaceToleranceMm);
   const thickness = plan.stockThicknessMm ?? null;
-  return { machineZ, seat: thickness === null ? null : r3(machineZ - thickness), thickness };
+  const recordedMachineZ =
+    lastRecordedTopMachineZ !== null && Number.isFinite(lastRecordedTopMachineZ)
+      ? r3(lastRecordedTopMachineZ)
+      : null;
+  const machineZ = recordedMachineZ ?? derivedMachineZ;
+  return {
+    machineZ,
+    seat: thickness === null ? null : r3(machineZ - thickness),
+    thickness,
+    derivedMachineZ,
+    recordedMachineZ,
+  };
 }
 
 /** #1166 — the DERIVED surface a run continues from: no probe touched it, so `touched: false`. */
@@ -842,8 +874,23 @@ function derivedSurfacePrb(plan: RegistrationPlan, machineZ: number): Prb {
   };
 }
 
-/** #1166 — the one arithmetic sentence the press, the question and the record share. */
-function bracketTopWords(top: { machineZ: number; seat: number | null; thickness: number | null }): string {
+/** #1166 — the one arithmetic sentence the press, the question and the record share.
+ *  #1179 B4 — with a record, it names the recorded top and how far it stands from seat + stock. */
+function bracketTopWords(top: {
+  machineZ: number;
+  seat: number | null;
+  thickness: number | null;
+  derivedMachineZ: number;
+  recordedMachineZ: number | null;
+}): string {
+  if (top.recordedMachineZ !== null) {
+    const diff = r3(top.recordedMachineZ - top.derivedMachineZ);
+    const versus =
+      diff === 0
+        ? `the same as seat + stock ${f(top.derivedMachineZ)}`
+        : `${f(Math.abs(diff))} mm ${diff > 0 ? 'above' : 'below'} seat + stock ${f(top.derivedMachineZ)}`;
+    return `the last record for this blank: machine Z ${f(top.recordedMachineZ)} (${versus})`;
+  }
   return top.seat !== null && top.thickness !== null
     ? `seat ${f(top.seat)} + stock ${f(top.thickness)} = ${f(top.machineZ)}`
     : `seat + stock thickness = ${f(top.machineZ)}`;
@@ -1947,7 +1994,7 @@ export async function runRegistration(
       plan.bracketOrigin !== null &&
       surfacePointOnStock(plan) &&
       deps.hasFinishedPrograms === true;
-    const bracketTop = bracketTopOf(plan);
+    const bracketTop = bracketTopOf(plan, deps.lastRecordedTopMachineZ ?? null);
     let chosenTop: { machineZ: number; source: 'bracket-top' | 'operator-entered' } | null = null;
     if (bracketTopFallback && deps.askTop !== undefined) {
       const choice = await deps.askTop({
@@ -2071,7 +2118,11 @@ export async function runRegistration(
         // names the arithmetic and tells the operator what a new blank means.
         const useDerived = await deps.operator({
           kind: 'derived-surface',
-          text: `no surface where the plan expected it. If earlier programs cut this spot, use the bracket's own top: ${bracketTopWords(bracketTop)}. If this is a new blank, decline and check its thickness.`,
+          // #1179 B4 — a recorded top is offered AS the record; otherwise the bracket's own top.
+          text:
+            `no surface where the plan expected it. If earlier programs cut this spot, ` +
+            `${bracketTop.recordedMachineZ !== null ? 'use' : "use the bracket's own top:"} ${bracketTopWords(bracketTop)}. ` +
+            `If this is a new blank, decline and check its thickness.`,
         });
         if (!useDerived) throw surfaceMissStop(plan, miss);
         slow = derivedSurfacePrb(plan, bracketTop.machineZ);

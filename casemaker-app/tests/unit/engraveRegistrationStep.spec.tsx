@@ -197,6 +197,11 @@ interface FakeOptions {
    * where that span puts it, so a test can make the blank a little larger or smaller than stated.
    */
   discSpans?: { x: number; y: number };
+  /**
+   * #1179 D — the top the fake really has, mm above (+) or below (−) the plan's expected surface.
+   * In-band shifts only: the surface seek still finds and uses the reading.
+   */
+  surfaceShiftMm?: number;
 }
 
 /**
@@ -211,7 +216,8 @@ function controller(plan: RegistrationPlan, sent: string[], opts: FakeOptions = 
   let lastY = 0;
   /** The machine's own State word — settable so a test can alarm it; `$X` returns it to Idle. */
   let state = 'Idle';
-  const stockZ = plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2;
+  const stockZ =
+    plan.seek.band.max - (plan.seek.band.max - plan.seek.band.min) / 2 + (opts.surfaceShiftMm ?? 0);
 
   const reply = (text: string): ConsoleSend => ({ ok: true, line: '', text, frames: 1, elapsedMs: 1 });
 
@@ -369,6 +375,39 @@ function beddedLocation() {
     } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
   });
 }
+
+describe('#1179 D — the thickness note', () => {
+  it('states the implied thickness when the measured top is more than the threshold from the job’s', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan, { surfaceShiftMm: 0.3 });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    const note = await screen.findByTestId('engrave-registration-thickness-note');
+    // The job's 3 mm, the top's 3.30, the difference, and that the job keeps its own number.
+    expect(note.textContent).toContain('The job says 3 mm');
+    expect(note.textContent).toContain('3.30 mm');
+    expect(note.textContent).toContain('0.30 mm more');
+    expect(note.textContent).toContain('not changed');
+    // The job keeps its stated thickness — the measured top is the record's, never the job's.
+    expect(useEngraveJobStore.getState().job.stock.thickness).toBe(3);
+  });
+
+  it('is silent inside the threshold', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    install(plan, { surfaceShiftMm: 0.05 });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await runStep();
+
+    expect(screen.queryByTestId('engrave-registration-thickness-note')).toBeNull();
+  });
+});
 
 describe('#636 — the write-backs read their answer', () => {
   it('a save that does not land is stated on the result, never reported as recorded', async () => {

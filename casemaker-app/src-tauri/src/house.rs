@@ -1507,6 +1507,7 @@ impl HouseStore {
                 record.power = existing.power.clone();
                 record.wasteboard = existing.wasteboard.clone();
                 record.finished_programs = existing.finished_programs.clone();
+                record.finished_runs = existing.finished_runs.clone();
                 // The bed (#510) is written by the client's one-time migration and, later, by the
                 // profile UI. An OLDER client sends no bed keys at all, and must not wipe them —
                 // but the migration itself arrives as a key-bearing PUT, so the rule is "absent
@@ -1529,6 +1530,7 @@ impl HouseStore {
                 record.power = None;
                 record.wasteboard = None;
                 record.finished_programs = Vec::new();
+                record.finished_runs = Vec::new();
                 record.bed_profiles = None;
                 record.active_bed_profile_id = None;
                 next.machines.push(record);
@@ -1729,8 +1731,21 @@ impl HouseStore {
     /// refusal would silently lose the second. The store's write lock makes the dedupe and the cap
     /// atomic, which is what the guard would otherwise have bought. A hash already on the list is a
     /// no-op and writes nothing.
-    pub async fn add_finished_program(&self, machine_id: &str, hash: &str) -> Result<(), HouseError> {
+    pub async fn add_finished_program(
+        &self,
+        machine_id: &str,
+        hash: &str,
+        run: Option<crate::location::FinishedRun>,
+    ) -> Result<(), HouseError> {
         crate::finished_programs::validate_hash(hash)?;
+        if let Some(record) = &run {
+            if record.hash != hash {
+                return Err(HouseError::BadEntry(
+                    "a finished run's hash must match the program hash being appended".into(),
+                ));
+            }
+            crate::finished_programs::validate_runs(machine_id, std::slice::from_ref(record))?;
+        }
         let mut inner = self.inner.write().await;
         Self::writable(&inner.location_problem)?;
         let mut next = inner.location.clone();
@@ -1739,10 +1754,20 @@ impl HouseStore {
             .iter_mut()
             .find(|m| m.id == machine_id)
             .ok_or_else(|| HouseError::NotFound(format!("machine {machine_id} is not in the location")))?;
-        if machine.finished_programs.iter().any(|h| h == hash) {
+        let had = machine.finished_programs.iter().any(|h| h == hash);
+        if run.is_none() && had {
             return Ok(());
         }
-        crate::finished_programs::append(&mut machine.finished_programs, hash);
+        if let Some(record) = run {
+            // #1179 — the record upserts newest-wins even when the hash was already listed: a
+            // program re-cut under a newer registration replaces its record.
+            crate::finished_programs::append_run(&mut machine.finished_runs, record);
+            if !had {
+                crate::finished_programs::append(&mut machine.finished_programs, hash);
+            }
+        } else {
+            crate::finished_programs::append(&mut machine.finished_programs, hash);
+        }
         self.commit(&mut inner, next)
     }
 
@@ -3693,8 +3718,28 @@ mod tests {
             power: None,
             wasteboard: None,
             finished_programs: Vec::new(),
+            finished_runs: Vec::new(),
             registrations: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
+        }
+    }
+
+    fn a_run(hash: &str, index: u32) -> crate::location::FinishedRun {
+        crate::location::FinishedRun {
+            hash: hash.into(),
+            job_id: Some("job-1".into()),
+            job_name: None,
+            package_key: None,
+            key8: None,
+            program_index: Some(index),
+            program_count: None,
+            program_name: None,
+            cutter_key: None,
+            setup_index: None,
+            finished_at: None,
+            stock: None,
+            registration: None,
+            cut_map: None,
         }
     }
 
@@ -4509,9 +4554,9 @@ mod tests {
     async fn a_machine_gains_finished_programs_once_and_keeps_them_across_a_machine_put() {
         let (_dir, store) = store_with_machine().await;
         // No ETag: an append is not a read-modify-write (see `add_finished_program`'s note).
-        store.add_finished_program("m-1", "a1b2c3d4").await.unwrap();
-        store.add_finished_program("m-1", "a1b2c3d4").await.unwrap();
-        store.add_finished_program("m-1", "0badf00d").await.unwrap();
+        store.add_finished_program("m-1", "a1b2c3d4", None).await.unwrap();
+        store.add_finished_program("m-1", "a1b2c3d4", None).await.unwrap();
+        store.add_finished_program("m-1", "0badf00d", None).await.unwrap();
         let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
         assert_eq!(
             view["machines"][0]["finishedPrograms"],
@@ -4531,9 +4576,9 @@ mod tests {
     #[tokio::test]
     async fn a_finished_program_needs_a_hash_and_a_machine_that_exists() {
         let (_dir, store) = store_with_machine().await;
-        assert!(matches!(store.add_finished_program("m-1", " ").await, Err(HouseError::BadEntry(_))));
+        assert!(matches!(store.add_finished_program("m-1", " ", None).await, Err(HouseError::BadEntry(_))));
         assert!(matches!(
-            store.add_finished_program("nope", "a1b2c3d4").await,
+            store.add_finished_program("nope", "a1b2c3d4", None).await,
             Err(HouseError::NotFound(_))
         ));
         // Neither refusal wrote anything.
@@ -4546,13 +4591,86 @@ mod tests {
         let (_dir, store) = store_with_machine().await;
         let cap = crate::finished_programs::MAX_FINISHED_PROGRAMS;
         for i in 0..cap + 5 {
-            store.add_finished_program("m-1", &format!("h{i:04}")).await.unwrap();
+            store.add_finished_program("m-1", &format!("h{i:04}"), None).await.unwrap();
         }
         let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
         let list = view["machines"][0]["finishedPrograms"].as_array().unwrap();
         assert_eq!(list.len(), cap);
         assert_eq!(list.last().unwrap(), &serde_json::json!("h0204"));
         assert_ne!(list[0], serde_json::json!("h0000"), "the oldest entry was not dropped");
+    }
+
+    #[tokio::test]
+    async fn a_finished_run_is_recorded_beside_the_hash_and_a_repeat_replaces_it() {
+        // #1179. The run record rides the SAME append: a hash-only body (an older client) stays
+        // valid and writes nothing, and a re-cut under a newer registration replaces the record
+        // without duplicating the hash.
+        let (_dir, store) = store_with_machine().await;
+        store.add_finished_program("m-1", "a1b2c3d4", Some(a_run("a1b2c3d4", 1))).await.unwrap();
+        store.add_finished_program("m-1", "a1b2c3d4", None).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+        assert_eq!(view["machines"][0]["finishedRuns"][0]["programIndex"], serde_json::json!(1));
+
+        store.add_finished_program("m-1", "a1b2c3d4", Some(a_run("a1b2c3d4", 2))).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["finishedPrograms"], serde_json::json!(["a1b2c3d4"]));
+        let runs = view["machines"][0]["finishedRuns"].as_array().unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0]["programIndex"], serde_json::json!(2));
+    }
+
+    #[tokio::test]
+    async fn a_finished_run_must_name_the_hash_and_a_cut_map_that_validates() {
+        let (_dir, store) = store_with_machine().await;
+        assert!(matches!(
+            store.add_finished_program("m-1", "a1b2c3d4", Some(a_run("0badf00d", 1))).await,
+            Err(HouseError::BadEntry(_))
+        ));
+        let mut broken = a_run("a1b2c3d4", 1);
+        broken.cut_map = Some(crate::location::FinishedCutMap {
+            cell_mm: 2.0,
+            cols: 80,
+            rows: 63,
+            x0_mm: 0.0,
+            y0_mm: 0.0,
+            step_mm: 0.05,
+            flat: crate::location::CutMapStream { encoding: "rle".into(), data: String::new() },
+            depth: crate::location::CutMapStream { encoding: "rle".into(), data: "1:0".into() },
+        });
+        assert!(matches!(
+            store.add_finished_program("m-1", "a1b2c3d4", Some(broken)).await,
+            Err(HouseError::BadEntry(_))
+        ));
+        // Neither refusal wrote anything.
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert!(view["machines"][0].get("finishedPrograms").is_none(), "{view}");
+        assert!(view["machines"][0].get("finishedRuns").is_none(), "{view}");
+    }
+
+    #[tokio::test]
+    async fn a_machine_put_keeps_the_run_records() {
+        let (_dir, store) = store_with_machine().await;
+        store.add_finished_program("m-1", "a1b2c3d4", Some(a_run("a1b2c3d4", 1))).await.unwrap();
+        let (_, etag) = store.location().await.unwrap();
+        store.put_machine(a_machine("m-1"), Some(&etag)).await.unwrap();
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        assert_eq!(view["machines"][0]["finishedRuns"][0]["programIndex"], serde_json::json!(1));
+    }
+
+    #[tokio::test]
+    async fn the_run_record_list_keeps_its_cap() {
+        let (_dir, store) = store_with_machine().await;
+        let cap = crate::finished_programs::MAX_FINISHED_PROGRAMS;
+        for i in 0..cap + 5 {
+            let hash = format!("h{i:04}");
+            store.add_finished_program("m-1", &hash, Some(a_run(&hash, 1))).await.unwrap();
+        }
+        let view: serde_json::Value = serde_json::from_slice(&store.location().await.unwrap().0).unwrap();
+        let runs = view["machines"][0]["finishedRuns"].as_array().unwrap();
+        assert_eq!(runs.len(), cap);
+        assert_eq!(runs.last().unwrap()["hash"], serde_json::json!("h0204"));
+        assert_ne!(runs[0]["hash"], serde_json::json!("h0000"), "the oldest record was not dropped");
     }
 
     // — the shop's defaults --------------------------------------------------------------------------

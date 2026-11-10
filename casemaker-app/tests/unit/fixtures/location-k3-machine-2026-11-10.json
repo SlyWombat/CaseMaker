@@ -1,0 +1,202 @@
+{
+  "_source": "Live k3 location document, machine record only, fetched read-only 2026-11-10 (machine-lejqjgb73q). Do not edit.",
+  "machine": {
+    "id": "machine-lejqjgb73q",
+    "profileId": "Z1",
+    "name": "Makera_Z1_010290",
+    "nickname": "Zoomba",
+    "serial": null,
+    "firmware": null,
+    "address": {
+      "host": "192.168.10.43",
+      "port": 2222
+    },
+    "calibration": {
+      "frame": {
+        "anchor1": [
+          -190.89,
+          -193.83
+        ],
+        "anchor2Offset": [
+          88.5,
+          45
+        ],
+        "clearanceXY": [
+          -11.6,
+          -14.6
+        ],
+        "clearanceZ": -3,
+        "toolrackOffset": [
+          48.8,
+          181
+        ],
+        "toolrackZ": -108
+      },
+      "machineId": "Z1",
+      "measuredAt": "2026-11-09T20:04:34.742Z",
+      "softEndstop": {
+        "enabled": true,
+        "source": "config-get sd on 192.168.10.43",
+        "xMin": -207,
+        "yMin": -206,
+        "zMin": -102
+      },
+      "source": "config-get sd on 192.168.10.43"
+    },
+    "fixtures": {},
+    "bedProfiles": [
+      {
+        "id": "bp-first-2026-10-24",
+        "name": "bed 2026-10-24",
+        "createdAt": "2026-10-24T15:23:45.198Z",
+        "basedOn": null,
+        "surface": {
+          "kind": "wasteboard",
+          "material": null,
+          "length": null,
+          "width": null,
+          "thickness": 6.0,
+          "position": null,
+          "provenance": {
+            "thickness": "measured:2026-11-07T20:51:45.253334Z"
+          },
+          "scars": [],
+          "lastResurfacedAt": null
+        },
+        "datums": {
+          "surfaceTopZ": null,
+          "viseJawTopZ": {
+            "value": -56.853,
+            "measuredAt": "2026-10-25T16:55:32.828Z",
+            "by": "fx-probe-1",
+            "at": [
+              -184.975,
+              -152.85
+            ]
+          },
+          "bracketSeatZ": {
+            "value": -85.788,
+            "measuredAt": "2026-11-09T17:55:01.000Z",
+            "by": "fx-probe-1",
+            "at": [
+              -175.0,
+              -35.0
+            ]
+          },
+          "rotaryAxis": null,
+          "rotaryFaceAngle": null
+        },
+        "placements": [
+          {
+            "id": "pl-bracket-anchor1",
+            "fixture": "fx-bracket-1",
+            "where": {
+              "kind": "anchor",
+              "pins": null,
+              "anchor": 1
+            },
+            "count": 1,
+            "frame": null,
+            "seed": null,
+            "provenance": {}
+          }
+        ],
+        "preferredMounting": [],
+        "consumables": null,
+        "history": [
+          {
+            "at": "2026-10-24T15:23:45.198Z",
+            "what": "created at the first vise registration"
+          },
+          {
+            "at": "2026-10-24T15:23:45.198Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-24T15:28:08.677Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-24T15:42:30.949Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-24T16:50:13.297Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-24T16:50:13.491Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-24T22:14:36.610Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-24T22:14:36.610Z",
+            "what": "surface top measured"
+          },
+          {
+            "at": "2026-10-24T22:14:36.778Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-24T23:57:10.692Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-24T23:57:10.692Z",
+            "what": "surface top measured"
+          },
+          {
+            "at": "2026-10-24T23:57:10.865Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-25T02:11:07.916Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-25T02:17:08.930Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-10-25T16:55:32.828Z",
+            "what": "the vise placement frame was written from a registration"
+          },
+          {
+            "at": "2026-10-25T16:55:32.828Z",
+            "what": "surface top measured"
+          },
+          {
+            "at": "2026-10-25T16:55:32.828Z",
+            "what": "tapped"
+          },
+          {
+            "at": "2026-11-09T17:10:03.000Z",
+            "what": "bracket placed at anchor 1 (bench 2026-11-09, written through the API \u2014 the change wizard on this build has no bracket step)"
+          },
+          {
+            "at": "2026-11-09T17:55:01.000Z",
+            "what": "bracket seat tapped \u2014 board top beside the blank, wired probe V2, [PRB:-175,-35,-85.788:1] (bench 2026-11-09, manual touch: the app\u2019s proposed seat point was 7.5 mm in front of the blank)"
+          }
+        ]
+      }
+    ],
+    "activeBedProfileId": "bp-first-2026-10-24",
+    "margins": null,
+    "power": null,
+    "wasteboard": {
+      "thickness": 6.0,
+      "thicknessSource": "measured",
+      "measuredAt": "2026-11-07T20:51:45.253334Z",
+      "lastResurfacedAt": null,
+      "scars": []
+    },
+    "finishedPrograms": [
+      "5343dd8c",
+      "1e4e7ef9"
+    ],
+    "updatedAt": "2026-11-09T20:05:12.468Z"
+  }
+}
