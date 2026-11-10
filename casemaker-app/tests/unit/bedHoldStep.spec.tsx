@@ -195,7 +195,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
     expect(rowText('ledge')).toContain('In the vise, …');
-    expect(rowText('ledge')).toContain('needs the vise on the pins');
+    expect(rowText('ledge')).toContain('Needs the vise on the pins');
     expect(screen.queryByTestId('engrave-setup-mount-row-block')).toBeNull();
     expect(screen.getByTestId('engrave-setup-change-ledge')).toBeTruthy();
   });
@@ -245,7 +245,7 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     // No anchor placement: the default is tape, and the row asks for the bracket (#718).
     expect(job().workholding.kind).toBe('tape');
     expect(radio('bed-bracket').disabled).toBe(true);
-    expect(rowText('bed-bracket')).toContain('needs the bracket at anchor 1');
+    expect(rowText('bed-bracket')).toContain('Needs the bracket at anchor 1');
     fireEvent.click(screen.getByTestId('engrave-setup-change-bed-bracket'));
     const request = useMachineChangeStore.getState().request;
     expect(request.target).toBe('bed');
