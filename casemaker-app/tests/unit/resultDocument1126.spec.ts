@@ -82,6 +82,31 @@ describe('#1126 — the v2 result document', () => {
     expect(doc.facingProgram).toBe(0);
   });
 
+  it('drops each plan’s toolpath IR — the 223 MB on the tray — and keeps what the browser reads', () => {
+    const withPlans = {
+      ...generatedFixture(),
+      plan: {
+        perSetup: [{ setupIndex: 0, notes: ['kept note'], features: { regions: 1 }, programs: [{ operations: [{ big: true }] }] }],
+        outcome: { predictedCutIntoMm: 0.4 },
+      },
+      planIdeal: {
+        perSetup: [{ setupIndex: 0, notes: ['ideal note'], programs: [{ operations: [{ big: true }] }] }],
+        outcome: { predictedCutIntoMm: 0.2 },
+      },
+    } as unknown as EngraveGenerated;
+    const doc = resultDocument('tray', withPlans);
+    const plan = doc.plan as { perSetup: Record<string, unknown>[]; outcome: unknown };
+    const ideal = doc.planIdeal as { perSetup: Record<string, unknown>[]; outcome: unknown };
+    for (const setup of [...plan.perSetup, ...ideal.perSetup]) {
+      expect('programs' in setup).toBe(false);
+    }
+    // What a browser reader does use survives: the QA window's plan notes, the store's outcome.
+    expect(plan.perSetup[0]!.notes).toEqual(['kept note']);
+    expect(plan.perSetup[0]!.features).toEqual({ regions: 1 });
+    expect(plan.outcome).toEqual({ predictedCutIntoMm: 0.4 });
+    expect(ideal.perSetup[0]!.notes).toEqual(['ideal note']);
+  });
+
   it('a job with no frame, no facing and no sweep alias says so with nulls', () => {
     const plain = {
       ...generatedFixture(),
