@@ -76,6 +76,7 @@ import {
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
+import { CutRunCard } from './CutRunCard';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
@@ -1677,6 +1678,12 @@ export function EngraveCutSurface({
       </Step>
 
       <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
+        {/* #1167 — THE RUN AS ONE CARD, before the controls that make it start: every program in
+            run order (the running row, the bit-change marks, the flip), the fixed Pause/Stop row,
+            and the footnote. Display only — the release step below still runs the job. */}
+        {plan !== null && pkg !== null && (
+          <CutRunCard job={job} pkg={pkg} plan={plan} finishedHashes={finishedHashes} target={target} />
+        )}
         {/* #1127 — the cutter checklist, at the machine: one row per bit, located or replaced; the
             Load and the cut are gated on every row being settled. */}
         {pkg !== null && checklistRows.length > 0 && (
