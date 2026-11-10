@@ -302,10 +302,13 @@ tool length, not the surface.
 ### Progress while a program runs
 
 While a program plays, the Cut step says how far it is and what is next: the controller's own
-percentage and the time it implies. Before the machine has reported a percentage the line says so
-rather than inventing a time; at 100 % it reads **finishing** rather than "0 s left"; a paused run
-says the time is what is left when it resumes. At the bit-change pause the line steps aside — the
-**Change** panel already names the next cutter.
+**percentage**, the next program in cut order that needs a different cutter, and — **approximate
+in this version** — the time left. The time is a rough guide only: it is worked out from the
+controller's progress figure, which this build does not read as true seconds, so do not plan
+around it. Before the machine has reported a percentage the line says so rather than inventing a
+time; at 100 % it reads **finishing** rather than "0 s left"; a paused run says the time is what
+is left when it resumes. At the bit-change pause the line steps aside — the **Change** panel
+already names the next cutter.
 
 ### The vacuum and the air
 
