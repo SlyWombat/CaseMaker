@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { flatEndMill } from '@/engine/cnc/tool';
-import { mergeSiblingCutters, siblingMergeSentence } from '@/engine/cnc/cam/model/plan';
+import { jobSiblingMerge, mergeSiblingCutters, siblingMergeSentence } from '@/engine/cnc/cam/model/plan';
 
 const flat = (id: string, diameter: number, fluteLength: number | null) =>
   flatEndMill(diameter, { id, name: `${diameter} flat ${fluteLength}`, number: 1, ...(fluteLength === null ? {} : { fluteLength }) });
@@ -33,6 +33,17 @@ describe('#1186 rule 6 — the job-level sibling merge', () => {
     const long = flat('long', 6, 25);
     const merged = mergeSiblingCutters([short, long], (tool) => tool.id === 'short');
     expect(merged).toEqual([long, short]);
+  });
+
+  it('a ONE-SETUP job merges nothing: no change can cross a setup boundary it does not have', () => {
+    // Found on Set B while re-pinning #1186: the top's ⌀10 → ⌀22 ball and the bottom's ⌀2 × 12 →
+    // ⌀2 × 15 rest were swapped by an unconditional job-level merge, with no second setup to share
+    // them with and so no change saved. The rule is "across setups"; one setup keeps every sibling.
+    const short = flat('short', 6, 15);
+    const long = flat('long', 6, 25);
+    expect(jobSiblingMerge([short, long], () => true, 1)).toEqual([short, long]);
+    // Two setups still merge exactly as the rule states.
+    expect(jobSiblingMerge([short, long], () => true, 2)).toEqual([long]);
   });
 
   it('leaves different diameters and different shapes untouched', () => {

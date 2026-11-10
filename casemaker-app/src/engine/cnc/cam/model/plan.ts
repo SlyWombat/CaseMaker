@@ -811,6 +811,22 @@ export function mergeSiblingCutters<T extends Tool>(tools: readonly T[], hasOwnR
   return keep;
 }
 
+/**
+ * #1186 rule 6 — THE MERGE APPLIES ONLY WHERE A CHANGE CAN CROSS A SETUP BOUNDARY. The rule exists
+ * to stop paying a bit change between two setups that could share one cutter; a ONE-SETUP job has
+ * no such boundary, so every same-diameter sibling stays a candidate and the picker weighs each on
+ * its own price (the shortest sufficient flute, #1114). Merging there swaps a cutter for no change
+ * saved: on Set B the bottom's rest ball moved ⌀2 × 12 → ⌀2 × 15 with nothing to show for it (the
+ * top uses no ⌀2 ball at all), caught when the bench build's Set B was re-pinned for #1186.
+ */
+export function jobSiblingMerge<T extends Tool>(
+  tools: readonly T[],
+  hasOwnRow: (tool: T) => boolean,
+  setupCount: number,
+): T[] {
+  return setupCount > 1 ? mergeSiblingCutters(tools, hasOwnRow) : [...tools];
+}
+
 export function resolvedCutParams(
   input: ModelPlanInput,
   tool: Tool,
@@ -1248,7 +1264,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       return false;
     }
   };
-  const siblingMergedHouse = mergeSiblingCutters(input.cutters.house, hasOwnRow);
+  const siblingMergedHouse = jobSiblingMerge(input.cutters.house, hasOwnRow, input.setups.length);
   // #1192 rule 3 (the morning minimum) — THE SHORTLIST: the INCUMBENT (the pre-#1186 order's
   // choice: the largest-diameter flat the feeds admit) and the BEST ESTIMATE (the greatest
   // material removal rate among flats running their OWN row: feed × step-down × step-over — the
