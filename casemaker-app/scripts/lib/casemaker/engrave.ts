@@ -229,6 +229,12 @@ interface Args {
   out?: string;
   /** #1052 — write the per-boundary memory trace (JSONL) to this file. */
   memTrace?: string;
+  /**
+   * #1151 — the owned plan first: write the programs without planning the ideal half. Off by
+   * default, so every committed receipt and docs round-trip is unchanged; the house service asks
+   * for it and runs the comparison as its own later child work.
+   */
+  deferIdeal?: boolean;
 }
 
 /** Exported for the CLI's own spec (#1052): the flag set is pinned by parsing. */
@@ -274,7 +280,8 @@ export function parseArgs(argv: string[]): Args {
         );
       }
       args.thirdTool = parsed.data;
-    } else if (a === '--mem-trace') args.memTrace = argv[++i];
+    } else if (a === '--defer-ideal') args.deferIdeal = true;
+    else if (a === '--mem-trace') args.memTrace = argv[++i];
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--turn') {
@@ -294,7 +301,7 @@ function fail(message: string): never {
 }
 
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -1149,6 +1156,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // the app's.
         undefined,
         getTools().map((entry) => entry.tool),
+        // #1151 — false (the default) is exactly today's two-plan run and receipt.
+        args.deferIdeal === true,
       );
     } catch (e) {
       if (isCliExit(e)) throw e;

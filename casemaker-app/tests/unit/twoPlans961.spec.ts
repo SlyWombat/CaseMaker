@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart } from '../tools/randomParts';
 import { planModelCam, type ModelPlanInput } from '../../src/engine/cnc/cam/model/plan';
-import { planTwoOutcomes } from '../../src/engine/cnc/cam/model/twoPlans';
+import { planOwnedOnly, planTwoOutcomes } from '../../src/engine/cnc/cam/model/twoPlans';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import { engraveJobDocumentSchema } from '@/store/engraveJobSchema';
@@ -55,6 +55,18 @@ describe('#961/#975 the two plans', () => {
     // And the owned run is `planModelCam` over the owned set alone — the catalogue never leaks in.
     const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] } });
     expect(JSON.stringify(two.owned)).toBe(JSON.stringify(directOwned));
+  }, 120_000);
+
+  // #1151 (#1134(c)'s ruling) — the caller that carries the ideal later runs the OWNED half alone;
+  // it must be the same plan `planTwoOutcomes` runs first, not a second spelling of it. (The
+  // catalogue's emptiness is still stated through `catalogueConfigured`, so the rest sentence
+  // tells "none configured" from "configured, none measured".)
+  it('#1151 — planOwnedOnly is the owned half, exactly', async () => {
+    const owned = [flat6, ball6, v90];
+    const planInput = input(owned, [smallFlat]);
+    const only = await planOwnedOnly(planInput);
+    const directOwned = await planModelCam({ ...planInput, cutters: { house: owned, catalogue: [] }, catalogueConfigured: true });
+    expect(JSON.stringify(only)).toBe(JSON.stringify(directOwned));
   }, 120_000);
 
   it('never refuses where an owned tool can do the job — even when the catalogue carries a better bit', async () => {
