@@ -408,26 +408,51 @@ describe('#1060 — the spindle blower follows the vacuum', () => {
     expect(f.lines()).toEqual(['?', 'M331.1', 'play /sd/gcodes/job.nc', '?', '?', 'M332.1', '$H']);
   });
 
-  it('across a three-file job-owned span the blower follows the vacuum per file: on at first, nothing in the middle, off at last', async () => {
+  // #1123 item 41 — THE SPAN IS RE-ASSERTED ON EVERY (RE)START. A job-owned span's middle file
+  // carries no word at all, and a retry after an alarm starts a controller whose outputs are off
+  // (finding 38: the first attempt's M331 died with the alarm, and the retry ran dry). So the run
+  // states M331 (and the blower) before EVERY program of a span that wants the vacuum on —
+  // idempotent when it is already on — and leaves the switch-off to the span's end.
+  it('a three-file job-owned span re-states the vacuum and blower on every program, and switches off only at the end', async () => {
     // File 1 (span 'first'): the vacuum goes on and STAYS on across the bit change — the blower
     // stays on with it, so this file's finish must not send M332.1.
     const first = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f1 = await runProgram('job.nc', { ...deps(first), blow: true, vacuumSpan: 'first', programOwnsVacuum: true });
     expect(f1.kind).toBe('finished');
+    expect(first.lines().filter((l) => l === 'M331')).toHaveLength(1);
     expect(first.lines()).toContain('M331.1');
     expect(first.lines()).not.toContain('M332.1');
-    // File 2 (span 'middle'): the vacuum is already on; no words at all.
+    expect(first.lines()).not.toContain('M332');
+    // File 2 (span 'middle'): the vacuum is already on, and the run RE-STATES it anyway — the same
+    // words the maintainer sent by hand before every program at the bench.
     const middle = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f2 = await runProgram('job.nc', { ...deps(middle), blow: true, vacuumSpan: 'middle', programOwnsVacuum: true });
     expect(f2.kind).toBe('finished');
-    expect(middle.lines().filter((l) => l === 'M331.1' || l === 'M332.1')).toEqual([]);
-    // File 3 (span 'last'): the vacuum's own M332 is in the file, so the blower goes off after it,
-    // in the finish — never M331.1 at the start.
+    expect(middle.lines().filter((l) => l === 'M331')).toHaveLength(1);
+    expect(middle.lines().filter((l) => l === 'M331.1')).toHaveLength(1);
+    expect(middle.lines()).not.toContain('M332.1');
+    expect(middle.lines()).not.toContain('M332');
+    // File 3 (span 'last'): re-stated at the start; the vacuum's own M332 is in the file, so the
+    // blower goes off after it, in the finish — the run never sends its own M332.
     const last = fake(['<Run|P:10,10,5>', '<Idle|P:51,100,41>']);
     const f3 = await runProgram('job.nc', { ...deps(last), blow: true, vacuumSpan: 'last', programOwnsVacuum: true });
     expect(f3.kind).toBe('finished');
-    expect(last.lines()).not.toContain('M331.1');
+    expect(last.lines().filter((l) => l === 'M331')).toHaveLength(1);
+    expect(last.lines().filter((l) => l === 'M331.1')).toHaveLength(1);
     expect(last.lines()).toContain('M332.1');
+    expect(last.lines()).not.toContain('M332');
+  });
+
+  it('#1123 item 41 — a play refused after a job-span file re-stated its M331 switches it off again', async () => {
+    const f = fake([], { play: 'error: file not found' });
+    const o = await runProgram('job.nc', { ...deps(f), vacuumSpan: 'first', programOwnsVacuum: true });
+    expect(o.kind).toBe('refused');
+    const lines = f.lines();
+    // The run stated the vacuum on (the span's re-assert) and the file never played: the run
+    // undoes its own word rather than leaving the vacuum on with nothing cutting.
+    expect(lines).toContain('M331');
+    expect(lines).toContain('M332');
+    expect(lines.indexOf('M331')).toBeLessThan(lines.indexOf('M332'));
   });
 
   it('a Stop during a middle file turns the blower off before the vacuum, though this file sent neither', async () => {

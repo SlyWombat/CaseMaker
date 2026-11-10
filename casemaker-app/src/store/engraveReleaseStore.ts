@@ -46,7 +46,7 @@ import { create } from 'zustand';
 import type { EngraveJob } from '@/types/engraveJob';
 import { uploadProgram, type MachineUploadResult } from '@/platform/machineUpload';
 import { describeRun, runSettings, type RunOutcome } from '@/platform/machineRun';
-import { closeVacuumSpan, switchVacuumOn } from '@/platform/machineSpan';
+import { closeVacuumSpan } from '@/platform/machineSpan';
 import { attachConsole } from '@/platform/machineConsole';
 import {
   retouchAndCorrectAfterFacing,
@@ -263,23 +263,10 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
 
     patch(machine, { phase: 'starting', active: index, next: null, stopAsked: false, settled: false, stoppedBetween: false });
     const span = programVacuumSpan(file.nc, jobCarriesVacuumWords(rec.files));
-    let vacuum = rec.vacuum;
-    // #473 — the face file is program 1 and carries the span's `M331`, so by the time a later program
-    // starts this store's reading is `on`. A file with no `M331` (a resumed middle/last program, or
-    // an `air: false` file) still needs the release step to switch it on — the one place this store
-    // sends an ON word.
-    const needOn = rec.airOn && !carriesVacuumOn(file.nc) && vacuum !== 'on';
-    if (needOn) {
-      const r = await switchVacuumOn(rec.target);
-      if (get().records[machine]?.phase !== 'starting') return; // stopped while the line was in flight
-      if (r.kind !== 'done') {
-        patch(machine, { phase: 'failed', vacuum: 'unknown' });
-        say(machine, `Program ${file.index} did not start: the vacuum could not be switched on — ${r.detail}.`);
-        return;
-      }
-      vacuum = 'on';
-      say(machine, `Vacuum switched on (M331) before program ${file.index} of ${file.total}, which does not carry the word itself.`);
-    }
+    // #1123 item 41 — THE RUN RE-STATES THE SPAN'S ON WORD on every start (platform/machineRun.ts),
+    // so this store no longer sends M331 itself: one decision, one seam. What the run leaves for a
+    // span that wants the vacuum on is 'on'; an `air: false` job (span none) has nothing switched.
+    const vacuum = span === 'none' ? rec.vacuum : 'on';
 
     // The program's own cutter, so the runtime and the offcut footprint are this file's (#414).
     const tool =
@@ -306,21 +293,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     };
     const runStore = useMachineRunStore.getState();
     if (!runStore.prepare(rec.target, file.filename, file.hash, context)) {
-      patch(machine, { phase: 'failed', vacuum });
+      // #1123 item 41 — nothing was sent by this store and the run never started, so no word of
+      // this store's is outstanding: the vacuum is exactly where the last program left it.
+      patch(machine, { phase: 'failed', vacuum: rec.vacuum });
       say(machine, `Program ${file.index} did not start: a run is already going on this machine.`);
-      // The switch-on has already gone out. Saying only "did not start" would leave the vacuum
-      // running with nothing cutting and no sentence about it; close the span (or report why not).
-      if (vacuum === 'on') {
-        await closeSpan(machine, 'The vacuum was switched on (M331) before this program and is on with nothing cutting.');
-      }
       return;
     }
     if (!runStore.start(rec.target, runSettings(useShopDefaultsStore.getState().defaults))) {
-      patch(machine, { phase: 'failed', vacuum });
+      patch(machine, { phase: 'failed', vacuum: rec.vacuum });
       say(machine, `Program ${file.index} did not start: the machine's run entry could not be started.`);
-      if (vacuum === 'on') {
-        await closeSpan(machine, 'The vacuum was switched on (M331) before this program and is on with nothing cutting.');
-      }
       return;
     }
     patch(machine, { phase: 'running', vacuum, settled: false, stopAsked: false });
@@ -484,7 +465,15 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
 
     // refused / alarm / unreachable / never-started: no program is running. A machine that answered
     // Idle can be closed from here; an alarm or silence cannot, and the sentence says so.
-    const vacuum = outcome.kind === 'never-started' && (outcome.span === 'middle' || outcome.span === 'last') ? 'on' : rec.vacuum;
+    // #1123 item 41 — AN ALARM OR SILENCE LEAVES THE OUTPUTS UNKNOWN (the red button cuts them):
+    // the record must not claim 'on', or the retry's card and the next close would both be guessing
+    // from a word that died with the alarm. The next start re-states the span regardless.
+    const vacuum =
+      outcome.kind === 'alarm' || outcome.kind === 'unreachable'
+        ? 'unknown'
+        : outcome.kind === 'never-started' && (outcome.span === 'middle' || outcome.span === 'last')
+          ? 'on'
+          : rec.vacuum;
     patch(machine, { phase: 'failed', active: index, next: null, vacuum });
     if (outcome.kind === 'refused' || outcome.kind === 'never-started') {
       await closeSpan(machine, 'The run did not start, so the release step is closing the vacuum span.');
