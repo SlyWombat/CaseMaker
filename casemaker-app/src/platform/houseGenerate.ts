@@ -151,6 +151,21 @@ export async function houseEngraveGenerate(args: HouseGenerateArgs): Promise<Eng
   // The stream carries the engine's frames as they happen; it never decides the outcome.
   void streamRunEvents(id, report, { signal: controller.signal });
 
+  // A QUEUED RUN IS NOT A SILENT ONE. The store's silence watchdog times a run by its last stage
+  // report; a house run can wait behind another job before any stage exists, so the wait itself is
+  // reported — once at submit and on every poll while the service says `queued`. The label is the
+  // same sentence each time, so the run log keeps one line.
+  const queued = (position: number | undefined): void => {
+    args.onProgress?.({
+      stage: 'prepare',
+      label:
+        position === undefined || position < 1
+          ? 'queued on the house'
+          : `queued on the house — position ${position}`,
+    });
+  };
+  if (submitted.queuePosition >= 1) queued(submitted.queuePosition);
+
   try {
     for (;;) {
       const read = await readRun(id);
@@ -160,6 +175,7 @@ export async function houseEngraveGenerate(args: HouseGenerateArgs): Promise<Eng
         continue;
       }
       const run = read.run;
+      if (run.state === 'queued') queued(run.queuePosition);
       if (run.state === 'done') {
         const result = await readRunGenerated(id);
         if (result.kind !== 'ok') throw new Error(houseFailureSentence(result));

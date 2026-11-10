@@ -49,7 +49,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks, not clearAllMocks: a mock IMPLEMENTATION set in one test (the stream's frame
+  // replay) must not leak into the next one and fire before the submit's own frames.
+  vi.resetAllMocks();
   useLocationStore.setState({ etag: null });
 });
 
@@ -142,6 +144,30 @@ describe('#1126 — following a house run', () => {
       margins: {} as never,
     });
     expect(mocked.submitRun).toHaveBeenCalledWith({ job: JOB });
+  });
+
+  it('reports a queued run, so the silence watchdog does not time a run that is waiting', async () => {
+    mocked.submitRun.mockResolvedValue({
+      kind: 'ok',
+      runId: 'run-q',
+      queuePosition: 2,
+      key: { jobSha: 'abc', build: 'b1' },
+    });
+    mocked.readRun.mockResolvedValue({
+      kind: 'ok',
+      run: { id: 'run-q', state: 'done', programs: [], receipt: {}, finding: null },
+    });
+    mocked.readRunGenerated.mockResolvedValue({ kind: 'ok', generated: { ok: true } });
+    const progress: EngraveProgress[] = [];
+    await houseEngraveGenerate({
+      job: JOB as never,
+      tool: null,
+      catalogue: [],
+      calibration: null,
+      margins: {} as never,
+      onProgress: (p) => progress.push(p),
+    });
+    expect(progress[0]).toEqual({ stage: 'prepare', label: 'queued on the house — position 2' });
   });
 
   it('throws the service’s own sentence when the submit is refused', async () => {
