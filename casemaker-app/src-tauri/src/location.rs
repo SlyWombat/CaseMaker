@@ -804,11 +804,11 @@ fn validate_provenance(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FinishedRunG54 {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z: Option<f64>,
 }
 
@@ -819,19 +819,19 @@ pub struct FinishedRunG54 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FinishedRunRegistration {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_machine_z: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub g54: Option<FinishedRunG54>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_source: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measured_top_machine_z: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implied_thickness_mm: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measured_at: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_expected_top_machine_z: Option<f64>,
 }
 
@@ -862,11 +862,11 @@ pub struct FinishedCutMap {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FinishedRunStock {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length_mm: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width_mm: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thickness_mm: Option<f64>,
 }
 
@@ -876,31 +876,31 @@ pub struct FinishedRunStock {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FinishedRun {
     pub hash: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package_key: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key8: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_index: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_count: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cutter_key: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_index: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock: Option<FinishedRunStock>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registration: Option<FinishedRunRegistration>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cut_map: Option<FinishedCutMap>,
 }
 
@@ -1517,6 +1517,12 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "hash": "a1b2c3d4" })).unwrap();
         assert_eq!(partial.cut_map, None);
         assert_eq!(partial.program_index, None);
+        // Absent fields are OMITTED on the wire (the client schema reads them as absent); a null
+        // here would be refused by the client's `FinishedRunSchema`.
+        assert_eq!(
+            serde_json::to_value(&partial).unwrap(),
+            serde_json::json!({ "hash": "a1b2c3d4" })
+        );
 
         let good = serde_json::json!({
             "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
