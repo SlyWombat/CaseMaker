@@ -1,10 +1,11 @@
 /**
  * A cutter's condition, copy by copy (#415, decision Q4), and the pure rules tool choice uses.
  *
- * THE OPERATOR SETS THE CONDITION — new / used / worn / broken — and nothing else does: runtime (#381)
+ * THE OPERATOR SETS THE CONDITION — new / used / worn / broken / lost (#1149) — and nothing else does: runtime (#381)
  * only WARNS past a threshold ({@link runtimeWarning}), it never retires a cutter. An inventory item
- * lists at most `quantity` described copies; a copy with no entry has NO condition set and is in its
- * box (`tool_copy.rs`), so nothing here guesses "new" for a bit that has been in a spindle.
+ * lists at most `quantity` described copies; a copy with no entry has NO condition set and no stated
+ * whereabouts — its state is UNKNOWN (#1149), so nothing here guesses "new" for a bit that has been
+ * in a spindle, nor "in its box" for a piece nobody has described.
  *
  * FOR TOOL CHOICE (`recommendTool.ts`, which is not this file's to change): {@link conditionRank}
  * orders candidates — new and used first, unset next, worn last, broken never — and
@@ -38,7 +39,12 @@ import { cuttingDiameter, type Tool } from './tool';
 import type { ToolLibraryEntry } from './toolLibrary';
 import { caseColourWord, caseSwatch, CopyCaseSchema, type CopyCase } from './caseColour';
 
-export const CONDITIONS = ['new', 'used', 'worn', 'broken'] as const;
+/**
+ * The states the operator can put a copy in (#415, #1149). `lost` is #1149's addition: a piece that
+ * is not on the bench at all is never chosen, exactly like a broken one — and its absence must be
+ * sayable without pretending every copy is broken.
+ */
+export const CONDITIONS = ['new', 'used', 'worn', 'broken', 'lost'] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
 // eslint-disable-next-line no-control-regex
@@ -132,6 +138,7 @@ export function conditionRank(c: CopyCondition): number {
     case 'worn':
       return 2;
     case 'broken':
+    case 'lost':
       return Number.POSITIVE_INFINITY;
   }
 }
@@ -151,10 +158,22 @@ export interface ItemWithCopies {
 }
 
 export interface ConditionSummary {
-  /** The best usable copy's condition (`null` = not set), or `'broken'` when none is usable. */
+  /** The best usable copy's condition (`null` = not set), or `'broken'`/`'lost'` when none is usable. */
   best: CopyCondition;
-  /** Copies that may be chosen: everything but the broken ones. */
+  /**
+   * Copies that may be chosen: everything but the broken and lost ones. A copy nobody described is
+   * INCLUDED — the shop holds it — but its condition is not assumed: {@link unknown} counts those,
+   * and {@link known} is the honestly-stated share (#1149).
+   */
   usable: number;
+  /**
+   * #1149 — of the usable copies, how many have NO condition set (a copy described with the
+   * condition left unset, or a copy nobody described at all). The state is UNKNOWN: never assumed
+   * new, never assumed to be in a box.
+   */
+  unknown: number;
+  /** #1149 — of the usable copies, how many have a stated condition (new / used / worn). */
+  known: number;
   /**
    * The note a pick of this cutter should carry — a worn one, or none usable — or null. A built-in
    * or catalogue key with no possession borrows the copies that correspond to it (#454), and its
@@ -179,20 +198,36 @@ export function copyConditions(item: ItemWithCopies): CopyCondition[] {
 
 /** The summary of a pool of copies, whether they are one item's or several items' (#454). */
 function summaryOf(all: readonly CopyCondition[]): ConditionSummary {
-  const usable = all.filter((c) => c !== 'broken');
+  const usable = all.filter((c) => c !== 'broken' && c !== 'lost');
   if (usable.length === 0) {
-    return { best: 'broken', usable: 0, note: 'every copy of this cutter is marked broken — it is not chosen' };
+    return {
+      // A pool with only broken copies says broken; a pool that includes a lost one says so — the
+      // operator's own word, not a borrowed one (#1149).
+      best: all.includes('lost') && !all.includes('broken') ? 'lost' : 'broken',
+      usable: 0,
+      unknown: 0,
+      known: 0,
+      note: 'every copy of this cutter is marked broken or lost — it is not chosen',
+    };
   }
+  const known = usable.filter((c) => c !== null).length;
+  const unknown = usable.length - known;
   const best = usable.reduce((a, b) => (conditionRank(b) < conditionRank(a) ? b : a));
   return {
     best,
     usable: usable.length,
+    unknown,
+    known,
     note:
-      best === 'worn'
-        ? usable.length === 1
-          ? 'the only usable copy of this cutter is marked worn — check it before the cut'
-          : `every usable copy of this cutter (${usable.length}) is marked worn — check the one you fit`
-        : null,
+      // #1149 — a bench nobody described is STATED as unknown: the cutter stays planable (the shop
+      // holds it), but the plan must not pretend its wear is known.
+      known === 0
+        ? 'no copy of this cutter has a condition set — its wear is unknown'
+        : best === 'worn'
+          ? usable.length === 1
+            ? 'the only usable copy of this cutter is marked worn — check it before the cut'
+            : `every usable copy of this cutter (${usable.length}) is marked worn — check the one you fit`
+          : null,
   };
 }
 
@@ -271,6 +306,19 @@ function sameCutter(item: ItemWithCopies, entry: ToolLibraryEntry): boolean {
 }
 
 /**
+ * #1149 T2 — whether two LIBRARY definitions name the same physical cutter, by the same rule
+ * (#454): cutting diameter, shape, and line. This is how the planner says a definition is ON THE
+ * SHELF — an inventory piece corresponds to it — instead of calling every non-`cat:` key owned.
+ */
+export function sameCutterEntry(a: ToolLibraryEntry, b: ToolLibraryEntry): boolean {
+  const da = cuttingDiameter(a.tool);
+  const db = cuttingDiameter(b.tool);
+  if (da === null || db === null || da !== db) return false;
+  if (a.tool.shape !== b.tool.shape) return false;
+  return entryOnMetalLine(a) === entryOnMetalLine(b);
+}
+
+/**
  * Replace the summaries, keyed by registry key (`inv:<id>`). `toolRegistryStore` calls it.
  *
  * `entries` are the DEFINITIONS the house also offers — the permanent built-ins and the `cat:`
@@ -319,7 +367,7 @@ export function conditionForKey(key: string): ConditionSummary | null {
 
 /**
  * The copies a pick of this cutter may choose between, at the best condition rank — or null when
- * the registry knows no copies for the key, and `[]` when every copy is broken (#491).
+ * the registry knows no copies for the key, and `[]` when every copy is broken or lost (#491, #1149).
  *
  * This is the "pick" the presentation rules speak of: new and used tie, an unexplained copy comes
  * next, and worn is last. When it returns more than one copy the pick is INDIFFERENT — the bench
@@ -328,7 +376,7 @@ export function conditionForKey(key: string): ConditionSummary | null {
 export function pickedCopiesForKey(key: string): CopyRef[] | null {
   const pool = pools.get(key);
   if (pool === undefined) return null;
-  const usable = pool.filter((c) => c.condition !== 'broken');
+  const usable = pool.filter((c) => c.condition !== 'broken' && c.condition !== 'lost');
   if (usable.length === 0) return [];
   const best = Math.min(...usable.map((c) => conditionRank(c.condition)));
   return usable.filter((c) => conditionRank(c.condition) === best);

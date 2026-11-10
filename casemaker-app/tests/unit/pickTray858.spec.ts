@@ -44,10 +44,17 @@ function tray(): EngraveJob {
 
 const CLEAR = 'inv:kz-o-flute-3-175-25';
 const FINE = 'flat-1.0';
+const FIXTURE_TOOLS = JSON.parse(readFileSync(join(DIR, 'tools.json'), 'utf8')) as ToolLibraryEntry[];
 const TOOLS: ToolLibraryEntry[] = [
-  ...(JSON.parse(readFileSync(join(DIR, 'tools.json'), 'utf8')) as ToolLibraryEntry[]).filter((t) => t.key === CLEAR),
+  ...FIXTURE_TOOLS.filter((t) => t.key === CLEAR),
   TOOL_LIBRARY.find((t) => t.key === FINE)!,
 ];
+/**
+ * #1149 T2 — the built-in 1 mm flat counts as OWNED only when the shop holds the same cutter; this
+ * fixture's inventory piece is the twin that makes it so (#454's correspondence). The cost case
+ * below needs both contesting plans all-owned, so it passes this twin beside the built-in.
+ */
+const OWNED_1MM = FIXTURE_TOOLS.find((t) => t.key === 'inv:kz-corn-1-7')!;
 const SEED = readDefault(
   ShopDefaultsSchema.parse((JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: unknown }).defaults),
   'toolChange.seconds',
@@ -89,7 +96,7 @@ describe('#858 a tool change has a cost, and time decides at equal fidelity', ()
     const evaluate = (p: CandidatePlan): PlanEvaluation =>
       p.cutters.length === 1 ? verdict(1000, 0, 1 - FIDELITY_TIE / 2) : verdict(950, 1, 1);
     const pickWith = async (change: number) =>
-      keys(picked(await smartPick(job, TOOLS, [], evaluate, { toolChangeSeconds: change })).chosen);
+      keys(picked(await smartPick(job, [...TOOLS, OWNED_1MM], [], evaluate, { toolChangeSeconds: change })).chosen);
     // 950 + 40 < 1000: the change is worth it. 950 + 91.4 > 1000: it is not — and the 0.05 %
     // fidelity difference is inside the tie, so it does not decide either way.
     expect(await pickWith(40)).toContain('+');

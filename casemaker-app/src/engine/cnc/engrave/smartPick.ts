@@ -29,7 +29,7 @@ import type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
-import type { ConditionSummary } from '@/engine/cnc/toolCondition';
+import { sameCutterEntry, type ConditionSummary } from '@/engine/cnc/toolCondition';
 import { statedCuttingSize as stated } from '@/engine/cnc/tool';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import {
@@ -74,9 +74,41 @@ type AwaitableEvaluate = (plan: CandidatePlan, level: 'coarse' | 'full') => Prom
  */
 export type EvaluateMany = (plans: readonly CandidatePlan[], level: 'full') => Promise<readonly PlanEvaluation[]>;
 
-/** Where a plan's cutters come from. `inv:` keys are the shop's own; catalogue entries are bought. */
-export function sourceOf(entry: ToolLibraryEntry): 'owned' | 'catalogue' {
-  return entry.key.startsWith('cat:') ? 'catalogue' : 'owned';
+/**
+ * #1149 T2 — WHERE A PLAN'S CUTTERS COME FROM. `owned` is a bit ON THE SHELF, never "any key that
+ * is not `cat:`": an `inv:` possession, or a definition an inventory piece corresponds to (#454's
+ * cutter rule). A `cat:` row, a bare built-in or a `user:` definition with no inventory piece is
+ * `catalogue` — a cutter the shop would have to obtain, not one it holds.
+ */
+export function sourceOf(entry: ToolLibraryEntry, owned?: ReadonlySet<string> | null): 'owned' | 'catalogue' {
+  if (entry.key.startsWith('cat:')) return 'catalogue';
+  if (entry.key.startsWith('inv:')) return 'owned';
+  return owned?.has(entry.key) === true ? 'owned' : 'catalogue';
+}
+
+/**
+ * #1149 T2 — the keys that are ON THE SHELF, from the library the pick sees:
+ *  - every `inv:` possession with a usable copy (every copy broken or lost is not a bit on the
+ *    shelf — with no condition table the possession counts, which is "nothing known", not "broken");
+ *  - every definition (built-in, `user:`, `cat:`) an inventory piece corresponds to.
+ * The correspondence is `sameCutterEntry` — #454's cutter rule (diameter, shape, line).
+ */
+export function ownedKeysOf(
+  tools: readonly ToolLibraryEntry[],
+  conditions?: ReadonlyMap<string, ConditionSummary> | null,
+): ReadonlySet<string> {
+  const hasUsableCopy = (key: string): boolean => {
+    const summary = conditions?.get(key);
+    return summary == null || summary.usable > 0;
+  };
+  const inventory = tools.filter((e) => e.key.startsWith('inv:'));
+  const owned = new Set<string>();
+  for (const item of inventory) if (hasUsableCopy(item.key)) owned.add(item.key);
+  for (const entry of tools) {
+    if (entry.key.startsWith('cat:') || owned.has(entry.key)) continue;
+    if (inventory.some((item) => sameCutterEntry(item, entry) && hasUsableCopy(item.key))) owned.add(entry.key);
+  }
+  return owned;
 }
 
 /** One plan with the numbers the objective ranks. */
@@ -237,25 +269,26 @@ export function rulePlanOf(
 ): CandidatePlan | null {
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
   if (base.cutters.length === 0) return null;
-  return planFrom(base.cutters, tools, base.faceToolKey, base.goalRoughKey);
+  return planFrom(base.cutters, tools, ownedKeysOf(tools, conditions), base.faceToolKey, base.goalRoughKey);
 }
 
 /** A plan from `planCutters`' output, with each cutter's source recorded. */
 function planFrom(
   cutters: readonly PlannedCutter[],
   tools: readonly ToolLibraryEntry[],
+  owned: ReadonlySet<string>,
   faceToolKey?: string,
   goalRoughKey?: string,
 ): CandidatePlan {
   const source: Record<string, 'owned' | 'catalogue'> = {};
   for (const c of cutters) {
     const entry = tools.find((t) => t.key === c.key);
-    source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
+    source[c.key] = entry === undefined ? 'owned' : sourceOf(entry, owned);
   }
   // #869 — the rough owns no items, but it is a program of the plan: its own source rides too.
   if (goalRoughKey !== undefined) {
     const entry = tools.find((t) => t.key === goalRoughKey);
-    source[goalRoughKey] = entry === undefined ? 'owned' : sourceOf(entry);
+    source[goalRoughKey] = entry === undefined ? 'owned' : sourceOf(entry, owned);
   }
   return {
     cutters: cutters.map((c) => ({ key: c.key, items: [...c.items] })),
@@ -280,6 +313,8 @@ export function candidatePlans(
 ): CandidatePlan[] {
   const out: CandidatePlan[] = [];
   const seen = new Set<string>();
+  // #1149 T2 — one ownership answer for the whole search: a bit on the shelf, not a key prefix.
+  const owned = ownedKeysOf(tools, conditions);
   const add = (given: CandidatePlan): void => {
     // #848 — a thread mill whose boss another cutter of the plan raises is cut AFTER that cutter.
     const ordered = bossBeforeThread(job, given.cutters);
@@ -295,7 +330,7 @@ export function candidatePlans(
     const source: Record<string, 'owned' | 'catalogue'> = {};
     for (const c of cutters) {
       const entry = tools.find((t) => t.key === c.key);
-      source[c.key] = entry === undefined ? 'owned' : sourceOf(entry);
+      source[c.key] = entry === undefined ? 'owned' : sourceOf(entry, owned);
     }
     return { cutters, source };
   };
@@ -330,7 +365,7 @@ export function candidatePlans(
   // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
   // NAMED job does not take it: that plan would replace the cutter the operator named.
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
-  const basePlan = planFrom(base.cutters, tools, base.faceToolKey);
+  const basePlan = planFrom(base.cutters, tools, owned, base.faceToolKey);
   // #842 — A MIXED JOB'S FACE CUTTER IS PART OF THE PLAN. The face rule names one; the search
   // also tries the other fitting face cutters, so a human finding a better one is a selector bug
   // no more. Each face variant rides the rule's item plan.
@@ -363,7 +398,7 @@ export function candidatePlans(
   const face = faceCutterOptions(job, tools, catalogue, conditions ?? undefined, table ?? undefined);
   if (face !== null) {
     for (const entry of face.candidates.slice(0, 6)) {
-      add({ cutters: [{ key: entry.key, items: [] }], source: { [entry.key]: sourceOf(entry) } });
+      add({ cutters: [{ key: entry.key, items: [] }], source: { [entry.key]: sourceOf(entry, owned) } });
     }
   }
 
@@ -401,7 +436,7 @@ export function candidatePlans(
       .filter(reachesGoal)
       .sort((a, b) => byDiameter(b, a))
       .slice(0, 6);
-    for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball) } });
+    for (const ball of balls) add({ cutters: [{ key: ball.key, items: ids }], source: { [ball.key]: sourceOf(ball, owned) } });
     // #869 — AND THE SAME BALL WITH A FLAT ROUGHING BEFORE IT. A flat takes a deeper step-down and
     // a wider step-over than the ball, so the bulk comes off faster, and the adaptive clearing
     // engine (flat end mills only) becomes available to the goal; the finish is the ball either
@@ -419,7 +454,7 @@ export function candidatePlans(
       );
       return (options?.candidates ?? []).slice(0, count).map((flat) => ({
         cutters: [{ key: ball.key, items: ids }],
-        source: { [ball.key]: sourceOf(ball), [flat.key]: sourceOf(flat) },
+        source: { [ball.key]: sourceOf(ball, owned), [flat.key]: sourceOf(flat, owned) },
         goalRoughKey: flat.key,
       }));
     };
@@ -447,7 +482,7 @@ export function candidatePlans(
           // of the plan the V joins, not something the chamfer variant drops.
           ...plan,
           cutters: [...plan.cutters, { key: cone.key, items: [] }],
-          source: { ...plan.source, [cone.key]: sourceOf(cone) },
+          source: { ...plan.source, [cone.key]: sourceOf(cone, owned) },
         });
       }
     }

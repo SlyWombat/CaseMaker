@@ -1,6 +1,6 @@
 /**
  * The copies of an owned cutter, as the operator describes them (#415, decision Q4): each one's
- * condition (new / used / worn / broken) and where it is (its box, or a machine of the location), an
+ * condition (new / used / worn / broken / lost) and where it is (its box, or a machine of the location), an
  * optional per-cutter runtime-warning threshold, and which of the location's machines this cutter's
  * shank fits a collet of.
  *
@@ -61,7 +61,11 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
       <div className="panel-subhead">Copies</div>
       <p className="hint" data-testid="manage-copies-summary">
         {summary.note ??
-          `${summary.usable} of ${item.quantity} usable${summary.best !== null && summary.best !== 'broken' ? ` · best: ${summary.best}` : ''}`}
+          // #1149 — the honest split: copies with a STATED usable condition, then the ones nobody
+          // has described as unknown (never counted as usable, never assumed to be in a box).
+          `${summary.known} of ${item.quantity} usable${summary.unknown > 0 ? ` · ${summary.unknown} unknown` : ''}${
+            summary.best !== null && summary.best !== 'broken' && summary.best !== 'lost' ? ` · best: ${summary.best}` : ''
+          }`}
       </p>
       {copies.map((c, i) => (
         <div className="grid2" key={c.id} data-testid={`manage-copy-${i}`}>
@@ -197,7 +201,7 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
       ))}
       {undescribed > 0 && (
         <p className="hint" data-testid="manage-copies-undescribed">
-          {undescribed} {undescribed === 1 ? 'copy has' : 'copies have'} no condition set and {undescribed === 1 ? 'is' : 'are'} in the box.
+          {undescribed} {undescribed === 1 ? 'copy has' : 'copies have'} no condition set — unknown, not assumed to be in a box.
         </p>
       )}
       <div className="btn-row">

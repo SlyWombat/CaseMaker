@@ -66,6 +66,33 @@ describe('#415 the copies editor', () => {
     expect(saved.colletFits).toEqual(['m-1']);
   });
 
+  it('#1149 states an undescribed piece as UNKNOWN, never as usable or "in the box"', () => {
+    // Two copies, none described: the summary says the wear is unknown — it must NOT claim "2 of 2
+    // usable" — and the hint must not assume where the copies are.
+    render(<ToolCopies item={ITEM} />);
+    const summary = screen.getByTestId('manage-copies-summary').textContent ?? '';
+    expect(summary).toContain('no copy of this cutter has a condition set');
+    expect(summary).not.toContain('2 of 2 usable');
+    expect(screen.getByTestId('manage-copies-undescribed').textContent).toContain('unknown, not assumed to be in a box');
+  });
+
+  it('#1149 a stated copy and an undescribed one: one usable, one unknown', () => {
+    const item = {
+      ...ITEM,
+      quantity: 2,
+      copies: [{ id: 'c1', condition: 'worn' as const, whereabouts: { kind: 'box' as const, case: null }, runtimeWarnMinutes: null, notes: null, runtimeMinutes: null }],
+    };
+    render(<ToolCopies item={item} />);
+    expect(screen.getByTestId('manage-copies-summary').textContent).toContain('1 of 2 usable · 1 unknown');
+  });
+
+  it('#1149 offers lost as a condition on a copy', () => {
+    render(<ToolCopies item={{ ...ITEM, quantity: 1 }} />);
+    fireEvent.click(screen.getByTestId('manage-copy-add'));
+    const options = [...(screen.getByTestId('manage-copy-condition-0') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toContain('lost');
+  });
+
   it('cannot describe more copies than are owned', () => {
     render(<ToolCopies item={{ ...ITEM, quantity: 1 }} />);
     fireEvent.click(screen.getByTestId('manage-copy-add'));
