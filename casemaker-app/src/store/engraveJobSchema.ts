@@ -2866,6 +2866,12 @@ const engraveJobV3Schema = engraveJobV2Schema
       )
       .optional()
       .describe('Per run (package hash) and cutter key: whether the bit is located or replaced (#1127); never a byte input.'),
+    // #1136 — a cutter replacement per setup and cutter: `jobSetups` applies it, the document's
+    // `toolKey`/`setups[].tools` stay untouched, and only the affected programs are re-posted.
+    cutterSubstitutions: z
+      .record(z.string(), z.record(z.string(), z.string()))
+      .optional()
+      .describe('Per setup id and cutter key: the cutter that stands in for it (#1136); omit for none.'),
     // #435 — 3D primitives and the reference object they are positioned against. BOTH OPTIONAL and
     // not defaulted, so every document that predates them keeps its exact shape and parses
     // unchanged; `schemaVersion` stays 3 because nothing existing is renamed or retyped.

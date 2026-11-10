@@ -2515,7 +2515,24 @@ export interface EngraveJob {
    * house-side runs.
    */
   cutterChecklist?: CutterChecklist;
+  /**
+   * #1136 — the cutter replacements, per setup id and cutter key (see {@link CutterSubstitutions}).
+   * OPTIONAL and absent on every document written before the field existed. A replacement recorded
+   * here leaves `toolKey` and `setups[].tools` untouched; `jobSetups` applies it, and only the
+   * affected programs are re-posted.
+   */
+  cutterSubstitutions?: CutterSubstitutions;
 }
+
+/**
+ * #1136 — THE CUTTER SUBSTITUTIONS, kept with the job. A replacement is recorded here as a map
+ * (setup id → the cutter it lists → the cutter that stands in for it) instead of rewriting
+ * `toolKey` and every setup's `tools`: `jobSetups` — the one place a program's cutter is resolved —
+ * applies it, so the document still names the operator's bits and the checklist rows keep their
+ * ORIGINAL key while the programs post the replacement. A BYTE INPUT: it changes program bytes,
+ * so it moves the fingerprint (the resolved setups carry its effect into the hash).
+ */
+export type CutterSubstitutions = Record<string, Record<string, string>>;
 
 /** One cutter's place in #1127's checklist: in hand, or replaced with another owned cutter. */
 export interface CutterChecklistEntry {

@@ -13,6 +13,7 @@ import {
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildRunRecord, parseRunRecordText } from '@/engine/cnc/engrave/runRecord';
 import { bitsLaidOutWords } from '@/engine/cnc/engrave/runSheet';
+import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { freezePackage, jobFingerprint, packageStaleness } from '@/engine/cnc/engrave/package';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { resetRegistry, setInventoryEntries, setRegistry } from '@/engine/cnc/toolRegistry';
@@ -123,7 +124,7 @@ describe('#1127 the cutter checklist', () => {
     expect(packageStaleness(pkg, ticked).stale).toBe(false);
   });
 
-  it('REPLACING a cutter writes it into the job (a byte input) — the package goes stale for an honest regenerate', () => {
+  it('REPLACING a cutter records the substitution (a byte input) — the package goes stale for an honest regenerate', () => {
     seedRegistry();
     const job = jobWithClean();
     job.toolKey = 'inv:flat-25';
@@ -133,9 +134,14 @@ describe('#1127 the cutter checklist', () => {
     useEngraveJobStore.setState({ job });
     useEngraveJobStore.getState().replaceCutter('inv:flat-25', 'inv:flat-20');
     const replaced = useEngraveJobStore.getState().job;
-    expect(replaced.toolKey).toBe('inv:flat-20');
-    expect(replaced.setups?.[0]?.tools).toEqual(['inv:flat-20']);
-    // A replacement IS a byte input: the frozen program no longer describes the job.
+    // #1136 — the DOCUMENT keeps the operator's cutter; the replacement is a map at the seam.
+    const setupId = replaced.setups![0]!.id;
+    expect(replaced.cutterSubstitutions).toEqual({ [setupId]: { 'inv:flat-25': 'inv:flat-20' } });
+    expect(replaced.toolKey).toBe('inv:flat-25');
+    expect(replaced.setups?.[0]?.tools).toEqual(['inv:flat-25']);
+    // Through `jobSetups` the setup posts the replacement …
+    expect(jobSetups(replaced)[0]!.tools).toEqual(['inv:flat-20']);
+    // … and a replacement IS a byte input: the frozen program no longer describes the job.
     expect(packageStaleness(made.package, replaced).stale).toBe(true);
   });
 

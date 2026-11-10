@@ -1098,7 +1098,7 @@ const IMPLICIT_SETUP_ID = 'setup-implicit';
  * has no registration (nothing was planned) and no remount (there is nowhere to come from).
  */
 export function jobSetups(job: EngraveJob): JobSetup[] {
-  if (job.setups !== undefined) return job.setups;
+  if (job.setups !== undefined) return withCutterSubstitutions(job, job.setups);
 
   const items: { id: string; enabled: boolean; construction?: boolean }[] = [
     ...job.labels,
@@ -1133,7 +1133,7 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
     .filter((item) => item.enabled && item.construction !== true)
     .map((item) => item.id);
 
-  return [
+  return withCutterSubstitutions(job, [
     {
       id: IMPLICIT_SETUP_ID,
       // A copy: the derived setup is built fresh on every call, so no caller can mutate the
@@ -1148,7 +1148,30 @@ export function jobSetups(job: EngraveJob): JobSetup[] {
       // `setupTools` then posts no program rather than one that names the empty key.
       tools: job.toolKey === NO_TOOL_KEY ? [] : [job.toolKey],
     },
-  ];
+  ]);
+}
+
+/**
+ * #1136 — THE ONE PLACE A SUBSTITUTION IS APPLIED. `job.cutterSubstitutions` (setup id → the
+ * cutter it lists → the cutter that stands in for it) is resolved HERE, so every reader of a
+ * program's cutter — the generator, the preview, the plan, the sheet and the record — sees the
+ * replacement, while the document's own `toolKey` and `setups[].tools` keep naming the operator's
+ * bits (the checklist rows keep their original key and settle through `replacedWith`).
+ */
+function withCutterSubstitutions(job: EngraveJob, setups: JobSetup[]): JobSetup[] {
+  const all = job.cutterSubstitutions;
+  if (all === undefined) return setups;
+  return setups.map((setup) => {
+    const map = all[setup.id];
+    if (map === undefined) return setup;
+    const replaced = setup.tools.map((key) => map[key] ?? key);
+    if (replaced.every((key, i) => key === setup.tools[i])) return setup;
+    return {
+      ...setup,
+      tools: replaced,
+      ...(setup.faceToolKey !== undefined && map[setup.faceToolKey] !== undefined ? { faceToolKey: map[setup.faceToolKey] } : {}),
+    };
+  });
 }
 
 /**

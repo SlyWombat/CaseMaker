@@ -893,6 +893,22 @@
       },
       "type": "object"
     },
+    "cutterSubstitutions": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "description": "Per setup id and cutter key: the cutter that stands in for it (#1136); omit for none.",
+      "propertyNames": {
+        "type": "string"
+      },
+      "type": "object"
+    },
     "drills": {
       "description": "Plunge-drilled holes and hole arrays; omit for none.",
       "items": {

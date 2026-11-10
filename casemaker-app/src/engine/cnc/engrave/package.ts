@@ -93,6 +93,10 @@ function programFingerprintView(job: EngraveJob): unknown {
   // same strip is in #1132's fingerprintView. The checklist is a per-package work record the
   // operator ticks, not a program input: ticking a cutter box never calls a worker.
   delete view.cutterChecklist;
+  // #1136 — the SUBSTITUTION MAP is not a second byte input beside its own effect: `jobSetups`
+  // (below) has already resolved it into the tools, so the resolved setups move the fingerprint
+  // when — and only when — a program's cutter really changed.
+  delete view.cutterSubstitutions;
   // #621 — the measured flatness is the registration's OUTCOME (the blank's bow), not a change to
   // the cutting program; a found position must not stale a frozen package.
   if (view.stock !== undefined) {

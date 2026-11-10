@@ -27,6 +27,7 @@ import { getTools, resolveTool } from '@/engine/cnc/toolRegistry';
 import { applyCutterPlanToJob } from '@/engine/cnc/engrave/measuredPick';
 import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { withSideGoal, withoutSideGoal } from '@/engine/cnc/engrave/jobSetup';
+import { withCutterReplacement } from '@/engine/cnc/engrave/cutterChecklist';
 import { reholdSetupGoals } from '@/engine/cnc/engrave/goalFlipSetups';
 import { flipPinsForAxis } from '@/engine/cnc/engrave/flipChoice';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -3444,16 +3445,9 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         return Object.keys(next).length === 0 ? rest : { ...rest, cutterChecklist: next };
       }),
 
-    replaceCutter: (fromKey, toKey) =>
-      apply((job) => ({
-        ...job,
-        ...(job.toolKey === fromKey ? { toolKey: toKey, tool: resolveTool(toKey) } : {}),
-        ...(job.setups === undefined
-          ? {}
-          : { setups: job.setups.map((setup) => ({ ...setup, tools: setup.tools.map((key) => (key === fromKey ? toKey : key)) })) }),
-        // A replacement is the operator overriding the substitute: the substitution sentence goes.
-        substitution: undefined,
-      })),
+    // #1136 — the replacement is a JOB-LEVEL map, not a rewrite: the document keeps its own
+    // cutters and `jobSetups` applies the map, so only the affected programs need re-posting.
+    replaceCutter: (fromKey, toKey) => apply((job) => withCutterReplacement(job, fromKey, toKey)),
 
     setJobMargins: (margins) =>
       apply((job) => {
