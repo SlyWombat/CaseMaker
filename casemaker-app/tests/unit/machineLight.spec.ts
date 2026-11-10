@@ -8,7 +8,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 import { toggleLight, lightLine, LIGHT_ON, LIGHT_OFF } from '@/platform/machineLight';
 
 afterEach(() => setMachineConsoleLoader(null));
@@ -19,26 +20,6 @@ const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>'
 const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
 const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
-function fakeSession(answer: (line: string) => ConsoleSend) {
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  setMachineConsoleLoader(async () => ({
-    async open() {
-      counters.opens += 1;
-      return session;
-    },
-  }));
-  return { sent, get closes() { return counters.closes; }, get opens() { return counters.opens; } };
-}
 
 const status = (text: string): ((line: string) => ConsoleSend) => (line) =>
   line === '?'
@@ -55,7 +36,7 @@ describe('#422 the work-light line', () => {
 
 describe('#422 the work-light switch', () => {
   it('sends M821 to an idle machine, on the one connection a press opens, and closes it', async () => {
-    const z1 = fakeSession(status(IDLE));
+    const z1 = fakeConsoleSession(status(IDLE));
     const r = await toggleLight(TARGET, true);
     expect(r).toMatchObject({ kind: 'toggled', on: true, status: IDLE });
     expect(z1.sent).toEqual(['?', 'M821']);
@@ -64,14 +45,14 @@ describe('#422 the work-light switch', () => {
   });
 
   it('sends M822 for off', async () => {
-    const z1 = fakeSession(status(IDLE));
+    const z1 = fakeConsoleSession(status(IDLE));
     const r = await toggleLight(TARGET, false);
     expect(r).toMatchObject({ kind: 'toggled', on: false });
     expect(z1.sent).toEqual(['?', 'M822']);
   });
 
   it('refuses a running machine without sending anything', async () => {
-    const z1 = fakeSession(status(RUNNING));
+    const z1 = fakeConsoleSession(status(RUNNING));
     const r = await toggleLight(TARGET, true);
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('Run');
@@ -80,7 +61,7 @@ describe('#422 the work-light switch', () => {
   });
 
   it('refuses an Idle line whose P: percent says the job has not finished', async () => {
-    const z1 = fakeSession(status(MID_JOB));
+    const z1 = fakeConsoleSession(status(MID_JOB));
     const r = await toggleLight(TARGET, true);
     expect(r.kind).toBe('busy');
     expect(r.kind === 'busy' && r.detail).toContain('90%');
@@ -88,21 +69,21 @@ describe('#422 the work-light switch', () => {
   });
 
   it('refuses an alarmed machine without sending anything', async () => {
-    const z1 = fakeSession(status(ALARM));
+    const z1 = fakeConsoleSession(status(ALARM));
     const r = await toggleLight(TARGET, true);
     expect(r.kind).toBe('busy');
     expect(z1.sent).toEqual(['?']);
   });
 
   it('reports an unreadable status line as an error, and sends nothing', async () => {
-    const z1 = fakeSession(status('???'));
+    const z1 = fakeConsoleSession(status('???'));
     const r = await toggleLight(TARGET, true);
     expect(r.kind).toBe('error');
     expect(z1.sent).toEqual(['?']);
   });
 
   it('reports a timeout on the code without claiming a mode', async () => {
-    const z1 = fakeSession((line) =>
+    const z1 = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: IDLE, frames: 1, elapsedMs: 30 }
         : { ok: false, reason: 'timeout', line, detail: 'no reply within 60000 ms', text: '' },

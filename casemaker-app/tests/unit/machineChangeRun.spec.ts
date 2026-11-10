@@ -15,7 +15,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { checkMachine, homeMachine, readMachineRest } from '@/platform/machineChangeRun';
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 import { readStatusLine } from '@/platform/desktop/protocol';
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
@@ -30,18 +31,6 @@ const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|S:12031|P:389,90,88>';
  * The transport, faked only at its socket: the guard, the poll loop and the reading of every line
  * are the real code. `answer` is called once per line the module sends.
  */
-function fakeConsole(answer: (line: string) => ConsoleSend): { sent: string[] } {
-  const sent: string[] = [];
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {},
-  };
-  setMachineConsoleLoader(async () => ({ async open() { return session; } }));
-  return { sent };
-}
 
 const sent = (line: string, text: string): ConsoleSend => ({ ok: true, line, text, frames: 1, elapsedMs: 10 });
 const refused = (line: string): ConsoleSend => ({ ok: false, reason: 'refused', line, detail: 'the console refuses that line', text: '' });
@@ -75,7 +64,7 @@ describe('#693 readMachineRest', () => {
 
 describe('#693 checkMachine', () => {
   it('asks once and answers online with the rest it read', async () => {
-    const z1 = fakeConsole((line) => sent(line, IDLE));
+    const z1 = fakeConsoleSession((line) => sent(line, IDLE));
     const r = await checkMachine(TARGET);
     expect(r.kind).toBe('ok');
     if (r.kind === 'ok') expect(r.rest.homed).toBe(true);
@@ -83,13 +72,13 @@ describe('#693 checkMachine', () => {
   });
 
   it('answers an offline machine with the transport’s own sentence', async () => {
-    fakeConsole((line) => ({ ok: false, reason: 'timeout', line, detail: 'no reply within 6000 ms', text: '' }));
+    fakeConsoleSession((line) => ({ ok: false, reason: 'timeout', line, detail: 'no reply within 6000 ms', text: '' }));
     const r = await checkMachine(TARGET);
     expect(r).toEqual({ kind: 'no', detail: 'no reply within 6000 ms' });
   });
 
   it('answers an alarm as a machine that cannot be made safe', async () => {
-    fakeConsole((line) => sent(line, `${ALARM}\nALARM: Probe fail`));
+    fakeConsoleSession((line) => sent(line, `${ALARM}\nALARM: Probe fail`));
     const r = await checkMachine(TARGET);
     expect(r.kind).toBe('no');
     if (r.kind === 'no') expect(r.detail).toContain('alarm');
@@ -98,7 +87,7 @@ describe('#693 checkMachine', () => {
 
 describe('#693 homeMachine', () => {
   it('does not send $H to a machine that is not Idle', async () => {
-    const z1 = fakeConsole((line) => sent(line, RUNNING));
+    const z1 = fakeConsoleSession((line) => sent(line, RUNNING));
     const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
     expect(r.kind).toBe('failed');
     if (r.kind === 'failed') expect(r.detail).toContain('Run');
@@ -106,14 +95,14 @@ describe('#693 homeMachine', () => {
   });
 
   it('does not send $H to a machine already Idle at its homed rest', async () => {
-    const z1 = fakeConsole((line) => sent(line, IDLE));
+    const z1 = fakeConsoleSession((line) => sent(line, IDLE));
     const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
     expect(r).toMatchObject({ kind: 'homed', sent: false });
     expect(z1.sent).toEqual(['?']);
   });
 
   it('refuses an Idle line whose P: percent says the job has not finished (#390)', async () => {
-    const z1 = fakeConsole((line) => sent(line, MID_JOB));
+    const z1 = fakeConsoleSession((line) => sent(line, MID_JOB));
     const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
     expect(r.kind).toBe('failed');
     if (r.kind === 'failed') expect(r.detail).toContain('90%');
@@ -122,7 +111,7 @@ describe('#693 homeMachine', () => {
 
   it('sends $H from Idle, then reads the rest from the status poll rather than the acknowledgement', async () => {
     let asked = 0;
-    const z1 = fakeConsole((line) => {
+    const z1 = fakeConsoleSession((line) => {
       if (line === '?') {
         asked += 1;
         return sent(line, asked === 1 ? IDLE_AWAY : IDLE);
@@ -138,7 +127,7 @@ describe('#693 homeMachine', () => {
 
   it('reports an alarm that arrives mid-poll', async () => {
     let asked = 0;
-    fakeConsole((line) => {
+    fakeConsoleSession((line) => {
       if (line === '?') {
         asked += 1;
         return sent(line, asked === 1 ? IDLE_AWAY : ALARM);
@@ -151,7 +140,7 @@ describe('#693 homeMachine', () => {
   });
 
   it('ends the window with the sentence that says where the machine actually is', async () => {
-    fakeConsole((line) => (line === '?' ? sent(line, IDLE_AWAY) : sent(line, 'ok')));
+    fakeConsoleSession((line) => (line === '?' ? sent(line, IDLE_AWAY) : sent(line, 'ok')));
     const r = await homeMachine(TARGET, { polls: 2, pollMs: 0 });
     expect(r.kind).toBe('failed');
     if (r.kind === 'failed') {
@@ -161,7 +150,7 @@ describe('#693 homeMachine', () => {
   });
 
   it('reports a refused $H without claiming the head moved', async () => {
-    fakeConsole((line) => (line === '?' ? sent(line, IDLE_AWAY) : refused(line)));
+    fakeConsoleSession((line) => (line === '?' ? sent(line, IDLE_AWAY) : refused(line)));
     const r = await homeMachine(TARGET, { polls: 1, pollMs: 0 });
     expect(r).toEqual({ kind: 'failed', detail: 'the console refuses that line' });
   });

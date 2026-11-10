@@ -46,9 +46,9 @@ import {
   u32be,
   utf8,
   type Frame,
-  type MachineTransport,
   type UdpDatagram,
 } from '@/platform/desktop/protocol';
+import { QueueTransport } from './helpers/fakeTransport';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { verifyCheck, type ProgramCheck } from '@/engine/cnc/uploadGate';
 
@@ -74,37 +74,24 @@ function decodeAll(writes: Uint8Array[]): Frame[] {
   return out;
 }
 
-class FakeTransport implements MachineTransport {
-  writes: Uint8Array[] = [];
-  reads: Uint8Array[] = [];
+class FakeTransport extends QueueTransport {
   udpLines: string[] = [];
-  connects = 0;
-  closed: number[] = [];
   listenPort: number | null = null;
   /** The timeout each `tcpConnect` was asked for — how a spec sees which connect window was used. */
   connectTimeouts: number[] = [];
 
   queueRead(...chunks: Uint8Array[]): void {
-    this.reads.push(...chunks);
+    this.queue(...chunks);
   }
-  async udpListen(port: number, _windowMs: number): Promise<UdpDatagram[]> {
+  override async udpListen(port: number, _windowMs: number): Promise<UdpDatagram[]> {
     this.listenPort = port;
     // The bridge reads the text and nothing else, so a fixed arrival time is enough here (#275).
     return this.udpLines.map((text) => ({ at: 0, text }));
   }
-  async tcpConnect(_host: string, _port: number, timeoutMs: number): Promise<number> {
+  override async tcpConnect(_host: string, _port: number, timeoutMs: number): Promise<number> {
     this.connects++;
     this.connectTimeouts.push(timeoutMs);
     return 1;
-  }
-  async tcpWrite(_conn: number, data: Uint8Array): Promise<void> {
-    this.writes.push(data);
-  }
-  async tcpRead(_conn: number, _max: number, _timeoutMs: number): Promise<Uint8Array> {
-    return this.reads.shift() ?? EMPTY;
-  }
-  async tcpClose(conn: number): Promise<void> {
-    this.closed.push(conn);
   }
 }
 

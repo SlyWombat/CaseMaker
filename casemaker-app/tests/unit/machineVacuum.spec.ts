@@ -9,7 +9,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleSession } from '@/platform/machineConsole';
+import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { fakeConsoleSession } from './helpers/fakeConsole';
 import { toggleVacuum, vacuumLine, VACUUM_ON, VACUUM_OFF } from '@/platform/machineVacuum';
 
 afterEach(() => setMachineConsoleLoader(null));
@@ -20,34 +21,6 @@ const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
 
 /** A session that answers as scripted, and remembers what it was asked and whether it was closed. */
-function fakeSession(answer: (line: string) => ConsoleSend) {
-  const sent: string[] = [];
-  const counters = { closes: 0, opens: 0 };
-  const session: MachineConsoleSession = {
-    async send(line) {
-      sent.push(line);
-      return answer(line);
-    },
-    async close() {
-      counters.closes += 1;
-    },
-  };
-  setMachineConsoleLoader(async () => ({
-    async open() {
-      counters.opens += 1;
-      return session;
-    },
-  }));
-  return {
-    sent,
-    get closes() {
-      return counters.closes;
-    },
-    get opens() {
-      return counters.opens;
-    },
-  };
-}
 
 /** The controller's own `ok` for a command, and its status line for `?`. */
 const idleMachine: (line: string) => ConsoleSend = (line) =>
@@ -66,7 +39,7 @@ describe('#390 the vacuum line', () => {
 
 describe('#390 the vacuum seam — it asks before it switches', () => {
   it('asks `?` then sends `M851` on an idle machine, on one connection, then closes it', async () => {
-    const fake = fakeSession(idleMachine);
+    const fake = fakeConsoleSession(idleMachine);
     const result = await toggleVacuum(TARGET, true);
 
     expect(result).toEqual({ kind: 'toggled', on: true, status: IDLE });
@@ -78,7 +51,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
   });
 
   it('sends `M852` when switching off', async () => {
-    const fake = fakeSession(idleMachine);
+    const fake = fakeConsoleSession(idleMachine);
     const result = await toggleVacuum(TARGET, false);
     expect(result.kind).toBe('toggled');
     if (result.kind !== 'toggled') return;
@@ -88,7 +61,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
 
   it('refuses a machine that reports Run rather than Idle, and sends no code', async () => {
     // The #296 rule, over this control's own connection: a program owns the vacuum while it runs.
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: '<Run|MPos:0,0,0|P:34,42,17>', frames: 1, elapsedMs: 30 }
         : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
@@ -112,7 +85,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
   // switching the vacuum there is no more welcome — so both halves refuse, and neither sends the code.
   it('refuses an alarm line that sits beside an Idle reply (#386 item 3)', async () => {
     const text = `${IDLE}\r\nALARM: Probe fail\r\nok\r\n`;
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?' ? { ok: true, line, text, frames: 3, elapsedMs: 40 } : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
     );
     const result = await toggleVacuum(TARGET, true);
@@ -130,7 +103,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     // The `M491` tail's shape: the `?` is answered normally, and the alarm was already on the socket
     // when it went out — the session hands that back as `carried`, never as the reply.
     const summary = 'M492.3\r\nERROR: Probe dead or not set, please charge or set first!\r\n';
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: IDLE, frames: 1, elapsedMs: 30, carried: { text: summary, frames: 3 } }
         : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
@@ -154,7 +127,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     // an `M851` sent here would leave the vacuum on with nothing left to switch it off.
     const MID_JOB_IDLE =
       '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,90,88|OTA:0,0>';
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?' ? { ok: true, line, text: MID_JOB_IDLE, frames: 1, elapsedMs: 30 } : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
     );
     const result = await toggleVacuum(TARGET, true);
@@ -169,7 +142,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
   });
 
   it('lets the finished line through: Idle with `P:` at 100 is a job that is over', async () => {
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? {
             ok: true,
@@ -186,7 +159,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
   });
 
   it('treats an unreadable status line as no permission, and sends no code', async () => {
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: 'garbage from the controller', frames: 1, elapsedMs: 30 }
         : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
@@ -199,7 +172,7 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
   });
 
   it('refuses any state word but Idle, so only an explicit idle passes', async () => {
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: '<Hold|MPos:0,0,0>', frames: 1, elapsedMs: 30 }
         : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
@@ -211,14 +184,14 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
 
 describe('#390 the vacuum seam — a socket that failed', () => {
   it('reports a timeout on the ask without sending the code', async () => {
-    const fake = fakeSession(() => ({ ok: false, reason: 'timeout', line: '?', detail: 'no reply within 60000 ms', text: '' }));
+    const fake = fakeConsoleSession(() => ({ ok: false, reason: 'timeout', line: '?', detail: 'no reply within 60000 ms', text: '' }));
     const result = await toggleVacuum(TARGET, true);
     expect(result.kind).toBe('timeout');
     expect(fake.sent).toEqual(['?']);
   });
 
   it('reports a timeout on the code itself, after the ask succeeded', async () => {
-    const fake = fakeSession((line) =>
+    const fake = fakeConsoleSession((line) =>
       line === '?'
         ? { ok: true, line, text: IDLE, frames: 1, elapsedMs: 30 }
         : { ok: false, reason: 'timeout', line, detail: 'no reply within 60000 ms', text: '' },
@@ -229,7 +202,7 @@ describe('#390 the vacuum seam — a socket that failed', () => {
   });
 
   it('turns a dead socket into an error answer rather than a thrown exception', async () => {
-    fakeSession(() => {
+    fakeConsoleSession(() => {
       throw new Error('tcpRead: connection reset by peer');
     });
     const result = await toggleVacuum(TARGET, true);

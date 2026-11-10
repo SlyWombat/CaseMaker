@@ -12,24 +12,9 @@ import type {
   PrepareOptions,
   PrepareResult,
 } from '../../scripts/lib/casemaker/verifiedProgram';
-import type { MachineTransport } from '../../src/platform/desktop/protocol';
+import { SpyTransport } from './helpers/fakeTransport';
 
 /** A transport that records whether the socket was ever opened, and answers empty reads. */
-class SpyTransport implements MachineTransport {
-  connects = 0;
-  async udpListen(): Promise<never[]> {
-    return [];
-  }
-  async tcpConnect(): Promise<number> {
-    this.connects += 1;
-    return 1;
-  }
-  async tcpWrite(): Promise<void> {}
-  async tcpRead(): Promise<Uint8Array> {
-    return new Uint8Array();
-  }
-  async tcpClose(): Promise<void> {}
-}
 
 const JOB = 'job.json';
 const HOST = '192.0.2.10';

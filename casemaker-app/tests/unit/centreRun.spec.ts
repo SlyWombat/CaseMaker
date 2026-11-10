@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
+import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { runCentreFind, type CentreFindOptions } from '@/engine/cnc/registration/execute';
 import { planCentreFind } from '@/engine/cnc/registration/centreFind';
 
@@ -26,7 +27,6 @@ function fakeMachine(feature: Feature) {
   let mode: 'G90' | 'G91' = 'G90';
   const pos = { x: -1, y: -1, z: -3 };
   const lines: string[] = [];
-  const reply = (text: string): ConsoleSendResult => ({ kind: 'sent', line: '', text, frames: 1, elapsedMs: 1 });
   const distFromCentre = (x: number, y: number): number => Math.hypot(x - CENTRE.x, y - CENTRE.y);
   /** Material under a point: the part's face for a boss; everything but the hole for a bore. */
   const materialAt = (x: number, y: number): boolean =>
@@ -42,8 +42,8 @@ function fakeMachine(feature: Feature) {
       if (line === 'G54' || line === 'G92.1') return reply('ok');
       // #789 — the probe connector's supply, switched on by the session.
       if (line === 'M831' || line === 'M832') return reply('ok');
-      if (line === 'M119') return reply('X_min:0 Y_min:0 Z_min:0 X_max:0 Y_max:0 Z_max:0 Probe:0');
-      if (line === 'M491') return reply('[PRB:0,0,-80.000:1]\nok');
+      if (line === 'M119') return reply(PROBE_OPEN_REPLY);
+      if (line === 'M491') return reply(PROBE_TRIGGERED_REPLY);
       if (line === 'G90' || line === 'G91') return (mode = line), reply('ok');
       let m = /^G53 G0 Z(-?[\d.]+)$/.exec(line);
       if (m) return (pos.z = Number(m[1])), reply('ok');

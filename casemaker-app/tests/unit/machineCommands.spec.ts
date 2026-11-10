@@ -29,25 +29,16 @@ import type { LoadedLocation } from '../../src/platform/headless/bootstrap';
 import {
   encodeFrame,
   utf8,
-  type MachineTransport,
   type UdpDatagram,
 } from '../../src/platform/desktop/protocol';
+import { QueueTransport } from './helpers/fakeTransport';
 
 const EMPTY = new Uint8Array();
 
-class FakeTransport implements MachineTransport {
-  writes: Uint8Array[] = [];
-  reads: Uint8Array[] = [];
-  connects = 0;
+class FakeTransport extends QueueTransport {
   hosts: string[] = [];
-  closed: number[] = [];
   /** One-shot replies to a written console line, in the order the lines arrive. */
   private responders: { line: string; frames: Uint8Array[] }[] = [];
-
-  /** Queue reply bytes with no relation to a write (the status/version/hashes tests). */
-  queue(...chunks: Uint8Array[]): void {
-    this.reads.push(...chunks);
-  }
 
   /**
    * Answer the next write of `line` with `frames`. A console session reads anything already queued
@@ -57,15 +48,15 @@ class FakeTransport implements MachineTransport {
   on(line: string, ...frames: Uint8Array[]): void {
     this.responders.push({ line, frames });
   }
-  async udpListen(): Promise<UdpDatagram[]> {
+  override async udpListen(): Promise<UdpDatagram[]> {
     throw new Error('these commands never broadcast');
   }
-  async tcpConnect(host: string): Promise<number> {
+  override async tcpConnect(host: string): Promise<number> {
     this.connects++;
     this.hosts.push(host);
     return 1;
   }
-  async tcpWrite(_conn: number, data: Uint8Array): Promise<void> {
+  override async tcpWrite(_conn: number, data: Uint8Array): Promise<void> {
     this.writes.push(data);
     // 5-byte header (magic, length, type) and a 4-byte footer (crc, magic), as `encodeFrame` writes it.
     const line = new TextDecoder().decode(data.subarray(5, data.length - 4));
@@ -74,17 +65,6 @@ class FakeTransport implements MachineTransport {
       const [responder] = this.responders.splice(at, 1);
       this.reads.push(...(responder?.frames ?? []));
     }
-  }
-  async tcpRead(): Promise<Uint8Array> {
-    return this.reads.shift() ?? EMPTY;
-  }
-  async tcpClose(conn: number): Promise<void> {
-    this.closed.push(conn);
-  }
-  /** Every console line written, decoded. */
-  lines(): string[] {
-    // 5-byte header (magic, length, type) and a 4-byte footer (crc, magic), as `encodeFrame` writes it.
-    return this.writes.map((w) => new TextDecoder().decode(w.subarray(5, w.length - 4)));
   }
 }
 
