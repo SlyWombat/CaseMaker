@@ -860,6 +860,12 @@ export function OperationStep({
           </div>
         </div>
       )}
+      {/* #1107 — a frame change's dropped pick is named here, in amber, whichever frame follows. */}
+      {droppedPick !== null && (
+        <p style={UNBLOCK} data-testid="start-wizard-rotary-dropped">
+          {droppedPick}
+        </p>
+      )}
       {rotary ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
@@ -868,12 +874,6 @@ export function OperationStep({
         />
       ) : (
         <>
-          {/* #1107 — a frame change's dropped pick is named here, in amber. */}
-          {droppedPick !== null && (
-            <p style={UNBLOCK} data-testid="start-wizard-rotary-dropped">
-              {droppedPick}
-            </p>
-          )}
           {/* #1107 — the rod intents are CARDS IN THE SAME LIST: first when the rotary is on the
               pins, after the flat intents otherwise. One door into the question, not two. */}
           {rotaryFacts.owned && rotaryFacts.onPins && rodCards}
