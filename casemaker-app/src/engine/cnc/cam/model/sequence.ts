@@ -1145,7 +1145,9 @@ export function chooseSequence(
       );
       if (picked !== 0) return picked > 0 ? -1 : 1;
     }
-    return ra[7]! < rb[7]! ? -1 : ra[7]! > rb[7]! ? 1 : 0;
+    // #1186 — the signature is the LAST member of the rank tuple (index 8 since the rank gained
+    // the change-count key); an index kept from the old 7-key shape compared `fallback` forever.
+    return ra[8]! < rb[8]! ? -1 : ra[8]! > rb[8]! ? 1 : 0;
   };
   feasible.sort(compareRanked);
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient
