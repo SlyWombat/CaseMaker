@@ -3508,6 +3508,16 @@ export interface GoalSurfaceFacts {
   roughStepOverMm?: number;
   /** Finishing raster pitch, mm. ABSENT on the model engine's facts (#1005). */
   finishStepOverMm?: number;
+  /**
+   * #1087 — THE FINISH'S CUSP PROMISE, both numbers: `finishScallopMm` is the cusp the job asks
+   * the finish to hold (its stated pitch converted on the finishing ball, or the engine's 0.027 mm
+   * default) and `finishCuspMm` is the cusp the row step actually leaves. Absent on a result
+   * stored before the field; `finishGridLimited` is true when the field grid was too coarse to
+   * reach the promise, and the sheet then names the grid rather than hiding the miss.
+   */
+  finishScallopMm?: number;
+  finishCuspMm?: number;
+  finishGridLimited?: boolean;
   /** Roughing allowance left on the goal surface, mm. ABSENT on the model engine's facts (#1005). */
   stockToLeaveMm?: number;
   /**
@@ -3576,14 +3586,23 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
         `leaving ${fmtNum(facts.stockToLeaveMm)} mm of stock on the surface.`;
   // #671 — the passes run in the order they are listed: the parallel finish, then the scallop
   // contours, then the pencil paths along the corners. #862 — the rim laps open the finish.
+  // #1087 — the step's PROMISE and its result in one clause: the cusp the rows leave beside the
+  // cusp the job asks for, and the grid named when it could not reach it.
+  const cuspWords =
+    facts.finishCuspMm === undefined || facts.finishScallopMm === undefined
+      ? ''
+      : facts.finishGridLimited === true
+        ? ` — the finest the ${fmtNum(facts.gridPitchMm ?? 0)} mm surface grid allows — leaving a ` +
+          `${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`
+        : `, leaving a ${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`;
   const passes = [
     facts.rim == null
-      ? `Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over.`
+      ? `Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over${cuspWords}.`
       // #869 — the rim laps ride the FINISHING cutter, so their spacing is ITS step-down (the
       // rough's deeper step-down is not the wall's lap height).
       : `The finish opens with ${facts.rim.laps} rim lap${facts.rim.laps === 1 ? '' : 's'} down the cleared band’s wall, ` +
         `one per ${fmtNum(facts.finishStepDownMm ?? facts.stepDownMm)} mm from the stock top to its floor, then follows the surface at ` +
-        `${fmtNum(facts.finishStepOverMm)} mm step-over.`,
+        `${fmtNum(facts.finishStepOverMm)} mm step-over${cuspWords}.`,
   ];
   if (facts.scallop != null) {
     passes.push(
