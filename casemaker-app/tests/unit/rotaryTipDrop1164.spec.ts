@@ -106,8 +106,12 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
     // pose, and the map's own disc (7.7° at the envelope) does not reach them while the true
     // distance at ρ = 8 does.
     const arc = 0;
-    const k = cellAt(field, 0, arc);
-    const x = field.x0 + Math.round((0 - field.x0) / field.pitch) * field.pitch;
+    // The FIELD is in the target's world frame (position.x = 50); the mesh the sweep uses is in the
+    // rod's own frame. Take the field's mid-x cell, then pose the sweep at that x TER the goal's
+    // position — the field's x0 alone is 30 mm away from where the mesh lives.
+    const xWorld = field.x0 + Math.floor(field.nx / 2) * field.pitch;
+    const k = cellAt(field, xWorld, arc);
+    const x = xWorld - 50;
     return { field, flat, k, x, arc };
   }
 
@@ -143,6 +147,8 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
     const { tris } = vGrooveTriangles(0);
     const field = sampleGoalRadialField(goal(tris), R, { pitchMm: PITCH });
     const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
-    for (let k = 0; k < tips.length; k += 101) expect(tips[k]).toBeCloseTo(0, 6);
+    // The sampled rod is a 180-gon: its chords sag below the envelope by ~0.0017 mm, and the tip
+    // follows the sampled surface, not the ideal circle.
+    for (let k = 0; k < tips.length; k += 101) expect(Math.abs(tips[k]!)).toBeLessThanOrEqual(0.01);
   }, 600_000);
 });
