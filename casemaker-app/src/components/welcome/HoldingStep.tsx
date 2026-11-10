@@ -92,6 +92,7 @@ import {
   HOLDING_MOUNT_WORDS,
   applyMount,
   applyRecommendedMount,
+  recommendSeat,
   armsAboveStock,
   bedAnchor,
   bedBracketHold,
@@ -125,6 +126,7 @@ import {
   type PictureRect,
 } from './holdingMounts';
 import type { PartFootprint } from './workShape';
+import type { WorkFacts } from './workFacts';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
@@ -1380,6 +1382,11 @@ function HoldingSideView({
 export interface HoldingStepProps {
   job: EngraveJob;
   answers: SetupAnswers;
+  /**
+   * #1103 — WHAT THE WORK TAKES (the question step's choice): the recommended seat reads it, so a
+   * 19.1 mm surfacing pass on a 20.1 mm plate is not recommended the block seat. Absent = unknown.
+   */
+  work?: WorkFacts;
   /** Apply the answer immediately: there is no later Finish to collect it. */
   onAnswers: (answers: SetupAnswers) => void;
   /**
@@ -1532,6 +1539,7 @@ function HoldChoice({
 export function HoldingStep({
   job,
   answers,
+  work,
   onAnswers,
   onRotary,
   onBedHold,
@@ -1633,10 +1641,18 @@ export function HoldingStep({
         block: chuckStockOf(job)?.kind === 'block',
         // #743 D6 — a disc is round in plan but NOT a rod: the chuck and the bracket refuse it.
         disc: job.stock.shape === 'disc',
+        through: work?.through === true || throughCut,
         tape,
       }),
     [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape],
   );
+  // #1103 — WHAT THE WORK TAKES, and the seat it recommends; the reason is shown under the rows.
+  const houseBoards = useMemo(() => boardChoices(profile), [profile]);
+  const seatChoice = useMemo(
+    () => recommendSeat(answers.stock, work ?? null, houseBoards),
+    [answers.stock, work, houseBoards],
+  );
+
   // #240/#715 — the mount the job is IN: the job's own workholding first (a rotary, or one of the
   // bed's two arms), the vise's seat and board otherwise.
   const current: HoldingMount =
@@ -1708,7 +1724,7 @@ export function HoldingStep({
     if (job.workholding.kind !== 'vise') return;
     // With the bed or the rotary on the pins, their own effects decide (#715, #714).
     if (now !== null && now.mount !== 'vise') return;
-    const next = applyRecommendedMount(answers, boardMm);
+    const next = applyRecommendedMount(answers, boardMm, work, boardChoices(profile));
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2583,6 +2599,12 @@ export function HoldingStep({
               />
             ))}
           </div>
+
+          {seatChoice.reason !== null && (
+            <p style={MUTED} data-testid="engrave-setup-recommendation-reason">
+              Recommended: {seatChoice.reason}.
+            </p>
+          )}
 
           {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
               on every vise job; now it is one line under the radios, and `vise-default` speaks

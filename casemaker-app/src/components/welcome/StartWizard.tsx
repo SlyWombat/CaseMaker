@@ -54,6 +54,7 @@ import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
+import { workFactsOf } from './workFacts';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -1011,6 +1012,8 @@ export function StartWizard(): JSX.Element {
         <HoldingStep
           job={job}
           answers={answers}
+          // #1103 — the recommended seat reads what the work takes, from the question step.
+          work={workFactsOf(operationChoice, proposal, work)}
           onAnswers={applyHoldAnswers}
           onRotary={applyRotaryHolding}
           onBedHold={applyBedHolding}
