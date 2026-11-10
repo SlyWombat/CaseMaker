@@ -191,4 +191,48 @@ describe('#1173 — a run IS the status poller', () => {
     expect(statusRequests).toBe(3);
     releaseManage();
   });
+
+  // THE DOUBLE-TIMER CHAIN (analyst, 2026-11-10). A boolean `running` cannot tell an OLD tick from a
+  // NEW one: a tick in flight while a run takes and releases the poll sees `running === true` again
+  // and schedules its own timer beside the new tick's, so two chains poll forever. The generation
+  // counter is what makes that old tick return.
+  it('a tick in flight across a run hold cannot start a second chain', async () => {
+    const OK: HeartbeatInspection = { status: { ok: true, text: '<Idle|MPos:0,0,0>' }, diagnose: null };
+    let inspects = 0;
+    const resolvers: Array<(reading: HeartbeatInspection) => void> = [];
+    setMachineHeartbeatLoader(async () => ({
+      inspect: () => {
+        inspects += 1;
+        return new Promise<HeartbeatInspection>((resolve) => resolvers.push(resolve));
+      },
+    }));
+
+    const releasePin = acquireStatusPoll(TARGET, 'pin');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolvers).toHaveLength(1); // tick 1 is in flight, its inspect unanswered
+
+    // The run takes the poll, and lets go at once (a play refused or an alarm ends a run that fast).
+    const releaseRun = acquireStatusPoll(TARGET, 'run', { pollsItself: true });
+    releaseRun();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolvers).toHaveLength(2); // tick 2 started
+
+    // Tick 1 answers NOW. With a bare boolean it thinks the poll is still running (it is — for tick
+    // 2) and schedules a timer of its own.
+    const [oldTick, newTick] = resolvers.splice(0);
+    oldTick!(OK);
+    await vi.advanceTimersByTimeAsync(0);
+    newTick!(OK);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const before = inspects;
+    for (let interval = 0; interval < 3; interval += 1) {
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_POLL_MS);
+      for (const resolve of resolvers.splice(0)) resolve(OK);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    // ONE chain: one inspect per interval. A second chain would be two per interval.
+    expect(inspects - before).toBe(3);
+    releasePin();
+  });
 });

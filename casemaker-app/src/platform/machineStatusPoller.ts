@@ -18,6 +18,11 @@
  * the timer starts again if anything still holds it. `noteRunStatus` folds the run's own answers
  * into the store, so the Manage page is live during a run without polling the machine itself.
  *
+ * ONE OVERLAP IS ACCEPTED, NOT HIDDEN: an inspect already in flight when a run starts is answered
+ * after the run's first `?` goes out, so the bench sees two status requests within one interval at
+ * that hand-off — the old tick's and the run's. Stopping the timer cannot recall a request already
+ * on the wire; the generation counter only guarantees the old answer cannot start a second chain.
+ *
  * THE STORE IS THE ONLY OWNER OF A READING. This module never keeps a status of its own: every
  * answer goes through `machineStore` (`noteLiveStatusLine`, `noteDiagnoseLine`, `noteHeartbeat`),
  * and the transition notice through `machineNoticeStore`. It owns only the timers and the holds.
@@ -44,6 +49,13 @@ interface StatusPoller {
   /** The consumers that send their own `?` (a run); while any is here, no timer of ours runs. */
   selfPolling: Set<string>;
   running: boolean;
+  /**
+   * A chain's identity (analyst, 2026-11-10). `running` alone cannot tell an OLD tick from a NEW
+   * one: a tick in flight while a run takes and releases the poll sees `running === true` again and
+   * schedules its own timer beside the new tick's, so two chains poll forever. Every start/stop
+   * bumps this; a tick captured under an older generation returns instead of scheduling.
+   */
+  generation: number;
   timer: ReturnType<typeof setTimeout> | null;
   /** The previous answer, for a transition notice; null is "no previous answer yet". */
   lastReachable: boolean | null;
@@ -57,6 +69,8 @@ function keyOf(target: HeartbeatTarget): string {
 
 function stopTimer(entry: StatusPoller): void {
   entry.running = false;
+  // Invalidate whatever tick is in flight, so its answer cannot schedule a chain of its own.
+  entry.generation += 1;
   if (entry.timer !== null) {
     clearTimeout(entry.timer);
     entry.timer = null;
@@ -66,12 +80,14 @@ function stopTimer(entry: StatusPoller): void {
 function startTimer(entry: StatusPoller): void {
   if (entry.running) return;
   entry.running = true;
+  entry.generation += 1;
+  const generation = entry.generation;
   // A fresh start re-establishes reachability: the first answer is not a transition (a mount or a
   // run's hand-off is not the machine dropping).
   entry.lastReachable = null;
 
   const tick = async (): Promise<void> => {
-    if (!entry.running) return;
+    if (!entry.running || entry.generation !== generation) return;
 
     let reachable = false;
     let line: string | null = null;
@@ -91,7 +107,9 @@ function startTimer(entry: StatusPoller): void {
       // to notice, so it is a result (unreachable), not a fault to propagate.
     }
 
-    if (!entry.running) return;
+    // The generation check is the one that matters after the awaits: a run may have taken the poll
+    // and handed it back while this inspect was in flight.
+    if (!entry.running || entry.generation !== generation) return;
     if (line !== null) useMachineStore.getState().noteLiveStatusLine(line);
     if (diagnoseLine !== null) useMachineStore.getState().noteDiagnoseLine(diagnoseLine);
     noteReachable(entry, reachable);
@@ -133,6 +151,7 @@ export function acquireStatusPoll(
       holds: new Set(),
       selfPolling: new Set(),
       running: false,
+      generation: 0,
       timer: null,
       lastReachable: null,
     };
@@ -166,6 +185,11 @@ export function acquireStatusPoll(
  * Fold one of a run's own `?` answers into the store, so the Manage card is live during a run
  * without a second poll. `raw` is null on a missed poll (reachable goes false; the last line stays,
  * exactly as the timer's own failed tick leaves it).
+ *
+ * NOTE (analyst, 2026-11-10): a null marks the heartbeat false WITHOUT posting the online/offline
+ * notice the timer's transition path posts. The run panel already carries the misses, and the
+ * notice is the pinned machine's; during a run this module is not the one watching. Kept as it is,
+ * and said on #1173 rather than left to be discovered.
  */
 export function noteRunStatus(raw: string | null): void {
   if (raw !== null) useMachineStore.getState().noteLiveStatusLine(raw);
