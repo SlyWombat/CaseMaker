@@ -669,6 +669,9 @@ export function StartStockStep({
   // wizard's proposal stops being a seed; the sentence still says where they STARTED. It is kept
   // here until a different valid number is committed, or another source takes the numbers over.
   const seededNumbers = seedSeen !== null && !seedDropped;
+  // The sentence lives in ONE place: the "From your design" card while it is on screen, and the
+  // line under the fields once typing has taken that card away (#1109 — never twice on one step).
+  const seedSentenceInCard = seed?.computed === true && seed.sentence !== undefined;
   const around = aroundLine(form, dims);
   // #1099 — the blank the drawing shows, once all three numbers are usable (mid-typing is not).
   const drawnBlank = useMemo(() => {
@@ -706,7 +709,11 @@ export function StartStockStep({
                     {fmt(seed.length)} × {fmt(seed.width)} × {fmt(seed.thickness)} mm{' '}
                     {MATERIAL_LABELS[seed.material]}
                   </div>
-                  {seed.sentence !== undefined && <div style={MUTED}>{seed.sentence}</div>}
+                  {seed.sentence !== undefined && (
+                    <div style={MUTED} data-testid="engrave-setup-stock-provenance">
+                      {seed.sentence}
+                    </div>
+                  )}
                 </button>
               </li>
             )}
@@ -915,7 +922,7 @@ export function StartStockStep({
       {/* #352 — where seeded numbers came from. It goes the moment one of them is edited, because
           then the number IS the operator's and the sentence would be a lie. #897 — a blank the
           work proposed says what it was sized from, in the same place and under the same rule. */}
-      {seededNumbers && (
+      {seededNumbers && !seedSentenceInCard && (
         <p style={MUTED} data-testid="engrave-setup-stock-provenance">
           {seedSeen.sentence ??
             'These numbers came from the template you picked, not from a bench measurement — change any you measured.'}
