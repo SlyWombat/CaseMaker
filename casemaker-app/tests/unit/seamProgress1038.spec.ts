@@ -71,6 +71,9 @@ function trayJob(stlPath: string): EngraveJob {
     labels: [],
     shapes: [],
     toolKey: X42_ENTRY.key,
+    // #1117 — the case is the PROGRESS CHANNEL, not the holding: tape keeps the tray, the stock
+    // and the plan's stages, and takes the vise's jaw out of a fixture that never named it.
+    workholding: { kind: 'tape', tape: { width: 20, thickness: 0.1, inset: 2, where: null, squareTo: 'front', source: 'default' } },
     sacrificial: { under: null, sides: { left: null, right: null, front: null, back: null }, source: 'default' },
     targetObject: goal,
   };

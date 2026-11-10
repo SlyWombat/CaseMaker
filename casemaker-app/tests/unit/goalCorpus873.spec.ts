@@ -359,7 +359,9 @@ describe('#949 an oversized goal is refused at the CAM, not clipped along the ja
   it('the same figure on a blank that holds it still generates — a fitting goal is untouched', async () => {
     const imported = await read('figure.stl');
     const size = imported.size;
-    const stock = { length: size.x + 4, width: size.y + 4, thickness: 20 };
+    // #1117 — room for the freeing contour's SHANK (the case is that a fitted goal generates, not
+    // what holds it): a 2 mm rim put the 3.175 shank 0.09 mm into the default vise's jaw.
+    const stock = { length: size.x + 12, width: size.y + 12, thickness: 20 };
     const g = await generate(tl, goalJob(targetOf(imported, stock), stock));
     expect(g.ok, JSON.stringify(g.errors)).toBe(true);
   });
