@@ -24,7 +24,11 @@ export type PresetId =
   | 'part-3d'
   | 'pcb'
   | 'dowel'
-  | 'something-else';
+  | 'something-else'
+  /** #1107 — the rod intents, folded into the card list when the house owns a rotary. */
+  | 'rod-dowel'
+  | 'rod-faces'
+  | 'rod-relief';
 
 export interface PresetDef {
   id: PresetId;

@@ -68,12 +68,14 @@ export function proposedStockFor(
 ): StockProposal | null {
   // #1098 — a drawing is work that sizes its own blank, exactly as a mesh or a board does.
   // #1100 — a cut-out and a pocket size their own too (the presets' proposals).
+  // #1107 — a rod answer sizes the rod.
   if (
     work.kind === 'mesh' ||
     work.kind === 'pcb' ||
     work.kind === 'outline' ||
     work.kind === 'cutout' ||
-    work.kind === 'pocket'
+    work.kind === 'pocket' ||
+    work.kind === 'rod'
   ) {
     return proposed;
   }
@@ -130,6 +132,16 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
   if (choice === null) return { kind: 'none' };
   // A ROD in the chuck is sized by its own start (the dowel/template flow), not by its goal's box.
   if (rotaryMapOf(job) !== null) return { kind: 'none' };
+  // #1107 — a ROD INTENT on a flat run: the blank the question asks for is the rod. A relief's
+  // diameter is the mesh's own section (the smaller side), not an invented 20 mm.
+  if ('frame' in choice && choice.frame === 'rotary') {
+    if (choice.type === 'surface' && choice.target !== null) {
+      const section = Math.min(choice.target.size.x, choice.target.size.y);
+      const diameter = Math.max(3, Math.round(section * 10) / 10);
+      return { kind: 'rod', diameter, length: 100 };
+    }
+    return { kind: 'rod', diameter: 20, length: 100 };
+  }
   switch (choice.type) {
     case 'surface':
       return choice.target === null ? { kind: 'none' } : { kind: 'mesh', size: choice.target.size };

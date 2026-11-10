@@ -61,6 +61,8 @@ export type WorkShape =
   | { kind: 'cutout'; length: number; width: number }
   /** #1100 — a flat-floored recess (A pocket or tray). */
   | { kind: 'pocket'; length: number; width: number; depth: number }
+  /** #1107 — a ROD answer (a rotary intent): the blank is the rod the chuck takes. */
+  | { kind: 'rod'; diameter: number; length: number }
   | { kind: 'none' };
 
 export interface StockProposal {
@@ -104,6 +106,9 @@ export function proposedThickness(work: WorkShape): number | null {
     case 'pocket':
       // #1100 — the floor needs its depth plus six millimetres of body under it.
       return round1(Math.max(work.depth + 6, HOUSE_PLATE_THICKNESS_MM));
+    case 'rod':
+      // #1107 — a rod's "thickness" is its own length in the standing box.
+      return round1(work.length);
     default:
       return null;
   }
@@ -199,6 +204,19 @@ export function proposeStock(work: WorkShape): StockProposal | null {
         thickness,
         finish: 'rough',
         sentence: `Sized from the pocket: ${n(work.length)} × ${n(work.width)} mm, plus ${m} mm each side; ${n(work.depth)} mm deep with ${n(thickness - work.depth)} mm under it.`,
+      };
+    }
+    case 'rod': {
+      // #1107 — the house's dowel: the starter's own ⌀20 × 100, in the STANDING box the stock
+      // step asks a rod's numbers in (diameter as length and width, the rod's length as thickness).
+      return {
+        form: 'rod',
+        material: WORK_STOCK_MATERIAL,
+        length: round1(work.diameter),
+        width: round1(work.diameter),
+        thickness: round1(work.length),
+        finish: 'rough',
+        sentence: `Sized for the rotary chuck: a ⌀${n(work.diameter)} × ${n(work.length)} mm rod.`,
       };
     }
     default:

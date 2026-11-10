@@ -50,7 +50,7 @@ import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetu
 import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { RotaryOperationId } from './rotaryOperations';
-import type { OperationTypeId } from '@/components/panels/operationTypes';
+import { operationType, type OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 
@@ -123,6 +123,13 @@ const PRESET: CSSProperties = {
   font: 'inherit',
 };
 const PRESET_ON: CSSProperties = { ...PRESET, borderColor: '#4f8ef7', background: '#152238' };
+
+/** #1107 — the three rod intents, as cards in the question's own list. */
+const ROD_INTENTS: readonly { id: string; pick: RotaryOperationId; art: PresetId; title: string; blurb: string }[] = [
+  { id: 'dowel', pick: 'engrave', art: 'rod-dowel', title: 'Name on a dowel', blurb: 'Text around or along a rod' },
+  { id: 'faces', pick: 'faces-all-round', art: 'rod-faces', title: 'Faces on a rod', blurb: 'Evenly spaced flats, indexed' },
+  { id: 'relief', pick: 'relief', art: 'rod-relief', title: 'A relief on a rod', blurb: 'A mesh wrapped on the surface' },
+];
 /** #723 P2-3 — one side of a part cut from several sides, as a choice. */
 // Longhands, not the `border` shorthand: the ON fill names `borderColor` (#874).
 const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, borderWidth: 1, borderStyle: 'solid', borderColor: '#2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
@@ -150,10 +157,19 @@ export type OperationChoice =
       reads?: 'along' | 'around';
       /** #1100 — the sign preset's letter size (cap height, mm), which sizes the blank. */
       sizeMm?: number;
+      /** #1107 — the answer is for a ROD: the blank is proposed as one and the chuck pre-selected. */
+      frame?: 'rotary';
     }
   /** #1100 — Cut out a shape: a rectangle or circle through the blank, held by tabs. */
   | { type: 'cutout'; shape: 'rect' | 'circle'; length: number; width: number; radius: number }
-  | { type: 'surface'; target: EngraveTargetObject | null; /** #723 P2-3 — the side it is written to. */ setupId?: string }
+  | {
+      type: 'surface';
+      target: EngraveTargetObject | null;
+      /** #723 P2-3 — the side it is written to. */
+      setupId?: string;
+      /** #1107 — a relief ON A ROD (a rotary intent from the question step). */
+      frame?: 'rotary';
+    }
   /**
    * #874 — a circuit board, from its Gerber and drill files. `imported` is whether the set has
    * READ: the files write the job's items themselves, so Create adds nothing and waits only for
@@ -168,7 +184,7 @@ export type OperationChoice =
   /** #241 slice 2 — a flat on a face: the index and the depth. */
   | { type: 'flat'; a: number; depth: number }
   /** #241 slice 2 — evenly spaced flats: the first index, the count, and the across-flats. */
-  | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number }
+  | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number; frame?: 'rotary' }
   /** #241 slice 2 — a cross-hole: the index and the diameter. */
   | { type: 'cross-hole'; a: number; diameter: number }
   /**
@@ -209,6 +225,12 @@ export interface OperationStepProps {
   initial?: OperationChoice | null;
   /** The step's current answer; the SHELL owns the footer, so the step reports rather than acts. */
   onChoiceChange: (choice: OperationChoice | null) => void;
+  /**
+   * #1107 — WHAT THE ROTARY IS, from the shell: whether the house OWNS one (the intents are
+   * offered) and whether it is on the pins now (the intents are listed first). A new run used to
+   * meet the rotary only after step 4, so the rod path was unreachable.
+   */
+  rotaryFacts?: { owned: boolean; onPins: boolean };
 }
 
 /** A flat-job picker id, or null for a choice only the rotary picker draws (or no choice). */
@@ -246,6 +268,7 @@ export function OperationStep({
   fresh = false,
   initial = null,
   onChoiceChange,
+  rotaryFacts = { owned: false, onPins: false },
 }: OperationStepProps): JSX.Element {
   // #897 — a re-mounted step starts from the answer the shell holds: Back is an edit, not a reset.
   const seed = initial;
@@ -261,7 +284,35 @@ export function OperationStep({
   // #752 R-UI-4 — on a rod in the chuck the step is the rotary one (§3.6): its own three groups,
   // and each operation's one field. `rotaryPicked` is null on a job that already has work, so
   // Create finishes without adding a duplicate — the same rule the flat picker follows.
-  const rotary = rotaryMapOf(job) !== null;
+  //
+  // #1107 — AND A NEW FLAT RUN CAN CHOOSE THE ROD: picking a rod intent turns the same step into
+  // the rotary one, so the answer states its frame and the blank/Holding follow it.
+  const rotaryJob = rotaryMapOf(job) !== null;
+  const [frameRotary, setFrameRotary] = useState(seed !== null && 'frame' in seed && seed.frame === 'rotary');
+  /** #1107 — the named sentence a FRAME CHANGE leaves when the pick does not exist in the other. */
+  const [droppedPick, setDroppedPick] = useState<string | null>(null);
+  const rotary = rotaryJob || frameRotary;
+  /** #1107 — the rod intents: an entry to the rotary step from a job that is not one yet. */
+  const startRotary = (pick: RotaryOperationId): void => {
+    // A flat pick that the rotary step does not know is dropped BY NAME, never silently.
+    const ROTARY_COMPATIBLE: readonly OperationTypeId[] = ['engrave', 'surface', 'pocket', 'v-carve', 'flute'];
+    const flatLabel = picked === null ? null : operationType(picked).label;
+    setDroppedPick(
+      picked !== null && !ROTARY_COMPATIBLE.includes(picked) && flatLabel !== null
+        ? `${flatLabel} is a flat-stock operation — on a rod, choose again.`
+        : outline !== null
+          ? 'Your drawing is a flat-stock operation — on a rod, choose again.'
+          : null,
+    );
+    setFrameRotary(true);
+    setRotaryPicked(pick);
+    setPickedByOperator(true);
+    setPicked(null);
+    setOutline(null);
+    setOutlineFileName(null);
+    setOutlineError(null);
+    setDropError(null);
+  };
   const rotaryPickOf = (choice: OperationChoice | null): RotaryOperationId | null => {
     if (choice === null) return null;
     switch (choice.type) {
@@ -334,6 +385,21 @@ export function OperationStep({
     // #1100 — a FILE (or a card) is an alternative to the fold; a chip clicked INSIDE the fold
     // keeps it open, so the picker does not disappear under the operator's next click.
     if (!keepFold) setPreset(null);
+    // #1107 — a flat chip is the way back to flat stock; a rod pick it cannot carry is named.
+    if (frameRotary) {
+      const ROD_LABEL: Partial<Record<RotaryOperationId, string>> = {
+        flat: 'The flat on a face',
+        'faces-all-round': 'Faces all round',
+        'cross-hole': 'The cross-hole',
+      };
+      const carried = rotaryPicked === 'engrave' || rotaryPicked === 'v-carve' || rotaryPicked === 'pocket' || rotaryPicked === 'flute' || rotaryPicked === 'relief';
+      setDroppedPick(
+        !carried && rotaryPicked !== null
+          ? `${ROD_LABEL[rotaryPicked] ?? 'Your rod answer'} is a rod operation — on flat stock, choose again.`
+          : null,
+      );
+    }
+    setFrameRotary(false);
     // #1098 — the picker is the alternative to the file; clicking a chip clears the drawing.
     setOutline(null);
     setOutlineFileName(null);
@@ -430,15 +496,18 @@ export function OperationStep({
   // #743 P-8 — a two-sided board whose holes the fitted probe cannot read, with its one-click offer.
   const [pcbAlignment, setPcbAlignment] = useState<PcbAlignmentOffer | null>(null);
 
+  // #1107 — the answer's frame, when the rod intents chose it.
+  const frame = frameRotary ? ({ frame: 'rotary' } as const) : {};
   const surfaceChoice: OperationChoice = {
     type: 'surface',
     target:
       surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
     ...(selectedSide === null ? {} : { setupId: selectedSide }),
+    ...frame,
   };
   const choice: OperationChoice | null = rotary
     ? rotaryPicked === 'engrave'
-      ? { type: 'engrave', text, depth, font, reads }
+      ? { type: 'engrave', text, depth, font, reads, ...frame }
       : rotaryPicked === 'v-carve'
         ? { type: 'v-carve', text: vcarveText }
         : rotaryPicked === 'pocket'
@@ -450,7 +519,7 @@ export function OperationStep({
               : rotaryPicked === 'flat'
                 ? { type: 'flat', a: faceAngle, depth: faceDepth }
                 : rotaryPicked === 'faces-all-round'
-                  ? { type: 'faces-all-round', a: faceAngle, count: facesCount, acrossFlats: facesAcross }
+                  ? { type: 'faces-all-round', a: faceAngle, count: facesCount, acrossFlats: facesAcross, ...frame }
                   : rotaryPicked === 'cross-hole'
                     ? { type: 'cross-hole', a: faceAngle, diameter: holeDiameter }
                     : null
@@ -488,7 +557,9 @@ export function OperationStep({
       proposal.form === 'plate' ? 'plate' : proposal.form
     } — change on the next step.`;
   }, [reportedChoice, job]);
-  const unblock = operationCreateBlocked(reportedChoice);
+  // #1107 — a NULL choice is the SHELL's rule (a new run is refused, a re-entry's Done is not),
+  // so its sentence belongs in the footer, not in a field that does not exist.
+  const unblock = reportedChoice === null ? null : operationCreateBlocked(reportedChoice);
   // #874 — the sentence names the FIELD it is about, so it renders in that chip's own field box,
   // directly under the field, never at the foot of the step 300 px away from the Text input.
   const unblockLine =
@@ -644,6 +715,29 @@ export function OperationStep({
   // #241 slice 2 — the face group: each operation's one field, and the index it is cut at.
   const faceField = rotary && (rotaryPicked === 'flat' || rotaryPicked === 'faces-all-round' || rotaryPicked === 'cross-hole');
   const sideGrid = useSelectionChipGrid();
+  // #1107 — the rod intents as cards in the question's own list.
+  const rodCards = (
+    <div data-testid="start-wizard-rotary-intents" role="group" aria-label="On a rod" style={{ margin: '0 0 8px' }}>
+      <div style={FIELD_HEADING}>On a rod</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 4 }}>
+        {ROD_INTENTS.map((intent) => (
+          <button
+            key={intent.id}
+            type="button"
+            data-testid={`start-wizard-rotary-intent-${intent.id}`}
+            onClick={() => startRotary(intent.pick)}
+            style={PRESET}
+          >
+            <span style={{ color: '#c9d4e2', lineHeight: 0 }}>
+              <PresetArt id={intent.art} />
+            </span>
+            <b style={{ fontSize: 12, fontWeight: 600 }}>{intent.title}</b>
+            <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{intent.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -766,6 +860,12 @@ export function OperationStep({
           </div>
         </div>
       )}
+      {/* #1107 — a frame change's dropped pick is named here, in amber, whichever frame follows. */}
+      {droppedPick !== null && (
+        <p style={UNBLOCK} data-testid="start-wizard-rotary-dropped">
+          {droppedPick}
+        </p>
+      )}
       {rotary ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
@@ -774,6 +874,9 @@ export function OperationStep({
         />
       ) : (
         <>
+          {/* #1107 — the rod intents are CARDS IN THE SAME LIST: first when the rotary is on the
+              pins, after the flat intents otherwise. One door into the question, not two. */}
+          {rotaryFacts.owned && rotaryFacts.onPins && rodCards}
           {/* #1100 — WHAT ARE YOU MAKING? Eight intents, each with a visible blurb; the sixteen
               engine chips are under Something else…, where the panel's vocabulary belongs. */}
           <div
@@ -799,6 +902,7 @@ export function OperationStep({
               </button>
             ))}
           </div>
+          {rotaryFacts.owned && !rotaryFacts.onPins && rodCards}
           {preset === 'something-else' && (
             <OperationPicker
               mode="select"
@@ -974,6 +1078,8 @@ export function OperationStep({
                 type="text"
                 data-testid="start-wizard-op-text"
                 aria-label="Engrave text"
+                // #1107 — the dowel starter opens here to be typed into.
+                autoFocus={seed?.type === 'engrave' && seed.frame === 'rotary'}
                 style={{ width: '100%', boxSizing: 'border-box' }}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -1267,6 +1373,15 @@ export function OperationStep({
             <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
               The part's shape is cut as a cavity from the top, turned over so a casting reads the
               right way round. One side only: a part with undercuts needs a two-part mould.
+            </p>
+          )}
+          {/* #1107 / #1164 — the reliefs' depth limit, stated plainly until the fix lands.
+              (Delete this block in one line when #1164 is in.) */}
+          {rotary && rotaryPicked === 'relief' && (
+            <p style={MUTED} data-testid="start-wizard-rotary-relief-depth-note">
+              A relief on the rod can be planned and previewed here, but do not cut it yet. Where
+              the shape goes deep towards the rod&apos;s centre, this build can take the cutter up
+              to about 1 mm into the design; a fix is on its way.
             </p>
           )}
           {unblockLine}
