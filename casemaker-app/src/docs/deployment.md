@@ -12,7 +12,7 @@ The Vite-built static bundle, served from any HTTP server (the dev server, the e
 - Chromium 110+ / Edge 110+
 - Firefox 110+
 - Safari 16+
-- **A 64-bit browser.** The CNC planner reserves roughly 454 MiB of address space while it ranks cutters, and a 32-bit renderer cannot: generation dies at the ball rank with "Array buffer allocation failed". On Windows on ARM, the installed Chrome is commonly a 32-bit x86 build under emulation — Edge there is the native ARM64 build. Check that `chrome://version` (or `edge://version`) says **64-bit**. The app refuses at Generate, with a plain sentence, when it detects a 32-bit or address-limited renderer.
+- **A 64-bit browser.** The CNC planner reserves roughly 454 MiB of address space while it ranks cutters, and a 32-bit renderer cannot: generation dies at the ball rank with "Array buffer allocation failed". On Windows on ARM, the installed Chrome is commonly a 32-bit x86 build under emulation — Edge there is the native ARM64 build. Check that `chrome://version` (or `edge://version`) says **64-bit**. The app refuses a 32-bit browser at Generate, with a plain sentence, before any planning starts; a 64-bit browser that cannot reserve the memory just then is warned and proceeds, and a run that runs out of memory names that cause.
 
 Required platform features: WebGL2, WebAssembly, ES2022, BigInt, structuredClone.
 

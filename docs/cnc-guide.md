@@ -2007,14 +2007,17 @@ one of the app's screens did not finish drawing.
 |---|---|---|---|
 | `panel-render-error` | error | The Cut panel or its setup flow threw while drawing. The message is the throw's own message and the panel's name; in a dev build the console prints the component stack. The rest of the window keeps working. | Press **Reload the panel**. If it throws again, report it with the console's component stack. |
 
-**This page's browser** (planner). Not a finding about the job: the page's renderer cannot reserve
-the memory the planner needs — a 32-bit browser, or a 64-bit one under severe memory pressure. The
-Generate button carries the sentence for the case it found instead of starting a run that would
-die in the ball rank:
+**This page's browser** (planner). Not a finding about the job: the planner needs 64-bit address
+space, and a 32-bit browser cannot give it. A 32-bit browser is refused at Generate, with a plain
+sentence, before any planning starts. A 64-bit browser whose startup probe cannot reserve the
+planner's memory is NOT refused: the app says so beside Generate — "This page couldn't reserve the
+planner's ~450 MiB just now; generating anyway" — and proceeds, so a real out-of-memory failure
+reads as the cause; the run's own allocation failure is named in the operator's words ("the planner
+ran out of memory in this browser; close other tabs or use a 64-bit browser").
 
 | Code | Severity | What it means in plain words | What to do |
 |---|---|---|---|
-| `browser-32-bit` | error | The page cannot give the planner the memory it needs: either the browser is a 32-bit build, or it could not reserve the planner's roughly 454 MiB of address space at startup. Planning a 3D goal would stop partway through with "Array buffer allocation failed", so Generate is refused before it starts. The sentence says which case: "This browser is 32-bit; the planner needs a 64-bit browser" when the browser states 32-bit, and otherwise "This browser can't reserve the memory the planner needs (about 450 MiB); close other tabs or use a 64-bit browser". | If the message says the browser is 32-bit, open the app in a 64-bit browser — on Windows on ARM, Edge is the native ARM64 build; `chrome://version` (or `edge://version`) says whether the browser is 64-bit. If it says the memory could not be reserved, close other tabs and reload, then try again; a 64-bit browser with enough free memory will plan. |
+| `browser-32-bit` | error | The browser is a 32-bit build, so it cannot give the planner the 64-bit address space it needs — a 3D goal's plan would stop partway through with "Array buffer allocation failed". Generate is refused before any planning starts, with "This browser is 32-bit; the planner needs a 64-bit browser". A 64-bit browser that could not reserve the planner's memory at startup is not refused (the warning beside Generate says so); a run that then runs out of memory is named in the operator's words. | Open the app in a 64-bit browser — on Windows on ARM, Edge is the native ARM64 build; `chrome://version` (or `edge://version`) says whether the browser is 64-bit. |
 
 **Running a job without the app** (headless). The command-line surface is `casemaker`
 (§8.6): `cut`, `export`, `location`, `readback` and the `machine` subcommands all run in Node.
