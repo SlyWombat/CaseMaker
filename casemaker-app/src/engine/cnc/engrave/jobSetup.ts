@@ -666,6 +666,12 @@ export interface JobFinding {
    */
   goalReachedFraction?: number;
   /**
+   * #1165 — on `goal-unreached`, the share of the goal's surface the TOP setup (side 1) alone
+   * addresses, 0–1: the number the verdict's cause class judges (under the pass line is
+   * `setup-infeasible`). A diagnostic beside the sentence's own percentage, never the verdict.
+   */
+  goalTopFraction?: number;
+  /**
    * #856 — on `vcarve-depth-beyond-cone`, the MATERIAL depth (above its floor) the item asks the
    * cone to cut, mm. The panel's press finds a cutter whose cone reaches it; absent on findings
    * that are not about a V-carve's reach.

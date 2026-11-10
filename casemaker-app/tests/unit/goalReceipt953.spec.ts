@@ -84,6 +84,21 @@ describe('#953 the receipt goal block', () => {
     expect(block.maxCutIntoAt).toBeNull();
   });
 
+  it('#1165 — a failing verdict carries its cause class and addressable share; a pass carries no key', () => {
+    const block = goalBlockFromReport(report(), { causeClass: 'setup-infeasible', addressableFraction: 0.46 });
+    expect(block.causeClass).toBe('setup-infeasible');
+    expect(block.addressableFraction).toBe(0.46);
+    // A cause the plan stated no addressable share for rides as the class alone.
+    const shop = goalBlockFromReport(report(), { causeClass: 'shop-infeasible', addressableFraction: null });
+    expect(shop.causeClass).toBe('shop-infeasible');
+    expect('addressableFraction' in shop).toBe(false);
+    // No cause (a pass, an unchecked run, or an older caller) → no keys at all: the passing Set B
+    // receipts stay byte-identical.
+    const plain = goalBlockFromReport(report());
+    expect('causeClass' in plain).toBe(false);
+    expect('addressableFraction' in plain).toBe(false);
+  });
+
   it('carries the whole-surface union and the column read when the report has them', () => {
     const wholeSurface = {
       fraction: 0.8386,

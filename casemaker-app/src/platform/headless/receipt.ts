@@ -19,6 +19,7 @@
 
 import { z } from 'zod';
 import type { GoalCutIntoReport } from '../../engine/cnc/engrave/designCheck';
+import type { GoalCause } from '../../engine/cnc/engrave/goalCause';
 
 /**
  * The receipt document's own version. A changed SHAPE bumps it; a new optional field does not.
@@ -244,6 +245,18 @@ export const engraveGoalSchema = z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
     passCoverage: z.number().describe('The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.'),
+    causeClass: z
+      .enum(['setup-infeasible', 'shop-infeasible', 'plan-shortfall'])
+      .optional()
+      .describe(
+        '#1165 — WHY a goal verdict under the pass line missed: `setup-infeasible` (this staging cannot address enough of the goal), `shop-infeasible` (a refused floor stands beyond the longest usable cutter reach), or `plan-shortfall` (addressable and reachable, and still not cut — the only engine defect). Absent on a pass and on an unchecked comparison, so those receipts stay byte-identical.',
+      ),
+    addressableFraction: z
+      .number()
+      .optional()
+      .describe(
+        '#1165 — the share of the goal this staging’s own top setup can address, 0–1 — a DIAGNOSTIC beside the judged coverage, never the verdict. Present with `causeClass`, or when the run stated the share on a failing check.',
+      ),
     ladder: z
       .array(
         z.object({
@@ -746,12 +759,20 @@ export type EngraveGoal = z.infer<typeof engraveGoalSchema>;
  * when the report carries them (the whole-surface union wave and the conservative column read);
  * absent means null, never an invented number.
  */
-export function goalBlockFromReport(report: GoalCutIntoReport): EngraveGoal {
+export function goalBlockFromReport(report: GoalCutIntoReport, cause?: GoalCause | null): EngraveGoal {
   const extended = report as GoalCutIntoReport & {
     wholeSurface?: EngraveGoal['wholeSurface'];
     columnCutInto?: EngraveGoal['columnCutInto'];
   };
   return {
+    // #1165 — the cause class rides ONLY on the verdict block, and only when there is one (a pass
+    // or an unchecked run has no key at all, so those receipts stay byte-identical).
+    ...(cause === undefined || cause === null
+      ? {}
+      : {
+          causeClass: cause.causeClass,
+          ...(cause.addressableFraction === null ? {} : { addressableFraction: cause.addressableFraction }),
+        }),
     ran: report.ran,
     reason: report.reason,
     cutIntoFraction: report.cutIntoFraction,

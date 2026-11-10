@@ -141,6 +141,13 @@ export interface PlanFindingStatement {
    * the full sentence stays in `text`.
    */
   feedsProxyMm?: number;
+  /**
+   * #1165 — on `goal-finish-unreachable`, the refused region's floor below the stock top and the
+   * finisher's usable length, mm: the pair the sentence states, as data, so the goal verdict's
+   * cause class (`shop-infeasible`) is read from numbers and never parsed out of prose.
+   */
+  floorMm?: number;
+  usableMm?: number;
 }
 
 export interface PlanSheetStatement {
