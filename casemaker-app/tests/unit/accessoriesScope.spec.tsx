@@ -345,6 +345,47 @@ describe('#1200 — the probe rail restricts a unit to top touches', () => {
     expect(sent.unit).toMatchObject({ tipDiameterMm: 2 });
   });
 
+  // #1203 — the shank is a swappable post: a swap writes the fitted shank + a history line, and
+  // never touches the sensor's tip values.
+  it('#1203 — fitting another post moves the shank and writes history; the tip values survive', async () => {
+    seed();
+    const state = useLocationStore.getState();
+    const location = state.location!;
+    useLocationStore.setState({
+      location: {
+        ...location,
+        accessories: (location.accessories ?? []).map((a) =>
+          a.id === 'fx-probe-1'
+            ? {
+                ...a,
+                unit: {
+                  ...a.unit,
+                  shankMm: 6.35,
+                  posts: [
+                    { id: 'post-1-8', label: '1/8\" post', diameterMm: 6.35, condition: 'fitted' },
+                    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: 'spare' },
+                  ],
+                },
+              }
+            : a,
+        ),
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-probe-1'));
+    expect(screen.getByTestId('manage-acc-shank-line').textContent).toContain('1/8" post fitted');
+    fireEvent.change(screen.getByTestId('manage-acc-post-select'), { target: { value: 'post-6' } });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const sent = calls[0]!.body as FixtureRecord;
+    expect(sent.unit.shankMm).toBe(6);
+    expect(sent.unit.tipDiameterMm).toBe(2.0);
+    expect(sent.unit.posts).toEqual([
+      { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: 'spare' },
+      { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: 'fitted' },
+    ]);
+    expect(sent.history[sent.history.length - 1]!.what).toContain('fitted the 6 mm post');
+  });
+
   it('a mount has no touch control', () => {
     seed();
     render(<AccessoriesScope />);

@@ -156,6 +156,13 @@ export interface ProbeSpec {
    * can drop onto the roll-off and read low, and a bent stylus makes that worse.
    */
   tipLateralUncertaintyMm?: number;
+  /**
+   * #1203 — THE SHANK (POST) FITTED TO THIS UNIT, its diameter in mm. The wired V2's sensor and
+   * tip are one unit; the shank is a threaded post that swaps for different collets (1/8" =
+   * 6.35 mm, 6 mm), so the fit-probe prompt names the collet the operator must have in the
+   * spindle. The tip values belong to the sensor and survive a swap; only this changes.
+   */
+  shankMm?: number | null;
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
@@ -661,6 +668,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         ...(input.probe?.tipLateralUncertaintyMm === undefined
           ? {}
           : { tipLateralUncertaintyMm: input.probe.tipLateralUncertaintyMm }),
+        // #1203 — the fitted post's shank rides the plan so the executor can name the collet.
+        ...(input.probe?.shankMm === undefined || input.probe.shankMm === null ? {} : { shankMm: input.probe.shankMm }),
       },
       settings: {
         scanInsideMm: s.scanInsideMm,
@@ -910,6 +919,14 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         `the probe is restricted to top touches: ${named} ${wouldSide.length === 1 ? 'is' : 'are'} found by stepping Z over ${wouldSide.length === 1 ? 'it' : 'them'}, not with a sideways touch`,
       );
     }
+  }
+  // #1200 (manager's note) — A RESTRICTED 3D UNIT IS A NEW PATH: it has never run a registration
+  // on this machine, and it stays under the first-run guard until the bench proves it. Said on the
+  // plan's own notes, so the card and the record carry it.
+  if (probe !== null && probe.instrument === 'xyz' && probe.touches === 'z-only') {
+    notes.push(
+      'the 3D probe has not run a registration on this machine yet: this top-touches-only path is its first run and stays under the first-run guard until the bench proves it',
+    );
   }
   notes.push(
     guarded === null

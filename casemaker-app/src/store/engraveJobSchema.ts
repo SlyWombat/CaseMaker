@@ -2295,6 +2295,13 @@ const registrationPlanSchema = z.object({
         .finite()
         .optional()
         .describe('The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.'),
+      // #1203 — the fitted post's shank diameter, so the run's prompts name the collet.
+      shankMm: z
+        .number()
+        .finite()
+        .nullable()
+        .optional()
+        .describe('The fitted shank/post diameter, millimetres (6.35 for 1/8", 6 for the 6 mm post); null/absent when unrecorded.'),
       tip: z
         .object({
           diameterMm: z.number().finite().describe('Probe tip diameter, in millimetres.'),

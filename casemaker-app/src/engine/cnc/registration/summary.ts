@@ -4,6 +4,7 @@
  */
 
 import { probeInstrumentOf, type RegistrationPlan } from './plan';
+import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import type { RegistrationOutcome } from './outcome';
 
 const n = (v: number) => String(Math.round(v * 100) / 100);
@@ -34,7 +35,7 @@ export function summarizePlan(plan: RegistrationPlan): string {
   if (plan.references) {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (
-      `Home, fit ${probeWords} and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
+      `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
       `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
       `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
     );
@@ -80,7 +81,7 @@ export function summarizePlan(plan: RegistrationPlan): string {
         `each kept within ±${n(s.edgeBandMm)} mm of where its edge is expected, stopping at the first touch off the stock, ` +
         `every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
   return (
-    `Home, fit ${probeWords} and measure it (M491);${tap}` +
+    `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}`
   );

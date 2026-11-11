@@ -1879,6 +1879,18 @@ mod tests {
         probe.touches = Some("z-only".into());
         probe.touches_reason = Some("the ball tip may not be 100% straight down".into());
         probe.touches_since = Some("2026-11-10T20:15:00.000Z".into());
+        // #1203 — the fitted post's shank and the posts the unit owns ride the open `unit` map.
+        probe.unit = serde_json::json!({
+            "tipDiameterMm": 2.0, "rimOffsetMm": 0.7, "rimOffsetUncertaintyMm": 0.25,
+            "shankMm": 6.0,
+            "posts": [
+                { "id": "post-1-8", "label": "1/8\" post", "diameterMm": 6.35, "condition": "broken" },
+                { "id": "post-6", "label": "6 mm post", "diameterMm": 6.0, "condition": "fitted" }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
         // The bed profile places the vise, so the machine must own it (the fixture's own rule).
         loc.accessories = vec![a_bed_fixture(), probe.clone()];
         loc.machines.push(a_machine_with_a_bed());
@@ -1886,6 +1898,8 @@ mod tests {
         let v = serde_json::to_value(&loc).unwrap();
         assert_eq!(v["accessories"][1]["touches"], serde_json::json!("z-only"));
         assert_eq!(v["accessories"][1]["touchesReason"], serde_json::json!("the ball tip may not be 100% straight down"));
+        assert_eq!(v["accessories"][1]["unit"]["shankMm"], serde_json::json!(6.0));
+        assert_eq!(v["accessories"][1]["unit"]["posts"][0]["condition"], serde_json::json!("broken"));
         let back: LocationDoc = serde_json::from_value(v).unwrap();
         assert_eq!(back, loc);
 

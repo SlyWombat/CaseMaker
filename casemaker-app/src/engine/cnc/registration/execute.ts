@@ -75,6 +75,7 @@ import {
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
 import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf, type FlipRegistrationPlan } from './plan';
+import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchSelected, sideTouchSetup } from './probe3d';
 import { centrePair, readCentrePair, type CentreFindPlan, type CentrePairReading } from './centreFind';
@@ -1460,7 +1461,13 @@ export async function runMountTap(
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
     if (controllerState(status) !== 'Idle') throw new Stop(`the machine reads ${controllerState(status) ?? 'no state'}, not Idle`);
     await io.home();
-    if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
+    // #1203 — the prompt names the collet the fitted post needs (the unit's recorded shank).
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: `Fit the wired probe in the spindle — ${probeColletWords(probe?.shankMm)} — then continue.`,
+      }))
+    ) {
       throw new Stop('stopped: the probe was not fitted');
     }
     // #789 — the standalone tap is a probe session too: power the connector before its first move.
@@ -2141,7 +2148,13 @@ export async function runRegistration(
         );
       }
     }
-    if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
+    // #1203 — the prompt names the collet the fitted post needs (the plan's recorded shank).
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: `Fit the wired probe in the spindle — ${probeColletWords(plan.probe?.shankMm)} — then continue.`,
+      }))
+    ) {
       throw new Stop('stopped: the probe was not fitted');
     }
     // #789 — the probe's supply, before the first probe move and before the rest check: an
@@ -2639,7 +2652,7 @@ export async function retouchSurface(
     if (
       !(await deps.operator({
         kind: 'fit-probe',
-        text: 'Fit the wired probe again: the faced top is measured before the program file is posted from it.',
+        text: `Fit the wired probe again — ${probeColletWords(plan.probe?.shankMm)}: the faced top is measured before the program file is posted from it.`,
       }))
     ) {
       throw new Stop('stopped: the probe was not fitted');
@@ -2933,7 +2946,13 @@ export async function runFlipRegistration(
     await io.home();
     await io.send('G54');
     await io.send('G92.1');
-    if (!(await deps.operator({ kind: 'fit-probe', text: 'Fit the wired probe in the spindle, then continue.' }))) {
+    // #1203 — the same collet, from the flip run's own frame plan.
+    if (
+      !(await deps.operator({
+        kind: 'fit-probe',
+        text: `Fit the wired probe in the spindle — ${probeColletWords(opts.ctx.probe?.shankMm)} — then continue.`,
+      }))
+    ) {
       throw new Stop('stopped: the probe was not fitted');
     }
     powered = true;

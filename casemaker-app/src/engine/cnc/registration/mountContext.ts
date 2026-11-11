@@ -106,12 +106,16 @@ export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
   // change; 0 when unstated, which keeps today's inset rule exactly).
   const touches = acc.touches ?? (probeInstrument(variant) === 'xyz' ? 'all' : 'z-only');
   const tipLateralUncertaintyMm = mountNum(acc.unit.tipLateralUncertaintyMm) ?? 0;
+  // #1203 — the fitted post's shank diameter, so every fit-probe prompt can name the collet. Null
+  // when the record states none (an older record): the prompts then say to check it.
+  const shankMm = mountNum(acc.unit.shankMm);
   return {
     id: acc.id,
     variant,
     instrument: probeInstrument(variant),
     touches,
     tipLateralUncertaintyMm,
+    shankMm,
     tip,
     ...(tipLengthMm === null ? {} : { tipLengthMm }),
     ...(bodyDiameterMm === null ? {} : { bodyDiameterMm }),
