@@ -195,7 +195,9 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
     expect(rowText('ledge')).toContain('In the vise, …');
-    expect(rowText('ledge')).toContain('Needs the vise on the pins');
+    // #1104 items 3/4 — the row states the ACTION now ("Put the vise on the pins"), not the
+    // older need ("Needs the vise on the pins"); the source is the file's lowercase fragment.
+    expect(rowText('ledge')).toContain('Put the vise on the pins');
     expect(screen.queryByTestId('engrave-setup-mount-row-block')).toBeNull();
     expect(screen.getByTestId('engrave-setup-change-ledge')).toBeTruthy();
   });

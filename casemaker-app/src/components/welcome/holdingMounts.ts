@@ -545,14 +545,18 @@ export interface MountOptionArgs {
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
 
-/** "Put the vise on the pins" — the cost line, from what is on the pins now; the action follows it. */
+/**
+ * "put the vise on the pins" — the ACTION the row offers, from what is on the pins now (#1104
+ * items 3/4, the newer wording). A lowercase fragment like the file's other sentences: the row
+ * renderer capitalises it, so the operator reads "Put the vise on the pins".
+ */
 function costWords(current: MachineMountKind, needed: MachineMountKind): string {
-  if (needed === 'rotary') return 'Put the rotary on the pins';
+  if (needed === 'rotary') return 'put the rotary on the pins';
   if (needed === 'vise') {
-    return current === 'rotary' ? 'Take the rotary off the pins' : 'Put the vise on the pins';
+    return current === 'rotary' ? 'take the rotary off the pins' : 'put the vise on the pins';
   }
   const out = current === 'rotary' ? 'rotary' : 'vise';
-  return `Take the ${out} off the pins`;
+  return `take the ${out} off the pins`;
 }
 
 /**
@@ -683,7 +687,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       continue;
     }
     if (mount === 'rotary' && stated) {
-      out.push({ ...base, hint: null, disabled: true, reason: 'This machine has no fourth axis.', escape: null });
+      out.push({ ...base, hint: null, disabled: true, reason: 'this machine has no fourth axis', escape: null });
       continue;
     }
     if (mount === 'rotary' && !rotaryStockFits(stock, args.round === true, envelope)) {
@@ -726,7 +730,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
           ...base,
           hint: null,
           disabled: true,
-          reason: 'The rotary holds round stock',
+          reason: 'the rotary holds round stock — say a rod in the stock step',
           escape: null,
         });
         continue;
