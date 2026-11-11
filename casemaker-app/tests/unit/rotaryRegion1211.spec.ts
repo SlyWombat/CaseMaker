@@ -135,3 +135,85 @@ describe('#1211 field 2 — the rotary job descent region', () => {
     expect(region(false, JAW_FACE_X + 30, AXIS_Y)).toBe(false);
   });
 });
+
+describe('#1211 acceptance — the property over rods, sections and probes', () => {
+  // The analyst's acceptance bullet: NO job-time rotary routine may descend outside field 2's
+  // region, and no XY move at ANY Z may enter the keep-out. Driven through the guard (the layer
+  // every routine shares), over the spans the bench actually mounts.
+  const SECTIONS = [
+    { name: '⌀20 rod', envelope: 10 },
+    { name: '⌀44.5 rod', envelope: 44.5 / 2 },
+    { name: '44.5 square', envelope: Math.hypot(44.5 / 2, 44.5 / 2) },
+    { name: '30 × 20 rect', envelope: Math.hypot(15, 10) },
+  ] as const;
+  const PROBES = [0.875, 1.5] as const;
+  const FREE_ENDS = [40, 85] as const;
+
+  for (const section of SECTIONS) {
+    for (const probeRadiusMm of PROBES) {
+      for (const freeEndMm of FREE_ENDS) {
+        it(`${section.name}, probe r${probeRadiusMm}, ${freeEndMm} mm free: descents only inside, traverses never into the keep-out`, () => {
+          const marginMm = 2;
+          const input: RotaryJobRegionInput = {
+            jawFaceX: JAW_FACE_X,
+            freeEndMm,
+            axisY: AXIS_Y,
+            envelopeRadiusMm: section.envelope,
+            probeRadiusMm,
+            marginMm,
+          };
+          const region = rotaryJobDescentRegion(input);
+          const guard = motionOrderGuard(CLEARANCE, {
+            descentAllowed: region,
+            travelKeepOut: { maxMachineX: JAW_FACE_X + ROTARY_JAW_KEEP_OUT_MM, what: 'chuck' },
+          });
+          guard.observe('$H');
+          guard.observe(`G53 G0 Z${CLEARANCE}`);
+
+          const xMin = JAW_FACE_X + ROTARY_JAW_KEEP_OUT_MM + probeRadiusMm;
+          const xMax = JAW_FACE_X + freeEndMm - marginMm;
+          const yHalf = section.envelope - marginMm;
+          const xMid = (xMin + xMax) / 2;
+
+          /** A traverse to (x, y) then a descent below the clearance: the guard's answer. */
+          const descentAt = (x: number, y: number): string | null => {
+            const g = motionOrderGuard(CLEARANCE, {
+              descentAllowed: region,
+              travelKeepOut: { maxMachineX: JAW_FACE_X + ROTARY_JAW_KEEP_OUT_MM, what: 'chuck' },
+            });
+            g.observe('$H');
+            g.observe(`G53 G0 Z${CLEARANCE}`);
+            const move = g.observe(`G53 G0 X${x.toFixed(3)} Y${y.toFixed(3)}`);
+            if (move !== null) return move; // the keep-out refused the traverse itself
+            return g.observe('G53 G0 Z-10.000');
+          };
+
+          // The span's four inside corners descend; a millimetre outside each refuses.
+          for (const [x, y] of [
+            [xMin + 1e-3, AXIS_Y],
+            [xMax - 1e-3, AXIS_Y],
+            [xMid, AXIS_Y + yHalf - 1e-3],
+            [xMid, AXIS_Y - yHalf + 1e-3],
+          ] as const) {
+            expect(descentAt(x, y), `inside (${x}, ${y})`).toBeNull();
+          }
+          for (const [x, y] of [
+            [JAW_FACE_X + ROTARY_JAW_KEEP_OUT_MM - 1, AXIS_Y],
+            [JAW_FACE_X + freeEndMm + 1, AXIS_Y],
+            [xMid, AXIS_Y + section.envelope + 1],
+            [xMid, AXIS_Y - section.envelope - 1],
+          ] as const) {
+            expect(descentAt(x, y), `outside (${x}, ${y})`).not.toBeNull();
+          }
+          // And no height at all lets a traverse end inside the keep-out.
+          for (const z of [CLEARANCE, 0, 50]) {
+            const g = motionOrderGuard(CLEARANCE, { travelKeepOut: { maxMachineX: JAW_FACE_X + ROTARY_JAW_KEEP_OUT_MM, what: 'chuck' } });
+            g.observe('$H');
+            g.observe(`G53 G0 Z${z.toFixed(3)}`);
+            expect(g.observe(`G53 G0 X${JAW_FACE_X}`), `traverse to the jaw face at Z ${z}`).not.toBeNull();
+          }
+        });
+      }
+    }
+  }
+});

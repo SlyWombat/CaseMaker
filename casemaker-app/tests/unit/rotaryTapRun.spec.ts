@@ -133,6 +133,16 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
     expect(result.circle.radiusMm).toBeCloseTo(NOMINAL_R, 1);
     expect(result.circle.axisZ).toBeCloseTo(AXIS.z, 1);
     expect(result.residualLine).toBeNull();
+    // #1211 — THE BED-SETUP ORDER at the reachable points: lift to the clearance, traverse XY,
+    // THEN descend (the park height) and probe. The guard would refuse anything else anyway.
+    const at = (re: RegExp, from = 0): number =>
+      fake.lines.findIndex((line, i) => i >= from && re.test(line));
+    const lift = at(/^G53 G0 Z-3(?:\.0+)?$/);
+    expect(lift).toBeGreaterThanOrEqual(0);
+    const xy = at(/^G53 G0 X-150(?:\.0+)? Y/, lift + 1);
+    expect(xy).toBeGreaterThan(lift);
+    const lowerZ = at(/^G53 G0 Z-/, xy + 1);
+    expect(lowerZ).toBeGreaterThan(xy);
     // Every side touch that triggered is released with G38.5 before the next G53/G0.
     const lines = fake.lines;
     for (let i = 0; i < lines.length; i++) {
