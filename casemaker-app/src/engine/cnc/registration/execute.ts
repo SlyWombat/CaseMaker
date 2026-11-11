@@ -74,7 +74,7 @@ import {
   type SurfaceSpreadAssessment,
   type SurfaceSpreadPlan,
 } from '@/engine/cnc/engrave/surfaceSpread';
-import { type EdgeScan, type ProbeSpec, type RegistrationPlan, probeInstrumentOf, type FlipRegistrationPlan } from './plan';
+import { type EdgeScan, type PlanObstacle, type ProbeSpec, type RegistrationPlan, probeInstrumentOf, type FlipRegistrationPlan } from './plan';
 import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import { classifyTouch, lastPrb, type Prb } from './readings';
 import { sideCentreWork, sideTouchSelected, sideTouchSetup } from './probe3d';
@@ -1585,6 +1585,103 @@ export interface CentreFindOptions {
    * touches, so the routine cannot run on a top-touch-only probe at all.
    */
   probeTouches: 'all' | 'z-only';
+  /**
+   * #1211 field 5 — THE HOLD THE FIND MUST RESPECT, stated by the caller (WORK XY; every
+   * registry-derived number resolved there per #1207). REQUIRED and deny by default: a find with
+   * no hold refuses before anything is sent, exactly as the #1199 guard refuses a session with no
+   * clearance.
+   */
+  hold: CentreFindHold;
+}
+
+/**
+ * #1211 field 5 — the hold a centre find runs against, joining #1199 field 7's rows:
+ *  - the top touch is a "probe, top touch" row: inside the footprint shrunk by `marginMm`;
+ *  - a bore's wall touches are a "probe into a bore" row: the planned centre inside the footprint;
+ *  - a boss's starts are outside the feature but inside its DECLARED WINDOW —
+ *    centre ± (`expectedRadiusMm` + `bandMm` + `bodyRadiusMm` + 2 mm) — and never on a step the
+ *    hold declares (a clamp, an arm, a jaw).
+ */
+export interface CentreFindHold {
+  /** The stock's footprint, WORK XY (the frame the routine's moves speak). */
+  footprint: { xMin: number; xMax: number; yMin: number; yMax: number };
+  /** The top-touch inset, mm (#1199 field 7 (d)); the caller resolves it from the registry rules. */
+  marginMm: number;
+  /** The edge band (#1133's ±4 mm), mm. */
+  bandMm: number;
+  /** The probe's BODY radius, mm (the unit's), for the boss window. */
+  bodyRadiusMm: number;
+  /** A boss's expected radius, mm; absent/null on a bore (a boss then refuses by name). */
+  expectedRadiusMm?: number | null;
+  /** The hold's declared obstacles (clamp/bracket boxes), WORK XY. */
+  obstacles: readonly PlanObstacle[];
+}
+
+/** #1211 field 5 — the refusal for a find whose hold or points break field 7's rows, or null. */
+export function centreFindHoldProblem(opts: CentreFindOptions): string | null {
+  const hold = opts.hold as CentreFindHold | undefined | null;
+  if (hold === undefined || hold === null) {
+    return 'the hold’s footprint and obstacles are not stated, so a centre find cannot be placed — nothing was sent';
+  }
+  const eps = 1e-6;
+  const inFoot = (x: number, y: number): boolean =>
+    x >= hold.footprint.xMin - eps &&
+    x <= hold.footprint.xMax + eps &&
+    y >= hold.footprint.yMin - eps &&
+    y <= hold.footprint.yMax + eps;
+  const inInset = (x: number, y: number): boolean =>
+    x >= hold.footprint.xMin + hold.marginMm - eps &&
+    x <= hold.footprint.xMax - hold.marginMm + eps &&
+    y >= hold.footprint.yMin + hold.marginMm - eps &&
+    y <= hold.footprint.yMax - hold.marginMm + eps;
+  const obstacleAt = (x: number, y: number): PlanObstacle | undefined =>
+    hold.obstacles.find((o) => x >= o.min[0] - eps && x <= o.max[0] + eps && y >= o.min[1] - eps && y <= o.max[1] + eps);
+
+  const topAt = opts.topTouchAt ?? opts.plan.at;
+  if (!inInset(topAt.x, topAt.y)) {
+    return (
+      `the top touch at (${f4(topAt.x)}, ${f4(topAt.y)}) is outside the stock’s footprint inset by the ` +
+      `${f(hold.marginMm)} mm top-touch margin — a top touch never descends beside the blank, and nothing was sent`
+    );
+  }
+
+  const at = opts.plan.at;
+  for (const axis of opts.plan.order) {
+    for (const sign of [-1, 1] as const) {
+      const { from } = centrePair(opts.plan.kind, at, axis, sign, opts.plan.searchMm);
+      if (opts.plan.kind === 'boss') {
+        const radius = hold.expectedRadiusMm;
+        if (radius === undefined || radius === null) {
+          return (
+            'the boss’s expected radius is not stated, so its start window cannot be declared — a boss start is ' +
+            'placed centre ± (radius + band + probe body + 2 mm), and nothing was sent'
+          );
+        }
+        const windowMm = radius + hold.bandMm + hold.bodyRadiusMm + 2;
+        const distanceMm = Math.hypot(from.x - at.x, from.y - at.y);
+        if (distanceMm > windowMm + eps) {
+          return (
+            `the ${axis.toUpperCase()} ${sign < 0 ? '−' : '+'} start at (${f4(from.x)}, ${f4(from.y)}) is ${f(distanceMm)} mm ` +
+            `from the centre — outside the declared ${f(windowMm)} mm window (${f(radius)} radius + ${f(hold.bandMm)} band + ` +
+            `${f(hold.bodyRadiusMm)} probe body + 2 mm) — nothing was sent`
+          );
+        }
+      } else if (!inFoot(from.x, from.y)) {
+        return (
+          `the ${axis.toUpperCase()} ${sign < 0 ? '−' : '+'} bore start at (${f4(from.x)}, ${f4(from.y)}) is outside the ` +
+          'stock’s footprint — a bore is touched inside the blank, and nothing was sent'
+        );
+      }
+      const obstacle = obstacleAt(from.x, from.y);
+      if (obstacle !== undefined) {
+        return (
+          `the ${axis.toUpperCase()} ${sign < 0 ? '−' : '+'} start at (${f4(from.x)}, ${f4(from.y)}) lies on a declared ` +
+          `${obstacle.kind} — a find never descends where the hold says a clamp, arm or jaw stands, and nothing was sent`
+        );
+      }
+    }
+  }
+  return null;
 }
 
 const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1620,10 +1717,18 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
       transcript: [],
     };
   }
+  // #1211 field 5 — THE HOLD IS CHECKED BEFORE ANYTHING IS SENT (deny by default).
+  const holdProblem = centreFindHoldProblem(opts);
+  if (holdProblem !== null) return { ok: false, reason: holdProblem, transcript: [] };
   const plan = opts.plan;
   const release = opts.releaseMm ?? 3;
   // #933 — centre-find is the 3D probe's routine: a stop with the ball deflected releases it.
-  const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true);
+  // #1211 field 5 — the guard's second line: no descent below the clearance outside the footprint.
+  const footprint = opts.hold.footprint;
+  const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true, {
+    descentAllowed: (_machine, x, y) =>
+      x >= footprint.xMin - 1e-6 && x <= footprint.xMax + 1e-6 && y >= footprint.yMin - 1e-6 && y <= footprint.yMax + 1e-6,
+  });
   /** #789 — whether the probe's supply was (or may have been) switched on. */
   let powered = false;
   try {

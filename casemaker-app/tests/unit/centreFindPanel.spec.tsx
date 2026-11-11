@@ -82,6 +82,14 @@ async function cardDry() {
     surfaceFeed: 150,
     parkAboveSurfaceMm: 2,
     probeTouches: 'all',
+    hold: {
+      footprint: { xMin: -1000, yMin: -1000, xMax: 1000, yMax: 1000 },
+      marginMm: 1,
+      bandMm: 4,
+      bodyRadiusMm: 1,
+      expectedRadiusMm: null,
+      obstacles: [],
+    },
     topTouchAt: { x: 30, y: 15 },
   });
 }

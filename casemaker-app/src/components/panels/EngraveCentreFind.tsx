@@ -23,6 +23,7 @@ import {
 } from '@/engine/cnc/registration/execute';
 import { planCentreFind, type CentreFindPlan, type CentreKind } from '@/engine/cnc/registration/centreFind';
 import { probeInstrumentOf, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { topTouchEdgeMarginsMm } from '@/engine/cnc/registration/cutBlank';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 // #1202 field 5 — the Find press's own dry line view, first-run mark and statement.
 import { dryCentreFind, type DryRoutine } from '@/engine/cnc/registration/dryRun';
@@ -116,8 +117,25 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
       // An UNSTATED probe is a legacy wired unit, which does touch sideways (the k3 3D probe now
       // states 'z-only' explicitly); the deny-by-default part is the REQUIRED hold block, not this.
       probeTouches: probe?.touches ?? 'all',
+      // #1211 field 5 — THE HOLD the find must respect, resolved here per #1207 (the preview and
+      // the press share these options, so they cannot disagree). This panel is not mounted yet; a
+      // mount must also state a boss's expected radius — the routine refuses a boss without one.
+      hold: (() => {
+        const margins = topTouchEdgeMarginsMm(
+          { tipRadiusMm: settings.tipRadiusMm, tipLateralUncertaintyMm: probe?.tipLateralUncertaintyMm ?? 0 },
+          { floorMm: settings.probeFootprintShrinkMm ?? 0, hold: { xMm: 0, yMm: 0 } },
+        );
+        return {
+          footprint: { xMin: plan.stock.xMin, xMax: plan.stock.xMax, yMin: plan.stock.yMin, yMax: plan.stock.yMax },
+          marginMm: Math.max(margins.xMm, margins.yMm),
+          bandMm: settings.edgeBandMm,
+          bodyRadiusMm: (probe?.bodyDiameterMm ?? 0) / 2,
+          expectedRadiusMm: null,
+          obstacles: plan.mountObstacles,
+        };
+      })(),
     };
-  }, [made, plan, probe, settings.surfaceSlowFeed, settings.parkAboveSurfaceMm, kind, topTouchAt]);
+  }, [made, plan, probe, settings, kind, topTouchAt]);
   const [preview, setPreview] = useState<DryRoutine | null>(null);
   const [ticked, setTicked] = useState(false);
   useEffect(() => {

@@ -131,6 +131,15 @@ function options(feature: Feature, over: Partial<CentreFindOptions> = {}): Centr
     probeTouches: 'all' as const,
     // A bore's centre is a hole: the top is touched on the face beside it.
     ...(feature.kind === 'bore' ? { topTouchAt: { x: 24, y: 20 } } : {}),
+    // #1211 field 5 — the hold is stated (deny by default once the routine reads it).
+    hold: {
+      footprint: { xMin: -20, xMax: 60, yMin: -20, yMax: 60 },
+      marginMm: 3,
+      bandMm: 4,
+      bodyRadiusMm: 6,
+      expectedRadiusMm: 15,
+      obstacles: [],
+    },
     ...over,
   };
 }
@@ -244,6 +253,67 @@ describe('#827 runCentreFind on a round part', () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/increase the search radius/);
+  });
+});
+
+describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is stated)', () => {
+  const HOLD = {
+    footprint: { xMin: -20, xMax: 60, yMin: -20, yMax: 60 },
+    marginMm: 3,
+    bandMm: 4,
+    bodyRadiusMm: 6,
+    expectedRadiusMm: 15,
+    obstacles: [] as { kind: 'clamp' | 'bracket'; label: string; min: [number, number]; max: [number, number]; topZ: number }[],
+  };
+
+  it('refuses with NO hold stated, by name, with nothing sent (deny by default)', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 4.44 });
+    const bare = { ...options({ kind: 'bore', radiusMm: 4.44 }) } as Partial<CentreFindOptions>;
+    delete bare.hold;
+    const r = await runCentreFind(bare as CentreFindOptions, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('not stated');
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('refuses a TOP TOUCH outside the footprint inset by the top-touch margin', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 4.44 });
+    // The bore's top touch is on the face beside it, at (24, 20): its footprint starts at 24, so
+    // the margin puts it outside.
+    const hold = { ...HOLD, footprint: { xMin: 24, xMax: 60, yMin: 10, yMax: 30 } };
+    const r = await runCentreFind(
+      options({ kind: 'bore', radiusMm: 4.44 }, { hold }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('top touch');
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('refuses a BOSS start outside its declared window', async () => {
+    const fake = fakeMachine({ kind: 'boss', radiusMm: 15 });
+    // Window = radius + band + probe body + 2 mm; a 5 mm expected radius declares 17 mm, and the
+    // plan's starts sit 20 mm out.
+    const r = await runCentreFind(
+      options({ kind: 'boss', radiusMm: 15 }, { hold: { ...HOLD, expectedRadiusMm: 5 } }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('window');
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('refuses a BOSS start over a declared CLAMP, arm or jaw', async () => {
+    const fake = fakeMachine({ kind: 'boss', radiusMm: 15 });
+    const hold = { ...HOLD, obstacles: [{ kind: 'clamp' as const, label: 'the clamp', min: [25, 10] as [number, number], max: [35, 30] as [number, number], topZ: 0 }] };
+    // The +X start sits at (30, 20) — inside the clamp box.
+    const r = await runCentreFind(
+      options({ kind: 'boss', radiusMm: 15 }, { hold }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/clamp|arm|jaw/);
+    expect(fake.lines).toHaveLength(0);
   });
 });
 
