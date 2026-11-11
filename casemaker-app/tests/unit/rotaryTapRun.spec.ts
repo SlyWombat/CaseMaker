@@ -99,12 +99,32 @@ function options(radius = NOMINAL_R): RotaryTapOptions {
     touchFeed: 150,
     surfaceFeed: 150,
     parkAboveSurfaceMm: 2,
+    // #1211 — the tap is bed setup, and this fixture's unit may touch sideways.
+    mode: 'bed-setup' as const,
+    probeTouches: 'all' as const,
   };
 }
 
 const yes = async () => true;
 
 describe('#607 runRotaryTap on a bench-shaped chuck', () => {
+  // ── #1211 — BED SETUP ONLY, AND TOP-TOUCH-ONLY UNITS REFUSE THE CHORDS ───────────────────────
+  it('#1211 field 1 — a rotary tap called from a JOB session is refused with nothing sent', async () => {
+    const fake = fakeChuck();
+    const r = await runRotaryTap({ ...options(), mode: 'job' }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('bed');
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('#1211 field 6 — a z-only unit refuses the sideways chords by name, with nothing sent', async () => {
+    const fake = fakeChuck();
+    const r = await runRotaryTap({ ...options(), probeTouches: 'z-only' }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('side');
+    expect(fake.lines).toHaveLength(0);
+  });
+
   it('writes the axis Z, axis Y and radius from one chord and the crown, with a clean check chord', async () => {
     const fake = fakeChuck();
     const result = await runRotaryTap(options(), { liveClearanceZ: -3, console: fake.console, operator: yes });

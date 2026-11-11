@@ -127,6 +127,8 @@ function options(feature: Feature, over: Partial<CentreFindOptions> = {}): Centr
     bandMm: { min: TOP_Z - 1, max: TOP_Z + 1 },
     surfaceFeed: 150,
     parkAboveSurfaceMm: 2,
+    // #1211 — this fixture's unit may touch sideways.
+    probeTouches: 'all' as const,
     // A bore's centre is a hole: the top is touched on the face beside it.
     ...(feature.kind === 'bore' ? { topTouchAt: { x: 24, y: 20 } } : {}),
     ...over,
@@ -136,6 +138,17 @@ function options(feature: Feature, over: Partial<CentreFindOptions> = {}): Centr
 const yes = async () => true;
 
 describe('#827 runCentreFind on the bench counterbore', () => {
+  it('#1211 field 6 — a z-only unit refuses the sideways touches by name, with nothing sent', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
+    const r = await runCentreFind(
+      options({ kind: 'bore', radiusMm: 8.88 / 2 }, { probeTouches: 'z-only' }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('side');
+    expect(fake.lines).toHaveLength(0);
+  });
+
   it('finds the centre and ⌀8.88 from the four walls, and releases every touch before any G0', async () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
     const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }), { liveClearanceZ: -3, console: fake.console, operator: yes });
