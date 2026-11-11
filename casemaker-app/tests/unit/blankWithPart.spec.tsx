@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import { BlankWithPart, blankMargins, overrunSentence } from '@/components/welcome/BlankWithPart';
+import { partFootprintFor } from '@/components/welcome/workShape';
+import type { WorkShape } from '@/engine/cnc/stockProposal';
 
 afterEach(cleanup);
 
@@ -26,6 +28,30 @@ describe('#1099 — the part drawn on the blank', () => {
     render(<BlankWithPart blank={BLANK} part={{ ...PART, length: 90 }} />);
     expect(screen.getByTestId('blank-part-footprint').getAttribute('class')).toContain('blank-part--clipped');
     expect(screen.getByTestId('blank-part-overrun').textContent).toBe('the part is 15 mm longer than the blank');
+  });
+
+  // #1099 item 1 — the presets draw as the part: a drawing, a cut-out and a pocket each answer a
+  // footprint from the size the question already measured. A circle is its diameter both ways.
+  it('an outline, a cut-out and a pocket work shape each have a footprint', () => {
+    const outline: WorkShape = { kind: 'outline', length: 60, width: 40, through: true };
+    const cutout: WorkShape = { kind: 'cutout', length: 36, width: 36 };
+    const pocket: WorkShape = { kind: 'pocket', length: 60, width: 40, depth: 6 };
+    expect(partFootprintFor(outline)).toEqual({ kind: 'outline', length: 60, width: 40, height: null });
+    expect(partFootprintFor(cutout)).toEqual({ kind: 'cutout', length: 36, width: 36, height: null });
+    expect(partFootprintFor(pocket)).toEqual({ kind: 'pocket', length: 60, width: 40, height: null });
+  });
+
+  // #1099 item 5 — the part's height is drawn down FROM the blank's top, and the skin under it is
+  // dimensioned: 20.1 mm blank, 19.1 mm part → 1 mm under it.
+  it('20.1 mm blank, 19.1 mm part: the side strip states 1 mm under it', () => {
+    render(<BlankWithPart blank={BLANK} part={PART} />);
+    const blank = screen.getByTestId('blank-with-part-side-blank');
+    const work = screen.getByTestId('blank-with-part-side-work');
+    expect(Number(work.getAttribute('y'))).toBeCloseTo(Number(blank.getAttribute('y')), 6);
+    expect(Number(work.getAttribute('y')) + Number(work.getAttribute('height'))).toBeLessThanOrEqual(
+      Number(blank.getAttribute('y')) + Number(blank.getAttribute('height')) + 0.001,
+    );
+    expect(screen.getByTestId('blank-with-part-side-skin').textContent).toBe('1 mm under it');
   });
 
   it('the margins are one rule, not four fields', () => {

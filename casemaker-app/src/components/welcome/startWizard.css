@@ -115,3 +115,12 @@
 .sw-file__kinds { color: #9aa4b0; font-size: 11px; margin: 4px 0 0; }
 .sw-file__error { color: #f0b4ad; font-size: 11px; margin: 4px 0 0; }
 .sw-overlay--sheet .sw-file__choose { width: 100%; }
+
+/* #1099 item 8 — the file's drawing at the LEFT of its facts, stacked when the wizard is narrow. */
+.sw-thumb { display: flex; gap: 8px; align-items: flex-start; }
+.sw-thumb__picture { display: block; flex: none; width: 160px; height: 120px; }
+.sw-thumb__side { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+@media (max-width: 480px) {
+  .sw-thumb { flex-direction: column; }
+  .sw-thumb__side { flex: initial; }
+}

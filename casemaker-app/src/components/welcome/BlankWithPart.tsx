@@ -20,6 +20,8 @@ export interface BlankWithPartProps {
 }
 
 const n = (v: number): string => String(Number(v.toFixed(2)));
+/** #1099 item 5 — one decimal, trailing .0 dropped (the skin reads "1 mm under it", not "1.0"). */
+const one = (v: number): string => String(Number(v.toFixed(1)));
 const fmt = (v: number): string => n(Math.abs(v));
 
 /** The margin's own name in the operator's terms (the view is from the front-left corner). */
@@ -133,20 +135,34 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
         style={{ display: 'block', border: '1px solid #2a2f36', background: '#10151b', borderRadius: 4 }}
       >
         {(() => {
-          const total = Math.max(blank.thickness + (part?.height ?? 0), 0.001);
-          const s = 32 / total;
+          // #1099 item 5 — the part is cut DOWN from the blank's top, and the skin left under it
+          // is the dimension: 20.1 mm blank, 19.1 mm part → "1 mm under it".
+          const s = 32 / Math.max(blank.thickness, 0.001);
           const tPx = Math.max(blank.thickness * s, 0.5);
-          const hPx = Math.max((part?.height ?? 0) * s, 0);
           const top = 40 - tPx;
+          const height = part?.height ?? null;
+          const hPx = height === null ? 0 : Math.min(Math.max(height * s, 0), tPx);
+          const skin = height === null ? null : blank.thickness - height;
           return (
             <>
               <rect data-testid="blank-with-part-side-blank" x="90" y={top} width="80" height={tPx} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth="1.2" />
-              {hPx > 0 && (
-                <rect data-testid="blank-with-part-side-work" x="102" y={top - hPx} width="56" height={hPx} fill="rgba(240, 217, 181, 0.28)" stroke="#f0d9b5" strokeWidth="1" />
+              {hPx > 0 && height !== null && (
+                <rect data-testid="blank-with-part-side-work" x="102" y={top} width="56" height={hPx} fill="rgba(240, 217, 181, 0.28)" stroke="#f0d9b5" strokeWidth="1" />
+              )}
+              {hPx > 0 && skin !== null && skin >= 0 && (
+                <>
+                  {/* The skin's witness line: from the part's floor down to the blank's bottom. */}
+                  <line x1="174" x2="180" y1={top + hPx} y2={top + hPx} stroke="#9aa4b0" strokeWidth="0.8" />
+                  <line x1="174" x2="180" y1={top + tPx} y2={top + tPx} stroke="#9aa4b0" strokeWidth="0.8" />
+                  <line x1="178" x2="178" y1={top + hPx} y2={top + tPx} stroke="#9aa4b0" strokeWidth="0.8" />
+                  <text x="184" y={(top + hPx + top + tPx) / 2 + 3} fontSize="10" fill="#c8d3de" data-testid="blank-with-part-side-skin">
+                    {one(skin)} mm under it
+                  </text>
+                </>
               )}
               <text x="8" y="50" fontSize="10" fill="#9aa4b0">
                 {n(blank.thickness)} mm blank
-                {hPx > 0 && part?.height != null ? ` · ${n(part.height)} mm part` : ''}
+                {hPx > 0 && height !== null ? ` · ${n(height)} mm part` : ''}
               </text>
             </>
           );

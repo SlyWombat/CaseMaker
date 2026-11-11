@@ -12,7 +12,7 @@
  * is still in front of them.
  */
 
-import { useEffect, useMemo, useRef, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { parseStl, type ParsedMesh } from '@/engine/import/stlParser';
@@ -28,7 +28,12 @@ export type ThumbnailSource =
     }
   | { kind: 'outline'; outline: OutlineImport }
   | { kind: 'picture'; name: string; data: string; size: { x: number; y: number; z: number } }
-  | { kind: 'board'; board: { length: number; width: number } };
+  | {
+      kind: 'board';
+      board: { length: number; width: number };
+      /** The Gerber files the set came in as; null/absent when the caller does not know (a Back). */
+      files?: number | null;
+    };
 
 export interface WizardThumbnailProps {
   source: ThumbnailSource;
@@ -40,6 +45,9 @@ const W = 160;
 const H = 120;
 
 const n = (v: number): string => String(Number(v.toFixed(2)));
+/** Item 3's decided precision: millimetres to one decimal, mm/px to two, trailing zeros dropped. */
+const one = (v: number): string => String(Number(v.toFixed(1)));
+const two = (v: number): string => String(Number(v.toFixed(2)));
 
 /** Azimuth and elevation of the fixed camera, degrees (the mockup's reading). */
 const AZ_DEG = 35;
@@ -197,6 +205,8 @@ export function WizardThumbnail({ source, sentence }: WizardThumbnailProps): JSX
     paintMesh(canvas.current, parsed);
   }, [parsed]);
 
+  // Item 3 — a picture's own pixels are read off the decoded image, not the importer's guess.
+  const [pixels, setPixels] = useState<{ w: number; h: number } | null>(null);
   let picture: JSX.Element;
   let facts: string;
   switch (source.kind) {
@@ -215,10 +225,18 @@ export function WizardThumbnail({ source, sentence }: WizardThumbnailProps): JSX
       } · from ${source.name}`;
       break;
     case 'outline': {
-      const paths = source.outline.paths ?? [];
-      const open = paths.filter((p) => !p.closed).length;
+      // Item 4 — a drawing's facts count its SHAPES (the filled rings) and name its open lines:
+      // "2 shapes", "1 open line". A zero term is omitted rather than written as "0".
+      const shapes = source.outline.contours.length;
+      const open = (source.outline.paths ?? []).filter((p) => !p.closed).length;
       picture = <OutlineThumbnail outline={source.outline} />;
-      facts = `${n(source.outline.width)} × ${n(source.outline.height)} mm · ${paths.length} path${paths.length === 1 ? '' : 's'}${open === 0 ? '' : ` · ${open} open`}`;
+      facts = [
+        `${n(source.outline.width)} × ${n(source.outline.height)} mm`,
+        shapes === 0 ? null : `${shapes} shape${shapes === 1 ? '' : 's'}`,
+        open === 0 ? null : `${open} open line${open === 1 ? '' : 's'}`,
+      ]
+        .filter((part): part is string => part !== null)
+        .join(' · ');
       break;
     }
     case 'picture':
@@ -227,10 +245,23 @@ export function WizardThumbnail({ source, sentence }: WizardThumbnailProps): JSX
           src={`data:image/png;base64,${source.data}`}
           alt="The picture, as the relief reads it"
           data-testid="wizard-thumbnail-picture"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+              setPixels({ w: img.naturalWidth, h: img.naturalHeight });
+            }
+          }}
           style={{ width: W, height: H, objectFit: 'contain', background: '#0b1017', borderRadius: 8, filter: 'grayscale(1)' }}
         />
       );
-      facts = `${n(source.size.x)} × ${n(source.size.y)} mm`;
+      // Item 3 — "512 × 512 px → 51.2 × 51.2 mm at 0.1 mm/px": the pixels the image really is,
+      // the millimetres the relief reads it at, and the scale between them.
+      facts =
+        pixels === null
+          ? `${one(source.size.x)} × ${one(source.size.y)} mm`
+          : `${pixels.w.toLocaleString('en-US')} × ${pixels.h.toLocaleString('en-US')} px → ${one(source.size.x)} × ${one(
+              source.size.y,
+            )} mm at ${two(source.size.x / pixels.w)} mm/px`;
       break;
     case 'board':
       picture = (
@@ -238,21 +269,31 @@ export function WizardThumbnail({ source, sentence }: WizardThumbnailProps): JSX
           <rect x="16" y="16" width={W - 32} height={H - 32} fill="rgba(184, 115, 51, 0.25)" stroke="#b87333" strokeWidth="1.5" />
         </svg>
       );
-      facts = `${n(source.board.length)} × ${n(source.board.width)} mm · Gerbers`;
+      // Item 2 — the set's own file count, when the caller knows it (a fresh read does; a Back
+      // that only kept the board's outline says the size alone).
+      facts = `${n(source.board.length)} × ${n(source.board.width)} mm${
+        source.files == null || source.files <= 0
+          ? ''
+          : ` · ${source.files} Gerber file${source.files === 1 ? '' : 's'}`
+      }`;
       break;
   }
 
+  // Item 8 — the picture at the LEFT, its facts and the proposal sentence in the column beside it
+  // (the CSS stacks the two under 480 px; `.sw-thumb` carries that one rule).
   return (
-    <div data-testid="wizard-thumbnail" data-kind={source.kind} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {picture}
-      <span data-testid="wizard-thumbnail-facts" style={{ fontSize: 11, color: '#9aa4b0' }}>
-        {facts}
-      </span>
-      {sentence != null && sentence !== '' && (
-        <span data-testid="wizard-thumbnail-sentence" style={{ fontSize: 11, color: '#c8d3de' }}>
-          {sentence}
+    <div data-testid="wizard-thumbnail" data-kind={source.kind} className="sw-thumb">
+      <span className="sw-thumb__picture">{picture}</span>
+      <span className="sw-thumb__side">
+        <span data-testid="wizard-thumbnail-facts" style={{ fontSize: 11, color: '#9aa4b0' }}>
+          {facts}
         </span>
-      )}
+        {sentence != null && sentence !== '' && (
+          <span data-testid="wizard-thumbnail-sentence" style={{ fontSize: 11, color: '#c8d3de' }}>
+            {sentence}
+          </span>
+        )}
+      </span>
     </div>
   );
 }
