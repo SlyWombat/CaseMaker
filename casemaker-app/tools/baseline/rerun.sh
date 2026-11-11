@@ -109,13 +109,13 @@ if [ "$ALLOW_BUSY" = 0 ] && [ "$DRY" = 0 ] && awk -v l="$LOAD1" -v m="$MAX_LOAD"
 fi
 
 # ---------------------------------------------------------------- the manifest to replay
-# run-after.sh rewrites the baseline's sha wherever a command carries it, and the baseline's folder
-# name (v0.2-c2dd27afa) is such a place; the commands reach the baseline's scripts through a link
-# with a neutral name instead, so the path stays true.
-LINK=$OUT/.rerun-baseline
-ln -sfn "$BASEDIR" "$LINK" || die "cannot link the baseline at $LINK"
-TMP=$(mktemp -d)
+# run-after.sh rewrites the baseline's sha wherever a command carries it (the baseline's folder
+# name, v0.2-c2dd27afa, is such a place) and rewrites the real home into its fake one; the commands
+# reach the baseline's scripts through a link under /tmp with a neutral name, so the path stays true.
+TMP=$(mktemp -d /tmp/rerun-baseline.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
+LINK=$TMP/baseline-src
+ln -sfn "$BASEDIR" "$LINK" || die "cannot link the baseline at $LINK"
 python3 - "$MANIFEST" "$TMP/manifest.json" "$LINK" "$ONLY" "$SKIP" <<'PY' || exit 2
 import json, re, sys
 src, dst, basedir, only, skip = sys.argv[1:6]  # basedir: the neutral link to the baseline folder
