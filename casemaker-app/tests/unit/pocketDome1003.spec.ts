@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '../../src/engine/cnc/cam/engraveJob';
 import { pocket } from '../../src/engine/cnc/cam/model/ops/pocket';
+import { FACING_EDGE_CLEARANCE_MM } from '../../src/engine/cnc/cam/facing';
 import type { PocketNode } from '../../src/engine/cnc/cam/model/features';
 import type { RegionRef } from '../../src/engine/cnc/cam/model/plan';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
@@ -103,6 +104,14 @@ function designTop(x: number, y: number): number {
   return Math.max(FLOOR, domeZ(x, y));
 }
 
+/**
+ * #1227 ruling (analyst): the pocket's wall pass runs one posted step (FACING_EDGE_CLEARANCE_MM)
+ * closer to the wall BY DESIGN, so this check is made with a disc of that much smaller radius at
+ * the unchanged 1e-6 tolerance — the sideways step is the fixed quantity, while the grazing height
+ * depends on the slope (a height threshold would pass or fail by fixture).
+ */
+const CHECK_R = R - FACING_EDGE_CLEARANCE_MM;
+
 /** The worst design height ANY point of the cutter's disc sweeps above the feed's own z. */
 function worstDiscCut(moves: { kind: string; x: number; y: number; z: number }[]): { over: number; x: number; y: number; z: number; top: number } {
   let worst = { over: -Infinity, x: 0, y: 0, z: 0, top: 0 };
@@ -116,9 +125,9 @@ function worstDiscCut(moves: { kind: string; x: number; y: number; z: number }[]
         const t = s / steps;
         const cx = prev.x + (m.x - prev.x) * t;
         const cy = prev.y + (m.y - prev.y) * t;
-        for (let ox = -R; ox <= R + 1e-9; ox += 0.1) {
-          for (let oy = -R; oy <= R + 1e-9; oy += 0.5) {
-            if (ox * ox + oy * oy > R * R + 1e-9) continue;
+        for (let ox = -CHECK_R; ox <= CHECK_R + 1e-9; ox += 0.1) {
+          for (let oy = -CHECK_R; oy <= CHECK_R + 1e-9; oy += 0.5) {
+            if (ox * ox + oy * oy > CHECK_R * CHECK_R + 1e-9) continue;
             const top = designTop(cx + ox, cy + oy);
             if (top - m.z > worst.over) worst = { over: top - m.z, x: cx + ox, y: cy + oy, z: m.z, top };
           }
