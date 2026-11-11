@@ -31,8 +31,6 @@ import { recommendedSurfaceToleranceMm } from '@/engine/cnc/materials';
 import { primitiveLabel } from '@/engine/cnc/engrave/partPlan';
 import {
   mountDatumFor,
-  accessoryNameFor,
-  mountDatumMismatch,
   mountTapFor,
   probeFor,
   probeNameFor,
@@ -181,13 +179,6 @@ export function EngraveSetupsSection({
   const machineRecord = target === null ? null : machineAt(target);
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
-  // #611 — the jaw-top datum's `by` when it names a probe other than the one now checked out.
-  const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
-  // #640 — the sentence names the probe, not its location id.
-  const mountDatumMismatchName = useMemo(
-    () => (mountDatumMismatchBy === null ? null : accessoryNameFor(mountDatumMismatchBy)),
-    [mountDatumMismatchBy],
-  );
   // #619 — the measured surface top, so a re-plan expects the found top rather than the ledge estimate.
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top; the
@@ -624,13 +615,10 @@ export function EngraveSetupsSection({
                   setup: derived,
                   mount: setup.mount,
                   mountDatum,
-                  mountDatumMismatch: mountDatumMismatchBy,
-                  mountDatumMismatchName,
                   surfaceTopZ,
                   bracketSeat,
                   placedSeed,
                   probe,
-                  probeName,
                   mountTap,
                   defaults,
                   calibration,

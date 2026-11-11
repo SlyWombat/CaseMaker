@@ -103,14 +103,11 @@ import {
   type MachineUpdate,
 } from '@/store/locationStore';
 import {
-  accessoryNameFor,
   bracketSeatDatumFor,
   bracketPlacementSeedFor,
   mountDatumFor,
-  mountDatumMismatch,
   mountTapFor,
   probeFor,
-  probeNameFor,
   recordProbeReading,
   surfaceTopDatumFor,
 } from '@/engine/cnc/registration/mountContext';
@@ -329,11 +326,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const lastRecordedTopProbeRefZ = lastRecordedTop?.probeRefZ ?? null;
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
-  const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
-  const mountDatumMismatchName = useMemo(
-    () => (mountDatumMismatchBy === null ? null : accessoryNameFor(mountDatumMismatchBy)),
-    [mountDatumMismatchBy],
-  );
   const surfaceTopZ = useMemo(() => surfaceTopDatumFor(machineRecord), [machineRecord]);
   // #509 — the bracket's seat from the ACTIVE bed profile (bracket seat, else surface top).
   const bracketSeat = useMemo(() => bracketSeatDatumFor(machineRecord), [machineRecord]);
@@ -469,7 +461,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask (read before the
   // seat tap is created so the tap can take the same answer the registration executor takes).
   const statementGiven = useEngraveRunStore((s) => s.acknowledged);
-  const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   // #1088 — SIDE 1'S GOAL and the location's tools, for the hold check the generator runs.
@@ -528,13 +519,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       setup: derived,
       mount: mountForProposal,
       mountDatum,
-      mountDatumMismatch: mountDatumMismatchBy,
-      mountDatumMismatchName,
       surfaceTopZ,
       bracketSeat,
       placedSeed,
       probe,
-      probeName,
       mountTap,
       defaults,
       calibration,
@@ -556,11 +544,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setupSettings,
     rotaryEnvelope,
     mountDatum,
-    mountDatumMismatchBy,
-    mountDatumMismatchName,
     surfaceTopZ,
     probe,
-    probeName,
     mountTap,
     defaults,
     calibration,
