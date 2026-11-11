@@ -295,7 +295,14 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // Design → Setups stays the place to edit it.
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
-  const machineRecord = target === null ? null : machineAt(target);
+  // #1202 — a LIVE subscription: the first-run mark is read from this machine's record, and the
+  // location may arrive after the card mounts (a fresh load). A one-shot read left the mark stuck
+  // on "never run" even when the record already said it had.
+  const machineRecord = useLocationStore((s) =>
+    target === null
+      ? null
+      : s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
+  );
   /**
    * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK. A finished run of this job keeps the top its
    * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
@@ -654,8 +661,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
                 mount: 'bracket',
                 planTravelMm: seat.planTravelMm,
                 routine: 'seat-press',
+                liveClearanceZ: seekFromMachineZ,
               })
-            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings });
+            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings, liveClearanceZ: seekFromMachineZ });
         if (live) setPreview(dry);
       } catch {
         if (live) setPreview(null);
@@ -1562,7 +1570,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // #1202 + #1199 item 3 — WHAT WILL BE SENT, the first-run mark, and the press's own statement.
   const routinePreview =
     preview === null ? null : (
-      <div data-testid="engrave-registration-routine" style={{ marginTop: 6 }}>
+      <div
+        data-testid="engrave-registration-routine"
+        data-routine={preview.identity.routine}
+        data-shape={preview.identity.shape}
+        style={{ marginTop: 6 }}
+      >
         {firstRun && (
           <p style={{ ...MUTED, color: WARN, margin: '4px 0' }} data-testid="engrave-registration-first-run">
             This measurement has not run on this machine before — stay at the Stop.
@@ -1585,6 +1598,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               </li>
             ))}
           </ol>
+          <p style={{ ...MUTED, margin: '2px 0 0' }} data-testid="engrave-registration-dry-note">
+            The routine’s own sequence, under the readings the plan expects. Every line is checked
+            again live as it is sent — this view previews; the guard enforces.
+          </p>
         </details>
         {headlessRefusal !== null && (
           <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">

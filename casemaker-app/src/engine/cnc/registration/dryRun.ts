@@ -102,13 +102,16 @@ export function registrationHeights(plan: RegistrationPlan, clearanceZ: number):
   return heights;
 }
 
-function depsFor(console_: ReturnType<typeof recordingConsole>): ExecDeps {
+function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ?: number): ExecDeps {
   return {
     console: { send: (line, timing) => console_.send(line, timing) },
     // The operator is not asked in a dry run: every prompt is answered as the press would with a
     // person at the machine who proceeds.
     operator: () => Promise.resolve(true),
     stopRequested: () => false,
+    // #1199 item 2 / #1202 — the guard is built from the SAME live clearance the real run passes,
+    // so the shown verdicts and the wire's verdicts are one guard, not two readings.
+    ...(liveClearanceZ !== undefined && Number.isFinite(liveClearanceZ) ? { liveClearanceZ } : {}),
   };
 }
 
@@ -125,13 +128,13 @@ function finish(routine: MotionRoutineId, console_: ReturnType<typeof recordingC
 /** The registration run's dry lines (the full executor: home, M491, seeks, scans, epilogue). */
 export async function dryRegistration(
   plan: RegistrationPlan,
-  opts: { clearanceZ: number; settings: RegistrationSettings },
+  opts: { clearanceZ: number; settings: RegistrationSettings; liveClearanceZ?: number },
 ): Promise<DryRoutine> {
   const console_ = recordingConsole();
   const heights = registrationHeights(plan, opts.clearanceZ);
   let error: string | null = null;
   try {
-    const result: RunResult = await runRegistration(plan, depsFor(console_));
+    const result: RunResult = await runRegistration(plan, depsFor(console_, opts.liveClearanceZ ?? opts.clearanceZ));
     if (!result.ok) error = result.reason;
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -152,6 +155,7 @@ export async function dryMountTap(
     mount?: 'vise' | 'bracket' | 'rotary';
     planTravelMm?: number | null;
     routine: Extract<MotionRoutineId, 'seat-press' | 'mount-tap'>;
+    liveClearanceZ?: number;
   },
 ): Promise<DryRoutine> {
   const console_ = recordingConsole();
@@ -166,7 +170,7 @@ export async function dryMountTap(
       tap,
       opts.clearanceZ,
       opts.settings,
-      depsFor(console_),
+      depsFor(console_, opts.liveClearanceZ ?? opts.clearanceZ),
       opts.workEnvelopeFloorZ,
       opts.mount ?? 'bracket',
       null,

@@ -1738,6 +1738,13 @@
       "unit": "mm",
       "note": "recommended, not measured: the reach margin a cutter's own flute must clear past the deepest cut it serves (the Z-datum class and the unmeasured jaw tops)"
     },
+    "routines.recordLimit": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "entries",
+      "note": "recommended, not measured: how many completed motion-routine shapes one machine record keeps (#1202); oldest fall off first"
+    },
     "bitChange.attendedMinutes": {
       "value": 5.0,
       "source": "seeded",

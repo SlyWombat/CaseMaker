@@ -493,6 +493,14 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // long one. Four shop settings, all RECOMMENDATIONS (the thresholds rule); the curve is
   // `bitChange.ts`'s (smooth step between the two thresholds), and the model plan prices every
   // change with them. `defaults.rs` states the same bounds and fallbacks.
+  // #1202 / #1207 — how many completed motion-routine shapes one machine record keeps. A record
+  // bound, not a motion figure: the recommendation is the observatory value, a shop may change it.
+  'routines.recordLimit': {
+    label: 'how many completed routine shapes a machine record keeps (recommended 60)',
+    unit: 'entries',
+    rule: z.number().int().min(1).max(500),
+    fallback: 60,
+  },
   'bitChange.attendedMinutes': {
     label: 'a program up to this long leaves the operator at the machine (recommended 5 min)',
     unit: 'min',

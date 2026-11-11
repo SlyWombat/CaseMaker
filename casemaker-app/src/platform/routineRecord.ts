@@ -27,8 +27,15 @@ export interface RoutineCompletion {
   build: { version: string; commit: string | null };
 }
 
-/** How many completions one machine record keeps; the oldest fall off first. */
-export const ROUTINE_RECORD_LIMIT = 60;
+/**
+ * #1202 / #1207 — how many completions one machine record keeps (the oldest fall off first). A
+ * REGISTRY value, not a constant: `routines.recordLimit` in the house's defaults, recommended 60.
+ */
+import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+export function routineRecordLimit(): number {
+  const value = readDefault(liveShopDefaults(), 'routines.recordLimit').value;
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : 60;
+}
 
 const ROUTINE_IDS: ReadonlySet<string> = new Set<MotionRoutineId>([
   'registration',
@@ -94,7 +101,7 @@ export function withRoutineCompletion(record: MachineRecord, completion: Routine
     ...existing.filter((c) => !(c.routine === completion.routine && c.shape === completion.shape)),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, ROUTINE_RECORD_LIMIT);
+    .slice(0, routineRecordLimit());
   return { ...record, completedRoutines: next };
 }
 

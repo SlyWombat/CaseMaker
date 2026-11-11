@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { lineShapeOf, routineIdentityOf, routineShapeOf } from '@/engine/cnc/registration/routineIdentity';
 import { MachineRecordSchema } from '@/platform/locationClient';
 import {
-  ROUTINE_RECORD_LIMIT,
+  routineRecordLimit,
   RoutineCompletionsSchema,
   routineCompleted,
   routineCompletionFor,
@@ -101,10 +101,11 @@ describe('#1202 — the completed-routines record', () => {
 
     // The cap keeps the newest sixty.
     let many = machine();
-    for (let i = 0; i < ROUTINE_RECORD_LIMIT + 5; i++) {
+    const limit = routineRecordLimit();
+    for (let i = 0; i < limit + 5; i++) {
       many = withRoutineCompletion(many, completion({ shape: `shape-${String(i).padStart(4, '0')}`, at: `2026-11-${String(1 + (i % 28)).padStart(2, '0')}T09:00:00.000Z` }));
     }
-    expect((many.completedRoutines ?? []).length).toBe(ROUTINE_RECORD_LIMIT);
+    expect((many.completedRoutines ?? []).length).toBe(limit);
   });
 
   it('an unreadable entry is dropped, never the whole machine', () => {
