@@ -1563,6 +1563,12 @@ export interface CentreFindOptions {
    * stock's face beyond the bore's reach, or the top touch would measure the bore's floor.
    */
   topTouchAt?: { x: number; y: number };
+  /**
+   * #1211 field 6 — the unit's own touch restriction (`probe.touches`, #1200). A `'z-only'` unit
+   * refuses the sideways wall touches by name before anything is sent: a centre find IS sideways
+   * touches, so the routine cannot run on a top-touch-only probe at all.
+   */
+  probeTouches: 'all' | 'z-only';
 }
 
 const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1587,6 +1593,17 @@ const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
  * `surfaceZ` is the top, so `applyCorrection` writes it with no other translation.
  */
 export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Promise<CentreRunResult> {
+  // #1211 field 6 — A TOP-TOUCH-ONLY UNIT NEVER SENDS THE WALL TOUCHES: the find IS sideways
+  // touches (±X/±Y at the depth), and a unit checked for top touches only cannot take them.
+  if (opts.probeTouches === 'z-only') {
+    return {
+      ok: false,
+      reason:
+        'this probe is checked for TOP touches only: finding a centre needs sideways (±X/±Y) wall touches, and a lateral ' +
+        'touch is not trusted with this unit — nothing was sent',
+      transcript: [],
+    };
+  }
   const plan = opts.plan;
   const release = opts.releaseMm ?? 3;
   // #933 — centre-find is the 3D probe's routine: a stop with the ball deflected releases it.
@@ -1800,6 +1817,17 @@ export interface RotaryTapOptions {
    * if the module is not where it expects).
    */
   probeRefZ?: number | null;
+  /**
+   * #1211 field 1 — WHERE THE CALL COMES FROM: `'bed-setup'` (the bed wizard / Manage, with its
+   * statement and points shown) or `'job'`. The tap is BED SETUP — the one routine allowed beside
+   * the chuck — and a `'job'` call is refused before anything is sent.
+   */
+  mode: 'bed-setup' | 'job';
+  /**
+   * #1211 field 6 — the unit's own touch restriction (`probe.touches`, #1200). A `'z-only'` unit
+   * refuses the two sideways chords by name before anything is sent.
+   */
+  probeTouches: 'all' | 'z-only';
 }
 
 const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1818,6 +1846,28 @@ const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
  * ALL XY IS MACHINE: the tap happens beside the chuck, where the work frame means nothing yet.
  */
 export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Promise<RotaryTapResult> {
+  // #1211 field 1 — BED SETUP ONLY. The tap is the one routine allowed beside the chuck; it runs
+  // from the bed wizard / Manage, with its statement and its points shown, and never from a job.
+  if (opts.mode === 'job') {
+    return {
+      ok: false,
+      reason:
+        'the rotary axis tap is BED SETUP: it runs beside the chuck, outside any job, from the bed wizard or Manage — ' +
+        'a job never taps the chuck, and nothing was sent',
+      transcript: [],
+    };
+  }
+  // #1211 field 6 — A TOP-TOUCH-ONLY UNIT NEVER SENDS THE CHORDS: the axis tap is two sideways
+  // (G38.3 Y) touches plus the crown, and a unit checked for top touches only cannot take them.
+  if (opts.probeTouches === 'z-only') {
+    return {
+      ok: false,
+      reason:
+        'this probe is checked for TOP touches only: the rotary axis tap needs a sideways (±Y) chord pair, and a lateral ' +
+        'touch is not trusted with this unit — nothing was sent',
+      transcript: [],
+    };
+  }
   // #933 — the rotary tap is the 3D probe's routine: a stop with the ball deflected releases it.
   const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true);
   const release = opts.releaseMm ?? 3;

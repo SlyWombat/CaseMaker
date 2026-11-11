@@ -21,7 +21,7 @@ import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type
 import { withBracketSeatDatum, withRotaryAxisDatum, withRotaryFaceAngleDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
-import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { probeFor, recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
 // #1202 — a completed tap records its routine identity on the machine, so a later press can say
 // whether this exact motion has run here before.
@@ -426,6 +426,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           surfaceFeed: inputs.settings.surfaceSlowFeed,
           parkAboveSurfaceMm: inputs.settings.parkAboveSurfaceMm,
           probeRefZ: axisProbeRefZ,
+          // #1211 fields 1 and 6 — this call IS bed setup; the unit's own touch restriction
+          // travels with it so a top-touch-only probe refuses the chords before anything is sent.
+          mode: 'bed-setup',
+          probeTouches: probeFor(activeRecord)?.touches ?? 'z-only',
         },
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
