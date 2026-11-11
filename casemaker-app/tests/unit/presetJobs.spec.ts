@@ -101,3 +101,26 @@ describe('#1100 — the preset defaults reach the four gates', () => {
     }, 180_000);
   }
 });
+
+// #1103 item 8 — THE PRESET JOBS ARE SEATED BY THE RECOMMENDATION. The sign's 36 mm stick is above
+// the vise floor, so the recommended seat is the block (the default vise says ledge); the pocket's
+// 12 mm plate stays on the ledge; the cut-out keeps the waste board its own default states, which
+// is the hold the receipt names. Red before `presetDefaultJob` seats through `applyRecommendedMount`.
+describe('#1103 item 8 — the preset default jobs are seated through the recommendation', () => {
+  it('the sign preset: the 36 mm stick sits on the vise floor (a block seat), not the ledge', () => {
+    const job = presetDefaultJob('sign');
+    expect(job.workholding.kind).toBe('vise');
+    if (job.workholding.kind !== 'vise') return;
+    expect(job.workholding.vise.seat).toBe('floor');
+    expect(job.sacrificial.under).toBeNull();
+  });
+
+  it('the pocket preset keeps the ledge; the cut-out keeps its 6 mm waste board', () => {
+    const pocket = presetDefaultJob('pocket');
+    expect(pocket.workholding.kind).toBe('vise');
+    if (pocket.workholding.kind !== 'vise') return;
+    expect(pocket.workholding.vise.seat).toBe('ledge');
+    const cutout = presetDefaultJob('cutout');
+    expect(cutout.sacrificial.under?.thickness).toBe(6);
+  });
+});
