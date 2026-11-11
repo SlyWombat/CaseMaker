@@ -23,7 +23,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
-import { HoldingPicture } from '@/components/welcome/HoldingStep';
+import { HoldingStep, HoldingPicture } from '@/components/welcome/HoldingStep';
+import { defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
+import type { PartFootprint } from '@/components/welcome/workShape';
 import { MachineChangeWizard } from '@/components/machine-change';
 import {
   applyMount,
@@ -1084,5 +1086,80 @@ describe('#1104 items 2, 4, 6 — the actions in place, the web build’s rows, 
     expect(draw(true)).toContain('take light cuts, or tape it.');
     expect(draw(false)).toContain('take light cuts.');
     expect(draw(false)).not.toMatch(/tape it/);
+  });
+});
+
+// #1099 items 6 and 7 — the SAME footprint steps 2 and 3 draw, in the hold: on every orientation
+// card, and on the bed mounts' top views. HoldingStep is rendered directly (the shell's part prop)
+// so the test asks the drawing, not the wizard.
+describe('#1099 — the part in the holding pictures', () => {
+  const PART: PartFootprint = { kind: 'mesh', length: 65, width: 62.7, height: 19.1 };
+
+  function bareBedMachine(): MachineRecord {
+    return machineWith(null, (m) => {
+      m.bedProfiles![0]!.placements = [];
+    });
+  }
+
+  function drawStep(job: EngraveJob, part: PartFootprint | null = PART): void {
+    const noop = (): void => undefined;
+    render(
+      <HoldingStep
+        job={job}
+        answers={defaultSetupAnswers(job)}
+        part={part}
+        onAnswers={noop}
+        onRotary={noop}
+        onBedHold={noop}
+        onHold={noop}
+        onMoveItemsToTop={noop}
+      />,
+    );
+  }
+
+  it('each hold card draws the part footprint, permuted by the hold', () => {
+    seedLocation(machineWith(null));
+    // A part clearly narrower than its blank, so the permutation shows: 90 × 20 on a 100 × 60.
+    drawStep(dj({ length: 100, width: 60, thickness: 20 }), { kind: 'mesh', length: 90, width: 20, height: 19.1 });
+    (screen.getByTestId('engrave-setup-hold-fold') as HTMLDetailsElement).open = true;
+    const cards = Array.from(
+      screen.getByTestId('engrave-setup-orientation-holds').querySelectorAll('button[aria-pressed]'),
+    );
+    expect(cards).toHaveLength(6);
+    for (const card of cards) {
+      expect(
+        card.querySelector('[data-testid="engrave-setup-hold-plan-footprint"]'),
+        card.getAttribute('data-testid') ?? '',
+      ).not.toBeNull();
+    }
+    // The plan is permuted: the long side runs along X on the first card, along Y on the swapped.
+    const first = cards
+      .find((c) => c.getAttribute('data-testid') === 'engrave-setup-hold-length-width-thickness')!
+      .querySelector('[data-testid="engrave-setup-hold-plan-footprint"]')!;
+    const swapped = cards
+      .find((c) => c.getAttribute('data-testid') === 'engrave-setup-hold-width-length-thickness')!
+      .querySelector('[data-testid="engrave-setup-hold-plan-footprint"]')!;
+    expect(Number(first.getAttribute('width'))).toBeGreaterThan(Number(first.getAttribute('height')));
+    expect(Number(swapped.getAttribute('width'))).toBeLessThan(Number(swapped.getAttribute('height')));
+  });
+
+  it("a bed mount's top view contains the footprint", () => {
+    seedLocation(bareBedMachine());
+    const job = { ...dj({ length: 65, width: 62.7, thickness: 20 }), workholding: { kind: 'tape' as const, tape: defaultTapeHold() } };
+    drawStep(job);
+    const picture = screen.getByTestId('engrave-setup-holding-picture');
+    expect(picture.getAttribute('data-mechanism')).toBe('bed');
+    expect(picture.querySelector('[data-testid="engrave-setup-holding-part-footprint"]')).not.toBeNull();
+  });
+
+  it('round stock on the bed stays without a footprint', () => {
+    seedLocation(bareBedMachine());
+    const job = {
+      ...dj({ length: 65, width: 65, thickness: 20, shape: 'cylinder' }),
+      stockEntry: { kind: 'made' as const, shelfId: null, file: null, form: 'rod' as const, finish: 'rough' as const, conductive: false },
+      workholding: { kind: 'tape' as const, tape: defaultTapeHold() },
+    };
+    drawStep(job);
+    expect(screen.getByTestId('engrave-setup-holding-picture').querySelector('[data-testid="engrave-setup-holding-part-footprint"]')).toBeNull();
   });
 });

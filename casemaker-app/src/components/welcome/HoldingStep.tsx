@@ -278,7 +278,7 @@ export function HoldingPicture({
         : null;
     return (
       <div style={{ display: 'grid', gap: 6 }}>
-        <BedTopView mount={mount as BedMount} stock={stock} form={form} bed={bed} />
+        <BedTopView mount={mount as BedMount} stock={stock} form={form} bed={bed} part={part} />
         <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-holding-caption">
           {caption}
         </p>
@@ -965,11 +965,14 @@ function BedTopView({
   stock,
   form,
   bed,
+  part = null,
 }: {
   mount: BedMount;
   stock: { length: number; width: number; thickness: number };
   form: JobStockForm | null;
   bed: BedPicture | null;
+  /** #1099 item 7 — the part's footprint, centred on the blank (round stock stays bare). */
+  part?: PartFootprint | null;
 }): JSX.Element {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<{ kind: 'clamp'; index: number } | { kind: 'where' } | null>(null);
@@ -1251,6 +1254,21 @@ function BedTopView({
             </text>
           </>
         )}
+        {/* #1099 item 7 — the same footprint the vise's top view draws, centred on the blank at
+            the blank's own plan scale. A round blank stays bare: a footprint drawn in a circle
+            would claim a rectangle the stock does not have. */}
+        {part != null && !round && (
+          <rect
+            data-testid="engrave-setup-holding-part-footprint"
+            x={stockRect.x + (stockRect.w - Math.min(part.length * (stockRect.w / Math.max(stock.length, 1e-9)), stockRect.w)) / 2}
+            y={stockRect.y + (stockRect.h - Math.min(part.width * (stockRect.h / Math.max(stock.width, 1e-9)), stockRect.h)) / 2}
+            width={Math.max(0.5, Math.min(part.length * (stockRect.w / Math.max(stock.length, 1e-9)), stockRect.w))}
+            height={Math.max(0.5, Math.min(part.width * (stockRect.h / Math.max(stock.width, 1e-9)), stockRect.h))}
+            fill="rgba(240, 217, 181, 0.28)"
+            stroke="#f0d9b5"
+            strokeWidth="1.2"
+          />
+        )}
         <text x={VB.w - 12} y={VB.h - 8} textAnchor="end" {...SVG_TEXT}>
           front · you
         </text>
@@ -1450,12 +1468,40 @@ function withBedSacrificial(a: SetupAnswers, mm: number | null): SetupAnswers {
 }
 
 /** The plan of one hold at a glance: the job box's length × width, and its numbers. */
-function HoldPlan({ box }: { box: { length: number; width: number; thickness: number } }): JSX.Element {
+function HoldPlan({
+  box,
+  footprint = null,
+}: {
+  box: { length: number; width: number; thickness: number };
+  /**
+   * #1099 item 6 — the part's footprint IN THIS HOLD, permuted by the same `holdBox` as the
+   * blank's box, so the six cards are told apart by what they show, not only by their numbers.
+   */
+  footprint?: { length: number; width: number; thickness: number } | null;
+}): JSX.Element {
   const w = Math.max(12, Math.min(96, (box.length / Math.max(box.length, box.width, 0.001)) * 96));
   const h = Math.max(9, Math.min(40, (box.width / Math.max(box.length, box.width, 0.001)) * 40));
+  const bx = (100 - w) / 2;
+  const by = (46 - h) / 2;
+  // The footprint keeps the plan's scale; a zero-extent side (a preset's face on edge) is drawn as
+  // a hairline rather than vanishing, so every card still shows the part.
+  const fw = footprint === null ? 0 : Math.max(0.8, (footprint.length / Math.max(box.length, 0.001)) * w);
+  const fh = footprint === null ? 0 : Math.max(0.8, (footprint.width / Math.max(box.width, 0.001)) * h);
   return (
     <svg viewBox="0 0 100 46" style={{ width: '100%', height: 46, display: 'block' }} role="img" aria-label={`${box.length} by ${box.width} plan`}>
-      <rect x={(100 - w) / 2} y={(46 - h) / 2} width={w} height={h} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth={1.2} />
+      <rect x={bx} y={by} width={w} height={h} fill="#1e3a4a" stroke="#6aa6c9" strokeWidth={1.2} />
+      {footprint !== null && (
+        <rect
+          data-testid="engrave-setup-hold-plan-footprint"
+          x={bx + Math.max(0, (w - fw) / 2)}
+          y={by + Math.max(0, (h - fh) / 2)}
+          width={Math.min(fw, w)}
+          height={Math.min(fh, h)}
+          fill="rgba(240, 217, 181, 0.28)"
+          stroke="#f0d9b5"
+          strokeWidth="0.9"
+        />
+      )}
       <text x="50" y={46 - (46 - h) / 2 + 3} textAnchor="middle" fontSize="8" fill="#d1d5db">
         {Number(box.length.toFixed(2))} × {Number(box.width.toFixed(2))}
       </text>
@@ -1477,6 +1523,7 @@ function HoldChoice({
   onHold,
   onMoveItemsToTop,
   mechanism,
+  footprint = null,
 }: {
   form: JobStockForm;
   job: EngraveJob;
@@ -1485,6 +1532,8 @@ function HoldChoice({
   onMoveItemsToTop: () => void;
   /** #1101 — the mount the step is on: its words, not another mount's. */
   mechanism: 'vise' | 'bed' | 'rotary';
+  /** #1099 item 6 — the part, drawn in each hold's plan under the hold's own permutation. */
+  footprint?: PartFootprint | null;
 }): JSX.Element {
   const part = partDimsOf(job.stock, selected);
   const holds = formHolds(form);
@@ -1526,7 +1575,14 @@ function HoldChoice({
                 cursor: 'pointer',
               }}
             >
-              <HoldPlan box={holdBox(part, hold)} />
+              <HoldPlan
+                box={holdBox(part, hold)}
+                footprint={
+                  footprint === null
+                    ? null
+                    : holdBox({ length: footprint.length, width: footprint.width, thickness: footprint.height ?? 0 }, hold)
+                }
+              />
               <b style={{ fontSize: 11 }}>{holdWordsForMount(mechanism, form, hold, part)}</b>
               <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
             </button>
@@ -2700,6 +2756,7 @@ export function HoldingStep({
                   onHold={onHold}
                   onMoveItemsToTop={onMoveItemsToTop}
                   mechanism={mechanismOf(current)}
+                  footprint={part}
                 />
                 {hasFace && (
                 <div
