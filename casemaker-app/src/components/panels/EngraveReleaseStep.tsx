@@ -37,6 +37,8 @@ import { cleanWalkPlanSeconds, cleanWalkPlanWords } from '@/engine/cnc/engrave/c
 // status line and the release list's cut order.
 import { nextBitChange, runClockSeconds, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
 import { EngraveMachineRun } from './EngraveMachineRun';
+import { StopReportAction } from '@/components/panels/StopReportAction';
+import { stopIsReportable } from '@/platform/machineStopReport';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
@@ -311,6 +313,11 @@ export function EngraveReleaseStep({
     record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present') &&
     walkFiles.every((w) => w.upload === 'uploaded' || w.upload === 'present');
   const uploadFailed = record.files.some((f) => f.upload === 'failed');
+  // #1197 — THE UPLOAD'S ONE REPORT, from the FIRST failed file's own sentence: the upload is one
+  // press, so its failure is one stop, not a row per file (#1187 rule 3 gates the action).
+  const failedUpload = record.files.find((f) => f.upload === 'failed') ?? null;
+  const uploadFailure =
+    failedUpload?.uploadNote != null && stopIsReportable(failedUpload.uploadNote) ? failedUpload.uploadNote : null;
   const atMachine = record.atMachine;
   // #1123-42 — the running program's sentence and the next cutter change. Null at every phase but
   // a playing program: at the bit-change pause the ChangePanel already names the next cutter.
@@ -401,6 +408,17 @@ export function EngraveReleaseStep({
           <FileRow key={f.index} file={f} />
         ))}
       </ul>
+      {/* #1197 — the failed upload's report: the console's sentence, the release's notes, and the
+          record's job facts. One action, under the list it belongs to. */}
+      {uploadFailure !== null && failedUpload !== null && (
+        <StopReportAction
+          action="upload"
+          target={target}
+          error={uploadFailure}
+          transcript={record.notes.map((s) => ({ line: '', reply: s }))}
+          job={{ id: record.jobId, name: record.jobName, packageHash: record.job.package?.hash ?? null }}
+        />
+      )}
       <p style={MUTED} data-testid="engrave-release-progress">
         {finished} of {record.files.length} finished on this machine.
         {nextFile === null ? ' Nothing is left to play.' : ` Next: program ${nextFile.index} (${nextFile.filename}).`}

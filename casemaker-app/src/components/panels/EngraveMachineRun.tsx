@@ -30,6 +30,8 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { formatDuration } from '@/engine/cnc/plan';
 import { useCncModeStore } from '@/store/cncModeStore';
+import { StopReportAction } from '@/components/panels/StopReportAction';
+import { stopIsReportable } from '@/platform/machineStopReport';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 /** #655 — the waiting prompt's box: the same frame the panel's other notices use. */
@@ -72,6 +74,11 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   // #797 — the ONE statement at Cut step 1 replaced this run's own at-machine tick.
   const acknowledged = useEngraveRunStore((s) => s.acknowledged);
   const [homeNote, setHomeNote] = useState<string | null>(null);
+  /**
+   * #1197 — the Home press's OWN failure sentence, kept apart from the note: the note is the
+   * panel's words ("Home was not sent: …"), the report carries what the console answered.
+   */
+  const [homeFailure, setHomeFailure] = useState<string | null>(null);
   // #442's #423 item — the panel follows the line the machine reports. The callback is kept in a
   // ref so a parent that passes a fresh closure on each render does not fire it again for a line
   // that has not changed; the effect below is the only caller.
@@ -105,6 +112,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   const run = () => {
     if (!confirmed) confirm(key);
     setHomeNote(null);
+    setHomeFailure(null);
     start(target, runSettings(defaults));
   };
 
@@ -113,12 +121,41 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     try {
       const r = await session.send('$H');
       setHomeNote(r.kind === 'sent' ? 'Homing.' : `Home was not sent: ${r.detail}`);
+      // #1197 — a home that was not sent is a stop of its own, and the console's detail is what
+      // the report carries (#1187 rule 3 gates the action; the note above stays as it was).
+      setHomeFailure(r.kind === 'sent' ? null : r.detail);
     } finally {
       await session.close();
     }
   };
 
   const outcome = entry.outcome;
+  // #1197 — THE REPORT'S JOB FACTS come from the entry's own context; a run prepared without one
+  // names the file it played and claims no package it does not know.
+  const reportJob =
+    entry.context === null
+      ? null
+      : {
+          id: entry.context.jobId ?? entry.filename,
+          name: entry.context.jobName ?? entry.filename,
+          packageHash: entry.context.packageKey ?? null,
+        };
+  // #1197 — THE RUN'S OWN REPORTABLE FAILURE, in the machine's words: a stop that failed on the
+  // transport, or a start the controller refused. A stop the machine CONFIRMED (`stopped`) is not
+  // one, and #1187 rule 3 gates the rest: a refusal of the app's own never earns the action.
+  const runFailure =
+    outcome === null
+      ? null
+      : outcome.kind === 'aborted' && outcome.stop.kind !== 'stopped'
+        ? 'detail' in outcome.stop
+          ? outcome.stop.detail
+          : outcome.stop.kind
+        : outcome.kind === 'refused'
+          ? outcome.reason
+          : null;
+  const runReportError = runFailure !== null && stopIsReportable(runFailure) ? runFailure : null;
+  /** #1197 — the run's lines are what the dock's Transcript tab shows; the report carries the same. */
+  const runTranscript = entry.lines.map((s) => ({ line: '', reply: s }));
   const canRun = !running && (confirmed || acknowledged);
   // #470 (review R7) — the vacuum sentence says what THIS prepared file will do, not what the runner
   // used to do for every file. An app upload owns the vacuum (#469), so the file's own words decide:
@@ -229,7 +266,16 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           Home ($H)
         </button>
       )}
-      {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+      {homeNote !== null && (
+        <p style={MUTED} data-testid="engrave-run-home-note">
+          {homeNote}
+        </p>
+      )}
+      {/* #1197 — the Home press's own report: the console's failure sentence, this run's transcript
+          and the entry's job facts. A successful "Homing." has nothing to report. */}
+      {homeFailure !== null && stopIsReportable(homeFailure) && (
+        <StopReportAction action="home" target={target} error={homeFailure} transcript={runTranscript} job={reportJob} />
+      )}
 
       {!running && entry.pendingStock !== null && (
         <div data-testid="engrave-run-stock-question">
@@ -264,6 +310,12 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
             <p style={MUTED} data-testid="engrave-run-outcome" data-state={outcome.kind}>
               {describeEndLine(outcome)}
             </p>
+          )}
+          {/* #1197 — THE START/STOP'S OWN REPORT: a Stop that failed on the transport, or a start the
+              controller refused, carries the machine's sentence, this run's transcript and the
+              entry's job facts. The panel's sentence above stays the operator's (#1187 rule 3). */}
+          {runReportError !== null && (
+            <StopReportAction action="run" target={target} error={runReportError} transcript={runTranscript} job={reportJob} />
           )}
           {entry.end.offcut?.state === 'asked' && (
             <div data-testid="engrave-run-offcut">

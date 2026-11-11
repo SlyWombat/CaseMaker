@@ -13,6 +13,8 @@ import {
   type ConsoleSend,
   type MachineConsoleClient,
 } from '@/platform/machineConsole';
+import type { MachineStopReport } from '@/platform/machineStopReport';
+import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
 import { PROBE_OPEN_REPLY, okReply as reply } from './helpers/registrationFixtures';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
@@ -310,6 +312,7 @@ beforeEach(() => {
   resetEngraveRegistrationStore();
   resetRegistrationTouchesStore();
   resetMachineStore();
+  __resetMachineStopReportStoreForTests();
 });
 
 afterEach(() => {
@@ -320,6 +323,65 @@ afterEach(() => {
 
 function install(plan: RegistrationPlan, opts: FakeOptions = {}): void {
   setMachineConsoleLoader(async () => controller(plan, sent, opts));
+}
+
+/**
+ * #1197 — a controller whose reply cannot be READ. The transport answers, and then the console's
+ * own read of the answer throws (a getter outside its catch): the executor does not convert that
+ * into a RunResult, so it lands on the panel's thrown-error card — a stop the app could not say
+ * anything better about.
+ */
+function breakingClient(message: string): MachineConsoleClient {
+  return {
+    async open() {
+      return {
+        async send(line: string): Promise<ConsoleSend> {
+          return {
+            ok: true,
+            line,
+            frames: 1,
+            elapsedMs: 1,
+            get text(): string {
+              throw new Error(message);
+            },
+          };
+        },
+        async close() {},
+      };
+    },
+  };
+}
+
+/**
+ * #1197 — the controller answers everything as the ordinary `controller` does, except its SECOND
+ * `$H`: the run's opening home is #1, and the panel's own home-after-the-failure is #2.
+ */
+function failingHomeClient(plan: RegistrationPlan, opts: FakeOptions, failure: ConsoleSend): MachineConsoleClient {
+  const inner = controller(plan, sent, opts);
+  let homes = 0;
+  return {
+    async open(target, timing) {
+      const session = await inner.open(target, timing);
+      return {
+        async send(line, t) {
+          if (line === '$H') {
+            homes += 1;
+            if (homes >= 2) return failure;
+          }
+          return session.send(line, t);
+        },
+        close: () => session.close(),
+      };
+    },
+  };
+}
+
+/** The shared press: acknowledge, start, and wait for either end of the run. */
+async function pressStart(): Promise<void> {
+  act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('engrave-registration-start'));
+  });
 }
 
 async function runStep(): Promise<void> {
@@ -2286,5 +2348,107 @@ describe('#1179 — blank identity on the Register card', () => {
       ),
     );
     expect(saves.length).toBe(1);
+  });
+});
+
+// #1197 — THE REGISTRATION'S TWO OTHER STOPS. #1187 gave the failed RunResult its report; a
+// THROWN error card and a Home press that did not answer are stops on the same link, and carry
+// their own report — only when the sentence is a transport or controller error, never an app
+// refusal. The console is the seam that supplies both.
+describe('#1197 — the registration’s other stop reports', () => {
+  it('offers the register report when the run threw a transport error, with this press’s facts', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-thrown.json' };
+    });
+    setMachineConsoleLoader(async () => breakingClient('read failed: Connection reset by peer (os error 104)'));
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    const card = await screen.findByTestId('engrave-registration-error');
+    expect(card.textContent).toContain('read failed: Connection reset by peer (os error 104)');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('register');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]!.action).toBe('register');
+    expect(reports[0]!.error).toBe('read failed: Connection reset by peer (os error 104)');
+    // The throw happened on the first reply, so the card has no transcript to claim.
+    expect(reports[0]!.transcript).toEqual([]);
+    expect(reports[0]!.job).toEqual({ id: job.id, name: job.name, packageHash: null });
+  });
+
+  it('never offers it when the throw is the app’s own refusal', async () => {
+    setMachineConsoleLoader(async () =>
+      breakingClient('no origin is written from this measurement: spread 1.2 mm is outside the 0.7 mm band'),
+    );
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-error');
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
+  });
+
+  it('offers the home report when the home after a failed run did not answer', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-reg-home.json' };
+    });
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    // The fast seek finds nothing (a clean failed run); the app then homes, and that `$H` times out.
+    setMachineConsoleLoader(async () =>
+      failingHomeClient(plan, { missFastTouch: true }, {
+        ok: false,
+        reason: 'timeout',
+        line: '$H',
+        detail: 'timeout — no reply within 60000 ms',
+        text: '',
+      }),
+    );
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-failed');
+    const note = screen.getByTestId('engrave-registration-home-note');
+    expect(note.textContent).toContain('did not answer the home command');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('home');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]!.action).toBe('home');
+    expect(reports[0]!.error).toBe('timeout — no reply within 60000 ms');
+    expect(reports[0]!.transcript).toEqual([]);
+    expect(reports[0]!.job).toEqual({ id: job.id, name: job.name, packageHash: null });
+  });
+
+  it('never offers it when the home was refused in the app’s own words', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    setMachineConsoleLoader(async () =>
+      failingHomeClient(plan, { missFastTouch: true }, {
+        ok: false,
+        reason: 'refused',
+        line: '$H',
+        detail: 'the machine reads Alarm, not Idle',
+        text: '',
+      }),
+    );
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-failed');
+    expect(screen.getByTestId('engrave-registration-home-note')).toBeTruthy();
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
   });
 });

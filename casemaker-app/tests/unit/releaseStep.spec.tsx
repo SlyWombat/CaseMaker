@@ -63,6 +63,8 @@ import { describeUpload } from '@/components/panels/engraveUploadCopy';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { MachineStopReport } from '@/platform/machineStopReport';
+import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -359,6 +361,7 @@ beforeEach(() => {
   resetEngraveRegistrationStore();
   resetLocationStore();
   clearStoredBaseline();
+  __resetMachineStopReportStoreForTests();
   setMachineConsoleLoader(async () => controller(2));
   setMachineUploadLoader(async () => ({
     status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
@@ -1387,5 +1390,65 @@ describe('#1146 the plan line carries the walks’ time', () => {
     await advanceUntil(() => expect(summary.getAttribute('data-walk-seconds')).not.toBeNull());
     expect(Number(summary.getAttribute('data-walk-seconds'))).toBeGreaterThan(0);
     expect(summary.textContent).toMatch(/cleaning and air walk: ~\d+ (min|s)/);
+  });
+});
+
+// #1197 — THE UPLOAD'S STOP CARRIES ONE REPORT. A failed record is one stop, not one per row: the
+// action sits under the file list once, with the failed file's own sentence, the record's notes and
+// the job it was uploading for. An app refusal (a file that failed its own check) shows none.
+describe('#1197 — the release upload’s stop report', () => {
+  function failingUpload(reason: 'error' | 'refused', detail: string): void {
+    setMachineUploadLoader(async () => ({
+      status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
+      upload: async () => ({ ok: false, reason, detail }),
+    }));
+  }
+
+  async function startUpload(): Promise<void> {
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await advanceUntil(() => expect(record()?.files.some((f) => f.upload === 'failed')).toBe(true), {
+      timeoutMs: 5000,
+    });
+  }
+
+  it('offers ONE report under the file list, with the failed file’s own facts', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-upload.json' };
+    });
+    const job = twoSetupJob();
+    renderStep(job);
+    failingUpload('error', 'could not open a console on 192.0.2.10:2222: connection refused');
+    await startUpload();
+
+    const actions = screen.getAllByTestId('stop-report-action');
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.dataset.action).toBe('upload');
+    // It follows the file list, where the failed row is.
+    expect(actions[0]!.previousElementSibling?.getAttribute('data-testid')).toBe('engrave-release-files');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await advanceUntil(() => expect(reports).toHaveLength(1));
+    const rec = record()!;
+    const failed = rec.files.find((f) => f.upload === 'failed')!;
+    expect(reports[0]!.action).toBe('upload');
+    expect(reports[0]!.error).toBe(failed.uploadNote);
+    expect(reports[0]!.transcript).toEqual(rec.notes.map((s) => ({ line: '', reply: s })));
+    expect(reports[0]!.job).toEqual({
+      id: rec.jobId,
+      name: rec.jobName,
+      packageHash: rec.job.package?.hash ?? null,
+    });
+  });
+
+  it('never offers it for the app’s own refusal', async () => {
+    const job = twoSetupJob();
+    renderStep(job);
+    failingUpload('refused', 'the program has not passed its check');
+    await startUpload();
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
   });
 });

@@ -36,7 +36,7 @@ export function StopReportAction({ action, target, error, transcript, job }: Sto
   const sendError = useMachineStopReportStore((s) => s.error);
   const send = useMachineStopReportStore((s) => s.send);
   return (
-    <div data-testid="stop-report-action" style={{ marginTop: 6 }}>
+    <div data-testid="stop-report-action" data-action={action} style={{ marginTop: 6 }}>
       {sent === null && (
         <button
           type="button"

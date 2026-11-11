@@ -676,6 +676,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const [runPlanUsed, setRunPlanUsed] = useState<RegistrationPlan | null>(null);
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
+  /**
+   * #1197 — THE HOME'S OWN FAILURE SENTENCE, kept apart from the operator note: the note says what
+   * to do by hand, the report carries what the console actually answered.
+   */
+  const [homeFailure, setHomeFailure] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * #743 D-2 — the operator's answer to a disc more than 1 % off the stated diameter: resize the
@@ -828,7 +833,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     if (target === null) return;
     const handle = attachConsole(target);
     try {
-      setHomeNote(await homeAfterStop(handle));
+      const home = await homeAfterStop(handle);
+      setHomeNote(home.note);
+      setHomeFailure(home.failure);
     } finally {
       await handle.close();
     }
@@ -854,8 +861,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     }
   }
 
-  /** Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. */
-  async function homeAfterStop(handle: ConsoleHandle): Promise<string> {
+  /**
+   * Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. The
+   * note is what the operator is told; the failure is the console's own sentence, kept for #1197's
+   * report — the note alone ("home it by hand") is the app's words, not the machine's.
+   */
+  async function homeAfterStop(handle: ConsoleHandle): Promise<{ note: string; failure: string | null }> {
     try {
       // #588 — "in alarm" is the machine's State, not a sentence. `$X` to an Idle machine is a no-op
       // with no reply, so it would sit out the console's 60 s first-reply window before `$H` (the
@@ -867,10 +878,16 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       }
       const reply = await handle.send('$H');
       return reply.kind === 'sent'
-        ? 'The machine was homed after the stop.'
-        : `The machine did not answer the home command (${reply.kind}) — home it by hand.`;
-    } catch {
-      return 'The machine could not be homed — home it by hand.';
+        ? { note: 'The machine was homed after the stop.', failure: null }
+        : {
+            note: `The machine did not answer the home command (${reply.kind}) — home it by hand.`,
+            failure: reply.detail,
+          };
+    } catch (e) {
+      return {
+        note: 'The machine could not be homed — home it by hand.',
+        failure: e instanceof Error ? e.message : String(e),
+      };
     }
   }
 
@@ -889,6 +906,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setNarration(null);
     stopRef.current = false;
@@ -926,14 +944,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         return;
       }
       if (!r.ok) {
-        const note = stopRef.current ? null : await homeAfterStop(handle);
+        const home = stopRef.current ? null : await homeAfterStop(handle);
         if (!aliveRef.current) {
           handleRef.current = null;
           await handle.close();
           return;
         }
         setResult(r);
-        setHomeNote(note);
+        setHomeNote(home?.note ?? null);
+        setHomeFailure(home?.failure ?? null);
         setPhase('failed');
         handleRef.current = null;
         await handle.close();
@@ -997,6 +1016,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setNarration(null);
     stopRef.current = false;
@@ -1125,14 +1145,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         // #933 — AFTER AN OPERATOR STOP THE MACHINE IS NOT HOMED BY THE APP. `$H` is a rapid, and
         // the whole point of a Stop is that nothing moves until the person says so; the panel
         // offers Home as its own press. Every other failure keeps the #588 epilogue.
-        const note = stopRef.current ? null : await homeAfterStop(handle);
+        const home = stopRef.current ? null : await homeAfterStop(handle);
         if (!aliveRef.current) {
           handleRef.current = null;
           await handle.close();
           return;
         }
         setResult(r);
-        setHomeNote(note);
+        setHomeNote(home?.note ?? null);
+        setHomeFailure(home?.failure ?? null);
         setPhase('failed');
         handleRef.current = null;
         await handle.close();
@@ -1416,6 +1437,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setPrompt(null);
     setDiscAnswer(null);
@@ -1763,7 +1785,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
                   job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
                 />
               )}
-              {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+              {homeNote !== null && (
+                <p style={MUTED} data-testid="engrave-registration-home-note">
+                  {homeNote}
+                </p>
+              )}
+              {/* #1197 — the home that failed on the transport (or that the controller refused) gets
+                  the same report as the run's own stop, carrying the CONSOLE's sentence, not the
+                  panel's "home it by hand" note (#1187 rule 3). */}
+              {target !== null && homeFailure !== null && stopIsReportable(homeFailure) && (
+                <StopReportAction
+                  action="home"
+                  target={target}
+                  error={homeFailure}
+                  transcript={[]}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
               {stopOutcome !== null && (
                 <p style={MUTED} data-testid="engrave-registration-stop-outcome">
                   {stopWords(stopOutcome)}
@@ -1985,9 +2023,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           )}
 
           {error !== null && (
-            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-error">
-              {error}
-            </p>
+            <>
+              <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-error">
+                {error}
+              </p>
+              {/* #1197 — a THROWN failure is a stop the app did not read as an outcome: its own
+                  sentence is the report's error, and the transcript is whichever half ran last.
+                  The gate is #1187's rule 3 — never a refusal of the app's own. */}
+              {target !== null && stopIsReportable(error) && (
+                <StopReportAction
+                  action="register"
+                  target={target}
+                  error={error}
+                  transcript={result?.transcript ?? written?.transcript ?? []}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
+            </>
           )}
 
           {(phase === 'measured' || phase === 'failed' || phase === 'recorded') && (
