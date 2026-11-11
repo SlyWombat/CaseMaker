@@ -1437,7 +1437,9 @@ describe('#1197 — the release upload’s stop report', () => {
     const failed = rec.files.find((f) => f.upload === 'failed')!;
     expect(reports[0]!.action).toBe('upload');
     expect(reports[0]!.error).toBe(failed.uploadNote);
-    expect(reports[0]!.transcript).toEqual(rec.notes.map((s) => ({ line: '', reply: s })));
+    // #1208 (second commit) — THE NOTES ARE THE APP'S OWN SENTENCES: they go out as the line the
+    // app said, with no reply. Mapping them the other way made every note read as a machine reply.
+    expect(reports[0]!.transcript).toEqual(rec.notes.map((s) => ({ line: s, reply: '' })));
     expect(reports[0]!.job).toEqual({
       id: rec.jobId,
       name: rec.jobName,

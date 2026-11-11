@@ -31,6 +31,11 @@ export interface MachineStopReportInput {
   /** The action's own failure sentence, in the app's words. */
   error: string;
   transcript: readonly StopTranscriptEntry[];
+  /**
+   * #1208 — how many `?` status exchanges a run's bounded transcript dropped, so the report says
+   * its tail is a tail. Absent (or 0) when the transcript carries the whole run.
+   */
+  droppedStatusPolls?: number;
   /** The job the action was for, when there was one. */
   job?: { id: string; name: string; packageHash: string | null } | null;
   /** Spec seam: the clock the report's createdAt is stamped with. */
@@ -49,6 +54,8 @@ export interface MachineStopReport {
   lastStatus: string | null;
   job: { id: string; name: string; packageHash: string | null } | null;
   transcript: StopTranscriptEntry[];
+  /** #1208 — the status exchanges the transcript no longer carries; absent when there are none. */
+  droppedStatusPolls?: number;
 }
 
 /** A controller status line: `<Idle|MPos:…>`. Not every `?` reply is one (a kind word is not). */
@@ -106,5 +113,10 @@ export function buildMachineStopReport(
     job: input.job ?? null,
     // A copy: the report is a document, and the panel's array must not edit it later.
     transcript: input.transcript.map((entry) => ({ line: entry.line, reply: entry.reply })),
+    // #1208 — only when there is something to say: a report that carries the run's whole
+    // conversation keeps the field out, so its absence means "nothing was dropped".
+    ...(input.droppedStatusPolls !== undefined && input.droppedStatusPolls > 0
+      ? { droppedStatusPolls: input.droppedStatusPolls }
+      : {}),
   };
 }

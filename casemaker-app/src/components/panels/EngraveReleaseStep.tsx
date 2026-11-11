@@ -474,13 +474,15 @@ export function EngraveReleaseStep({
         </div>
       )}
       {/* #1197 — the failed upload's report: the console's sentence, the release's notes, and the
-          record's job facts. One action, under the list it belongs to. */}
+          record's job facts. One action, under the list it belongs to. #1208 — THE NOTES ARE THE
+          APP'S OWN SENTENCES, not a machine conversation: they go out as the line the app said,
+          with no reply, so the report never presents them as something the machine answered. */}
       {uploadFailure !== null && failedUpload !== null && (
         <StopReportAction
           action="upload"
           target={target}
           error={uploadFailure}
-          transcript={record.notes.map((s) => ({ line: '', reply: s }))}
+          transcript={record.notes.map((s) => ({ line: s, reply: '' }))}
           job={{ id: record.jobId, name: record.jobName, packageHash: record.job.package?.hash ?? null }}
         />
       )}

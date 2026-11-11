@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
 import { describeEndLine, programOwnsVacuum, runSettings } from '@/platform/machineRun';
-import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { machineKey, runTranscriptFor, useMachineRunStore } from '@/store/machineRunStore';
 import { runKey, useRunConfirmStore } from '@/store/runConfirmStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
@@ -188,8 +188,15 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           ? outcome.reason
           : null;
   const runReportError = runFailure !== null && stopIsReportable(runFailure) ? runFailure : null;
-  /** #1197 — the run's lines are what the dock's Transcript tab shows; the report carries the same. */
-  const runTranscript = entry.lines.map((s) => ({ line: '', reply: s }));
+  /**
+   * #1197/#1208 — THE REPORT CARRIES THE RUN'S CONVERSATION, not the dock's display strings: the
+   * store keeps every command and the reply it got, and the last N status exchanges in a fixed
+   * ring. The display lines flatten a reply among the app's own notes, so mapping them made every
+   * run line read as a machine reply with an empty line. `droppedPolls` says how much of the
+   * status tail is no longer in the report; an empty transcript is honest, an invented one is not.
+   */
+  const talk = runTranscriptFor(machine);
+  const runTranscript = talk.entries;
   const canRun = !running && (confirmed || acknowledged);
   // #470 (review R7) — the vacuum sentence says what THIS prepared file will do, not what the runner
   // used to do for every file. An app upload owns the vacuum (#469), so the file's own words decide:
@@ -321,7 +328,14 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
       {/* #1197 — the Home press's own report: the console's failure sentence, this run's transcript
           and the entry's job facts. A successful "Homing." has nothing to report. */}
       {homeFailure !== null && stopIsReportable(homeFailure) && (
-        <StopReportAction action="home" target={target} error={homeFailure} transcript={runTranscript} job={reportJob} />
+        <StopReportAction
+          action="home"
+          target={target}
+          error={homeFailure}
+          transcript={runTranscript}
+          droppedStatusPolls={talk.droppedPolls}
+          job={reportJob}
+        />
       )}
 
       {!running && entry.pendingStock !== null && (
@@ -362,7 +376,14 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
               controller refused, carries the machine's sentence, this run's transcript and the
               entry's job facts. The panel's sentence above stays the operator's (#1187 rule 3). */}
           {runReportError !== null && (
-            <StopReportAction action="run" target={target} error={runReportError} transcript={runTranscript} job={reportJob} />
+            <StopReportAction
+              action="run"
+              target={target}
+              error={runReportError}
+              transcript={runTranscript}
+              droppedStatusPolls={talk.droppedPolls}
+              job={reportJob}
+            />
           )}
           {entry.end.offcut?.state === 'asked' && (
             <div data-testid="engrave-run-offcut">

@@ -52,6 +52,7 @@ import { toolChangeIdentity } from '@/platform/toolChangeDry';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
+import { RunTranscript, type RunTranscriptView } from './runTranscript';
 
 /**
  * What a run knows about its job, for its end (#414). Everything but the program is OPTIONAL: the job
@@ -609,6 +610,18 @@ let runSeq = 0;
  * first poll to the run's end, where it is handed to `recordProgramOutcome`.
  */
 const statusLogs = new Map<string, StatusLog>();
+/**
+ * #1208 (bounded) — THE RUN'S CONVERSATION FOR ITS STOP REPORT, one per machine, outside zustand
+ * for the same reason `statusLogs` is: it changes on every poll and nothing renders it. A fixed
+ * ring for the `?` status exchanges (sized by `report.statusPollsKept`), every command kept whole
+ * — never the whole-array copy per poll that grew a 3 h run to thousands of entries.
+ */
+const transcripts = new Map<string, RunTranscript>();
+
+/** The conversation a stop report carries for this machine's current run (#1208), or empty. */
+export function runTranscriptFor(machine: string): RunTranscriptView {
+  return transcripts.get(machine)?.view() ?? { entries: [], droppedPolls: 0 };
+}
 
 export const useMachineRunStore = create<MachineRunState>((set, get) => {
   const patch = (machine: string, p: Partial<RunEntry>) =>
@@ -630,6 +643,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       if (get().runs[machine]?.running) return false;
       // #1154 — a prepare starts a new program: an abandoned watch's collector is not this one's.
       statusLogs.delete(machine);
+      transcripts.delete(machine);
       set((s) => ({
         runs: {
           ...s.runs,
@@ -679,6 +693,12 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       // #1154 — the heartbeat log's clock starts where the program does: "the first 5 min" is the
       // run's, not the first reply's.
       statusLogs.set(machine, createStatusLog(Date.now()));
+      // #1208 (bounded) — the report's conversation starts here too. Commands are kept whole; the
+      // status exchanges are a fixed ring sized by the shop's `report.statusPollsKept` (#1207).
+      transcripts.set(
+        machine,
+        new RunTranscript(readDefault(useShopDefaultsStore.getState().defaults, 'report.statusPollsKept').value),
+      );
       patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, firstProgressAt: null, pausedMs: 0, pausedAt: null, toolWaiting: null, end: null });
       const session = attachConsole(target);
       // #1173 — THE RUN IS THE STATUS POLLER while it lasts. Its hold says so, so the machine
@@ -743,8 +763,17 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                 statusLogs.get(machine)?.push({ atMs: e.atMs, ...readStatusFields(e.raw) });
               }
               else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
-              else if (e.kind === 'sent' && e.line !== '?') {
-                patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
+              else if (e.kind === 'sent') {
+                // #1208 (bounded) — THE REPORT'S CONVERSATION. Every COMMAND is kept whole; the `?`
+                // status exchanges go into the fixed ring, so a report carries the run's tail and
+                // the store neither grows nor copies per poll (#1147's class). `lines` stays the
+                // display's: a `?` has no display line, and a reply there is flattened to one. A
+                // `poll` event needs no entry of its own: it follows the `sent` '?' carrying the
+                // same raw text, while the opening poll (and the stop's polls) produce none at all.
+                transcripts.get(machine)?.push(e.line, e.reply, e.line === '?');
+                if (e.line !== '?') {
+                  patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
+                }
               } else if (e.kind === 'missed') {
                 // A missed status poll is a result, not an error: the page reads "not answering".
                 noteRunStatus(null);
@@ -956,5 +985,6 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
 export function resetMachineRunStore(): void {
   flags.clear();
   statusLogs.clear();
+  transcripts.clear();
   useMachineRunStore.setState({ runs: {} });
 }

@@ -473,6 +473,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("stop.idlePolls", 3.0, "polls", "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"),
     ("stop.idlePollMs", 5000.0, "ms", "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"),
     ("stop.abortReplyMs", 60000.0, "ms", "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"),
+    // #1208 — a run's stop report keeps every command whole and only this many `?` status
+    // exchanges, in a fixed ring; the report names how many polls it dropped.
+    ("report.statusPollsKept", 30.0, "polls", "chosen, not measured: how many status (`?`) exchanges a run's stop report keeps, in a fixed ring; commands are never dropped. At the 2 s poll, 30 is about a minute of the machine's heartbeat"),
     ("power.probeTries", 3.0, "tries", "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"),
     ("power.probeGapSeconds", 2.0, "s", "chosen, not measured: the wait between those probes"),
     ("power.cyclePauseSeconds", 10.0, "s", "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"),
@@ -958,6 +961,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "run.missLimit" => Some(need(
             n.is_some_and(|v| (1.0..=10.0).contains(&v) && v.fract() == 0.0),
             "a whole number of polls, 1 to 10",
+        )),
+        // #1208 — the run stop report's bounded status tail (`defaultsClient.ts` states the same).
+        "report.statusPollsKept" => Some(need(
+            n.is_some_and(|v| (5.0..=500.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of polls, 5 to 500",
         )),
         // ── #449 (begin) — the probe, scan, console, stop and power timing (`defaultsClient.ts` states
         // the same bounds). The slow surface seek must out-travel the 1 mm lift before it; the console

@@ -243,6 +243,14 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },
   'run.missLimit': { label: 'missed polls before unreachable', unit: 'polls', rule: z.number().int().min(1).max(10), fallback: 3 },
+  // #1208 — how much of a run's `?` status tail its stop report keeps: a fixed ring, while every
+  // command is kept whole. At the 2 s poll, 30 is about a minute of the machine's heartbeat.
+  'report.statusPollsKept': {
+    label: 'status polls the run’s stop report keeps',
+    unit: 'polls',
+    rule: z.number().int().min(5).max(500),
+    fallback: 30,
+  },
   // ── #449 (begin) — the probe, scan, console, stop and power timing. CHOSEN, not measured: each seed
   // is the number the code compiled before, and each fallback is that seed. The 2000 ms poll floors
   // (`RUN_POLL_FLOOR_MS`, `STOP_POLL_FLOOR_MS`, `MIN_STATUS_POLL_MS`) stay compiled; a rule here can

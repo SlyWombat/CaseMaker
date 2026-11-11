@@ -57,6 +57,18 @@ describe('#1187 — the machine-stop report document', () => {
     expect(report.transcript).toEqual(TRANSCRIPT);
     // A copy, not the panel's array: the document must not change under the press.
     expect(report.transcript).not.toBe(TRANSCRIPT);
+    // #1208 — a report that carries the whole conversation says nothing about dropped polls.
+    expect('droppedStatusPolls' in report).toBe(false);
+  });
+
+  // #1208 — THE REPORT SAYS ITS STATUS TAIL IS A TAIL: the ring dropped exchanges, and the count
+  // is the run's own fact, never a silent truncation.
+  it('carries how many status polls a bounded transcript dropped', () => {
+    const report = buildMachineStopReport({ ...INPUT, droppedStatusPolls: 5_370 }, APP);
+    expect(report.droppedStatusPolls).toBe(5_370);
+    // The transcript itself is unchanged: commands plus the kept tail.
+    expect(report.transcript).toEqual(TRANSCRIPT);
+    expect(buildMachineStopReport({ ...INPUT, droppedStatusPolls: 0 }, APP).droppedStatusPolls).toBeUndefined();
   });
 
   it('a session that never read a status line reports none', () => {
