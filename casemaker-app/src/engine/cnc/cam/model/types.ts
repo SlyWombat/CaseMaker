@@ -208,4 +208,14 @@ export interface ModelPlanProgress {
   setupIndex: number;
   op: PlannedOpKind | 'features' | 'clSurface' | 'sequence' | 'linking';
   fraction: number;
+  /**
+   * #1192 rule 3 — THE SCREEN'S REPORTS. When the sequence pick is pricing its shortlist, `done`
+   * and `total` are the 1-based candidate and the priced count, so the run's progress row says
+   * "pricing candidate i of k" (deterministic information, never a time cut-off). `note` is a
+   * line the run should keep as its own Log entry — the final report carries the screen's count
+   * line, so the receipt and the Log state the same numbers.
+   */
+  done?: number;
+  total?: number;
+  note?: string;
 }

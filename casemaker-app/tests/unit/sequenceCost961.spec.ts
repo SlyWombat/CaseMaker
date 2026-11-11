@@ -200,7 +200,9 @@ describe('#961 choose by cost', () => {
     const choice = chooseSequence(
       TRAY,
       { house: [...Object.values(VENDOR), ball3], catalogue: [] },
-      opts(),
+      // #1192 rule 3 — this test is ABOUT the pricing mechanic: price everything (the screen's
+      // OFF side), so every considered chain carries its real cost.
+      opts({ screen: false }),
     );
     expect(choice.unreachable).toEqual([]);
     const complete = choice.considered

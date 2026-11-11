@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
+import type { CutParams } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import { planCurvedForTree, planPocketsForTree, type PlanCurvedOptions } from '@/engine/cnc/cam/model/plan';
@@ -96,6 +97,46 @@ describe('#992 — the plan states one thing per cause, typed', () => {
     expect(statement.text).toContain('40 rims not broken: covered from above');
     // The dump keeps a line per rim — the detail, never the operator's statement.
     expect(result.notes.filter((n) => n.includes('not broken: covered from above'))).toHaveLength(40);
+  }, 120_000);
+
+  // #1192 rule 3 — THE PROPOSAL SCREEN'S COUNT LINE. The receipt prints it as a sheet statement
+  // and the same text goes to the run's Log; the numbers are the picker's own (a chain priced is
+  // a chain priced, not a sentence reconstructed from the panel).
+  it('#1192 — the screen states its counts once, on the sheet and to the Log', () => {
+    const { tree } = slabTree([]);
+    const mid4 = flatEndMill(4, { number: 2, id: 'flat-4', name: 'flat-4', fluteLength: 30 });
+    const small3 = flatEndMill(3.175, { number: 3, id: 'flat-3', name: 'flat-3', fluteLength: 30 });
+    const params = (feed: number, stepDown: number): CutParams => ({
+      rpm: 12000, feed, plungeFeed: 250, stepDown, stepOver: 1, peck: 0, air: true,
+    });
+    const byId: Record<string, CutParams> = {
+      'flat-6': params(300, 0.5),
+      'flat-4': params(1000, 1),
+      'flat-3': params(200, 0.5),
+    };
+    const seen: string[] = [];
+    const result = planPocketsForTree(tree, {
+      offset: makeClipperOffset(tl),
+      houseFlats: [FLAT, mid4, small3],
+      paramsFor: (tool) => byId[tool.id ?? ''] ?? params(900, 1.5),
+      stepDownMm: 1.5,
+      feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
+      rapid: Z1.rapidEstimate,
+      toolChangeSeconds: 5,
+      spindleRpm: 12000,
+      air: true,
+      proposalTopK: 1,
+      proposalMarginPct: 25,
+      onScreen: (text) => seen.push(text),
+    });
+    const lines = result.statements.filter((s) => s.code === 'plan-run' && s.text.startsWith('proposal screen:'));
+    expect(lines).toHaveLength(1);
+    const text = lines[0]!.text;
+    expect(text).toContain('3 chains estimated');
+    expect(text).toContain('2 priced');
+    expect(text).toContain('incumbent');
+    // One text, two readers: the Log gets exactly the sheet's sentence.
+    expect(seen).toEqual([text]);
   }, 120_000);
 
   // #1160 — the badge blank is 0.81 mm thick and the shop's release tab is 1 mm: the contour op

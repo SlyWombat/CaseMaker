@@ -6294,11 +6294,19 @@ export async function generateGoalProgram(
       ...(onProgress === undefined
         ? {}
         : {
-            onProgress: (p: ModelPlanProgress) =>
+            onProgress: (p: ModelPlanProgress) => {
+              // #1192 rule 3 — THE PRICING ROW AND THE SCREEN'S LINE. While the pick prices its
+              // shortlist the row says "pricing candidate i of k" (a count, deterministic on every
+              // machine — never a time estimate); the final report carries the screen's count line,
+              // which becomes its own Log entry beside the percentage ticks of the stage.
+              const position = p.done !== undefined && p.total !== undefined
+                ? `pricing candidate ${p.done} of ${p.total}`
+                : `${Math.round(p.fraction * 100)} %`;
               onProgress({
                 stage: 'plan',
-                label: `planning: ${p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
-              }),
+                label: `planning: ${p.op} — setup ${p.setupIndex + 1}, ${position}${p.note === undefined ? '' : ` — ${p.note}`}`,
+              });
+            },
           }),
       ...(signal === undefined ? {} : { signal }),
       // #1151 Phase 2 — the rank seam rides every plan this door runs (the deferred ideal too).

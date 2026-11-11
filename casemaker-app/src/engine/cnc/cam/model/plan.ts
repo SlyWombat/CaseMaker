@@ -998,6 +998,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     walkAwayMinutes: readDefault(defaults, BIT_CHANGE_KEYS.walkAwayMinutes).value,
     returnMinutes: readDefault(defaults, BIT_CHANGE_KEYS.returnMinutes).value,
   };
+  // #1192 rule 3 — the proposal screen's two registry numbers (#1207): how many candidates the
+  // real CAM prices by estimate rank, and how far past the best estimate the margin reaches.
+  const proposalTopK = Math.max(1, Math.round(readDefault(defaults, 'plan.proposalTopK').value));
+  const proposalMarginPct = Math.max(0, readDefault(defaults, 'plan.proposalMarginPct').value);
   // #961 — THE SIMULATED OUTCOME'S STAMP. With a goal supplied, every candidate the picker prices
   // is posted and stamped exactly as the goal check does, and the cells its sweep leaves above the
   // 0.1 mm band are counted — the rank's first key. The goal is the caller's (the job's target),
@@ -1271,36 +1275,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // material removal rate among flats running their OWN row: feed × step-down × step-over — the
   // cheap estimate's own formula, no toolpath). Every other flat stays a rest/finish candidate;
   // only these two may price as a primary, so no job's cycle can rise from the screen.
-  const paramsIfAny = (tool: Tool): CutParams | null => {
-    try {
-      return resolvedCutParams(input, tool).params;
-    } catch {
-      return null;
-    }
-  };
-  const shortlistedPrimaryKeys = ((): Set<string> => {
-    const flats = siblingMergedHouse.filter((tool) => tool.shape === 'flat' || tool.shape === undefined);
-    const keyed = flats
-      .map((tool) => ({ tool, key: cutterKeyOf(tool), diameter: cuttingDiameter(tool), params: paramsIfAny(tool) }))
-      .filter((row): row is { tool: Tool; key: string; diameter: number; params: CutParams } => row.params !== null && row.diameter !== null);
-    const keys = new Set<string>();
-    // #1192/#1114 — EQUAL DIAMETERS ARE THE PICK'S, NOT THE LIST'S. The incumbent is the largest
-    // flat; among equal diameters the tie falls to the #1114 decider's own preference — the
-    // shortest STATED flute that reaches (the stiffest adequate tool), an unstated flute last,
-    // then the key — never house order (which made the ⌀3.175 × 25 beat the × 12 on list order).
-    const incumbent = [...keyed].sort(
-      (a, b) =>
-        b.diameter - a.diameter
-        || ((a.tool.fluteLength ?? Number.POSITIVE_INFINITY) - (b.tool.fluteLength ?? Number.POSITIVE_INFINITY))
-        || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
-    )[0];
-    if (incumbent !== undefined) keys.add(incumbent.key);
-    const bestOwnRow = keyed
-      .filter((row) => hasOwnRow(row.tool))
-      .sort((a, b) => b.params.feed * b.params.stepDown * b.params.stepOver - a.params.feed * a.params.stepDown * a.params.stepOver)[0];
-    if (bestOwnRow !== undefined) keys.add(bestOwnRow.key);
-    return keys;
-  })();
   const candidateHouse = siblingMergedHouse.filter((tool) => {
     if (!isCuttingRecord(tool)) return false;
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
@@ -2334,12 +2308,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
-      // #1192 rule 3 (minimum) — only the shortlisted flats may primary this setup.
-      allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
       // #1038 — the tree's boundary ticks reach the run as the plan's own progress reports.
       ...(opts.onProgress === undefined
         ? {}
-        : { onProgress: (op: ModelPlanProgress['op'], fraction: number) => opts.onProgress!({ setupIndex, op, fraction }) }),
+        : {
+            onProgress: (
+              op: ModelPlanProgress['op'],
+              fraction: number,
+              extra?: Pick<ModelPlanProgress, 'done' | 'total' | 'note'>,
+            ) => opts.onProgress!({ setupIndex, op, fraction, ...extra }),
+          }),
       ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       pockets: noFlatFallback ? null : {
         ...(depthBandMm === undefined ? {} : { depthBandMm }),
@@ -2356,8 +2334,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           ? {}
           : { stockFootprintMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width } }),
         houseFlats: flats,
-        // #1192 rule 3 (minimum) — the job's shortlist gates which flats may primary this setup.
-        allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
+        // #1192 rule 3 — the two-stage price's registry numbers.
+        proposalTopK,
+        proposalMarginPct,
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
@@ -3333,6 +3312,9 @@ export interface PlanPocketsOptions {
    * program, and `concatToolpathIR` refuses a header mismatch. Absent → `feeds`/`spindleRpm`.
    */
   paramsFor?: (tool: Tool) => CutParams;
+  /** #1192 rule 3 — the screen's K and margin (the registry's plan.proposalTopK/MarginPct). */
+  proposalTopK?: number;
+  proposalMarginPct?: number;
   /**
    * #975 — the V bits in the house set (engraving/chamfer shapes), as the pocket chain's LAST
    * RESORT: a pocket no flat covers gets the narrowest V whose tip is no wider than the stroke
@@ -3381,8 +3363,14 @@ export interface PlanPocketsOptions {
    * watchdog hears nothing; this is a step boundary, never a per-cell hook.
    */
   onStep?: (kind: PlannedOpKind) => void;
-  /** #1038 — a tick at each candidate chain's boundary (see `SequenceOptions.onCandidate`). */
+  /** #1038 — a tick at each PRICED candidate chain's boundary (see `SequenceOptions.onCandidate`). */
   onCandidate?: (index: number, total: number) => void;
+  /**
+   * #1192 rule 3 — the proposal screen's count line, once, the same text the run sheet prints:
+   * the caller turns it into the run Log's own entry, so the receipt and the Log state the same
+   * numbers.
+   */
+  onScreen?: (text: string) => void;
   /** #1038 — the caller's stop, checked once per step boundary (and forwarded to
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
@@ -3456,8 +3444,6 @@ export interface PlanPocketsOptions {
    * sets it.
    */
   planRegionForTest?: (outcome: OpOutcome | null, id: string) => OpOutcome | null;
-  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
-  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /**
@@ -3642,6 +3628,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     features.push({
       id: node.id,
       kind: 'pocket',
+      // #1192 rule 3 — the plan area, for the screen's cheap estimate (volume ÷ removal rate).
+      areaMm2: node.floors.reduce((n, f) => n + f.area, 0),
       // An OPEN node's OWN narrowest is measured against its unextended boundary, which is not
       // the real constraint at an open edge (finding 3) — the extension this op applies (below)
       // is what decides whether a cutter fits there, not this number; stating it here would
@@ -3660,6 +3648,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     features.push({
       id: node.id,
       kind: 'pocket',
+      areaMm2: node.floors.reduce((n, f) => n + f.area, 0),
       minOpeningMm: node.narrowest,
       cornerRadiusMm: node.narrowest / 2,
       depthMm: capDepth(depthBandMm === undefined ? -node.floorZ : Math.min(-node.floorZ, depthBandMm)),
@@ -3692,7 +3681,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return margins.every((m) => m <= GOAL_FIT_TOLERANCE_MM);
     })();
   if (!tree.contour.synthetic && !outlineIsStock) {
-    features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
+    features.push({ id: 'contour', kind: 'contour', areaMm2: tree.contour.area, depthMm: contourDepthMm });
   }
   const demand = { features };
 
@@ -3706,6 +3695,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     rowKey: (tool: Tool) => {
       const p = cutParamsFor(tool);
       return `${p.feed}:${p.stepDown}:${p.stepOver}`;
+    },
+    // #1192 rule 3 — the same numbers for the screen's removal-rate estimate.
+    cutParams: (tool: Tool) => {
+      const p = cutParamsFor(tool);
+      return { feed: p.feed, stepDown: p.stepDown, stepOver: p.stepOver };
     },
   };
 
@@ -4130,7 +4124,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
     planStep,
     maxCutters: opts.maxCutters,
-    ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
+    ...(opts.proposalTopK === undefined ? {} : { topK: opts.proposalTopK }),
+    ...(opts.proposalMarginPct === undefined ? {} : { marginPct: opts.proposalMarginPct }),
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.goalCoverage === undefined
@@ -4376,6 +4371,32 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #992 — the SAME facts, typed: code, severity and count, so the seam can route them. `notes`
   // keeps every string exactly as before (the failure path joins it, the acceptance reads it).
   const statements: PlanStatement[] = [];
+  // #1192 rule 3 — THE PROPOSAL SCREEN'S COUNT LINE. Stated on the run sheet (the receipt) and
+  // handed to the run's Log as its own progress entry; the numbers are the picker's own, never
+  // reconstructed here. The line names what the estimate ranked, what the dominance prune dropped,
+  // what the real CAM priced and on which ground, how much slower the unpriced ones were estimated,
+  // and whether the pre-#1186 incumbent won.
+  if (choice.screen !== undefined) {
+    const s = choice.screen;
+    const ground = [
+      `${s.topK} by estimate rank`,
+      ...(s.withinMargin > 0 ? [`${s.withinMargin} within ${s.marginPct} %`] : []),
+      ...(s.restVariants > 0 ? [`${s.restVariants} coverage-rest`] : []),
+      ...(s.incumbentChains > 0 ? [`${s.incumbentChains} incumbent`] : []),
+    ].join(' + ');
+    const slower = s.unpriced === 0
+      ? ''
+      : s.othersSlowerPct === null
+        ? ` · the other ${s.unpriced} not priced`
+        : ` · the other ${s.unpriced} estimated ≥ ${s.othersSlowerPct} % slower`;
+    const text =
+      `proposal screen: ${s.passedConstraints} primary cutters passed the constraints · ` +
+      `${s.droppedAsDominated} dropped as dominated · ${s.estimated} chains estimated · ` +
+      `${s.priced} priced (${ground})${slower} · the incumbent ${s.incumbentWon ? 'won' : 'lost'}`;
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
+    opts.onScreen?.(text);
+  }
   // #1160 — A RELEASE TAB CLAMPED TO THE PART'S OWN THICKNESS IS STATED, once, with both numbers:
   // the shop's tab is taller than the part, and the plan cut the tallest tab that fits under the
   // stock top. Only when the contour actually ran (the op carries the clamp), so a chain without
@@ -6154,11 +6175,13 @@ export interface PlanTreeOptions {
    * chain at 0.4 (its steps and its candidates) and the curved stages at 0.7. Boundary hooks
    * only — nothing per cell — so reporting costs nothing measurable.
    */
-  onProgress?: (op: ModelPlanProgress['op'], fraction: number) => void;
+  onProgress?: (
+    op: ModelPlanProgress['op'],
+    fraction: number,
+    extra?: Pick<ModelPlanProgress, 'done' | 'total' | 'note'>,
+  ) => void;
   /** #1038 — the caller's stop, checked at the same boundary hooks (one per tick). */
   signal?: AbortSignal;
-  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
-  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */
@@ -6336,7 +6359,11 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
           ? {}
           : {
               onStep: (kind: PlannedOpKind) => opts.onProgress!(kind, 0.4),
-              onCandidate: () => opts.onProgress!('sequence', 0.4),
+              // #1192 rule 3 — "pricing candidate i of k" reaches the run's progress row and Log;
+              // the screen's count line follows as its own entry.
+              onCandidate: (index: number, total: number) =>
+                opts.onProgress!('sequence', 0.4, { done: index + 1, total }),
+              onScreen: (text: string) => opts.onProgress!('sequence', 0.4, { note: text }),
             }),
         ...(opts.signal === undefined ? {} : { signal: opts.signal }),
       });

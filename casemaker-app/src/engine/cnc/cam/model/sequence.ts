@@ -73,6 +73,12 @@ export interface CutterCandidates {
    * absent, the prune falls back to the feeds KIND alone, which can only prune less.
    */
   rowKey?: (tool: Tool) => string | null;
+  /**
+   * #1192 rule 3 — the resolved row's numbers, for the screen's removal-rate estimate
+   * (feed × step-down × step-over). Absent: the estimate falls back to the feeds kind alone and
+   * is only a ranking hint.
+   */
+  cutParams?: (tool: Tool) => { feed: number; stepDown: number; stepOver: number } | null;
 }
 
 /**
@@ -82,6 +88,12 @@ export interface CutterCandidates {
 export interface SequenceFeature {
   /** The feature's id, carried into the step's `regionIds`. */
   id: string;
+  /**
+   * #1192 rule 3 — the feature's PLAN AREA, mm², for the screen's cheap estimate (volume ÷ the
+   * row's removal rate). Absent: the estimate treats the feature as unknown (0), which only makes
+   * a candidate's estimate optimistic — the real CAM still prices every selected chain.
+   */
+  areaMm2?: number;
   /** A pocket floor / island top, the outer contour, a curved remainder, or an edge to break. */
   kind: 'pocket' | 'contour' | 'curved' | 'rim';
   /**
@@ -212,6 +224,27 @@ export interface SequenceOptions {
   /** The machine's rapid model, #927's timing. */
   rapid: RapidEstimate;
   /**
+   * #1192 rule 3 — THE PROPOSAL SCREEN. Every candidate is ESTIMATED (volume ÷ the row's removal
+   * rate + the priced changes); only the top `topK` by estimate, any further candidate within
+   * `marginPct` of the best (up to `SCREEN_PRICE_CAP_MULTIPLE × topK`), every coverage-rest
+   * variant of the best chain, and the INCUMBENT (the pre-#1186 order's choice) are PRICED with
+   * the real CAM.
+   *
+   * THE NUMBERS ARE THE REGISTRY'S, NOT THIS MODULE'S (#1207): the caller passes
+   * `plan.proposalTopK` and `plan.proposalMarginPct` (seeded 4 and 25 %). When either is absent
+   * the screen does not run and every candidate is priced — the pre-#1192 behaviour, and what a
+   * direct caller (a test, a fixture) gets unless it asks for the screen. `screen: false` forces
+   * the same OFF side even when the numbers are present (the conservatism check).
+   */
+  topK?: number;
+  marginPct?: number;
+  screen?: boolean;
+  /**
+   * #1192 rule 2 — the dominance prune's count, for the receipt's line: `dropped` primaries, of
+   * `kept` that remain (before chain expansion).
+   */
+  onPrune?: (dropped: number, kept: number) => void;
+  /**
    * #1114 — THE SHOP'S BIT-CHANGE RULE: a change costs by the price curve from the program
    * before it. When absent, `toolChangeSeconds` is the pre-#1114 flat allowance (every change the
    * same), so a caller with no durations to price against is unchanged.
@@ -225,13 +258,6 @@ export interface SequenceOptions {
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
   feedsKind?: (tool: Tool) => 'row' | 'fallback';
-  /**
-   * #1192 rule 3's MORNING MINIMUM — WHICH FLATS MAY BE PRIMARIES. The screen's shortlist by key
-   * (the incumbent and the best estimate); a flat off the list is never a primary, but STAYS in
-   * the rest/finish pool (a dropped primary remains available as a rest — the fields' rule 2).
-   * Absent → every fitting flat is a primary, as rule 1 said.
-   */
-  allowPrimary?: (cutterKey: string) => boolean;
   /**
    * The most cutters a chain may use, including the primary and the ball/chamfer — the card's
    * "vendor + 1" budget. Absent → no cap; a chain past it is simply not generated.
@@ -250,10 +276,13 @@ export interface SequenceOptions {
     cellAreaMm2: number;
   } | null;
   /**
-   * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
-   * simulated. The simulated outcome can be seconds per candidate and a plan is minutes; between
-   * the plan's stage reports the run's silence watchdog hears nothing. One callback per candidate
-   * costs nothing measurable (no per-cell hooks).
+   * #1038 — a tick at every PRICED candidate's boundary, once before its chain is priced and its
+   * outcome simulated. The simulated outcome can be seconds per candidate and a plan is minutes;
+   * between the plan's stage reports the run's silence watchdog hears nothing. One callback per
+   * candidate costs nothing measurable (no per-cell hooks). #1192 rule 3 — `index` is the
+   * candidate's 0-based position among the PRICED ones and `total` is the priced count, so the
+   * run's progress row can say "pricing candidate i of k"; a screened-out candidate is never
+   * ticked (it costs nothing).
    */
   onCandidate?: (index: number, total: number) => void;
   /**
@@ -356,6 +385,42 @@ export interface SequenceChoice {
   steps: SequenceStep[];
   cost: SequenceCost;
   considered: ConsideredSequence[];
+  /**
+   * #1192 rule 3 — the screen's own count line, stated on the receipt and in the Log: how many
+   * primary cutters passed the constraints, how many the dominance prune dropped, how many chains
+   * were estimated and how many were priced (and on which ground), what the unpriced ones were
+   * estimated at, and the incumbent's fate. Present ONLY when the screen ran (both registry
+   * numbers supplied and `screen` not false); an unscreened pick prices everything and says
+   * nothing.
+   */
+  screen?: {
+    /** Primary cutters that passed the hard constraints, `droppedAsDominated` included. */
+    passedConstraints: number;
+    /** Primary cutters the exact dominance prune dropped before any estimate. */
+    droppedAsDominated: number;
+    /** Candidate chains the cheap estimate ranked (after the prune). */
+    estimated: number;
+    /** Candidate chains the real CAM priced (the top K + margin + rest variants + incumbent). */
+    priced: number;
+    /** How many of `priced` were the top `topK` by estimate (the smaller of K and the set). */
+    topK: number;
+    /** The registry's own K and margin as applied, for the receipt's words. */
+    topKLimit: number;
+    marginPct: number;
+    /** Further candidates admitted by the margin (the 2 × K cap included). */
+    withinMargin: number;
+    /** Coverage-rest variants of the best chain, priced past the estimate's own ranking. */
+    restVariants: number;
+    /** Chains whose primary is the pre-#1186 incumbent's (largest) diameter, always priced. */
+    incumbentChains: number;
+    incumbentPriced: boolean;
+    /** The picked chain is one of the incumbent chains (the pre-#1186 order would pick it too). */
+    incumbentWon: boolean;
+    /** Chains the estimate ranked but the screen did not price. */
+    unpriced: number;
+    /** The least percentage by which an unpriced chain was estimated slower; null when best ≤ 0. */
+    othersSlowerPct: number | null;
+  };
   /** The chosen chain's uncovered pockets, by feature id; empty when every pocket is covered. */
   unreachable: string[];
   /**
@@ -382,6 +447,14 @@ export interface SequenceChoice {
 }
 
 const EPS = 1e-9;
+
+/**
+ * #1192 rule 3 — THE SCREEN'S HARD COUNT. The margin may admit further candidates past the top K,
+ * but never past this multiple of K: the analyst's field fixes the bound at 2 × K (a count, not a
+ * wall clock, so the same job and shop pick the same chains on every machine). It is the field's
+ * own number, not a shop preference — the shop's K and margin are the two registry entries.
+ */
+const SCREEN_PRICE_CAP_MULTIPLE = 2;
 
 /** A stable key for a cutter: its record id, else its name. Also what `pinned` matches. */
 export function cutterKeyOf(tool: Tool): string {
@@ -543,7 +616,7 @@ interface ChainLink {
 export function candidateSequences(
   demand: SequenceDemand,
   cutters: CutterCandidates,
-  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters' | 'allowPrimary'>,
+  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters' | 'onPrune'>,
 ): CandidateSequence[] {
   const features = demand.features;
   // The part's freeing cut (the outer contour) is NOT a pocket and is not folded into a pocket
@@ -606,35 +679,22 @@ export function candidateSequences(
   // decides. The chains are still complete-part chains — a smaller primary keeps its rest/contour
   // steps, and `leftBehind` still ranks an uncut feature above price — so proposing them cannot
   // silently shrink the job; it can only let a cheaper complete chain win, which is the point.
-  // #1192 rule 3 (the morning minimum) — only the shortlisted flats may PRIMARY; a flat off the
-  // list keeps its rest/finish roles through `flatsDesc` below, never a program of its own.
-  const mayPrimary = (c: CandidateCutter): boolean => opts?.allowPrimary === undefined || opts.allowPrimary(c.key);
-  // #1192/#1195 — THE SHORTLIST MAY NARROW THE PICK, NEVER EMPTY IT. Its two names are the
-  // incumbent (the largest flat) and the best own-row flat; on a part whose only capable flat is
-  // neither (a V-floor pocket only a ⌀0.6 flat enters, against a larger flat that cannot enter it)
-  // filtering by name left NO primary and refused a plan the engine could make. The screen applies
-  // only while it leaves at least one flat that can actually cut something.
-  const eligiblePrimaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
-  const shortlisted = eligiblePrimaries.filter(mayPrimary);
-  const chosenPrimaries = shortlisted.length > 0 ? shortlisted : eligiblePrimaries;
-  // #1195 — THE SHORTLIST MAY NOT STARVE THE FREEING CONSTRAINT. Set B's shortlist picked the
-  // ⌀3.175 ×25 by price, and only the ×42 proves the 25.3 mm profile: with the ×42 off the
-  // shortlist, every chain was excluded and the plan refused on a part main freed. When none of
-  // the shortlisted cutters can free the profile, the eligible cutters that CAN join them.
-  const canFree = (c: CandidateCutter): boolean =>
-    contourFeatures.every((f) => coversFeature(c.tool, f) && reachesContour(c.tool, f));
-  const freed = contourFeatures.some((f) => (f.depthMm ?? 0) > 0);
-  const primaries = freed && !chosenPrimaries.some(canFree)
-    ? [...chosenPrimaries, ...eligiblePrimaries.filter((c) => canFree(c) && !chosenPrimaries.includes(c))]
-    : chosenPrimaries;
+  // #1192 — WHO GETS PRICED IS THE SCREEN'S JOB, NOT A SHORTLIST'S: every eligible flat is a
+  // primary here, and `chooseSequence`'s two-stage price estimates them all and sends only the
+  // selected chains through the real CAM. A shortlist at this point would hide a candidate from
+  // the estimate, exactly what the screen exists to avoid.
+  const primaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
   // #1192 rule 2 — THE EXACT DOMINANCE PRUNE (the analyst's field): a candidate is dropped
   // unpriced when a KEPT one has the same shape and the SAME FEED ROW (own, or the same borrowed
   // numbers), at least as long a STATED reach and at least as large a diameter — on one row a
   // larger cutter cannot cut slower — and covers every region the dropped one could (a larger
   // cutter that cannot enter a narrow region never dominates there). A dominated primary stays a
   // rest/finish candidate through `flatsDesc` (the chains add it only where it is needed).
+  // NO ROW, NO PRUNE: without the caller's row resolver the feed numbers are unknown, and two
+  // cutters that merely both say 'row' are not provably on one row — the prune may only prune
+  // less. A direct caller that wants it supplies `rowKey` (plan.ts always does).
   const rowOf = (c: CandidateCutter): string =>
-    cutters.rowKey === undefined ? c.feeds : `${c.feeds}:${cutters.rowKey(c.tool) ?? 'unknown'}`;
+    cutters.rowKey === undefined ? `__unresolved:${c.key}` : `${c.feeds}:${cutters.rowKey(c.tool) ?? 'unknown'}`;
   const dominates = (big: CandidateCutter, small: CandidateCutter): boolean => {
     if (big.key === small.key) return false;
     if ((big.tool.shape ?? 'flat') !== (small.tool.shape ?? 'flat')) return false;
@@ -653,6 +713,9 @@ export function candidateSequences(
   };
   const undominated = primaries.filter((c) => !primaries.some((other) => dominates(other, c)));
   const screenedPrimaries = undominated.length > 0 ? undominated : primaries;
+  // #1192 rule 2 — the count rides back for the receipt's line (the prune never empties the set:
+  // if it would, every candidate stays).
+  opts?.onPrune?.(primaries.length - screenedPrimaries.length, screenedPrimaries.length);
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   // #1192/#1195 — THE BALL FALLBACK IS NOT THE SHORTLIST'S. The shortlist is a rule about FLATS
   // (the incumbent and the best own-row flat); the fallback exists precisely for the demand NO
@@ -1099,8 +1162,97 @@ function comparePriceBaseline(
   return a[5]! < b[5]! ? -1 : a[5]! > b[5]! ? 1 : 0;
 }
 
+
 /**
- * The picker: every pruned candidate priced, then the first by rank — house before catalogue,
+ * #1192 rule 3 — THE SCREEN'S CHEAP ESTIMATE, seconds. No toolpath, no goal stamp, no sweep: each
+ * step's material volume (its features' PLAN AREAS × their depths, terms the tree already states)
+ * over the ROW'S removal rate (feed × step-down × step-over from `cutParams` — the numbers the
+ * cutter really runs, which is where a borrowed row shows), plus each change priced from the
+ * estimated program before it (#1114). It ranks; the real CAM prices every selected chain.
+ *
+ * UNKNOWN IS OPTIMISTIC, NEVER PESSIMISTIC: a step whose row or volume cannot be stated is
+ * charged ZERO, so missing data can only make a candidate look CHEAPER — it can never be the
+ * reason the screen leaves a candidate unpriced. (A direct caller that supplies no `cutParams`
+ * gets an estimate that ranks only the bit changes; the numbers that matter are the registry's
+ * `plan.proposalTopK` / `plan.proposalMarginPct` and `plan.ts` always supplies the rows.)
+ */
+function estimateScreenSeconds(
+  sequence: CandidateSequence,
+  demand: SequenceDemand,
+  cutters: CutterCandidates,
+  opts: SequenceOptions,
+): number {
+  const byId = new Map(demand.features.map((f) => [f.id, f] as const));
+  const runs: number[] = [];
+  let runKey: string | null = null;
+  for (const step of sequence.steps) {
+    const params = cutters.cutParams?.(step.cutter.tool) ?? null;
+    const mrr = params === null || params.feed <= 0 || params.stepDown <= 0 || params.stepOver <= 0
+      ? null
+      : params.feed * params.stepDown * params.stepOver;
+    let seconds = 0;
+    if (mrr !== null) {
+      let volume = 0;
+      for (const id of step.regionIds) {
+        const feature = byId.get(id);
+        if (feature === undefined || feature.areaMm2 === undefined) continue;
+        volume += Math.max(0, feature.areaMm2) * Math.max(0, feature.depthMm ?? 0);
+      }
+      if (volume > 0) seconds = (volume / mrr) * 60;
+    }
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+    if (runKey === step.cutter.key) runs[runs.length - 1] = runs[runs.length - 1]! + seconds;
+    else {
+      runs.push(seconds);
+      runKey = step.cutter.key;
+    }
+  }
+  const rule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds ?? 0);
+  let total = 0;
+  for (let i = 0; i < runs.length; i++) {
+    total += runs[i]!;
+    if (i > 0) total += bitChangePriceSeconds(rule, runs[i - 1]!);
+  }
+  return Number.isFinite(total) ? total : 0;
+}
+
+/** The chain's full signature — every step, the coverage-rest marker included (what the search dedupes on). */
+function chainSignature(sequence: CandidateSequence): string {
+  return sequence.steps
+    .map((st) => `${st.kind}:${st.cutter.key}${st.coverageRest === true ? '*' : ''}`)
+    .join('+');
+}
+
+/** The shape a coverage-rest variant shares with its chain: everything except the rest steps. */
+function chainShape(sequence: CandidateSequence): string {
+  return sequence.steps
+    .filter((st) => st.coverageRest !== true)
+    .map((st) => `${st.kind}:${st.cutter.key}`)
+    .join('+');
+}
+
+/**
+ * #1192 rule 3 — THE INCUMBENT, exactly. The pre-#1186 order proposed only the maximal-diameter
+ * primaries (#961's `maximal`) and priced every chain from them, so "the pre-#1186 order's
+ * choice" is not one chain: it is the best rank among ALL chains whose primary is of the largest
+ * cutting diameter. Price that whole set and the pre-#1186 winner is priced too, which is what
+ * makes the screen's promise — no job's cycle can rise — true by construction rather than by a
+ * guess at which chain the old order would pick.
+ */
+function incumbentCandidateIndices(candidates: readonly CandidateSequence[]): number[] {
+  const diameters = candidates.map((c) => {
+    const first = c.steps[0];
+    return first === undefined ? null : cuttingDiameter(first.cutter.tool);
+  });
+  const largest = diameters.reduce<number | null>(
+    (top, d) => (d === null ? top : top === null || d > top ? d : top),
+    null,
+  );
+  if (largest === null) return [];
+  return diameters.flatMap((d, i) => (d !== null && Math.abs(d - largest) <= EPS ? [i] : []));
+}
+
+/** The picker: every pruned candidate priced, then the first by rank — house before catalogue,
  * rowed before fallback, cheapest within the group. A pinned key is a constraint, not a preference
  * (`honoursPins`), so a pinned candidate is the only one of its kind that survives.
  *
@@ -1112,7 +1264,16 @@ export function chooseSequence(
   cutters: CutterCandidates,
   opts: SequenceOptions,
 ): SequenceChoice {
-  const candidates = candidateSequences(demand, cutters, opts);
+  let droppedAsDominated = 0;
+  let keptPrimaries = 0;
+  const candidates = candidateSequences(demand, cutters, {
+    ...opts,
+    onPrune: (dropped, kept) => {
+      droppedAsDominated = dropped;
+      keptPrimaries = kept;
+      opts.onPrune?.(dropped, kept);
+    },
+  });
   if (candidates.length === 0) {
     // #1195 (the analyst's field) — THE REFUSAL IS NAMED AND ONLY WHEN IT MUST BE: no owned
     // cutter with a STATED flute reaches the profile, or the operator pinned a cutter that does
@@ -1157,9 +1318,92 @@ export function chooseSequence(
     );
   }
 
+  // #1192 rule 3 — THE TWO-STAGE PRICE (the analyst's field). Stage 1 estimates every candidate
+  // cheaply; stage 2 prices with the real CAM: the top K by estimate, any further candidate within
+  // the margin of the best (up to 2K), every COVERAGE-REST variant of the best chain, and the
+  // INCUMBENT SET (the pre-#1186 order's choice) always — so no job's cycle can rise because of
+  // the screen. Everything else is counted, never priced, and its rank row says so.
+  //
+  // THE SCREEN RUNS ONLY WHEN THE CALLER SUPPLIES BOTH REGISTRY NUMBERS (#1207). Absent, every
+  // candidate is priced exactly as before — a direct caller's default; `plan.ts` always passes
+  // `plan.proposalTopK` / `plan.proposalMarginPct`, so the product is screened. `screen: false`
+  // is the conservatism check's OFF side.
+  const selected = new Set<number>(candidates.map((_, i) => i));
+  let incumbentIndices: number[] = [];
+  let screen: SequenceChoice['screen'];
+  if (opts.screen !== false && opts.topK !== undefined && opts.marginPct !== undefined) {
+    const topKLimit = Math.max(1, Math.round(opts.topK));
+    const marginPct = Math.max(0, opts.marginPct);
+    const estimates = candidates.map((c) => estimateScreenSeconds(c, demand, cutters, opts));
+    // ESTIMATE ORDER IS TOTAL AND MACHINE-INDEPENDENT: the estimate (IEEE arithmetic on the same
+    // inputs), then the chain's full signature. Candidate generation order never decides a tie.
+    const order = candidates.map((_, i) => i).sort((a, b) => {
+      const byEstimate = estimates[a]! - estimates[b]!;
+      if (byEstimate !== 0) return byEstimate;
+      const sa = chainSignature(candidates[a]!);
+      const sb = chainSignature(candidates[b]!);
+      return sa < sb ? -1 : sa > sb ? 1 : 0;
+    });
+    const bestEstimate = estimates[order[0]!] ?? 0;
+    selected.clear();
+    const topKIndices = order.slice(0, Math.min(topKLimit, order.length));
+    for (const i of topKIndices) selected.add(i);
+    let withinMargin = 0;
+    for (const i of order.slice(topKIndices.length)) {
+      if (selected.size >= SCREEN_PRICE_CAP_MULTIPLE * topKLimit) break;
+      if (estimates[i]! <= bestEstimate * (1 + marginPct / 100) + EPS) {
+        selected.add(i);
+        withinMargin++;
+      } else break;
+    }
+    // THE BEST CHAIN'S REST VARIANTS: the same non-rest shape with a coverage rest priced against
+    // it. The rank's rest price needs both sides measured, so these are always priced (#961).
+    let restVariants = 0;
+    const bestShape = chainShape(candidates[order[0]!]!);
+    candidates.forEach((candidate, i) => {
+      if (selected.has(i) || chainShape(candidate) !== bestShape) return;
+      if (!candidate.steps.some((st) => st.coverageRest === true)) return;
+      selected.add(i);
+      restVariants++;
+    });
+    incumbentIndices = incumbentCandidateIndices(candidates);
+    for (const i of incumbentIndices) selected.add(i);
+    const unpricedIndices = candidates.map((_, i) => i).filter((i) => !selected.has(i));
+    let othersSlowerPct: number | null = null;
+    if (unpricedIndices.length > 0 && bestEstimate > 0) {
+      // The LEAST slower unpriced chain, floored: every unpriced one is at least this much slower
+      // than the best estimate, so the receipt's "≥ p % slower" is true of all of them.
+      const least = Math.min(...unpricedIndices.map((i) => (estimates[i]! / bestEstimate - 1) * 100));
+      othersSlowerPct = Math.max(0, Math.floor(least + EPS));
+    }
+    screen = {
+      passedConstraints: keptPrimaries + droppedAsDominated,
+      droppedAsDominated,
+      estimated: candidates.length,
+      priced: selected.size,
+      topK: topKIndices.length,
+      topKLimit,
+      marginPct,
+      withinMargin,
+      restVariants,
+      incumbentChains: incumbentIndices.length,
+      incumbentPriced: incumbentIndices.length > 0,
+      incumbentWon: false,
+      unpriced: unpricedIndices.length,
+      othersSlowerPct,
+    };
+  }
+
+  let pricedIndex = 0;
   const priced = candidates.map((sequence, candidateIndex) => {
     opts.signal?.throwIfAborted();
-    opts.onCandidate?.(candidateIndex, candidates.length);
+    if (!selected.has(candidateIndex)) {
+      return { sequence, priced: null, coverage: null, screenedOut: true as const };
+    }
+    // #1038/#1192 — ONE TICK PER PRICED CANDIDATE, before it is priced: the run's progress row
+    // says "pricing candidate i of k", and the run log keeps it as the stage's own line.
+    opts.onCandidate?.(pricedIndex, selected.size);
+    pricedIndex++;
     // #1019 — an EMPTY chain is the trivially-satisfied demand (every pocket un-enterable, no
     // contour): it prices at zero so it is feasible and chosen, never ranked as "could not be
     // priced"; nothing is posted for it and its `unreachable` states the pockets.
@@ -1178,7 +1422,8 @@ export function chooseSequence(
   // No local threshold between the two freeing-cut options: both are priced on the real steps
   // (the return change included) and the cheaper wins. plan v2's 3× stop rule is a package-vs-
   // vendor line on the reference card, not a per-profile gate here.
-  const considered: ConsideredSequence[] = priced.map(({ sequence, priced: price, coverage }) => ({
+  const considered: ConsideredSequence[] = priced.map(({ sequence, priced: price, coverage, ...rest }) => ({
+    ...(('screenedOut' in rest ? { screenedOut: true } : {})),
     steps: sequence.steps.map((s) => ({ kind: s.kind, cutterKey: s.cutter.key })),
     leftoverCells: coverage === null ? null : coverage.leftoverCells,
     coveredCells: coverage === null ? null : coverage.coveredCells,
@@ -1194,7 +1439,9 @@ export function chooseSequence(
     catalogueSteps: sequence.steps.filter((s) => !s.cutter.house).length,
     fallbackSteps: sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length,
     reason: price === null
-      ? 'the primary step could not be planned'
+      ? ('screenedOut' in rest
+        ? 'not priced: outside the proposal screen (estimate rank, margin, rest variants and the incumbent)'
+        : 'the primary step could not be planned')
       : price.failures.length > 0
         ? `${price.failures.length} step${price.failures.length === 1 ? '' : 's'} could not be planned`
         : '',
@@ -1371,6 +1618,17 @@ export function chooseSequence(
     steps,
     cost: best.cost,
     considered,
+    // #1192 rule 3 — the screen's own count line, for the receipt and the Log.
+    ...(screen === undefined
+      ? {}
+      : {
+          screen: {
+            ...screen,
+            // The pick is one of the chains the pre-#1186 order would have priced, so it would
+            // have chosen the same plan (the promise that a job's cycle cannot rise by the screen).
+            incumbentWon: incumbentIndices.includes(candidates.indexOf(best.sequence)),
+          },
+        }),
     unreachable,
     freeing,
     unplanned: best.failures,
