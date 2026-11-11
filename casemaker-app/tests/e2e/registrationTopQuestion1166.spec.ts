@@ -217,6 +217,9 @@ test('#1179 B — with finished programs on the machine the run MEASURES a cut b
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
   const approve = page.getByTestId('engrave-registration-approve-start');
   await expect(approve).toHaveText('Register');
+  // #1202 (later) — the first-run hold: the card's statement is ticked before the press.
+  const firstRunTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await firstRunTick.count()) > 0) await firstRunTick.check();
   await approve.click();
 
   // The mount confirm comes first, as on the plain seek — and the typed-Z QUESTION #1166 c1 added
@@ -274,6 +277,9 @@ test('#1166 c1 — a job with NO finished programs takes the plain seek, and the
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top');
+  // #1202 (later) — the first-run hold: the card's statement is ticked before the press.
+  const firstRunTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await firstRunTick.count()) > 0) await firstRunTick.check();
   await page.getByTestId('engrave-registration-approve-start').click();
   // The seek path keeps the #427 clamp confirm (the question's answers skip it): it asks before
   // the probe moves, so the walk answers it, then the seek runs.

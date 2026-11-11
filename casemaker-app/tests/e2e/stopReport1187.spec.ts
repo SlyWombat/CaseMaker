@@ -153,6 +153,9 @@ test('#1187 — a Register stop on a dead link offers its own report, and nothin
   await cm.ready();
   await prepare(page);
 
+  // #1202 (later) — the first-run hold: the card's statement is ticked before the press.
+  const firstRunTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await firstRunTick.count()) > 0) await firstRunTick.check();
   await page.getByTestId('engrave-registration-approve-start').click();
 
   // The run dies on its M491 read — BEFORE the operator's fit-probe confirm is ever asked, so

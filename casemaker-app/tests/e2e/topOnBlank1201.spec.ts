@@ -182,6 +182,9 @@ test('#1201 — Register runs the two top touches, writes the origin, and every 
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('the top on the blank', {
     timeout: 60_000,
   });
+  // #1202 (later) — the first-run hold: the card's statement is ticked before the press.
+  const firstRunTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await firstRunTick.count()) > 0) await firstRunTick.check();
   await page.getByTestId('engrave-registration-approve-start').click();
   await page.getByTestId('engrave-registration-continue').click();
 

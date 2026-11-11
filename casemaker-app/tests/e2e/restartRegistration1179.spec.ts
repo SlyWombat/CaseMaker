@@ -203,6 +203,10 @@ async function prepare(page: Page): Promise<void> {
   // so the operator can clear those spots: they sit inset from the stock's edges, not on the
   // corners where the bench's first touch met a pile.
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('in from the stock');
+  // #1202 (later) — a routine whose first run this machine has never seen is held until the
+  // card's own first-run statement is ticked.
+  const firstRunTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await firstRunTick.count()) > 0) await firstRunTick.check();
   await page.getByTestId('engrave-registration-approve-start').click();
   // The seek path keeps the #427 clamp confirm; the checks move nothing sideways from it.
   await page.getByTestId('engrave-registration-continue').click();
