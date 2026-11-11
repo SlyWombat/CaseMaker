@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
-import { runCentreFind, type CentreFindOptions } from '@/engine/cnc/registration/execute';
+import { centreFindRegionProblem, runCentreFind, type CentreFindOptions } from '@/engine/cnc/registration/execute';
 import { planCentreFind } from '@/engine/cnc/registration/centreFind';
 
 // The bench, in MACHINE coordinates: the vise's counterbore at X −203.498, Y −181.329, calipered
@@ -336,5 +336,80 @@ describe('#932 a zero release distance', () => {
     // …and #933's stop path still backs the triggered stylus off, with the compiled distance: a
     // release setting of 0 must not leave the probe down for the epilogue's home.
     expect(fake.lines.filter((l) => l.startsWith('G38.5'))).toEqual(['G38.5 Z3 F100']);
+  });
+});
+
+// #1211 field 5 (remainder) — THE CENTRE FIND ON THE 4TH AXIS: its descents obey the rotary job's
+// region, its traverses obey the chuck keep-out at any Z, and both are proven BEFORE anything is
+// sent (a refused find has an empty transcript). The find's moves are G54 WORK coordinates, so the
+// caller states the work origin's machine XY and the machine-frame region is evaluated through it.
+describe('#1211 field 5 — the centre find’s rotary region', () => {
+  const AXIS_Y_MACHINE = G54.y + 20; // the find's work Y 20, in machine Y
+  const origin = { x: G54.x, y: G54.y };
+  const baseRegion = {
+    jawFaceX: -250,
+    freeEndMm: 80,
+    axisY: AXIS_Y_MACHINE,
+    envelopeRadiusMm: 40,
+    probeRadiusMm: R,
+    marginMm: 3,
+    workOriginMachine: origin,
+  } as const;
+
+  it('a traverse that would enter the chuck keep-out refuses before anything is sent', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
+    const r = await runCentreFind(
+      options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion, jawFaceX: -200 } }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('keep-out');
+    expect(r.transcript).toEqual([]);
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('a region too short for the pair starts refuses by name, with nothing sent', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
+    const r = await runCentreFind(
+      options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion, freeEndMm: 20 } }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('region');
+    expect(r.transcript).toEqual([]);
+    expect(fake.lines).toHaveLength(0);
+  });
+
+  it('a region that holds the find lets it run to the measured centre', async () => {
+    const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
+    const r = await runCentreFind(
+      options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion } }),
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
+    );
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.centreWork.x).toBeCloseTo(10, 2);
+    expect(r.centreWork.y).toBeCloseTo(20, 2);
+    expect(r.centreMachine.x).toBeCloseTo(CENTRE.x, 2);
+    expect(r.centreMachine.y).toBeCloseTo(CENTRE.y, 2);
+  });
+
+  it('every pair start the region admits is a point the descent may use (property over free ends)', () => {
+    // The pre-check admits a find exactly when each of its four pair starts and its top touch is
+    // in the region and clear of the keep-out — checked here against the same function the
+    // executor uses, for a sweep of free ends around the starts' own reach.
+    const startsX = [10 - 8, 10 + 8].map((x) => x + origin.x);
+    for (const freeEndMm of [10, 20, 25, 30, 40, 60, 80]) {
+      const region = { ...baseRegion, freeEndMm };
+      const problem = centreFindRegionProblem(
+        options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: region }),
+      );
+      const xMax = region.jawFaceX + freeEndMm - region.marginMm;
+      // The top touch (work 24,20) is a descent point too; every point must be in [xMin, xMax].
+      const topX = 24 + origin.x;
+      const fits = [topX, ...startsX].every((mx) => mx <= xMax + 1e-6 && mx > region.jawFaceX + 3 + R - 1e-6);
+      expect(problem === null, `freeEnd ${freeEndMm}: ${problem ?? ''}`).toBe(fits);
+    }
   });
 });

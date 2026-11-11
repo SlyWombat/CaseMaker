@@ -112,7 +112,9 @@ import {
   planTravelProblem,
   rotaryJobDescentRegion,
   type MotionOrderGuardOptions,
+  type RotaryJobRegionInput,
 } from './motionOrder';
+import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -1592,6 +1594,14 @@ export interface CentreFindOptions {
    * clearance.
    */
   hold: CentreFindHold;
+  /**
+   * #1211 field 5 — THE ROTARY JOB'S REGION, when the find runs on the 4th axis: the same inputs
+   * `runFaceAngle` hands `rotaryJobDescentRegion` (field 2), plus the WORK origin's own MACHINE XY.
+   * The find's moves are G54 work coordinates and the region is machine XY, so the origin is what
+   * proves the mapping (the guard's `travelKeepOut` takes the same X). Absent: a flat-bed find —
+   * the hold footprint alone, exactly as before.
+   */
+  rotaryRegion?: RotaryJobRegionInput & { workOriginMachine: { x: number; y: number } };
 }
 
 /**
@@ -1705,6 +1715,52 @@ const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
  * a RegistrationOutcome whose `correctedG54` puts the measured centre at work (0,0) and whose
  * `surfaceZ` is the top, so `applyCorrection` writes it with no other translation.
  */
+/**
+ * #1211 field 5 — THE REFUSAL for a rotary find whose own points leave the job's region or cross
+ * the chuck keep-out, or null. Checked BEFORE anything is sent, from the plan the run will use:
+ * the top touch and each pair's start (where the ball descends to the touch depth). The first
+ * offending point is named; a flat-bed find (no `rotaryRegion`) has no region problem.
+ */
+export function centreFindRegionProblem(opts: CentreFindOptions): string | null {
+  const region = opts.rotaryRegion;
+  if (region === undefined) return null;
+  const allowed = rotaryJobDescentRegion(region);
+  const keepOutMm = region.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM;
+  const maxMachineX = region.jawFaceX + keepOutMm;
+  const origin = region.workOriginMachine;
+  const toMachine = (p: { x: number; y: number }): { x: number; y: number } => ({ x: p.x + origin.x, y: p.y + origin.y });
+  const describe = (p: { x: number; y: number }): string => `machine X ${f(p.x)}, Y ${f(p.y)}`;
+
+  // The traverses first: a pair start is where the ball travels to at the clearance, and the
+  // chuck keep-out holds at every height.
+  const starts = opts.plan.order.flatMap((axis) =>
+    ([-1, 1] as const).map((sign) => ({
+      what: `the ${sign < 0 ? '−' : '+'}${axis.toUpperCase()} pair start`,
+      at: toMachine(centrePair(opts.plan.kind, opts.plan.at, axis, sign, opts.plan.searchMm).from),
+    })),
+  );
+  for (const start of starts) {
+    if (start.at.x <= maxMachineX + 1e-9) {
+      return (
+        `the ${start.what} at ${describe(start.at)} is inside the chuck keep-out (machine X ≤ ${f(maxMachineX)}): ` +
+        'a rotary find never moves over the chuck, at any Z — nothing was sent'
+      );
+    }
+  }
+  // Then every descent point: the top touch and the pair starts.
+  const topAt = toMachine(opts.topTouchAt ?? opts.plan.at);
+  for (const point of [{ what: 'the top touch', at: topAt }, ...starts]) {
+    if (!allowed(true, point.at.x, point.at.y)) {
+      return (
+        `the rotary job's region does not contain ${point.what} at ${describe(point.at)}: the region runs from the ` +
+        `jaws' keep-out plus the probe's radius to the free end less the top-touch margin, and |Y − the axis| within ` +
+        'the section envelope less that margin — nothing was sent'
+      );
+    }
+  }
+  return null;
+}
+
 export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Promise<CentreRunResult> {
   // #1211 field 6 — A TOP-TOUCH-ONLY UNIT NEVER SENDS THE WALL TOUCHES: the find IS sideways
   // touches (±X/±Y at the depth), and a unit checked for top touches only cannot take them.
@@ -1720,14 +1776,39 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
   // #1211 field 5 — THE HOLD IS CHECKED BEFORE ANYTHING IS SENT (deny by default).
   const holdProblem = centreFindHoldProblem(opts);
   if (holdProblem !== null) return { ok: false, reason: holdProblem, transcript: [] };
+  // #1211 field 5 — and the rotary job's region, for a find on the 4th axis: its own points are
+  // checked against the region and the chuck keep-out before the first line is sent.
+  const regionProblem = centreFindRegionProblem(opts);
+  if (regionProblem !== null) return { ok: false, reason: regionProblem, transcript: [] };
   const plan = opts.plan;
   const release = opts.releaseMm ?? 3;
   // #933 — centre-find is the 3D probe's routine: a stop with the ball deflected releases it.
-  // #1211 field 5 — the guard's second line: no descent below the clearance outside the footprint.
+  // #1211 field 5 — the guard's second line: no descent below the clearance outside the footprint
+  // (and, on the rotary, outside the job's region — both frames are compiled through the stated
+  // work origin, since the find's moves are work G54 lines and the region is machine XY).
   const footprint = opts.hold.footprint;
+  const region = opts.rotaryRegion;
+  const regionAllowed = region === undefined ? null : rotaryJobDescentRegion(region);
+  const regionKeepOutMm = region === undefined ? 0 : (region.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM);
   const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true, {
-    descentAllowed: (_machine, x, y) =>
-      x >= footprint.xMin - 1e-6 && x <= footprint.xMax + 1e-6 && y >= footprint.yMin - 1e-6 && y <= footprint.yMax + 1e-6,
+    descentAllowed: (machine, x, y) => {
+      const wx = region === undefined || !machine ? x : x - region.workOriginMachine.x;
+      const wy = region === undefined || !machine ? y : y - region.workOriginMachine.y;
+      if (!(wx >= footprint.xMin - 1e-6 && wx <= footprint.xMax + 1e-6 && wy >= footprint.yMin - 1e-6 && wy <= footprint.yMax + 1e-6)) {
+        return false;
+      }
+      if (regionAllowed === null || region === undefined) return true;
+      return regionAllowed(true, wx + region.workOriginMachine.x, wy + region.workOriginMachine.y);
+    },
+    ...(region === undefined
+      ? {}
+      : {
+          travelKeepOut: {
+            maxMachineX: region.jawFaceX + regionKeepOutMm,
+            what: 'chuck',
+            workOriginMachineX: region.workOriginMachine.x,
+          },
+        }),
   });
   /** #789 — whether the probe's supply was (or may have been) switched on. */
   let powered = false;

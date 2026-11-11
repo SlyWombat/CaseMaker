@@ -62,7 +62,17 @@ export interface MotionOrderGuardOptions {
    * inside it (a state the guard should never have allowed) is refused too. A WORK-frame X line is
    * refused while this is set: its machine X cannot be proven.
    */
-  travelKeepOut?: { maxMachineX: number; what: string };
+  travelKeepOut?: {
+    maxMachineX: number;
+    what: string;
+    /**
+     * #1211 field 5 — THE WORK FRAME'S OWN PROOF. A centre find's moves are G54 WORK coordinates
+     * while the keep-out is machine X; when the caller states the work origin's own MACHINE X, a
+     * work X line is provable as `x + workOriginMachineX` and the same rule applies. Absent: a
+     * work-frame X line cannot be proven and is refused, exactly as before.
+     */
+    workOriginMachineX?: number;
+  };
 }
 
 export interface MotionOrderGuard {
@@ -368,23 +378,29 @@ export function motionOrderGuard(clearanceZ: number, opts: MotionOrderGuardOptio
     // #1211 field 3 — THE CHUCK KEEP-OUT, BEFORE ANY Z QUESTION: no height over the chuck is clear,
     // so a traverse that ends inside it is refused at any Z, the clearance included.
     if (opts.travelKeepOut !== undefined && w.x !== null) {
-      const { maxMachineX, what } = opts.travelKeepOut;
-      if (!w.machine || (lastXY !== null && !lastXY.machine)) {
+      const { maxMachineX, what, workOriginMachineX } = opts.travelKeepOut;
+      // #1211 field 5 — a work-frame line is provable only when the caller states the origin.
+      const workStartUnproven = lastXY !== null && !lastXY.machine && workOriginMachineX === undefined;
+      if ((!w.machine && workOriginMachineX === undefined) || workStartUnproven) {
         return (
           `refusing to move X in the work frame: the ${what}'s keep-out is machine X ≤ ${f(maxMachineX)}, and this ` +
-          `line's machine X cannot be proven — send it as G53, or move clear of the ${what}`
+          `line's machine X cannot be proven — send it as G53, or state the work origin, or move clear of the ${what}`
         );
       }
-      if (w.x <= maxMachineX + 1e-9) {
+      const machineX = w.machine ? w.x : w.x + workOriginMachineX!;
+      if (machineX <= maxMachineX + 1e-9) {
         return (
-          `refusing to move to machine X ${f(w.x)}: the ${what}'s keep-out is X ≤ ${f(maxMachineX)} at ANY Z — ` +
+          `refusing to move to machine X ${f(machineX)}: the ${what}'s keep-out is X ≤ ${f(maxMachineX)} at ANY Z — ` +
           `the jaws' reach varies with the grip, so no height over the ${what} is clear`
         );
       }
-      if (lastXY !== null && lastXY.x <= maxMachineX + 1e-9) {
-        return (
-          `refusing to move from machine X ${f(lastXY.x)}: it is inside the ${what}'s keep-out (X ≤ ${f(maxMachineX)})`
-        );
+      if (lastXY !== null) {
+        const startMachineX = lastXY.machine ? lastXY.x : lastXY.x + workOriginMachineX!;
+        if (startMachineX <= maxMachineX + 1e-9) {
+          return (
+            `refusing to move from machine X ${f(startMachineX)}: it is inside the ${what}'s keep-out (X ≤ ${f(maxMachineX)})`
+          );
+        }
       }
     }
     // #1211 field 4 — THE TURN FLOOR, for EVERY A word in the session (the routine's own check is
