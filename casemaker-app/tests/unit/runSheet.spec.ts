@@ -1761,9 +1761,10 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
   const throughFacts = (): NonNullable<RunSheetGenerated['through']> => ({
     breakthroughMm: 0.3,
     boardThicknessMm: 12,
+    maxSpanMm: 80,
     cutouts: [
-      { id: 'cut-1', name: 'Badge', tabs: { count: 4, widthMm: 4, heightMm: 1 }, spans: 4, unplaceable: 0 },
-      { id: 'cut-2', name: 'Insert', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0 },
+      { id: 'cut-1', name: 'Badge', tabs: { count: 4, widthMm: 4, heightMm: 1 }, spans: 4, unplaceable: 0, added: 0 },
+      { id: 'cut-2', name: 'Insert', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0, added: 0 },
     ],
   });
 
@@ -1784,12 +1785,29 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
     expect(cut).not.toContain('Insert:');
   });
 
+  it('states the tabs the span limit added, and counts the tabs actually cut (#1206)', () => {
+    const job = dj();
+    const facts = {
+      ...throughFacts(),
+      cutouts: [
+        { id: 'cut-1', name: 'Badge', tabs: { count: 2, widthMm: 4, heightMm: 1 }, spans: 8, unplaceable: 0, added: 6 },
+      ],
+    };
+    const cut = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: facts }, NO_SIM, NOW), 'cut');
+    // The count is what the CAM placed, and the sheet says why it is more than asked.
+    expect(cut).toContain('Badge: 8 tabs, 4 mm wide and 1 mm high');
+    expect(cut).toContain('The planner placed 6 more than asked');
+    expect(cut).toContain('no stretch of the outline is left longer than 80 mm');
+    expect(cut).toContain('8 tabs to cut by hand');
+  });
+
   it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
     const job = dj();
     const noTabs: RunSheetGenerated['through'] = {
       breakthroughMm: 0.3,
       boardThicknessMm: null,
-      cutouts: [{ id: 'c', name: 'Part', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0 }],
+      maxSpanMm: 80,
+      cutouts: [{ id: 'c', name: 'Part', tabs: { count: 0, widthMm: 4, heightMm: 1 }, spans: 0, unplaceable: 0, added: 0 }],
     };
     const withNone = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: noTabs }, NO_SIM, NOW), 'cut');
     expect(withNone).toContain('cuts one piece out of the blank');

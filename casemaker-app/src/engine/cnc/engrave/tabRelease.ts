@@ -394,7 +394,7 @@ function placeReleaseTabs(
   const chosen = spreadSelect(candidates, tabs.count, spanLength, perimeter);
   if (chosen === null) return null;
   const targets = chosen.map((c) => c.startArc + spanLength / 2);
-  const placement = placeTabs(ring, tabs.count, tabs.widthMm, toolRadiusMm, targets);
+  const placement = placeTabs(ring, tabs.count, tabs.widthMm, toolRadiusMm, { targets });
   if (placement.spans.length !== tabs.count) return null;
   if (!placement.spans.every((span) => spanClears(span, corners, pins))) return null;
   // The spans must be the ones asked for, not a distant edge's snap: each centre within half a
@@ -526,7 +526,7 @@ export function planTabRelease(input: TabReleaseInput): TabReleaseResult {
     const target = i === levels.length - 1 ? finalMoves : bulkMoves;
     for (const r of rings) {
       // The spans were placed on the largest ring; a second ring (an island) is cut untabbed.
-      const on: TabPlacement = r === ring ? placement : { spans: [], unplaceable: 0 };
+      const on: TabPlacement = r === ring ? placement : { spans: [], unplaceable: 0, added: 0 };
       target.push(...contourMoves(r, z, tabTopZ, on, input.params).moves);
     }
   });

@@ -313,6 +313,13 @@ export interface ModelPlanInput {
    */
   freeingTabs?: { count: number; widthMm: number; heightMm: number };
   /**
+   * #1206 — THE SHOP'S `tabs.maxSpanMm`, mm: no stretch of the freeing contour is left longer
+   * than this without a tab. Applied to whichever tab spec the plan uses (the job's stated
+   * `freeingTabs`, or {@link DEFAULT_RELEASE_TABS} when it states none). Absent: no span rule,
+   * exactly the pre-#1206 placement.
+   */
+  tabMaxSpanMm?: number;
+  /**
    * #943 (10) — THE JOB'S OWN SETUP COUNT, when this input is one setup of a larger job re-planned
    * ALONE (the #1017 twin): the single-setup-only rules — the "outline is the stock, no freeing
    * contour" rule — must read the JOB, not the input that a twin or a caller narrowed. The plan
@@ -2067,6 +2074,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         : input.freeingTabs === undefined
           ? undefined
           : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
+    // #1206 — the shop's span limit rides whichever spec the plan uses; a job that states its
+    // own tabs is not exempt from "no unsupported stretch longer than the limit".
+    const tabSpec = tabs !== undefined && input.tabMaxSpanMm !== undefined ? { ...tabs, maxSpanMm: input.tabMaxSpanMm } : tabs;
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -2466,7 +2476,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // over-clip" / `pocketShadowNestedFloor966.spec.ts` cases. `curvedOpsProperty959` is back
         // at its own 95% line, unchanged.
         shadowMesh: curvedGeometry.triangles,
-        ...(tabs === undefined ? {} : { tabs }),
+        ...(tabSpec === undefined ? {} : { tabs: tabSpec }),
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
         facing: input.facing ?? 'off',
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
@@ -3466,7 +3476,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this

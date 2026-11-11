@@ -406,6 +406,8 @@ export interface RunSheetThroughFacts {
   breakthroughMm: number;
   /** The board's thickness, or null when the job states none. */
   boardThicknessMm: number | null;
+  /** #1206 — the shop's `tabs.maxSpanMm` the placement ran with, mm. Absent on a pre-#1206 run. */
+  maxSpanMm?: number;
   cutouts: readonly {
     id: string;
     name: string;
@@ -414,6 +416,8 @@ export interface RunSheetThroughFacts {
     spans: number;
     /** Spans it could not place; a non-zero count is a finding, never a silent omission. */
     unplaceable: number;
+    /** #1206 — tabs the span limit added beyond the requested count (absent on a pre-#1206 run). */
+    added?: number;
   }[];
 }
 
@@ -3840,20 +3844,28 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
   ];
   const tabbed = facts.cutouts.filter((c) => c.tabs.count > 0);
   if (tabbed.length > 0) {
-    const total = tabbed.reduce((sum, c) => sum + c.tabs.count, 0);
+    // #1206 — the count is what the CAM PLACED (`spans`), not what was requested: the span limit
+    // may add tabs, and an unplaceable one was never cut. The operator removes real tabs.
+    const total = tabbed.reduce((sum, c) => sum + c.spans, 0);
+    const added = tabbed.reduce((sum, c) => sum + (c.added ?? 0), 0);
     const detail = tabbed
       .map(
         (c) =>
-          `${c.name}: ${c.tabs.count} tab${c.tabs.count === 1 ? '' : 's'}, ` +
+          `${c.name}: ${c.spans} tab${c.spans === 1 ? '' : 's'}, ` +
           `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`,
       )
       .join('; ');
+    const addedWords =
+      added === 0
+        ? ''
+        : ` The planner placed ${added} more than asked, so no stretch of the outline is left longer ` +
+          `than ${fmtNum(facts.maxSpanMm ?? 0)} mm.`;
     steps.push({
       // A DISTINCT step, not a sentence inside another: the program holds the part by these tabs,
       // and the operator must not free it before the file ends.
       text:
         `Only after the program ends, remove the cut-out ${count === 1 ? 'part' : 'parts'} and cut ` +
-        `the ${total === 1 ? 'holding tab' : 'holding tabs'} by hand — ${detail}. Cut each tab flush ` +
+        `the ${total === 1 ? 'holding tab' : 'holding tabs'} by hand — ${detail}.${addedWords} Cut each tab flush ` +
         'with the part and the blank; do not lever a part out by its tabs.',
       value: `${total} tab${total === 1 ? '' : 's'} to cut by hand`,
     });

@@ -26,7 +26,7 @@ import { CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
-import { TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
+import { TAB_MAX_SPAN_FALLBACK_MM, TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
 import {
   houseRequest,
   setHouseRequestTimeoutMs,
@@ -665,6 +665,17 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     unit: 'mm',
     rule: z.number().min(0.1).max(20),
     fallback: TAB_SETTINGS_FALLBACK.heightMm,
+  },
+  // #1206 — no stretch of the outline is left longer than this between two holding tabs: the
+  // planner adds tabs on the long edges' own even division and the run sheet says how many. The
+  // recommended value scales with the stock (80 mm on 6 mm or thicker, 40 mm under 3 mm, linear
+  // between); the setting holds one number for the shop.
+  'tabs.maxSpanMm': {
+    label:
+      'longest stretch of outline between holding tabs (recommended 80 mm on stock 6 mm or thicker, 40 mm under 3 mm)',
+    unit: 'mm',
+    rule: z.number().min(10).max(400),
+    fallback: TAB_MAX_SPAN_FALLBACK_MM,
   },
   // #417 — how deep a cut may go into the wasteboard before it is warned about.
   'wasteboard.depthLimitMm': {

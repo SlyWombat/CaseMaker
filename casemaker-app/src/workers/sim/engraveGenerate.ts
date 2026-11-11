@@ -673,6 +673,8 @@ export interface ThroughCutFacts {
   breakthroughMm: number;
   /** The under-board's thickness, mm, or null when the job has none (refused before CAM). */
   boardThicknessMm: number | null;
+  /** #1206 — the shop's `tabs.maxSpanMm` the placement ran with, mm. */
+  maxSpanMm: number;
   cutouts: {
     id: string;
     name: string;
@@ -681,6 +683,8 @@ export interface ThroughCutFacts {
     spans: number;
     /** Tabs asked for but not placed; 0 on a run that reached CAM. */
     unplaceable: number;
+    /** #1206 — tabs the span limit added beyond the request. */
+    added: number;
   }[];
 }
 
@@ -2398,6 +2402,9 @@ export function engraveRegions(
   // offset the region CAM uses, so the path CAM cuts, the path the verifier's mask tests and the
   // region the oracle expects are one geometry rather than three derivations.
   const throughDepth = plan.stock.thickness + job.breakthrough;
+  // #1206 — the shop's span limit: no stretch of a freeing contour is left longer than this
+  // without a tab. Read once, so the mask, the cut and the sheet's words use one number.
+  const tabMaxSpanMm = readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value;
   const profiles: ProfileCut[] = [];
   const cutoutMask: MaskCutout[] = [];
   const cutoutCuts: CutRegion[] = [];
@@ -2479,7 +2486,7 @@ export function engraveRegions(
       let placed = 0;
       let unplaceable = 0;
       for (const contour of path) {
-        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius);
+        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm });
         spans.push(placement.spans);
         placed += placement.spans.length;
         unplaceable += placement.unplaceable;
@@ -2490,7 +2497,7 @@ export function engraveRegions(
         path,
         depth: c.depth,
         thickness: c.thickness,
-        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height },
+        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm },
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
@@ -5536,6 +5543,9 @@ export async function buildModelPlanInputForGoal(
               ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
               : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
         }),
+    // #1206 — the shop's span limit for the freeing contour's tabs: no stretch of the outline is
+    // left longer than this without a tab. The job's own tab spec does not override it.
+    tabMaxSpanMm: readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     // #1234 — the fixture answer the finishing edge overrun reads (see `stockEdgeOpenAt`): the plan
@@ -8660,6 +8670,7 @@ async function generateOneProgram(
         cutoutFacts = {
           breakthroughMm: job.breakthrough,
           boardThicknessMm: job.sacrificial.under?.thickness ?? null,
+          maxSpanMm: readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value,
           cutouts: profileResult.tabs.map((report) => {
             const cut = byId.get(report.id);
             return {
@@ -8672,6 +8683,7 @@ async function generateOneProgram(
               },
               spans: report.spans,
               unplaceable: report.unplaceable,
+              added: report.added,
             };
           }),
         };

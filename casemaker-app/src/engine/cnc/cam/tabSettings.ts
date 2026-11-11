@@ -49,6 +49,14 @@ export const TAB_SETTINGS_FALLBACK: TabSettings = {
   heightMm: 1,
 };
 
+/**
+ * #1206 — the longest stretch of outline allowed between two holding tabs, mm, when there is NO
+ * LOCATION TO READ. Chosen, not measured: 80 mm on stock 6 mm or thicker, 40 mm under 3 mm, linear
+ * between. `defaults.rs` seeds the same number; the location's own value wins, and the planner
+ * adds tabs (on the long edges' own even division) when the requested count cannot meet it.
+ */
+export const TAB_MAX_SPAN_FALLBACK_MM = 80;
+
 /** Where a tab number came from, as `readDefault` reports it (seeded/chosen/measured/fallback). */
 export type TabSettingSource = string;
 

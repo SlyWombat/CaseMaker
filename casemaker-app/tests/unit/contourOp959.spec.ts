@@ -126,7 +126,9 @@ describe('#1160 the release tab cannot rise above the stock top', () => {
   const shallow = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 
   it('a 1 mm tab on a 0.81 mm part is clamped: no feed is posted above the stock top', () => {
-    const c = contourOf({ outline: rect(20, 10), area: 200, zTo: -0.81, frees: true, shoulders: [] });
+    // #1206 — a 60 x 40 part, so the 6 mm tabs have the corner margin the mid-side rule asks for
+    // (on the old 20 x 10 fixture, max(2 x 6, 10 %) = 12 mm a side leaves a 20 mm edge nothing).
+    const c = contourOf({ outline: rect(60, 40), area: 2400, zTo: -0.81, frees: true, shoulders: [] });
     const out = contour({
       cutter: shallow, contour: c, region: region(),
       depthMm: 0.81, tabs: { count: 4, width: 6, height: 1 },

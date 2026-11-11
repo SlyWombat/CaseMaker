@@ -132,13 +132,15 @@ describe('placeTabs (#218)', () => {
     expect(placement.unplaceable).toBe(4);
   });
 
-  it('places two tabs on each long side and reports the rest as unplaceable', () => {
-    // A 20 x 3 rectangle holds two 7.175 mm spans on each 20 mm side and none on a 3 mm side, so
-    // six requested tabs fit four; the two that do not fit are unplaceable, not extra tabs.
+  it('a short edge holds one centred tab; the 3 mm sides take none (#1206)', () => {
+    // #1206 — on a 20 x 3 rectangle the margin is max(2 x 4, 10 % of 20) = 8 mm; a tab is 4 mm of
+    // material at the edge's midpoint, its kept edge exactly 8 mm from the corner, so ONE tab fits
+    // each 20 mm side. The 3 mm sides are shorter than the 7.175 mm span and take none; the other
+    // four of six are unplaceable.
     const placement = placeTabs(rect(20, 3)[0]!, 6, 4, R);
-    expect(placement.spans.length).toBe(4);
-    expect(placement.unplaceable).toBe(2);
-    expect(placement.spans.length + placement.unplaceable).toBe(6);
+    expect(placement.spans.length).toBe(2);
+    expect(placement.unplaceable).toBe(4);
+    expect(placement.added).toBe(0);
   });
 
   it('places four tabs on a polygonised circle, each following the arc (#736)', () => {
@@ -196,6 +198,183 @@ describe('placeTabs (#218)', () => {
     // One tab in each quarter of the path: four different sides, not four tabs on one.
     const quarters = new Set(placement.spans.map((span) => Math.floor(span.startArc / (perimeter / 4))));
     expect(quarters.size).toBe(4);
+  });
+});
+
+describe('placeTabs mid-side (#1206)', () => {
+  /** The geometric centre of a span on a straight edge (its ends' midpoint). */
+  const centreOf = (span: { start: readonly [number, number]; end: readonly [number, number] }): [number, number] => [
+    (span.start[0] + span.end[0]) / 2,
+    (span.start[1] + span.end[1]) / 2,
+  ];
+  /** A cyclic arc gap from each span's end to the next span's start. */
+  function gaps(spans: readonly { startArc: number; endArc: number }[], perimeter: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < spans.length; i++) {
+      const next = spans[(i + 1) % spans.length]!;
+      const span = spans[i]!;
+      if (spans.length === 1) {
+        out.push(perimeter - (span.endArc - span.startArc));
+        continue;
+      }
+      let gap = (next.startArc - span.endArc) % perimeter;
+      if (gap < 0) gap += perimeter;
+      out.push(gap);
+    }
+    return out;
+  }
+
+  it('four tabs on a 160 x 126 rectangle are centred on the four side midpoints', () => {
+    const placement = placeTabs(rect(160, 126)[0]!, 4, 4, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.added).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    const mids: [number, number][] = [
+      [80, 0],
+      [160, 63],
+      [80, 126],
+      [0, 63],
+    ];
+    for (const [mx, my] of mids) {
+      expect(
+        placement.spans.some((span) => {
+          const [cx, cy] = centreOf(span);
+          return Math.hypot(cx - mx, cy - my) <= 0.01;
+        }),
+        `a span is centred at (${mx}, ${my})`,
+      ).toBe(true);
+    }
+  });
+
+  it('two tabs on the same rectangle take the two 160 mm sides', () => {
+    const placement = placeTabs(rect(160, 126)[0]!, 2, 4, R);
+    expect(placement.spans).toHaveLength(2);
+    const centres = placement.spans.map(centreOf);
+    for (const [cx, cy] of centres) {
+      expect(cx).toBeCloseTo(80, 2);
+      expect(cy === 0 || cy === 126).toBe(true);
+    }
+  });
+
+  it('the same rule holds on the REAL offset path (four side midpoints, 160 x 126)', () => {
+    // The CAM never places on the raw outline: it places on the offset centre path, whose sides
+    // are ONE segment each between the round joins. Before #1206's single-segment edge rule the
+    // whole offset rectangle was one smooth edge and every tab kept equal spacing.
+    const path = profilePath(rect(160, 126), 'outside', R, 0, offset);
+    expect(path).toHaveLength(1);
+    const placement = placeTabs(path[0]!, 4, 4, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    const mids: [number, number][] = [
+      [80, -R],
+      [160 + R, 63],
+      [80, 126 + R],
+      [-R, 63],
+    ];
+    for (const [mx, my] of mids) {
+      expect(
+        placement.spans.some((span) => {
+          const [cx, cy] = centreOf(span);
+          return Math.hypot(cx - mx, cy - my) <= 0.01;
+        }),
+        `a span is centred at (${mx}, ${my})`,
+      ).toBe(true);
+    }
+  });
+
+  it('an L-shaped outline centres every tab on an edge, outside the corner margins', () => {
+    // Side lengths 120, 40, 80, 60, 40, 100. The four longest take the four requested tabs, each
+    // at its own midpoint.
+    const outline: [number, number][] = [
+      [0, 0],
+      [120, 0],
+      [120, 40],
+      [40, 40],
+      [40, 100],
+      [0, 100],
+    ];
+    const placement = placeTabs(outline, 4, 4, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    const mids: [number, number][] = [
+      [60, 0],
+      [80, 40],
+      [40, 70],
+      [0, 50],
+    ];
+    for (const [mx, my] of mids) {
+      expect(
+        placement.spans.some((span) => {
+          const [cx, cy] = centreOf(span);
+          return Math.hypot(cx - mx, cy - my) <= 0.01;
+        }),
+        `a span is centred at (${mx}, ${my})`,
+      ).toBe(true);
+    }
+  });
+
+  it('a hexagonal outline puts one tab at each of its six edge midpoints', () => {
+    const r = 60;
+    const outline: [number, number][] = Array.from({ length: 6 }, (_, i) => [
+      r * Math.cos((i * Math.PI) / 3),
+      r * Math.sin((i * Math.PI) / 3),
+    ]);
+    const placement = placeTabs(outline, 6, 4, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(6);
+    for (let i = 0; i < 6; i++) {
+      const a = outline[i]!;
+      const b = outline[(i + 1) % 6]!;
+      const mx = (a[0] + b[0]) / 2;
+      const my = (a[1] + b[1]) / 2;
+      expect(
+        placement.spans.some((span) => {
+          const [cx, cy] = centreOf(span);
+          return Math.hypot(cx - mx, cy - my) <= 0.01;
+        }),
+        `a span is centred on edge ${i}`,
+      ).toBe(true);
+    }
+  });
+
+  it('the span limit adds tabs until no stretch of the outline is longer than it', () => {
+    // A 400 x 400 square: the 10 % margin is 40 mm a side and six tabs a side divide it into
+    // 57.1 mm steps, so a 120 mm limit is met everywhere (the corner stretch is 107.1 mm).
+    const placement = placeTabs(rect(400, 400)[0]!, 2, 4, R, { maxSpanMm: 120 });
+    expect(placement.spans.length).toBeGreaterThan(2);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.added).toBe(placement.spans.length - 2);
+    // Every gap around the whole outline is within the limit.
+    for (const gap of gaps(placement.spans, 4 * 400)) expect(gap).toBeLessThanOrEqual(120 + 1e-6);
+  });
+
+  it('the analyst’s 300 x 60 x 3 case: 2 tabs requested, every stretch within 40 mm', () => {
+    // The 3 mm-stock recommendation (40 mm) is met: each long side divides into eighths and each
+    // short side into sixths, and the corner stretches come to 36.2 mm.
+    const placement = placeTabs(rect(300, 60)[0]!, 2, 4, R, { maxSpanMm: 40 });
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.added).toBeGreaterThan(0);
+    expect(placement.spans.length).toBe(placement.added + 2);
+    for (const gap of gaps(placement.spans, 2 * (300 + 60))) expect(gap).toBeLessThanOrEqual(40 + 1e-6);
+  });
+
+  it('a limit the corner margins cannot meet still fills every edge, and the margin wins', () => {
+    // A 20 x 12 part with a 7 mm limit: the long side holds one centred tab (its kept material is
+    // exactly 8 mm from each corner), the 12 mm sides hold none — so two tabs is the most the
+    // margins allow and the outline's shortest spans stay longer than the limit. The margin is the
+    // hard rule; the planner places what it can and `added` says how many it added.
+    const placement = placeTabs(rect(20, 12)[0]!, 2, 4, R, { maxSpanMm: 7 });
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.spans).toHaveLength(2);
+    expect(placement.added).toBe(0);
+    const worst = Math.max(...gaps(placement.spans, 2 * (20 + 12)));
+    expect(worst).toBeGreaterThan(7);
+  });
+
+  it('without a span limit the requested count is all that is placed', () => {
+    const placement = placeTabs(rect(300, 60)[0]!, 2, 4, R);
+    expect(placement.spans).toHaveLength(2);
+    expect(placement.added).toBe(0);
   });
 });
 
