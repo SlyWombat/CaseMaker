@@ -90,7 +90,9 @@ export function AppShell() {
     <div className="app-shell">
       <header className="app-header">
         <h1 className="app-header__logo">
-          <img src="logo-wordmark.svg" alt="Case Maker" height="36" />
+          <img className="app-header__wordmark" src="logo-wordmark.svg" alt="Case Maker" height="36" />
+          {/* #1123-48 — the phone Home bar has no room for the wordmark; it keeps the mark. */}
+          <img className="app-header__mark" src="logo-mark.svg" alt="Case Maker" height="32" width="32" />
         </h1>
         <Toolbar />
       </header>

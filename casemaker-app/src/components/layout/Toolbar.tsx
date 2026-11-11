@@ -383,6 +383,7 @@ export function Toolbar() {
     <button
       onClick={onLoadClick}
       data-testid="load-project"
+      aria-label="Load"
       title="Load a project or a cutting job (.caseproj.json or .cutjob.json)"
     >
       📂 <span className="btn-label">Load</span>
@@ -417,6 +418,7 @@ export function Toolbar() {
     <button
       onClick={() => setDocsOpen(true)}
       data-testid="docs-open"
+      aria-label="Docs"
       title="Open the User Manual"
     >
       📖 <span className="btn-label">Docs</span>
