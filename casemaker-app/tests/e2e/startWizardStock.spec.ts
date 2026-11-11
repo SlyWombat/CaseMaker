@@ -55,12 +55,12 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   // #1105 — the step with its blank cards: the matching row live, the other materials greyed, the
   // vocabulary Woods first. The screenshot is the hand-in's record of the step.
   await expect(page.getByTestId('start-wizard-shelf-other')).toBeVisible();
-  await page.getByTestId('start-wizard-step-stock').screenshot({ path: 'test-results/stock-step-1105.png' });
+  await expect(page.getByTestId('start-wizard-step-stock')).toHaveScreenshot('stock-step-with-shelf.png');
   await plate.click();
-  // The shelf row fills the panel's own size fields (#683) — no summary sentence repeats them.
-  await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('120');
-  await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('60');
-  await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('8');
+  // #1105 item 6 — the picked blank is ONE summary line, not the fields; this walk keeps the shelf
+  // entry (the fields' "edit" would make the numbers the operator's own).
+  await expect(page.getByTestId('start-wizard-stock-summary')).toContainText('120 × 60 × 8 mm');
+  await expect(page.getByTestId('start-wizard-make-length')).toHaveCount(0);
   await page.getByTestId('start-wizard-stock-next').click();
 
   // Step 4 — the same wizard, on the mount; its button is the create (#897).
@@ -100,4 +100,29 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
 
   // Named, not reserved: nothing was written to the shelf (Cut mode, #419, reserves).
   expect(writes).toEqual([]);
+});
+
+// #1105 item 7 — THE OTHER HALF OF THE BASELINE: a house with no shelf. Only the step-2 proposal
+// and the "Other size…" row are on offer, and the step is pinned as its own screenshot.
+test('without a shelf: the design proposal and Other size only', async ({ cm, page }) => {
+  await page.route('**/api/v1/stock**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { etag: '"s-0"' },
+      body: JSON.stringify([]),
+    });
+  });
+
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await openSomethingElse(page);
+  await page.getByTestId('engrave-setup-what-pocket').click();
+  await page.getByTestId('start-wizard-operation-next').click();
+
+  await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-blank-card-design')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-stock-other-size')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-step-stock')).toHaveScreenshot('stock-step-without-shelf.png');
 });

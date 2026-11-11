@@ -20,7 +20,7 @@
 
 import { defaultStockProud, jobVise, validateVise } from '@/engine/cnc/fixture';
 import { FEEDS_TABLE } from '@/engine/cnc/feeds';
-import { MATERIAL_LABELS } from '@/engine/cnc/materials';
+import { MATERIAL_LABELS, materialFamilyOf, type MaterialFamily } from '@/engine/cnc/materials';
 import type { Mill } from '@/engine/cnc/machine';
 import {
   hasSacrificial,
@@ -85,8 +85,15 @@ export function materialOptionsFor(machine?: Mill): MaterialOption[] {
   // The table's own order, because that list is the one this app can cut with no help.
   for (const entry of FEEDS_TABLE) add(entry.material);
   for (const material of machine?.materials ?? []) add(material);
-  return options;
+  // #1105 item 2 — THE VOCABULARY IN THE ORDER A WOODWORKER READS IT. The feeds table's order and
+  // the machine's own list are each a source's order, not a user's; sorting by family (stable) puts
+  // Woods first, then the cast boards, the plastics, the metals and the copper-clad board, keeping
+  // each family's own order. `groupMaterials` draws its sections from this sequence.
+  return options.sort((a, b) => FAMILY_RANK[materialFamilyOf(a.value)] - FAMILY_RANK[materialFamilyOf(b.value)]);
 }
+
+/** #1105 — the family order the options list is sorted by, and the sections read in. */
+const FAMILY_RANK: Readonly<Record<MaterialFamily, number>> = { wood: 0, board: 1, plastic: 2, metal: 3, pcb: 4 };
 
 /**
  * What the part is held in (#240): the vise, or the rotary module's four-jaw self-centring chuck. The rotary

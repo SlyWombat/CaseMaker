@@ -520,6 +520,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("vise.uncertaintyMm", 0.5, "mm", "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"),
     ("vise.defaultStockProudMm", 4.0, "mm", "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"),
     ("vise.minCoverageFraction", 0.5, "x", "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"),
+    // #1105 — the stock step pre-selects a shelf blank within this of the proposal (both the
+    // thickness and the length × width, either orientation).
+    ("stock.shelfMatchMm", 1.0, "mm", "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"),
     ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
 ];
@@ -839,6 +842,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "vise.minCoverageFraction" => Some(need(
             n.is_some_and(|v| (0.05..=1.0).contains(&v)),
             "0.05 to 1, a share of the stock's width",
+        )),
+        "stock.shelfMatchMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
         )),
         "clamp.refuseFraction" => Some(need(
             n.is_some_and(|v| (0.01..=5.0).contains(&v)),

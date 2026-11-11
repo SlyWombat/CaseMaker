@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
@@ -14,6 +14,8 @@ import {
   formLabel,
   formSizeProblem,
   isJobForm,
+  matchShelf,
+  parseInches,
   rodGripProblem,
   rotaryEnvelopeOf,
   shelfFor,
@@ -27,6 +29,8 @@ import {
   type StockSizeKey,
 } from '@/engine/cnc/stockStart';
 import { readStockFile, type StockFileRead } from '@/engine/import/meshStock';
+import { readDefault } from '@/platform/defaultsClient';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { SELECTED_FILL } from '@/components/selectionChip';
 import { featureSim } from '@/platform/features';
 import { stockProblem, type StockItem } from '@/platform/stockClient';
@@ -98,6 +102,16 @@ export interface StartStockSeed {
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
 const REFUSED: CSSProperties = { ...MUTED, color: '#f0b4ad' };
+/** #1105 — the "edit" beside the picked-blank summary: a link, not a second button in the row. */
+const LINK_BUTTON: CSSProperties = {
+  background: 'none',
+  border: 0,
+  padding: 0,
+  color: '#8fc7ff',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+  fontSize: 'inherit',
+};
 const NUM: CSSProperties = { width: 72 };
 // #875 — equal-width form buttons: four columns on the phone (4 + 3), one row on a desktop.
 const FORMS: CSSProperties = { display: 'grid', gap: 6, margin: '4px 0', alignItems: 'stretch' };
@@ -429,7 +443,16 @@ export function StartStockStep({
   // the sentence under the fields states both numbers once a value is entered that way.
   const [unit, setUnit] = useState<'mm' | 'in'>('mm');
   const [lastInch, setLastInch] = useState<string | null>(null);
+  // #1105 item 1 — the operator's own inch text while it is being typed: the field shows THIS, not
+  // a conversion of the millimetres stored under it, so "1.2345" is not rewritten to "1.234" under
+  // the cursor. The parser runs on blur; the draft is dropped once the value is committed.
+  const [inchText, setInchText] = useState<Partial<Record<StockSizeKey, string>>>({});
   const [shelfId, setShelfId] = useState<string | null>(null);
+  // #1105 item 6 — a PICKED blank is one summary line, not the fields; "edit" and "Other size…"
+  // bring the fields back, seeded with the picked numbers (the entry becomes the operator's own).
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  const arrivalMatched = useRef(false);
   // #1109 — the provenance sentence survives typing; it goes only when a DIFFERENT valid number is
   // committed on blur (or another source — a shelf entry, a file, a form — takes the numbers over).
   const [seedDropped, setSeedDropped] = useState(false);
@@ -459,6 +482,23 @@ export function StartStockStep({
   const shelfOk = shelfStatus === 'present';
   // #1105 — the cards show EVERY shelf row; the ones in another material are greyed, not hidden.
   const shelfOther = useMemo(() => items.filter((i) => i.material !== material), [items, material]);
+
+  // #1105 item 5 — THE SHELF BLANK THAT IS THE PROPOSAL IS PRE-SELECTED on arrival, once: the
+  // selected material, its thickness and its length × width within `stock.shelfMatchMm` in either
+  // orientation. No such blank leaves the proposal card selected, exactly as before.
+  useEffect(() => {
+    if (arrivalMatched.current || seed?.computed !== true || !shelfOk || items.length === 0) return;
+    arrivalMatched.current = true;
+    const match = matchShelf(
+      { length: seed.length, width: seed.width, thickness: seed.thickness },
+      items,
+      material,
+      readDefault(shopDefaults ?? null, 'stock.shelfMatchMm').value,
+    );
+    if (match !== null) pickShelf(match);
+    // pickShelf is a declaration in this component, not a dependency of the arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed, shelfOk, items, material, shopDefaults]);
   // A pick that is already on the shelf is not "kept" again; a loaded file is not typed either.
   const canKeep = shelfOk && shelfId === null && fileRead === null;
 
@@ -567,6 +607,8 @@ export function StartStockStep({
     setForm(next);
     setShelfId(null);
     setFileRead(null);
+    // A form is an explicit edit: the fields open (there is no picked blank to summarise).
+    setSummaryOpen(false);
   }
 
   /** Typing a number makes the piece the person's own, not the shelf entry's. */
@@ -580,6 +622,26 @@ export function StartStockStep({
    *  types (a slip must not lose where the numbers came from) and goes only when a different, valid
    *  number is left in the field. */
   function commitDim(key: StockSizeKey): void {
+    // #1105 item 1 — an inch entry is parsed HERE, once, from the text the operator typed; while it
+    // was being typed the field held that text and the stored millimetres were left alone.
+    const draft = inchText[key];
+    if (unit === 'in' && draft !== undefined) {
+      const mm = parseInches(draft);
+      setInchText((t) => {
+        const next = { ...t };
+        delete next[key];
+        return next;
+      });
+      if (mm === null) {
+        editDim(key, draft);
+        return;
+      }
+      setLastInch(`${draft} in = ${mm} mm`);
+      editDim(key, String(mm));
+      const seedValue = Number(seedDims[key]);
+      if (!Number.isFinite(seedValue) || mm !== seedValue) setSeedDropped(true);
+      return;
+    }
     const value = dims[key].trim();
     const n = Number(value);
     if (value === '' || !Number.isFinite(n) || n <= 0) return;
@@ -587,28 +649,24 @@ export function StartStockStep({
     if (!Number.isFinite(seedValue) || n !== seedValue) setSeedDropped(true);
   }
 
-  /** #1105 — the field as the chosen unit shows it: mm as stored, inches to 3 decimals. */
+  /** #1105 — the field as the chosen unit shows it: the typed text while an inch entry is being
+   *  typed, mm as stored, inches to 3 decimals otherwise. */
   function shownDim(key: StockSizeKey): string {
+    const draft = inchText[key];
+    if (unit === 'in' && draft !== undefined) return draft;
     const raw = dims[key];
     if (unit === 'mm' || raw.trim() === '') return raw;
     const mm = Number(raw);
     return Number.isFinite(mm) ? String(Number((mm / 25.4).toFixed(3))) : raw;
   }
 
-  /** #1105 — typing in inches stores mm (3 decimals) and states both numbers; mm is unchanged. */
+  /** #1105 — typing in inches holds the operator's text; the parser runs on blur. mm is unchanged. */
   function editShownDim(key: StockSizeKey, value: string): void {
-    if (unit === 'mm' || value.trim() === '') {
+    if (unit === 'mm') {
       editDim(key, value);
       return;
     }
-    const inches = Number(value);
-    if (!Number.isFinite(inches)) {
-      editDim(key, value);
-      return;
-    }
-    const mm = Math.round(inches * 25.4 * 1000) / 1000;
-    setLastInch(`${value} in = ${mm} mm`);
-    editDim(key, String(mm));
+    setInchText((t) => ({ ...t, [key]: value }));
   }
 
   /** A shelf entry fills the form, its numbers and its finish; the fields stay editable. */
@@ -620,6 +678,28 @@ export function StartStockStep({
     setDims(dimsFromItem(item));
     setFinish(item.finish);
     setSave(false);
+    // #1105 item 6 — the row IS the answer: one summary line, the fields behind "edit".
+    setSummaryOpen(true);
+  }
+
+  /** #1105 item 6 — the picked blank in one line: its name, its numbers and the material. */
+  function selectionSummary(): string {
+    const item = items.find((i) => i.id === shelfId) ?? null;
+    const name =
+      item === null
+        ? 'From your design'
+        : `${MATERIAL_LABELS[item.material]} ${isJobForm(item.form) ? formLabel(item.form).toLowerCase() : item.form}`;
+    const d = item === null ? dims : dimsFromItem(item);
+    const f = item === null ? form : item.form;
+    const size =
+      f === 'disc'
+        ? `${d.diameter} Ø × ${d.thickness}`
+        : f === 'rod'
+          ? `${d.diameter} Ø × ${d.length}`
+          : f === 'tube'
+            ? `${d.diameter} Ø × ${d.wall} wall × ${d.length}`
+            : `${d.length} × ${d.width} × ${d.thickness}`;
+    return `${name} — ${size} mm ${MATERIAL_LABELS[material]}`;
   }
 
   /** #1105 — the step-2 proposal is a card like a shelf row: picking it returns to the app's own
@@ -638,6 +718,8 @@ export function StartStockStep({
 
   async function pickFile(file: File | undefined): Promise<void> {
     if (!file) return;
+    // A file is its own answer; there is no picked blank to summarise.
+    setSummaryOpen(false);
     setReading(true);
     try {
       const read = await readStockFile(file);
@@ -696,7 +778,11 @@ export function StartStockStep({
                   type="button"
                   data-testid="start-wizard-blank-card-design"
                   aria-pressed={shelfId === null && fileRead === null && seededNumbers}
-                  onClick={pickProposal}
+                  onClick={() => {
+                    pickProposal();
+                    // #1105 item 6 — the card is picked: one summary line, the fields behind "edit".
+                    setSummaryOpen(true);
+                  }}
                   style={{
                     width: '100%',
                     textAlign: 'left',
@@ -761,6 +847,20 @@ export function StartStockStep({
                   </li>
                 );
               })}
+            {/* #1105 item 6 — the list's last row: the fields, seeded from the proposal. */}
+            <li>
+              <button
+                type="button"
+                data-testid="start-wizard-stock-other-size"
+                onClick={() => {
+                  pickProposal();
+                  setSummaryOpen(false);
+                }}
+                style={{ width: '100%', textAlign: 'left', padding: 4 }}
+              >
+                <div style={{ fontSize: 12, color: '#cfe' }}>Other size…</div>
+              </button>
+            </li>
           </ul>
           {shelfOk && shelfOther.length > 0 && (
             <p style={MUTED} data-testid="start-wizard-shelf-other">
@@ -778,6 +878,8 @@ export function StartStockStep({
           onChange={(e) => {
             setMaterial(e.target.value as StockMaterial);
             setShelfId(null);
+            // A different material is an explicit edit: no picked blank remains to summarise.
+            setSummaryOpen(false);
           }}
           style={{ display: 'block', width: '100%', marginTop: 2 }}
         >
@@ -818,6 +920,8 @@ export function StartStockStep({
         {outcome.sentence ?? formSentence(selectedForm.id, machine)}
       </p>
 
+      {!summaryOpen && (
+        <>
       <p style={{ ...MUTED, margin: '8px 0 0' }}>Size</p>
       {/* #1105 — mm / in beside Size: the job stays mm, inches are a typing unit. */}
       <span
@@ -834,18 +938,47 @@ export function StartStockStep({
           onClick={() => {
             setUnit('mm');
             setLastInch(null);
+            setInchText({});
           }}
         >
           mm
         </button>
-        <button type="button" data-testid="start-wizard-size-in" aria-pressed={unit === 'in'} onClick={() => setUnit('in')}>
+        <button
+          type="button"
+          data-testid="start-wizard-size-in"
+          aria-pressed={unit === 'in'}
+          onClick={() => {
+            setUnit('in');
+            setInchText({});
+          }}
+        >
           in
         </button>
       </span>
+        </>
+      )}
       {/* #1099 — the numbers get the picture beside them: the part's footprint on this blank, its
           margins, and the warning when a typed number no longer holds it. */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+          {summaryOpen ? (
+            <p style={{ ...MUTED, margin: '8px 0 0' }} data-testid="start-wizard-stock-summary">
+              {selectionSummary()}{' '}
+              <button
+                type="button"
+                data-testid="start-wizard-stock-summary-edit"
+                onClick={() => {
+                  // The entry becomes the operator's own: the fields open on the picked numbers.
+                  setShelfId(null);
+                  setSummaryOpen(false);
+                }}
+                style={LINK_BUTTON}
+              >
+                edit
+              </button>
+            </p>
+          ) : (
+            <>
           <div
             style={{ ...SIZE_FIELDS, gridTemplateColumns: narrow ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))' }}
             data-testid="start-wizard-make"
@@ -874,6 +1007,8 @@ export function StartStockStep({
               </label>
             ))}
           </div>
+            </>
+          )}
         </div>
         {part != null && drawnBlank !== null && (
           <div style={{ flex: '1 1 260px', maxWidth: 340 }}>
@@ -882,7 +1017,7 @@ export function StartStockStep({
         )}
       </div>
       {/* #1105 — an inch entry states both numbers: the typed inches and the stored millimetres. */}
-      {unit === 'in' && lastInch !== null && (
+      {!summaryOpen && unit === 'in' && lastInch !== null && (
         <p style={MUTED} data-testid="start-wizard-stock-size-both">
           {lastInch}
         </p>
@@ -1005,7 +1140,7 @@ export function StartStockStep({
       </details>
 
       {outcome.notes.length > 0 && (
-        <div data-testid="start-wizard-stock-summary">
+        <div data-testid="start-wizard-stock-notes">
           {outcome.notes.map((n, i) => (
             <p key={i} style={NOTE}>
               {n}

@@ -32,7 +32,7 @@ import type { StockItem } from '@/platform/stockClient';
 import { isShippedDemoLabelSet } from './engrave/blankLabelSeed';
 import { VISE_FLOOR_DEPTH } from './fixture';
 import { rotaryOf, type Mill, type SizedMachine } from './machine';
-import { isConductiveMaterial, isMetalMaterial, isWoodMaterial, MATERIAL_LABELS } from './materials';
+import { isConductiveMaterial, isMetalMaterial, materialFamilyOf, MATERIAL_LABELS } from './materials';
 import { ROTARY_MAX_DIAMETER_MM, ROTARY_MAX_LENGTH_MM } from './rotary/wrap';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
@@ -60,6 +60,46 @@ export interface StockBox {
  */
 export type StockSizeKey = 'length' | 'width' | 'thickness' | 'diameter' | 'wall';
 export type StockSize = Partial<Record<StockSizeKey, number | null>>;
+
+/**
+ * #1105 — an inch entry as millimetres, rounded to 3 dp; null when the text is not a number yet.
+ * Inches are a TYPING unit: the job is stored and planned in millimetres, and the field keeps the
+ * operator's own text until the entry is committed (on blur).
+ */
+export function parseInches(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const inches = Number(trimmed);
+  if (!Number.isFinite(inches)) return null;
+  return Math.round(inches * 25.4 * 1000) / 1000;
+}
+
+/**
+ * #1105 item 5 — THE SHELF BLANK THAT IS THE PROPOSAL, within the shop's match tolerance: the
+ * selected material, its thickness within `tolMm`, and its length × width within `tolMm` in EITHER
+ * orientation (a 75 × 72.7 plate is the blank for a 72.7 × 75 proposal). The first such row in
+ * shelf order wins; null when none does. A round form never matches a rectangular proposal.
+ */
+export function matchShelf(
+  proposal: { length: number; width: number; thickness: number },
+  shelf: readonly StockItem[],
+  material: StockMaterial,
+  tolMm: number,
+): StockItem | null {
+  const near = (value: number | null | undefined, target: number): boolean =>
+    value !== null && value !== undefined && Math.abs(value - target) <= tolMm;
+  return (
+    shelf.find((item) => {
+      if (item.material !== material) return false;
+      const { length, width, thickness } = item.size;
+      if (!near(thickness, proposal.thickness)) return false;
+      return (
+        (near(length, proposal.length) && near(width, proposal.width)) ||
+        (near(length, proposal.width) && near(width, proposal.length))
+      );
+    }) ?? null
+  );
+}
 
 /**
  * What each form asks for, in the order it is shown (#683, #713). The rectangular forms ask for the
@@ -771,7 +811,10 @@ export function finishOf(job: Pick<EngraveJob, 'stockEntry' | 'stock'>): JobStoc
  * its own to be caught, because its material is a plastic.
  */
 export function facingRefusal(material: StockMaterial): string | null {
-  return isWoodMaterial(material) || isMetalMaterial(material)
+  // #1105 item 3 — the FAMILY is the one predicate: the four poles (wood, metal, the composite board
+  // and the tooling board) are the material's own record, not a second set of lists here.
+  const family = materialFamilyOf(material);
+  return family === 'wood' || family === 'metal'
     ? null
     : `facing is not offered on ${MATERIAL_LABELS[material]}: a flat cutter smears a plastic top`;
 }
