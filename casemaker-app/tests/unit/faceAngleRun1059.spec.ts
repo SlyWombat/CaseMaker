@@ -163,4 +163,33 @@ describe('#1059 runFaceAngle on a bench square', () => {
     expect(fake.aWords).toHaveLength(0);
     expect(fake.lines.at(-1)).toBe('M832');
   });
+
+  // ── #1211 — THE ROTARY REGION AND THE CHUCK KEEP-OUT ON TRAVEL ─────────────────────────────
+  it('#1211 — a touch X inside the chuck keep-out is refused at the TRAVERSE and nothing descends', async () => {
+    const fake = fakeStock(0);
+    const p = plan();
+    // A doctored plan: X inside the jaws' keep-out (jaw face + anything under the band). The
+    // traverse to it happens at the clearance, so #1199 alone would wave it through.
+    const inside = { ...p, x: inputs().jawFaceX + 1 };
+    const r = await runFaceAngle({ plan: inside, touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('keep-out');
+    expect(fake.lines.some((l) => l.startsWith('G38.3'))).toBe(false);
+  });
+
+  it('#1211 — a touch beside the stock’s envelope is refused at the DESCENT, not probed', async () => {
+    const fake = fakeStock(0);
+    const p = plan();
+    // The traverse to the point is legal (it is at the clearance); the descent below the
+    // clearance there is not — the point is outside the rod's projection.
+    const beside = {
+      ...p,
+      yPlus: AXIS.axisY + p.envelopeRadiusMm + 5,
+      yMinus: AXIS.axisY - p.envelopeRadiusMm - 5,
+    };
+    const r = await runFaceAngle({ plan: beside, touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain('footprint');
+    expect(fake.lines.some((l) => l.startsWith('G38.3 Z'))).toBe(false);
+  });
 });
