@@ -243,10 +243,13 @@ describe('#1199 field 7 — the plan’s descent region', () => {
     expect(region(true, -186.2, -180)).toBe(false);
   });
 
-  it('allows the plan’s own mount tap where it stands, in MACHINE XY (a vise jaw is outside the blank)', () => {
+  it('does NOT admit the plan’s mount tap (ruling B: a jaw datum is a SETUP measurement)', () => {
     const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
     const region = jobDescentRegion(planAt({ mountTap: tap }));
-    expect(region(true, -186.2, -180)).toBe(true);
-    expect(region(true, -186.2, -170)).toBe(false);
+    // The vise jaw sits 4.65 mm beside the blank's left edge: a legacy plan carrying this tap is
+    // refused at the tap like any point outside the region. A vise plan has no origin, so a
+    // machine-frame line cannot be converted at all — the work-frame blank still admits a descent.
+    expect(region(true, -186.2, -180)).toBe(false);
+    expect(region(false, 19.05, 38.1)).toBe(true);
   });
 });

@@ -480,11 +480,9 @@ export function planRegistrationAttempt(args: {
   // it carried; `bracketRegistration1133.spec.ts` pins that a bracket plan has no scans.
   if (mount.kind === 'vise' && args.mountDatum !== null) {
     // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
-    // height (`registrationFor` works it out), and the probe is carried for the record. #599 — the
-    // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
-    if (args.mountTap === null) {
-      return { kind: 'refused', reason: 'place the vise, or register once from the fixed jaw, so the app knows where it is' };
-    }
+    // height (`registrationFor` works it out), and the probe is carried for the record. #1199
+    // (analyst ruling B) — the plan carries NO mount tap: a jaw datum is a SETUP measurement, and a
+    // job never descends beside the blank. The measured datum is used as it is.
     // #1189 — a datum measured before the probe was last fitted cannot anchor the band. The
     // surface top is the expected top when present; the jaw top is the seek's floor and ceiling
     // datum, so BOTH have to carry a reference. Ask for the one-touch re-measure and stop.
@@ -510,7 +508,8 @@ export function planRegistrationAttempt(args: {
       mountDatum: args.mountDatum,
       surfaceTopZ: args.surfaceTopZ,
       probe: args.probe,
-      mountTap: args.mountTap,
+      // #1199 (B) — NO job-time jaw tap: the measured datum above is the plan's reference.
+      mountTap: null,
       // #1199 field 7 — the vise's own placement uncertainty, across and along the jaws.
       holdUncertainty:
         holdUncertaintyFor({
@@ -522,7 +521,8 @@ export function planRegistrationAttempt(args: {
     };
   } else {
     // The vise with no measured jaw-top datum: THE TAP IS THE PROCEDURE (#934 hides the typed-seat
-    // override, so there is no other path to a seat here).
+    // override, so there is no other path to a seat here). #1199 (B) — the tap is a SETUP action
+    // (the standalone mount tap behind this button), never the registration's first touch.
     // #611 — a datum tapped by a probe other than the one now checked out names which probe tapped
     // it and offers the tap with the current probe; an absent datum keeps the plain ask.
     if (args.mountDatumMismatch !== null) {
@@ -535,7 +535,7 @@ export function planRegistrationAttempt(args: {
     }
     return {
       kind: 'need-datum',
-      message: 'tap the jaw first — run the registration: its first touch is that tap',
+      message: 'tap the fixed jaw first (Manage › the machine › Tap the fixed jaw) — a job never taps beside the blank, so the jaw datum is a setup measurement',
       mountTap: args.mountTap,
     };
   }

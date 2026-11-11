@@ -113,12 +113,14 @@ function triggerZOf(reply: string | undefined): number | null {
 }
 
 /**
- * #1199 field 7 (analyst 2026-11-11) — WHERE A JOB-TIME DESCENT MAY HAPPEN, per plan:
+ * #1199 field 7 (analyst ruling — B) — WHERE A JOB-TIME DESCENT MAY HAPPEN, per plan:
  *  - the BLANK's outline as the hold places it, SHRUNK by the probe's top-touch margins
  *    (`topTouchEdgeMarginsMm`: tip + unit lateral uncertainty + hold placement, registry floor);
  *  - each declared edge-find window (a scan's start..limit along its edge, ± `edgeBandMm`), minus
- *    any stretch a top clamp's box covers — never on a clamped stretch;
- *  - the plan's own mount-tap target (a datum measurement the planner places and checks).
+ *    any stretch a top clamp's box covers — never on a clamped stretch.
+ * NO mount-tap target: a jaw/seat datum is measured in the SETUP (the standalone mount tap), and a
+ * job never descends beside the blank. A legacy plan that still carries `mountTap` is refused at its
+ * tap descent like any other point outside the region.
  * Machine-frame lines are converted with the bracket origin; a machine line on a plan with no
  * origin is refused. A plan with no hold figure or floor shrinks to NOTHING: every descent is
  * refused rather than guessed.
@@ -201,12 +203,10 @@ export function jobDescentRegion(
         y <= o.max[1] + eps,
     );
   };
-  const tap = plan.mountTap;
   return (machine, x, y) => {
-    // TODO(#1199 analyst): the VISE's jaw tap sits outside the blank by design — kept as a
-    // declared target until the analyst rules how a job-time jaw datum fits field 7. The tap's
-    // own coordinates are MACHINE XY (`PlanMountTap`), so they are compared in that frame.
-    if (tap !== null && machine && Math.abs(x - tap.x) <= 1e-3 && Math.abs(y - tap.y) <= 1e-3) return true;
+    // The plan's mount tap is NOT a descent region (analyst ruling B): a jaw/seat datum is a
+    // SETUP measurement (the standalone mount tap), never a job-time descent beside the blank.
+    // A legacy plan carrying one is refused here like any other point outside the region.
     const p = toWork(machine, x, y);
     if (p === null) return false;
     if (inBlank(p.x, p.y)) return true;

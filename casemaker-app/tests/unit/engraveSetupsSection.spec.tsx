@@ -362,7 +362,7 @@ describe('#471 a saved list that no longer matches the document', () => {
 
 describe('#471 registration — planned only after approval, refused with the engine’s reason', () => {
   // #934 — THE TYPED SEAT IS HIDDEN. There is no override and no seat field; a vise with no
-  // measured jaw-top datum asks for the tap, which IS the registration procedure.
+  // measured jaw-top datum asks for the tap, which is a SETUP measurement (#1199 ruling B).
   it('offers neither the typed-seat override nor the seat field, and asks for the jaw tap', () => {
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
@@ -374,7 +374,7 @@ describe('#471 registration — planned only after approval, refused with the en
 
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
     expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain(
-      'tap the jaw first — run the registration',
+      'tap the fixed jaw first (Manage › the machine › Tap the fixed jaw)',
     );
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
@@ -386,7 +386,7 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the jaw first — run the registration');
+    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the fixed jaw first (Manage › the machine › Tap the fixed jaw)');
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
