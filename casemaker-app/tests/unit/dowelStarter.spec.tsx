@@ -127,7 +127,7 @@ describe('#1107 — the dowel starter', () => {
     // The intent is picked; the empty text is what holds Create.
     const next = screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(next.disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave.');
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave — for example, a name.');
   });
 
   it('creates a rotary text job reading along the rod once the text is typed', async () => {

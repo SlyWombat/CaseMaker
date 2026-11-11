@@ -290,7 +290,7 @@ export function MachineStep({
             );
           })}
           {onChangeBed !== undefined && (
-            <button type="button" data-testid="start-wizard-change-bed" onClick={onChangeBed} style={{ textAlign: 'left' }}>
+            <button type="button" className="sw-btn" data-testid="start-wizard-change-bed" onClick={onChangeBed} style={{ textAlign: 'left' }}>
               Change what’s on the bed…
             </button>
           )}

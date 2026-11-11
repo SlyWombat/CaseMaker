@@ -80,8 +80,10 @@ describe('#181 platform capabilities', () => {
   });
 
   it('the relay-less sentence says why, and where a machine can be driven — in one sentence (#821/#867)', () => {
-    expect(NO_MACHINE_RELAY_SENTENCE).toMatch(/without the machine relay/);
-    expect(NO_MACHINE_RELAY_SENTENCE).toMatch(/desktop app or from a local install/);
+    // #1106 (later) rewrote the sentence to the positive form — what this page can do, and where
+    // the machine is driven. The later issue's wording wins; the one-sentence rule stays.
+    expect(NO_MACHINE_RELAY_SENTENCE).toMatch(/write, check and simulate/);
+    expect(NO_MACHINE_RELAY_SENTENCE).toMatch(/open the desktop app/);
     expect(NO_MACHINE_RELAY_SENTENCE.split('.').filter((part) => part.trim() !== '')).toHaveLength(1);
   });
 

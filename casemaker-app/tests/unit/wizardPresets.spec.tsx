@@ -29,7 +29,7 @@ describe('#1100 — the preset answers', () => {
   });
 
   it('an empty sign is not makeable: the gate asks for the text', () => {
-    expect(operationCreateBlocked(presetChoice('sign', answers)!)).toBe('Type the text to engrave.');
+    expect(operationCreateBlocked(presetChoice('sign', answers)!)).toBe('Type the text to engrave — for example, a name.');
   });
 
   it('Cut out a shape 60 × 40 proposes 80 × 60 — ten millimetres each side, through a plate', () => {
@@ -75,7 +75,7 @@ describe('#1100 — the step', () => {
     const onChoice = renderStep();
     fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
     expect(screen.getByTestId('start-wizard-preset-text')).toBeDefined();
-    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Type the text to engrave.');
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Type the text to engrave — for example, a name.');
 
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     const choice = lastChoice(onChoice);
