@@ -21,7 +21,7 @@ import {
   type PlanInput,
   type RegistrationPlan,
 } from '@/engine/cnc/registration';
-import { dryRegistration, previewHolds, recordingConsole, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { dryRegistration, previewHolds, recordingConsole, scriptedReply, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +36,7 @@ const PROBE: ProbeSpec = {
   tip: { diameterMm: 2, rimOffsetMm: 0.875, rimOffsetUncertaintyMm: 0.01 },
 };
 
-function trayPlan(): RegistrationPlan {
+function trayPlan(over: Partial<PlanInput> = {}): RegistrationPlan {
   const input: PlanInput = {
     stock: { xMin: 0, yMin: 0, xMax: 160, yMax: 126, cornerRadius: 8 },
     mount: 'bracket',
@@ -47,6 +47,7 @@ function trayPlan(): RegistrationPlan {
     probe: PROBE,
     bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor 1', offsetMeasured: true },
     mountObstacles: [],
+    ...over,
   };
   const planned = planRegistration(input, S);
   if (!planned.ok) throw new Error(planned.reason);
@@ -102,5 +103,39 @@ describe('#1202 — a preview that could not finish is not a preview', () => {
     expect(previewHolds(routine(), true, true)).toBe(false);
     expect(previewHolds(routine(), false, false)).toBe(false);
     expect(previewHolds(null, false, false)).toBe(false);
+  });
+});
+
+// #1202 bench blocker (2026-11-11, live k3 record): the scripted machine's M491 must answer the
+// PLAN's own probe reference. The seat on the live record carries probeRefZ −75.467; a scripted
+// M491 of −80 made the executor's #1189 correction shift the band by −4.533, so every scripted
+// touch read above it and the card previewed the above-band branch and errored, holding the press.
+describe('#1202 — the scripted M491 answers the plan’s own reference', () => {
+  it('a datum reference away from −80 previews in the frame the executor shifts to', async () => {
+    // A NARROW expected-surface band (the live defect's): a guarded band is wide enough to
+    // swallow the shift. The bracket's seat carries the reference.
+    const plan = trayPlan({ guarded: undefined, probeRefZ: -75.467 });
+    expect(plan.probeRefZ).toBe(-75.467);
+    const dry = await dryRegistration(plan, {
+      clearanceZ: plan.seek.fromMachineZ,
+      settings: S,
+      liveClearanceZ: plan.seek.fromMachineZ,
+    });
+    // RED with the fixed −80 answer: the shift moves the band and this errors above it.
+    expect(dry.error).toBeNull();
+    expect(dry.refused).toBe(false);
+    expect(dry.lines.filter((l) => l.line.startsWith('G38.3 Z')).length).toBeGreaterThanOrEqual(2);
+    expect(dry.lines.slice(-2).map((l) => l.line)).toEqual(['$H', 'M832']);
+
+    // SHOWN == SENT: the executor against the same machine (M491 at the plan's reference).
+    const console_ = recordingConsole(scriptedReply({ band: plan.seek.band, m491Z: -75.467 }));
+    const run = await runRegistration(plan, {
+      console: { send: (line, timing) => console_.send(line, timing) },
+      operator: () => Promise.resolve(true),
+      stopRequested: () => false,
+      liveClearanceZ: plan.seek.fromMachineZ,
+    });
+    expect(run.ok).toBe(true);
+    expect(dry.lines.map((l) => l.line)).toEqual(console_.lines);
   });
 });
