@@ -46,7 +46,7 @@ test('#1099 — a drawing walks the same three steps, its rings on the blank and
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // The drawing is read by the step's own drop zone and takes the drawing's door (#1098).
   await page.getByTestId('start-wizard-drop-input').setInputFiles(COASTER);
