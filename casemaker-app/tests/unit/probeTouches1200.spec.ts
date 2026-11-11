@@ -270,6 +270,7 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
     const prompts: string[] = [];
     const r = await runRegistration(p, {
+      liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         prompts.push(step.text);
