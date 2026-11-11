@@ -31,6 +31,7 @@ const options = () => ({
   bandMm: { min: -12, max: 0 },
   surfaceFeed: 60,
   parkAboveSurfaceMm: 2,
+  probeTouches: 'all' as const,
   topTouchAt: { x: 60, y: 40 },
 });
 

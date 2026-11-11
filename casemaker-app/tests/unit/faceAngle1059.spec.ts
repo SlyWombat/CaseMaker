@@ -130,4 +130,17 @@ describe('#1059 the face-angle plan', () => {
     expect(text).toContain('10°');
     expect(FACE_ANGLE_LEVEL_BAND_MM).toBe(0.02);
   });
+
+  it('#1211 field 7 — the jaw keep-out is the shop key, and the plan carries the value it used', () => {
+    const fallback = planFaceAngle(inputs());
+    const wider = planFaceAngle(inputs({ jawKeepOutMm: 10 }));
+    if (!fallback.ok) throw new Error(fallback.reason);
+    if (!wider.ok) throw new Error(wider.reason);
+    expect(fallback.jawKeepOutMm).toBe(3); // the registry's labelled fallback
+    expect(wider.jawKeepOutMm).toBe(10);
+    // The jaw-side clearance moves by the extra band; the tail side does not, so the touch X (the
+    // span's midpoint) moves by half of it.
+    expect(wider.x - fallback.x).toBeCloseTo(7 / 2, 6);
+    expect(wider.notes.join('\n')).toContain('10 mm keep-out');
+  });
 });

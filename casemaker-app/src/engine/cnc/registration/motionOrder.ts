@@ -33,6 +33,7 @@
 import { lastPrb } from './readings';
 import { topTouchEdgeMarginsMm } from './cutBlank';
 import { topTouchTipRadiusMm, type EdgeScan, type RegistrationPlan } from './plan';
+import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
 
 export interface MotionOrderGuardOptions {
   /**
@@ -48,6 +49,20 @@ export interface MotionOrderGuardOptions {
    * belongs to the hold (clamps, arms, jaws), so nothing may descend there.
    */
   descentAllowed?: (machine: boolean, x: number, y: number) => boolean;
+  /**
+   * #1211 field 4 — THE TURN FLOOR: the machine Z every A word must be sent from. A turn sweeps
+   * the stock's corners out to its envelope, so the guard holds the floor `runFaceAngle` holds —
+   * a routine that forgets its own check still cannot turn. Absent: the ordinary clearance rule.
+   */
+  turnClearanceZ?: number;
+  /**
+   * #1211 field 3 — THE CHUCK KEEP-OUT, machine X: the maintainer's rule (2026-11-07) is that the
+   * jaws' reach varies with the grip, so no height over the chuck is clear. No traverse may END at
+   * X ≤ `maxMachineX` — at ANY Z, the machine clearance included — and a traverse that STARTS
+   * inside it (a state the guard should never have allowed) is refused too. A WORK-frame X line is
+   * refused while this is set: its machine X cannot be proven.
+   */
+  travelKeepOut?: { maxMachineX: number; what: string };
 }
 
 export interface MotionOrderGuard {
@@ -219,6 +234,49 @@ export function jobDescentRegion(
   };
 }
 
+/**
+ * #1211 field 2 — THE ROTARY JOB'S DESCENT REGION: the rod's own projection, in MACHINE XY (a
+ * job-time rotary routine runs before the work offset exists, so a work-frame point is refused
+ * rather than converted). The span is the analyst's:
+ *
+ *   - X from the jaw tips + {@link ROTARY_JAW_KEEP_OUT_MM} + the probe's radius — the ball must be
+ *     able to clear the jaws' band the keep-out already forbids the CENTRE to enter — to the free
+ *     end less the top-touch margin (or the fitted tailstock band's start, less the same margin);
+ *   - Y within the section's circumscribed radius either side of the axis line, shrunk by the
+ *     margin `topTouchEdgeMarginsMm` states (the caller supplies it as one number, so this module
+ *     needs no registration settings of its own).
+ *
+ * ONE function feeds the guard AND the planners, as #1199 field 7 (a) requires for a blank.
+ */
+export interface RotaryJobRegionInput {
+  /** The jaws' face, machine X — the datum the keep-out and the span are measured from. */
+  jawFaceX: number;
+  /** The stock's free span past the jaw face, mm. */
+  freeEndMm: number;
+  /** The fitted tailstock's band start, mm past the jaw face; null/absent when none is fitted. */
+  tailstockBandFromMm?: number | null;
+  /** The axis line's machine Y. */
+  axisY: number;
+  /** The section's circumscribed radius, mm (the swing a turn must clear). */
+  envelopeRadiusMm: number;
+  /** The probe's effective contact radius, mm. */
+  probeRadiusMm: number;
+  /** The top-touch margin either end of the span and either side of the axis, mm. */
+  marginMm: number;
+  /** #1211 field 7 — the chuck keep-out past the jaw tips, mm; absent → the registry's fallback. */
+  jawKeepOutMm?: number;
+}
+
+export function rotaryJobDescentRegion(i: RotaryJobRegionInput): (machine: boolean, x: number, y: number) => boolean {
+  const eps = 1e-6;
+  const xMin = i.jawFaceX + (i.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM) + i.probeRadiusMm;
+  const spanEnd = Math.min(i.freeEndMm, i.tailstockBandFromMm ?? Number.POSITIVE_INFINITY);
+  const xMax = i.jawFaceX + spanEnd - i.marginMm;
+  const yHalf = i.envelopeRadiusMm - i.marginMm;
+  return (machine, x, y) =>
+    machine && x >= xMin - eps && x <= xMax + eps && Math.abs(y - i.axisY) <= yHalf + eps;
+}
+
 /** The refusal for a plan whose travel height sits below the machine's clearance. */
 export function planTravelProblem(travelZ: number, clearanceZ: number, what: string): string | null {
   if (!Number.isFinite(clearanceZ)) return 'the machine’s clearance is not known — nothing was sent';
@@ -305,6 +363,36 @@ export function motionOrderGuard(clearanceZ: number, opts: MotionOrderGuardOptio
       return (
         `refusing to move X/Y/A from machine Z ${f(lastZ)}: a traverse on a probing run is taken at the machine's ` +
         `clearance ${f(clearanceZ)} or higher — lift first, then move, and descend only at the point to be probed`
+      );
+    }
+    // #1211 field 3 — THE CHUCK KEEP-OUT, BEFORE ANY Z QUESTION: no height over the chuck is clear,
+    // so a traverse that ends inside it is refused at any Z, the clearance included.
+    if (opts.travelKeepOut !== undefined && w.x !== null) {
+      const { maxMachineX, what } = opts.travelKeepOut;
+      if (!w.machine || (lastXY !== null && !lastXY.machine)) {
+        return (
+          `refusing to move X in the work frame: the ${what}'s keep-out is machine X ≤ ${f(maxMachineX)}, and this ` +
+          `line's machine X cannot be proven — send it as G53, or move clear of the ${what}`
+        );
+      }
+      if (w.x <= maxMachineX + 1e-9) {
+        return (
+          `refusing to move to machine X ${f(w.x)}: the ${what}'s keep-out is X ≤ ${f(maxMachineX)} at ANY Z — ` +
+          `the jaws' reach varies with the grip, so no height over the ${what} is clear`
+        );
+      }
+      if (lastXY !== null && lastXY.x <= maxMachineX + 1e-9) {
+        return (
+          `refusing to move from machine X ${f(lastXY.x)}: it is inside the ${what}'s keep-out (X ≤ ${f(maxMachineX)})`
+        );
+      }
+    }
+    // #1211 field 4 — THE TURN FLOOR, for EVERY A word in the session (the routine's own check is
+    // a courtesy; this one cannot be forgotten).
+    if (w.a !== null && opts.turnClearanceZ !== undefined && !(lastZ >= opts.turnClearanceZ - 1e-9)) {
+      return (
+        `refusing to turn A from machine Z ${f(lastZ)}: the stock's corners sweep its envelope as it turns, so every ` +
+        `A word must be sent from the turn clearance ${f(opts.turnClearanceZ)} or higher`
       );
     }
     if (w.z !== null && !(w.z >= clearanceZ - 1e-9)) {

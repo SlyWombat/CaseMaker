@@ -112,8 +112,10 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
       surfaceFeed: settings.surfaceSlowFeed,
       parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
       ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
+      // #1211 field 6 — a top-touch-only probe refuses the wall touches before anything is sent.
+      probeTouches: probe?.touches ?? 'z-only',
     };
-  }, [made, plan, settings.surfaceSlowFeed, settings.parkAboveSurfaceMm, kind, topTouchAt]);
+  }, [made, plan, probe, settings.surfaceSlowFeed, settings.parkAboveSurfaceMm, kind, topTouchAt]);
   const [preview, setPreview] = useState<DryRoutine | null>(null);
   const [ticked, setTicked] = useState(false);
   useEffect(() => {

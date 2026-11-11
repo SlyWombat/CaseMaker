@@ -81,6 +81,7 @@ async function cardDry() {
     bandMm: { min: -6, max: -4 },
     surfaceFeed: 150,
     parkAboveSurfaceMm: 2,
+    probeTouches: 'all',
     topTouchAt: { x: 30, y: 15 },
   });
 }

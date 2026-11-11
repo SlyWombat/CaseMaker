@@ -385,6 +385,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // fields are planned on when the goal states no surface grid; a coarser plan is the conservative
     // direction and the tip field's cost grows ~1/pitch².
     ("relief.planningPitchMm", 1.0, "mm", "chosen, not measured: the map a rotary relief's drop-tip fields are planned on when the goal states no surface grid; coarser is conservative and the cost grows with 1/pitch²"),
+    // #1211 field 7 (#1207 fix-on-touch) — the chuck keep-out past the jaw tips: nothing moves at X
+    // inside it, at any Z.
+    ("rotary.jawKeepOutMm", 3.0, "mm", "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"),
     // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
     ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
     // ── #451 runSheet (end)
@@ -1233,6 +1236,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.1..=2.0).contains(&v)),
             "0.1 to 2 mm",
         )),
+        "rotary.jawKeepOutMm" => Some(need(n.is_some_and(|v| (0.0..=20.0).contains(&v)), "0 to 20 mm")),
         // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
         // playback speed is one of the transport's multipliers, not any number in a range.
         "sim.playbackSpeed" => Some(need(

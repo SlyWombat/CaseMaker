@@ -106,7 +106,13 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
-import { jobDescentRegion, motionOrderGuard, planTravelProblem } from './motionOrder';
+import {
+  jobDescentRegion,
+  motionOrderGuard,
+  planTravelProblem,
+  rotaryJobDescentRegion,
+  type MotionOrderGuardOptions,
+} from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -327,17 +333,12 @@ function session(
    */
   releaseProbeOnStop = false,
   /**
-   * #1199 field 7 — WHERE A DESCENT BELOW THE CLEARANCE MAY HAPPEN for this session (the plan's
-   * stock box, its edge-find windows and its tap target). Absent: the clearance/order rules apply
-   * without a footprint check.
+   * #1199 field 7 / #1211 — THE GUARD'S OWN OPTIONS for this session: where a descent below the
+   * clearance may happen (#1199), whether sideways probes are allowed (#1200, `lateralProbes`),
+   * the A-turn floor (#1211 field 4) and the chuck keep-out on travel (#1211 field 3). Absent or
+   * empty: the clearance/order rules apply without a footprint check.
    */
-  descentAllowed?: (machine: boolean, x: number, y: number) => boolean,
-  /**
-   * #1200 — whether this session's probe may touch SIDEWAYS (`probe.touches !== 'z-only'`). The
-   * planner is expected never to emit one for a z-only unit; the guard refuses it at the wire if
-   * one ever gets through.
-   */
-  lateralProbes = true,
+  guardOptions: MotionOrderGuardOptions = {},
 ) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
@@ -360,10 +361,7 @@ function session(
    * line sent from below it — so a routine that lifts to a band height and traverses is stopped
    * before the line reaches the wire, and a descent is only ever taken at the point to be probed.
    */
-  const motion = motionOrderGuard(seekFromMachineZ, {
-    ...(descentAllowed === undefined ? {} : { descentAllowed }),
-    ...(lateralProbes ? {} : { lateralProbes: false }),
-  });
+  const motion = motionOrderGuard(seekFromMachineZ, guardOptions);
 
   /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
   function stoppedByOperator(): boolean {
@@ -1455,9 +1453,14 @@ export async function runMountTap(
    */
   expectZ: number | null = null,
 ): Promise<MountTapResult> {
-  const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe), undefined, probe?.touches !== 'z-only');
-  // The floor the tap may reach: the PLAN's bound when it states one, else the stored reference's
-  // own `mountTapFloorMm`, else the work envelope's floor as before.
+  const io = session(
+    deps,
+    seekFromMachineZ,
+    settings.idlePollLimit,
+    probeNeedsRelease(probe),
+    probe?.touches === 'z-only' ? { lateralProbes: false } : {},
+  );
+  // The floor the tap may reach: the PLAN's bound when it states one, never the envelope's alone.
   // #1199 — the bound is stated below the tap's own APPROACH (`tap.fromMachineZ`, the band start),
   // not below the clearance: the two heights were one parameter before, and splitting them must
   // not move the floor (which it did: a clearance-based floor stopped the seat seek 1.1 mm short).
@@ -1576,6 +1579,12 @@ export interface CentreFindOptions {
    * stock's face beyond the bore's reach, or the top touch would measure the bore's floor.
    */
   topTouchAt?: { x: number; y: number };
+  /**
+   * #1211 field 6 — the unit's own touch restriction (`probe.touches`, #1200). A `'z-only'` unit
+   * refuses the sideways wall touches by name before anything is sent: a centre find IS sideways
+   * touches, so the routine cannot run on a top-touch-only probe at all.
+   */
+  probeTouches: 'all' | 'z-only';
 }
 
 const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1600,6 +1609,17 @@ const f4 = (n: number): string => String(Math.round(n * 1000) / 1000);
  * `surfaceZ` is the top, so `applyCorrection` writes it with no other translation.
  */
 export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Promise<CentreRunResult> {
+  // #1211 field 6 — A TOP-TOUCH-ONLY UNIT NEVER SENDS THE WALL TOUCHES: the find IS sideways
+  // touches (±X/±Y at the depth), and a unit checked for top touches only cannot take them.
+  if (opts.probeTouches === 'z-only') {
+    return {
+      ok: false,
+      reason:
+        'this probe is checked for TOP touches only: finding a centre needs sideways (±X/±Y) wall touches, and a lateral ' +
+        'touch is not trusted with this unit — nothing was sent',
+      transcript: [],
+    };
+  }
   const plan = opts.plan;
   const release = opts.releaseMm ?? 3;
   // #933 — centre-find is the 3D probe's routine: a stop with the ball deflected releases it.
@@ -1813,6 +1833,17 @@ export interface RotaryTapOptions {
    * if the module is not where it expects).
    */
   probeRefZ?: number | null;
+  /**
+   * #1211 field 1 — WHERE THE CALL COMES FROM: `'bed-setup'` (the bed wizard / Manage, with its
+   * statement and points shown) or `'job'`. The tap is BED SETUP — the one routine allowed beside
+   * the chuck — and a `'job'` call is refused before anything is sent.
+   */
+  mode: 'bed-setup' | 'job';
+  /**
+   * #1211 field 6 — the unit's own touch restriction (`probe.touches`, #1200). A `'z-only'` unit
+   * refuses the two sideways chords by name before anything is sent.
+   */
+  probeTouches: 'all' | 'z-only';
 }
 
 const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1831,6 +1862,28 @@ const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
  * ALL XY IS MACHINE: the tap happens beside the chuck, where the work frame means nothing yet.
  */
 export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Promise<RotaryTapResult> {
+  // #1211 field 1 — BED SETUP ONLY. The tap is the one routine allowed beside the chuck; it runs
+  // from the bed wizard / Manage, with its statement and its points shown, and never from a job.
+  if (opts.mode === 'job') {
+    return {
+      ok: false,
+      reason:
+        'the rotary axis tap is BED SETUP: it runs beside the chuck, outside any job, from the bed wizard or Manage — ' +
+        'a job never taps the chuck, and nothing was sent',
+      transcript: [],
+    };
+  }
+  // #1211 field 6 — A TOP-TOUCH-ONLY UNIT NEVER SENDS THE CHORDS: the axis tap is two sideways
+  // (G38.3 Y) touches plus the crown, and a unit checked for top touches only cannot take them.
+  if (opts.probeTouches === 'z-only') {
+    return {
+      ok: false,
+      reason:
+        'this probe is checked for TOP touches only: the rotary axis tap needs a sideways (±Y) chord pair, and a lateral ' +
+        'touch is not trusted with this unit — nothing was sent',
+      transcript: [],
+    };
+  }
   // #933 — the rotary tap is the 3D probe's routine: a stop with the ball deflected releases it.
   const io = session(deps, opts.seekFromMachineZ, MAX_IDLE_POLLS, true);
   const release = opts.releaseMm ?? 3;
@@ -2022,7 +2075,22 @@ export async function runFaceAngle(opts: FaceAngleOptions, deps: ExecDeps): Prom
   const release = opts.releaseMm ?? 3;
   const levelBand = opts.levelBandMm ?? FACE_ANGLE_LEVEL_BAND_MM;
   const maxCorrections = opts.maxCorrections ?? FACE_ANGLE_MAX_CORRECTIONS;
-  const io = session(deps, plan.seekZ, MAX_IDLE_POLLS, true);
+  // #1211 — THE ROTARY JOB'S OWN GUARD: descents only over the rod's projection (field 2), the
+  // chuck keep-out on every traverse at any Z (field 3), and the A-turn floor enforced by the
+  // guard itself (field 4), so `turnA`'s check below is a courtesy, never the only line.
+  const io = session(deps, plan.seekZ, MAX_IDLE_POLLS, true, {
+    descentAllowed: rotaryJobDescentRegion({
+      jawFaceX: plan.jawFaceX,
+      freeEndMm: plan.freeEndMm,
+      axisY: r3((plan.yPlus + plan.yMinus) / 2),
+      envelopeRadiusMm: plan.envelopeRadiusMm,
+      probeRadiusMm: plan.probeRadiusMm,
+      marginMm: plan.regionMarginMm,
+      jawKeepOutMm: plan.jawKeepOutMm,
+    }),
+    turnClearanceZ: plan.turnClearanceZ,
+    travelKeepOut: { maxMachineX: plan.jawFaceX + plan.jawKeepOutMm, what: 'chuck' },
+  });
   let powered = false;
   /** The last machine Z commanded — what the A-turn guard reads. */
   let lastZ = plan.seekZ;
@@ -2159,8 +2227,10 @@ export async function runRegistration(
     plan.settings.idlePollLimit,
     probeNeedsRelease(plan.probe),
     // #1199 field 7 — a descent below the clearance only over the blank's outline.
-    jobDescentRegion(plan),
-    plan.probe?.touches !== 'z-only',
+    {
+      descentAllowed: jobDescentRegion(plan),
+      ...(plan.probe?.touches === 'z-only' ? { lateralProbes: false } : {}),
+    },
   );
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
@@ -2673,8 +2743,10 @@ export async function retouchSurface(
     plan.settings.idlePollLimit,
     probeNeedsRelease(plan.probe),
     // #1199 field 7 — a descent below the clearance only over the blank's outline.
-    jobDescentRegion(plan),
-    plan.probe?.touches !== 'z-only',
+    {
+      descentAllowed: jobDescentRegion(plan),
+      ...(plan.probe?.touches === 'z-only' ? { lateralProbes: false } : {}),
+    },
   );
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
@@ -2980,8 +3052,10 @@ export async function runFlipRegistration(
     cleared.clearanceZ,
     s.idlePollLimit,
     true,
-    jobDescentRegion(ctx, flipScans),
-    ctx.probe?.touches !== 'z-only',
+    {
+      descentAllowed: jobDescentRegion(ctx, flipScans),
+      ...(ctx.probe?.touches === 'z-only' ? { lateralProbes: false } : {}),
+    },
   );
   let powered = false;
   try {

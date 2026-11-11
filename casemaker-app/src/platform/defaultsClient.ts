@@ -430,6 +430,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // relief planned at 0.1 mm would need ~4e9 tip evaluations. Fallback = the value the Set B and
   // giraffe acceptance jobs state, which measures 0.0056 mm of finish overcut.
   'relief.planningPitchMm': { label: 'relief planning pitch (chosen)', unit: 'mm', rule: z.number().min(0.1).max(2), fallback: 1 },
+  // ── #1211 field 7 (#1207 fix-on-touch) — THE CHUCK KEEP-OUT past the jaw tips, mm: in a rotary
+  // session NOTHING moves at X inside it, at any Z — the jaws' reach varies with the grip, so no
+  // height over the chuck is clear (maintainer 2026-11-07). Read by the face-angle plan and the
+  // session guard; the verifier and the relief CAM still hold the constant, which derives from
+  // this key's fallback.
+  'rotary.jawKeepOutMm': { label: 'rotary chuck keep-out past the jaw tips (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

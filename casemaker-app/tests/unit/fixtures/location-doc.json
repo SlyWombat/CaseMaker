@@ -1045,6 +1045,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the map a rotary relief's drop-tip fields are planned on when the goal states no surface grid; coarser is conservative and the cost grows with 1/pitch²"
     },
+    "rotary.jawKeepOutMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"
+    },
     "margins.boundaryMarginMm": {
       "value": 0.2,
       "source": "seeded",
