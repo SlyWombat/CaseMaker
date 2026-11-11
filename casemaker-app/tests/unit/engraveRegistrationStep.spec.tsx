@@ -1384,6 +1384,43 @@ describe('#1201 a bracket job with no trusted seat measures the top on the blank
     expect(screen.queryByTestId('engrave-registration-seat-prompt')).toBeNull();
   });
 
+  // #1200 × #1201 — the guarded top seek must name the UNIT, not a hard-coded "wired probe": a 3D
+  // probe restricted to top touches registers on this path, and the card owes the operator that
+  // instrument and its restriction before the press.
+  it('a guarded top seek names a top-touches-only 3D probe', () => {
+    const job = bedJob('guarded restricted 1201');
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    beddedLocation();
+    const loc = useLocationStore.getState().location!;
+    useLocationStore.setState({
+      location: {
+        ...loc,
+        accessories: [
+          {
+            id: 'fx-probe-1',
+            kind: 'probe',
+            product: 'Makera 3D Wired Probe',
+            variant: '3d',
+            unit: { tipDiameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05, tipLateralUncertaintyMm: 1 },
+            touches: 'z-only',
+            touchesReason: 'the ball tip may not be 100% straight down',
+            touchesSince: '2026-11-10T20:15:00.000Z',
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-11-07T00:00:00.000Z' },
+          },
+        ],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const line = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(line).toContain('the top on the blank');
+    expect(line).toContain('3D probe · top touches only');
+  });
+
   it('a LEGACY seat: the card says it is not used, and still offers only Register', () => {
     const job = bedJob('legacy seat 1201');
     beddedLocation();

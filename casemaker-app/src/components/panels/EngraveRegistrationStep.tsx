@@ -198,7 +198,7 @@ function proposalLine(plan: RegistrationPlan): string {
         ? `(${p3(point.x)}, ${p3(point.y)})`
         : `machine X ${p3(origin.x + point.x)}, Y ${p3(origin.y + point.y)}`;
     const points = (plan.surfaceChecks ?? []).map(at);
-    return `the top on the blank — ${points.length === 0 ? 'two touches' : points.join(' and ')} · wired probe`;
+    return `the top on the blank — ${points.length === 0 ? 'two touches' : points.join(' and ')} · ${probeWords}`;
   }
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
