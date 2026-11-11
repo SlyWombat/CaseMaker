@@ -71,6 +71,7 @@
       "quantity": 2,
       "codes": [{ "symbology": "qr_code", "value": "C1-BIT-BALL-NOSE-1-4" }],
       "addedAt": "2026-10-09T09:05:00.000Z",
+      "useInPlans": true,
       "notes": null
     }
   ]

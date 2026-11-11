@@ -41,6 +41,8 @@ const BLANK_FORM: CutterForm = {
   shoulderLength: '',
   quantity: '1',
   notes: '',
+  caseColour: '',
+  keptIn: '',
 };
 
 export function TypeDoor() {
@@ -73,8 +75,12 @@ export function TypeDoor() {
         prefix="manage-type"
         quantity={form.quantity}
         notes={form.notes}
+        caseColour={form.caseColour}
+        keptIn={form.keptIn}
         onQuantity={(v) => setForm((f) => ({ ...f, quantity: v }))}
         onNotes={(v) => setForm((f) => ({ ...f, notes: v }))}
+        onCaseColour={(v) => setForm((f) => ({ ...f, caseColour: v }))}
+        onKeptIn={(v) => setForm((f) => ({ ...f, keptIn: v }))}
         disabled={busy !== null}
       />
 

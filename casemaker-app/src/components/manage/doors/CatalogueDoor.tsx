@@ -44,6 +44,8 @@ export function CatalogueDoor() {
   const [picked, setPicked] = useState<string | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [notes, setNotes] = useState('');
+  const [caseColour, setCaseColour] = useState('');
+  const [keptIn, setKeptIn] = useState('');
 
   const catalogue = entries.filter((e) => tierOf(e.key) === 'catalogue');
   const shown = query.trim().length === 0 ? catalogue : catalogue.filter((e) => matchesSearch(toolSearchText(e), query));
@@ -56,6 +58,8 @@ export function CatalogueDoor() {
       quantity: quantityOrOne(quantity),
       code: null,
       notes,
+      caseColour,
+      keptIn,
       now: new Date().toISOString(),
       health,
     });
@@ -63,6 +67,8 @@ export function CatalogueDoor() {
       setPicked(null);
       setQuantity('1');
       setNotes('');
+      setCaseColour('');
+      setKeptIn('');
       selectRegistered(item.id);
     }
   }
@@ -137,8 +143,12 @@ export function CatalogueDoor() {
             prefix="manage-catalogue"
             quantity={quantity}
             notes={notes}
+            caseColour={caseColour}
+            keptIn={keptIn}
             onQuantity={setQuantity}
             onNotes={setNotes}
+            onCaseColour={setCaseColour}
+            onKeptIn={setKeptIn}
             disabled={disabled}
           />
           <div className="btn-row">

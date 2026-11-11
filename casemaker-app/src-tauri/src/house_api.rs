@@ -950,6 +950,9 @@ mod tests {
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
+            case_colour: None,
+            kept_in: None,
+            use_in_plans: true,
             copies: vec![],
             collet_fits: None,
         }

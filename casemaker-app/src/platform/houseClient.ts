@@ -296,6 +296,16 @@ export const InventoryItemSchema = z.object({
   notes: z.string().nullable().default(null),
   /** The copies the operator described (#415): condition and where each is. At most `quantity`. */
   copies: z.array(ToolCopySchema).default([]),
+  /**
+   * #1172 item 3 — the CASE colour of every piece that does not state its own (#491's per-copy
+   * `case` still wins for that copy), and where the bit is kept. Optional, never defaulted.
+   */
+  caseColour: z.string().optional(),
+  keptIn: z.string().optional(),
+  /**
+   * #1172 item 5 — "Use this bit in plans", default ON. Off keeps the record; no plan asks for it.
+   */
+  useInPlans: z.boolean().default(true),
   /** The machines this cutter's shank fits a collet of (#415). Null is "not stated". */
   colletFits: z.array(machineIdText).nullable().default(null),
 }).superRefine((item, ctx) => {
@@ -341,7 +351,12 @@ export const InventorySchema = z.array(InventoryItemSchema).superRefine((list, c
 
 export type Coded = z.infer<typeof CodedSchema>;
 export type Origin = z.infer<typeof OriginSchema>;
-export type InventoryItem = z.infer<typeof InventoryItemSchema>;
+/**
+ * #1172 item 5 — the app-side item is the schema's shape with the plans switch free to be absent:
+ * parsing still fills it (default ON), while a builder or a spec literal need not state it. Every
+ * reader treats "absent" as ON (`useInPlans !== false`).
+ */
+export type InventoryItem = Omit<z.infer<typeof InventoryItemSchema>, 'useInPlans'> & { useInPlans?: boolean };
 
 /** What an inventory read concluded: the same four outcomes as {@link HouseTools}. */
 export type HouseInventory =

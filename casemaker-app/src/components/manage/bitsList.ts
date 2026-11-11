@@ -97,6 +97,9 @@ export function usablePieces(item: InventoryItem): number {
 export function possessionSearchText(item: InventoryItem): string {
   const parts: string[] = [];
   if (item.notes !== null) parts.push(item.notes);
+  // #1172 item 3 — the item-level place and case colour are searchable beside the copies'.
+  if (item.keptIn !== undefined) parts.push(item.keptIn);
+  if (item.caseColour !== undefined) parts.push(item.caseColour);
   for (const copy of item.copies) {
     const kase = copyCase(copy);
     if (kase === null) continue;

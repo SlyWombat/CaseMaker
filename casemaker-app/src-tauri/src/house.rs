@@ -400,6 +400,17 @@ pub struct InventoryItem {
     pub added_at: String,
     #[serde(default)]
     pub notes: Option<String>,
+    /// #1172 item 3 — the item-level case colour (a copy's own `case` still wins) and where the
+    /// bit is kept. Both optional; absent is "not stated", never a default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_colour: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_in: Option<String>,
+    /// #1172 item 5 — "Use this bit in plans", default ON. Off keeps the record; no plan asks for
+    /// it. A build older than the field refuses it (deny_unknown_fields); house and desktop ship
+    /// together, which was the accepted cost.
+    #[serde(default = "default_true")]
+    pub use_in_plans: bool,
     /// The copies the operator has described (#415): condition, where each is. At most `quantity`;
     /// a copy with no entry has no condition set and is in its box (`tool_copy.rs`).
     ///
@@ -619,6 +630,11 @@ pub struct CatalogueImport {
 
 /// The build string a report written before #566 carries: the field is absent, and the honest
 /// answer is that it does not know rather than a version nobody built.
+/// #1172 item 5 — a boolean that is ON unless the document says otherwise (the plans switch).
+fn default_true() -> bool {
+    true
+}
+
 fn unknown_build() -> String {
     "unknown".to_string()
 }
@@ -2328,6 +2344,9 @@ mod tests {
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
+            case_colour: None,
+            kept_in: None,
+            use_in_plans: true,
             copies: vec![],
             collet_fits: None,
         }

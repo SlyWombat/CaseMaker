@@ -112,7 +112,11 @@ export function toolSearchText(entry: ToolLibraryEntry, codes: readonly string[]
     entry.provenance,
     ...codes,
     t.tipDiameter,
+    // #1172 item 1 — the printed size is typed as the box reads it ("4.0", "0.9"), so the one-
+    // decimal form is searchable beside the bare number.
+    t.tipDiameter === null || t.tipDiameter === undefined ? null : t.tipDiameter.toFixed(1),
     t.diameter,
+    t.diameter === null || t.diameter === undefined ? null : t.diameter.toFixed(1),
     t.handleDiameter,
     t.fluteLength,
     t.shoulderLength,
@@ -121,10 +125,25 @@ export function toolSearchText(entry: ToolLibraryEntry, codes: readonly string[]
   return parts.filter((p) => p !== null && p !== undefined).join(' ').toLowerCase();
 }
 
-/** Whether a row matches what has been typed. Every space-separated word must appear (AND). */
+/**
+ * Whether a row matches what has been typed (#1172 item 1).
+ *
+ * Every space-separated query word must PREFIX a token of the row's text (punctuation and the
+ * interpunct split tokens). Substring matching was wrong for the acceptance's own query: "box A"
+ * matched every row whose text contained the letter "a" anywhere (in "flat", in "2"), so it
+ * returned boxes B and C too. A prefix match keeps partial typing ("yel", "cor") working while
+ * making a one-letter word mean the word.
+ */
 export function matchesSearch(text: string, query: string): boolean {
   const words = query.trim().toLowerCase().split(/\s+/).filter((w) => w.length > 0);
-  return words.every((w) => text.includes(w));
+  if (words.length === 0) return true;
+  const tokens = text
+    .toLowerCase()
+    .split(/[\s·,;/|()[\]{}]+/)
+    // A word wrapped in punctuation — "(metal)" — is still that word.
+    .map((t) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter((t) => t.length > 0);
+  return words.every((w) => tokens.some((t) => t.startsWith(w)));
 }
 
 /**
