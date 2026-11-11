@@ -797,6 +797,12 @@ export async function smartPick(
       ...named.map((c) => `${c.key} — ${c.reason}`),
       ...(others === 0 ? [] : [`${others} other cutter${others === 1 ? ' is' : 's are'} not the shape this work needs`]),
     ];
+    // #1213 follow-up — A REFUSAL IS A COMPLETED PICK: it decided no candidate can be tried. The
+    // end row closes the family with the counts the normal end carries (evaluated, postings), so a
+    // CLI trace reads `incomplete no` instead of looking like a run that died mid-search. The
+    // app's worker pre-checks the candidate list (runSmartPick) and never reaches this return, so
+    // no app trace gains a row.
+    memTrace('pick:end', { evaluated: 0, postings: 0 });
     return {
       refused: true,
       reason:
