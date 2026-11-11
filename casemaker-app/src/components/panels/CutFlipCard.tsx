@@ -22,6 +22,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { readDefault } from '@/platform/defaultsClient';
 import { fenceCornerFor } from '@/engine/cnc/engrave/flipChoice';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
@@ -39,6 +40,58 @@ import { cutMachineLine } from './cutMachineStatus';
 const AMBER = '#e0a84a';
 const MUTED = { color: '#9aa4b0' } as const;
 const BOX = { padding: 12, border: `1px solid ${AMBER}`, borderRadius: 10, background: '#161d27' } as const;
+
+/**
+ * #1170 (the drawing finding) — THE PICTURE'S NUMBERS, in one place and named.
+ *
+ * The card's text is the design system's body type, never a literal (#84, #1207): a label that
+ * scales with a drawing is how the old picture's words reached ~7 px on a phone. The drawing's
+ * viewBox is its content plus {@link FLIP_DIAGRAM_PAD} of the larger side, so no side keeps an
+ * empty margin over 6 % of the width. Every stroke is non-scaling, so lines keep one weight at
+ * every size.
+ */
+const BODY_TEXT = 'var(--cm-text-body-size)';
+const LINE_PX = 1.5;
+const FLIP_DIAGRAM_PAD = 0.04;
+/** Under this VIEWPORT width the before and after drawings stack; at the panel's width they share a row. */
+const FLIP_STACK_BELOW_PX = 480;
+const STACK_QUERY = `(max-width: ${FLIP_STACK_BELOW_PX - 1}px)`;
+/** The drawn blank's schematic size, in the picture's own units. */
+const PANEL_W = 150;
+const PANEL_H = 134;
+const BRACKET_STROKE = 10;
+const CORNER_R = 8;
+
+export interface FlipPictureBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/**
+ * THE DRAWN CONTENT'S BOUNDS — the blank, its outline, the bracket's arm and the ringed corner,
+ * strokes included. The turn arrow and the words are HTML now, so they are not in this box.
+ */
+export function flipPictureBounds(w = PANEL_W, h = PANEL_H): FlipPictureBounds {
+  const rectEdge = LINE_PX / 2;
+  const cornerEdge = CORNER_R + LINE_PX / 2;
+  return {
+    minX: -rectEdge,
+    minY: -rectEdge,
+    maxX: Math.max(w + BRACKET_STROKE / 2, w + cornerEdge),
+    maxY: Math.max(h + BRACKET_STROKE / 2, h + cornerEdge),
+  };
+}
+
+/** The content plus a pad of {@link FLIP_DIAGRAM_PAD} of its larger side on every side (#1170). */
+export function flipViewBox(bounds: FlipPictureBounds): { viewBox: string; pad: number } {
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const pad = Math.max(width, height) * FLIP_DIAGRAM_PAD;
+  const viewBox = `${bounds.minX - pad} ${bounds.minY - pad} ${width + 2 * pad} ${height + 2 * pad}`;
+  return { viewBox, pad };
+}
 
 type Axis = 'left-right' | 'front-back';
 
@@ -133,72 +186,99 @@ export interface CutFlipCardProps {
   arrival?: FlipArrivalIO;
 }
 
-/** One panel of the before/after picture: blank, two bores, the ringed corner. */
-function FlipPanel({
+/**
+ * One side's drawing — its LABEL, the tight SVG and its caption (#1170 field 2): the words are
+ * HTML in the card's body type, so they never scale down with the picture. Inside the drawing
+ * the two blanks are told apart by the marks the card already uses — the face shading and the
+ * datum corner ring — not by labels.
+ */
+function FlipPicture({
   side,
-  title,
+  label,
+  describe,
   bores,
   stock,
   caption,
 }: {
   side: 'before' | 'after';
-  title: string;
+  label: string;
+  describe: string;
   bores: { x: number; y: number }[] | null;
   stock: { length: number; width: number };
   caption: string | null;
 }): JSX.Element {
-  const x = side === 'before' ? 36 : 376;
-  const y = 40;
-  const w = 150;
-  const h = 134;
-  const atX = (mm: number): number => x + (mm / stock.length) * w;
+  const atX = (mm: number): number => (mm / stock.length) * PANEL_W;
   // Work Y runs away from the operator; SVG Y runs down. The front edge is the bottom.
-  const atY = (mm: number): number => y + h - (mm / stock.width) * h;
+  const atY = (mm: number): number => PANEL_H - (mm / stock.width) * PANEL_H;
+  const { viewBox } = flipViewBox(flipPictureBounds());
   return (
-    <g>
-      <text x={x + w / 2} y={18} fill="#c9d4e2" fontSize={12} textAnchor="middle">
-        {title}
-      </text>
-      <g transform={`translate(${x},0)`}>
+    <figure
+      data-testid={`engrave-flip-picture-${side}`}
+      style={{ margin: 0, minWidth: 0, flex: '1 1 0', display: 'flex', flexDirection: 'column', gap: 6 }}
+    >
+      <figcaption data-testid={`engrave-flip-label-${side}`} style={{ fontSize: BODY_TEXT, color: '#c9d4e2' }}>
+        {label}
+      </figcaption>
+      <svg
+        data-testid="engrave-flip-diagram"
+        data-side={side}
+        width="100%"
+        viewBox={viewBox}
+        role="img"
+        aria-label={describe}
+        style={{ display: 'block', height: 'auto' }}
+      >
         <path
           data-testid={`engrave-flip-bracket-${side}`}
-          d={`M0 ${y + h} H${w} V${y}`}
+          d={`M0 ${PANEL_H} H${PANEL_W} V0`}
           stroke="#c9d4e2"
-          strokeWidth={10}
+          strokeWidth={BRACKET_STROKE}
           fill="none"
+          vectorEffect="non-scaling-stroke"
         />
-      </g>
-      <rect x={x} y={y} width={w} height={h} fill={side === 'before' ? '#8a6a3a' : '#7a5c30'} stroke="#c9a06a" />
-      {(bores ?? []).map((bore, i) => (
+        <rect
+          x={0}
+          y={0}
+          width={PANEL_W}
+          height={PANEL_H}
+          fill={side === 'before' ? '#8a6a3a' : '#7a5c30'}
+          stroke="#c9a06a"
+          strokeWidth={LINE_PX}
+          vectorEffect="non-scaling-stroke"
+        />
+        {(bores ?? []).map((bore, i) => (
+          <circle
+            key={`${side}-${i}`}
+            data-testid={`engrave-flip-bore-${side}-${i}`}
+            data-x={bore.x}
+            data-y={bore.y}
+            cx={atX(bore.x)}
+            cy={atY(bore.y)}
+            r={5}
+            fill="none"
+            stroke={AMBER}
+            strokeWidth={LINE_PX}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {/* The corner that sits in the bracket: the FIXTURE's corner, identical in both panels. */}
         <circle
-          key={`${side}-${i}`}
-          data-testid={`engrave-flip-bore-${side}-${i}`}
-          data-x={bore.x}
-          data-y={bore.y}
-          cx={atX(bore.x)}
-          cy={atY(bore.y)}
-          r={5}
+          data-testid={`engrave-flip-corner-${side}`}
+          cx={PANEL_W}
+          cy={PANEL_H}
+          r={CORNER_R}
           fill="none"
-          stroke={AMBER}
-          strokeWidth={2}
+          stroke="#5fc27f"
+          strokeWidth={LINE_PX}
+          vectorEffect="non-scaling-stroke"
         />
-      ))}
-      {/* The corner that sits in the bracket: the FIXTURE's corner, identical in both panels. */}
-      <circle
-        data-testid={`engrave-flip-corner-${side}`}
-        cx={x + w}
-        cy={y + h}
-        r={8}
-        fill="none"
-        stroke="#5fc27f"
-        strokeWidth={2}
-      />
+      </svg>
       {caption !== null && (
-        <text x={x + w / 2} y={y + h + 18} fill="#5fc27f" fontSize={11} textAnchor="middle">
+        <p data-testid={`engrave-flip-caption-${side}`} style={{ ...MUTED, fontSize: BODY_TEXT, margin: 0 }}>
           {caption}
-        </text>
+        </p>
       )}
-    </g>
+    </figure>
   );
 }
 
@@ -214,6 +294,7 @@ export function CutFlipCard({
   const [ticked, setTicked] = useState(false);
   const [arrivalState, setArrivalState] = useState<'waiting' | 'ready' | 'failed'>('waiting');
   const attempted = useRef<string | null>(null);
+  const stack = useMediaQuery(STACK_QUERY);
   const machine = useMachineStore((s) => s.machine);
   const heartbeat = useMachineStore((s) => s.heartbeat);
   const defaults = useShopDefaultsStore((s) => s.defaults);
@@ -249,7 +330,7 @@ export function CutFlipCard({
     <section data-testid="engrave-flip-card" data-arrival={arrivalState} style={{ ...BOX, marginTop: 8 }}>
       <div
         data-testid="engrave-flip-header"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, borderBottom: '1px solid #2a3542', paddingBottom: 8 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: BODY_TEXT, borderBottom: '1px solid #2a3542', paddingBottom: 8 }}
       >
         <span
           style={{
@@ -261,7 +342,7 @@ export function CutFlipCard({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 12,
+            fontSize: BODY_TEXT,
             fontWeight: 700,
           }}
         >
@@ -273,53 +354,56 @@ export function CutFlipCard({
             · side {due.fromSetup} done, {due.done} of {due.total} · turn the blank
           </span>
         </span>
-        {machineWords.length > 0 && <span style={{ fontSize: 12, color: '#5fc27f' }}>{machineWords}</span>}
+        {machineWords.length > 0 && <span style={{ fontSize: BODY_TEXT, color: '#5fc27f' }}>{machineWords}</span>}
       </div>
 
-      <svg
-        data-testid="engrave-flip-diagram"
-        width="100%"
-        height={220}
-        viewBox="0 0 560 220"
-        role="img"
-        aria-label={`Before: side ${due.fromSetup} up, the blank's ${words.corner} corner in the bracket. After: the blank turned ${words.axisWords}, the other front corner in the bracket, the two locating bores now in their side-2 places.`}
-      >
-        <FlipPanel
-          side="before"
-          title={`Before · side ${due.fromSetup} up`}
-          bores={due.boresBefore}
-          stock={due.stock}
-          caption={null}
-        />
-        <path d="M250 110h60" stroke="#c9d4e2" strokeWidth={2} />
-        <path d="M310 110l-8-6v12z" fill="#c9d4e2" />
-        <text
+      {/* #1170 (the drawing finding) — two drawings, each tight to its own content, with every word
+          in HTML. Under 480 px they stack at the card's full width; at the panel's width they share
+          a row. The turn's own words sit under both, in the card's body type. */}
+      <div data-testid="engrave-flip-picture-block">
+        <div
+          data-testid="engrave-flip-pictures"
+          style={{
+            display: 'flex',
+            flexDirection: stack ? 'column' : 'row',
+            alignItems: 'stretch',
+            gap: 10,
+            margin: '8px 0 4px',
+          }}
+        >
+          <FlipPicture
+            side="before"
+            label={`Before · side ${due.fromSetup} up`}
+            describe={`Side ${due.fromSetup} up: the blank's ${words.corner} corner in the bracket, the two locating bores in their side-${due.fromSetup} places.`}
+            bores={due.boresBefore}
+            stock={due.stock}
+            caption={null}
+          />
+          <FlipPicture
+            side="after"
+            label={`After · side ${due.toSetup} up`}
+            describe={`The blank turned ${words.axisWords}: the two locating bores in their side-${due.toSetup} places, the other front corner in the bracket.`}
+            bores={due.boresAfter}
+            stock={due.stock}
+            caption="the other front corner now sits in the bracket"
+          />
+        </div>
+        <p
           data-testid="engrave-flip-axis"
-          x={280}
-          y={98}
-          fill="#9aa8b8"
-          fontSize={11}
-          textAnchor="middle"
+          style={{ textAlign: 'center', fontSize: BODY_TEXT, color: '#9aa8b8', margin: '0 0 8px' }}
         >
           {words.arrow}
-        </text>
-        <FlipPanel
-          side="after"
-          title={`After · side ${due.toSetup} up`}
-          bores={due.boresAfter}
-          stock={due.stock}
-          caption="the other front corner now sits in the bracket"
-        />
-      </svg>
+        </p>
+      </div>
 
       {due.boresAfter === null && (
-        <p style={{ ...MUTED, fontSize: 12, margin: '0 0 8px' }} data-testid="engrave-flip-no-bores">
+        <p style={{ ...MUTED, fontSize: BODY_TEXT, margin: '0 0 8px' }} data-testid="engrave-flip-no-bores">
           This setup states no locating pins, so the two bores cannot be drawn or registered on — re-plan the
           flip in Design → Setups.
         </p>
       )}
 
-      <ol data-testid="engrave-flip-steps" style={{ margin: '8px 0 10px', paddingLeft: 20, fontSize: 14, display: 'grid', gap: 6 }}>
+      <ol data-testid="engrave-flip-steps" style={{ margin: '8px 0 10px', paddingLeft: 20, fontSize: BODY_TEXT, display: 'grid', gap: 6 }}>
         <li>Loosen the clamp, lift the blank out, brush the chips off the bed and the bracket.</li>
         <li>
           Turn it over <b>{words.axisWords}</b> (the {words.stays} edge stays at the {words.stays}) and push the
@@ -331,7 +415,7 @@ export function CutFlipCard({
       </ol>
 
       <label
-        style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: '#1b2531', fontSize: 14 }}
+        style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: 8, background: '#1b2531', fontSize: BODY_TEXT }}
       >
         <input
           type="checkbox"
@@ -352,7 +436,7 @@ export function CutFlipCard({
         >
           Register side {due.toSetup} on the two bores
         </button>
-        <span style={{ fontSize: 12, color: '#9aa8b8' }} data-testid="engrave-flip-register-note">
+        <span style={{ fontSize: BODY_TEXT, color: '#9aa8b8' }} data-testid="engrave-flip-register-note">
           Probe in, two bores found from side {due.toSetup}’s top, Z checked at the corners first; a reading off the
           carried side-{due.toSetup} top by more than {toleranceMm} mm stops before any bore is entered. Then the
           cutter for program {due.nextIndex}

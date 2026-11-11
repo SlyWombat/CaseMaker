@@ -13,6 +13,7 @@
 //   3. after the last program the steps stay above the end card; "Cut the tabs again" plays ONLY
 //      the release file; Keep adds one shelf blank;
 //   4. a reload at the flip returns to the flip card, not step 1.
+//   5. (the drawing finding) no SVG text, a tight viewBox, and before/after stacking at 390 px.
 //
 // Screenshot: docs/bench/img/2026-11-10-cut-flip-1170/.
 import fs, { readFileSync } from 'node:fs';
@@ -583,6 +584,114 @@ test('#1170 — after side 1 the flip card shows the job’s own axis and bores;
   await page.screenshot({ path: path.join(OUT, 'flip-card.png') });
   // The arrival's own output: the work light was switched on (the fake logs M821).
   expect(fake.lines()).toContain('M821');
+});
+
+// #1170 (the flip-drawing finding) — the picture is tight and text-free, its labels are HTML at
+// the body size, and the two drawings stack under 480 px so a phone gets them at full width.
+test('#1170 — the flip drawing: no SVG text, a tight viewBox, and before/after stacking at 390 px', async ({
+  cm,
+  page,
+}) => {
+  await fakeHouse(page, Array.from({ length: 10 }, (_, i) => `h${i + 1}`));
+  await installFakeConsole(page, { steps: 12, idleMpos: [-1, -1, -1] });
+  await cm.ready();
+  await rememberMachine(page);
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await seed(page, { allDone: false, releasePrograms: true, sideTwoRegistered: false });
+  await openCut(page);
+  const card = page.getByTestId('engrave-flip-card');
+  await expect(card).toBeVisible();
+  const pictures = page.getByTestId('engrave-flip-pictures');
+  await expect(pictures).toBeVisible();
+  await expect(page.getByTestId('engrave-flip-diagram')).toHaveCount(2);
+  // NO TEXT IN THE DRAWINGS, at any width.
+  await expect(page.locator('[data-testid="engrave-flip-diagram"] text')).toHaveCount(0);
+
+  /** Every text-bearing element in the card, and the ones under the body size (0.875rem = 14 px). */
+  const undersized = (): Promise<string[]> =>
+    card.evaluate((el) => {
+      const out: string[] = [];
+      for (const node of [el, ...Array.from(el.querySelectorAll('*'))]) {
+        const ownText = Array.from(node.childNodes)
+          .filter((n) => n.nodeType === Node.TEXT_NODE)
+          .map((n) => (n.textContent ?? '').trim())
+          .join('');
+        if (ownText === '') continue;
+        const px = Number.parseFloat(getComputedStyle(node).fontSize);
+        if (px < 14) out.push(`${node.tagName} ${px}px: ${ownText.slice(0, 40)}`);
+      }
+      return out;
+    });
+
+  /** The empty margin each drawing leaves inside its viewBox, as a share of its width. */
+  const margins = (): Promise<{ left: number; right: number; top: number; bottom: number }[]> =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="engrave-flip-diagram"]')].map((svg) => {
+        const vb = (svg as SVGSVGElement).viewBox.baseVal;
+        const boxes = [...svg.querySelectorAll('path, rect, circle')].map((el) =>
+          (el as SVGGraphicsElement).getBBox(),
+        );
+        const minX = Math.min(...boxes.map((b) => b.x));
+        const minY = Math.min(...boxes.map((b) => b.y));
+        const maxX = Math.max(...boxes.map((b) => b.x + b.width));
+        const maxY = Math.max(...boxes.map((b) => b.y + b.height));
+        return {
+          left: (minX - vb.x) / vb.width,
+          right: (vb.x + vb.width - maxX) / vb.width,
+          top: (minY - vb.y) / vb.width,
+          bottom: (vb.y + vb.height - maxY) / vb.width,
+        };
+      }),
+    );
+
+  // WIDE — 1280: the two drawings sit side by side, each tight to its content.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect.poll(() => pictures.evaluate((el) => getComputedStyle(el).flexDirection)).toBe('row');
+  const wide = await page.evaluate(() => {
+    const rect = (side: string): { left: number; right: number; top: number } => {
+      const r = document.querySelector(`[data-testid="engrave-flip-picture-${side}"]`)!.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top };
+    };
+    return { before: rect('before'), after: rect('after') };
+  });
+  expect(wide.after.left).toBeGreaterThanOrEqual(wide.before.right - 1);
+  expect(Math.abs(wide.after.top - wide.before.top)).toBeLessThanOrEqual(1);
+  for (const m of await margins()) {
+    expect(m.left, JSON.stringify(m)).toBeLessThanOrEqual(0.06);
+    expect(m.right, JSON.stringify(m)).toBeLessThanOrEqual(0.06);
+    expect(m.top, JSON.stringify(m)).toBeLessThanOrEqual(0.06);
+    expect(m.bottom, JSON.stringify(m)).toBeLessThanOrEqual(0.06);
+  }
+  expect(await undersized()).toEqual([]);
+  fs.mkdirSync(OUT, { recursive: true });
+  // The baseline is the DRAWING BLOCK (both pictures and the turn's words), not the whole card:
+  // at 390 the card is taller than the drawer's painted area, and a taller-than-viewport element
+  // screenshot captures the unscrolled remainder as black.
+  const block = page.getByTestId('engrave-flip-picture-block');
+  await block.scrollIntoViewIfNeeded();
+  await block.screenshot({ path: path.join(OUT, 'flip-card-1280.png') });
+
+  // PHONE — 390: the drawings stack, each at the card's full width, and nothing shrinks under the
+  // body size.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => pictures.evaluate((el) => getComputedStyle(el).flexDirection)).toBe('column');
+  const stack = await page.evaluate(() => {
+    const rect = (side: string): { top: number; bottom: number; width: number } => {
+      const r = document.querySelector(`[data-testid="engrave-flip-picture-${side}"]`)!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, width: r.width };
+    };
+    const container = document.querySelector('[data-testid="engrave-flip-pictures"]')!.getBoundingClientRect();
+    return { before: rect('before'), after: rect('after'), width: container.width };
+  });
+  expect(stack.after.top).toBeGreaterThanOrEqual(stack.before.bottom - 1);
+  expect(stack.before.width).toBeGreaterThanOrEqual(stack.width * 0.95);
+  expect(stack.after.width).toBeGreaterThanOrEqual(stack.width * 0.95);
+  expect(await undersized()).toEqual([]);
+  await block.scrollIntoViewIfNeeded();
+  await block.screenshot({ path: path.join(OUT, 'flip-card-390.png') });
 });
 
 test('#1170 — a reload at the flip returns to the flip card, not step 1', async ({ cm, page }) => {
