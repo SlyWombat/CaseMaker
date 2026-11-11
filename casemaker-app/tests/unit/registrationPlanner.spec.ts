@@ -1312,6 +1312,20 @@ describe('#430 the executor, on a fake machine', () => {
     expect(z1.lines).toEqual([]);
   });
 
+  it('#1199 item 2 — a planner-built plan is refused when the LIVE machine clearance was raised after planning', async () => {
+    // The plan was built against −3 (its own recorded clearance); the machine's profile now says
+    // −1 (for example, a calibration changed after the plan was approved). The executor must read
+    // the live value, refuse, and send nothing — a plan's field compared with itself can never
+    // catch this.
+    const p = plan('vise');
+    const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes, liveClearanceZ: -1 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('below the machine');
+    expect(z1.lines).toEqual([]);
+  });
+
   it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at the clearance, never below the cap', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
