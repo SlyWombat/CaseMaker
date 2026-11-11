@@ -131,7 +131,7 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
           bandMm: settings.edgeBandMm,
           bodyRadiusMm: (probe?.bodyDiameterMm ?? 0) / 2,
           expectedRadiusMm: null,
-          obstacles: plan.mountObstacles,
+          obstacles: plan.mountObstacles ?? [],
         };
       })(),
     };

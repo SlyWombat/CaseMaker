@@ -34,6 +34,10 @@ const SETTINGS = {
   touchFeed: 150,
   surfaceSlowFeed: 150,
   parkAboveSurfaceMm: 2,
+  // #1211 field 5 — the panel resolves the find's hold from these; a cast fixture must state them.
+  tipRadiusMm: 0.875,
+  edgeBandMm: 4,
+  probeFootprintShrinkMm: 3,
 } as unknown as RegistrationSettings;
 
 afterEach(() => {
