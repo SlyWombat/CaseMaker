@@ -531,8 +531,16 @@ describe('#1059 the face-angle step through the hook', () => {
     // The turn went out, and the datum landed on the active profile in DEGREES with its residual.
     expect(b.turns).toHaveLength(1);
     expect(b.turns[0]).toBeCloseTo(-2, 2);
-    expect(saves).toHaveLength(1);
-    const datum = saves[0]!.bedProfiles!.find((p) => p.id === 'bp1')!.datums.rotaryFaceAngle!;
+    // #1202 — TWO writes: the datum, and the routine's completion (the motion completed on this
+    // machine). The datum's own save is the one carrying the bed profile.
+    expect(saves).toHaveLength(2);
+    expect(saves.some((record) => (record.completedRoutines ?? []).some((c) => c.routine === 'face-angle'))).toBe(true);
+    const datum = saves
+      .flatMap((record) => record.bedProfiles ?? [])
+      .map((p) => p.datums.rotaryFaceAngle)
+      .find((d) => d != null);
+    expect(datum, 'the datum write').toBeDefined();
+    if (datum == null) throw new Error('the datum write must carry rotaryFaceAngle');
     expect(datum.value).toBeCloseTo(-2, 2);
     expect(datum.residualMm).toBeCloseTo(0, 6);
     expect(datum.by).toBe('probe-1');

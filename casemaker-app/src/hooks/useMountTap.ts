@@ -23,6 +23,10 @@ import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
+// #1202 — a completed tap records its routine identity on the machine, so a later press can say
+// whether this exact motion has run here before.
+import { routineIdentityOf, type MotionRoutineId, type NamedHeights } from '@/engine/cnc/registration/routineIdentity';
+import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
 
 /**
  * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
@@ -208,6 +212,27 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
 
   const resolve = (ok: boolean): void => resolver.current?.(ok);
 
+  /**
+   * #1202 — THE ROUTINE COMPLETED: record its identity on the machine BEFORE any datum write that
+   * may fail. What is recorded is the MOTION ("this sequence finished without a stop"), which is
+   * true even when a later save is refused; a failed record write is silent here — the next press
+   * simply marks the routine again, which is the safe direction.
+   */
+  function recordRoutine(routine: MotionRoutineId, lines: readonly string[], heights: NamedHeights): void {
+    if (inputs.target === null) return;
+    const machine = machineAt(inputs.target);
+    if (machine === null) return;
+    const identity = routineIdentityOf(routine, lines, heights);
+    void saveMachineWithRetry(machine, (current) =>
+      withRoutineCompletion(current, {
+        routine: identity.routine,
+        shape: identity.shape,
+        at: new Date().toISOString(),
+        build: buildStamp(),
+      }),
+    );
+  }
+
   /** A note is a render of a host that may already have gone (Design → Cut mid-tap). */
   const noteNow = (text: string): void => {
     if (alive.current) setNote(text);
@@ -264,6 +289,16 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (r.ok) {
+        // #1202 — the tap's motion is a completed routine on this machine: the seat press and the
+        // jaw/arm taps are distinct routines, and the identity is the line sequence it SENT.
+        const seatRoutine = tap.reference === 'bracket-seat' && (tap.datumOffsetMm ?? 0) === 0;
+        recordRoutine(seatRoutine ? 'seat-press' : 'mount-tap', r.transcript.map((t) => t.line), {
+          clearance: inputs.clearanceZ,
+          ...(Number.isFinite(tap.fromMachineZ) ? { approach: tap.fromMachineZ } : {}),
+          ...(tap.planTravelMm !== undefined && tap.planTravelMm !== null && tap.planTravelMm > 0
+            ? { seek: -tap.planTravelMm }
+            : {}),
+        });
         const record = machineAt(inputs.target);
         if (record !== null) {
           const now = new Date().toISOString();
@@ -400,6 +435,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         noteNow(r.reason);
         return;
       }
+      // #1202 — the rotary tap completed on this machine.
+      recordRoutine('rotary-tap', r.transcript.map((t) => t.line), {
+        ...(Number.isFinite(req.seekFromMachineZ) ? { clearance: req.seekFromMachineZ } : {}),
+      });
       // The measurement stands on its own; the record write is reported separately.
       setAxis({
         axisZ: r.circle.axisZ,
@@ -467,6 +506,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         noteNow(r.reason);
         return;
       }
+      // #1202 — the face-angle step completed on this machine.
+      recordRoutine('face-angle', r.transcript.map((t) => t.line), {});
       setFaceAngle({ thetaDeg: r.thetaDeg, residualMm: r.residualMm, passes: r.readings.length });
       const held = machineAt(inputs.target);
       if (held !== null) {

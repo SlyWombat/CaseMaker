@@ -138,6 +138,9 @@ import {
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+// #1202 + #1199 item 3 — the dry line view and the first-run mark.
+import { dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -623,6 +626,51 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const planDrift = plan !== null && proposalPlan !== null && canonicalJson(plan) !== canonicalJson(proposalPlan.plan);
 
   const [proposalOpen, setProposalOpen] = useState(false);
+  // #1202 + #1199 item 3 — THE PRESS PREVIEW. The routine the press would run is executed against
+  // a RECORDING console (no socket) and every line is shown with the motion-order guard's verdict,
+  // BEFORE the press. The same list's shape is the routine's identity: a shape this machine has
+  // never completed marks the press as a first run, which needs its own at-machine statement.
+  const [preview, setPreview] = useState<DryRoutine | null>(null);
+  const [routineTicked, setRoutineTicked] = useState(false);
+  const previewPlan: RegistrationPlan | null = plan ?? (proposal?.kind === 'plan' ? proposal.plan : null);
+  const previewFloor = jobMachine(job, calibration).envelope.z.min;
+  useEffect(() => {
+    if (previewPlan === null || target === null) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    const clearanceZ = previewPlan.machineClearanceZ ?? seekFromMachineZ;
+    const seat = seatTapArgs(previewPlan);
+    void (async () => {
+      try {
+        const dry =
+          seat !== null
+            ? await dryMountTap(seat, {
+                clearanceZ,
+                settings: regSettings,
+                workEnvelopeFloorZ: previewFloor,
+                mount: 'bracket',
+                planTravelMm: seat.planTravelMm,
+                routine: 'seat-press',
+              })
+            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings });
+        if (live) setPreview(dry);
+      } catch {
+        if (live) setPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [previewPlan, target, seekFromMachineZ, regSettings, previewFloor]);
+  // A fresh statement per routine shape: the tick that satisfied the last press is not this one.
+  const previewShape = preview?.identity.shape ?? null;
+  useEffect(() => setRoutineTicked(false), [previewShape]);
+  const firstRun = preview !== null && !routineCompleted(machineRecord, preview.identity);
+  // The press is refused when the guard would refuse a line, and held until the operator's own
+  // statement when this exact routine has never completed on this machine (#1202 field 2).
+  const routineGate = (preview !== null && preview.refused) || (firstRun && !routineTicked);
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
   const [gridNote, setGridNote] = useState<string | null>(null);
@@ -1173,6 +1221,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         await handle.close();
         return;
       }
+      // #1202 — THE REGISTRATION COMPLETED. Its routine identity (the line sequence the press
+      // sent) is recorded on the machine BEFORE any house write that may fail: the MOTION finished
+      // without a stop, which is what the record claims, and an unreadable save only means the
+      // next press marks the routine again — the safe direction.
+      if (preview !== null && target !== null) {
+        const recordMachine = machineAt(target);
+        if (recordMachine !== null) {
+          void saveMachineWithRetry(recordMachine, (current) =>
+            withRoutineCompletion(current, {
+              routine: preview.identity.routine,
+              shape: preview.identity.shape,
+              at: new Date().toISOString(),
+              build: buildStamp(),
+            }),
+          );
+        }
+      }
       // #636 — THE MEASUREMENT IS ON SCREEN BEFORE ANY HOUSE WRITE. A throw or a refused save in
       // the chain below used to land in the outer catch as `failed`, and the successful probe result
       // was never shown; it is set first here, and every write's ANSWER is read below, with the
@@ -1491,6 +1556,52 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     );
   }
 
+  // #1202 + #1199 item 3 — WHAT WILL BE SENT, the first-run mark, and the press's own statement.
+  const routinePreview =
+    preview === null ? null : (
+      <div data-testid="engrave-registration-routine" style={{ marginTop: 6 }}>
+        {firstRun && (
+          <p style={{ ...MUTED, color: WARN, margin: '4px 0' }} data-testid="engrave-registration-first-run">
+            This measurement has not run on this machine before — stay at the Stop.
+          </p>
+        )}
+        <details data-testid="engrave-registration-dry">
+          <summary data-testid="engrave-registration-dry-summary">
+            What will be sent — {preview.lines.length} line{preview.lines.length === 1 ? '' : 's'}
+          </summary>
+          <ol style={{ ...MUTED, paddingLeft: 18, margin: '4px 0' }} data-testid="engrave-registration-dry-list">
+            {preview.lines.map((l, i) => (
+              <li
+                key={`${i}-${l.line}`}
+                data-testid={`engrave-registration-dry-line-${i}`}
+                data-refused={l.refused === null ? undefined : 'true'}
+                style={l.refused === null ? undefined : { color: BAD }}
+              >
+                <code>{l.line}</code>
+                {l.refused !== null && <span> — {l.refused}</span>}
+              </li>
+            ))}
+          </ol>
+        </details>
+        {preview.refused && (
+          <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
+            The marked line would be refused — the press is disabled.
+          </p>
+        )}
+        {firstRun && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' }} data-testid="engrave-registration-first-run-statement">
+            <input
+              type="checkbox"
+              data-testid="engrave-registration-first-run-tick"
+              checked={routineTicked}
+              onChange={(e) => setRoutineTicked(e.target.checked)}
+            />
+            <span>I am at the machine — the probe is fitted, the head is clear, and I will stay at the Stop.</span>
+          </label>
+        )}
+      </div>
+    );
+
   return (
     <div
       data-testid="engrave-registration"
@@ -1590,13 +1701,16 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               {summarizePlan(proposal.plan)}
             </p>
           )}
+          {routinePreview}
           <button
             type="button"
             data-testid="engrave-registration-approve-start"
             // #1189 — a SEAT press may run before the statement: the tap asks for the probe on the
             // card (its prompt is drawn above), and the answer starts it. A REGISTER press still
             // needs the statement: the executor would otherwise move without it.
-            disabled={busy || (!statementGiven && seatTapArgs(proposal.plan) === null)}
+            // #1202 — and a FIRST-RUN routine is refused at the guard level (a marked line) or
+            // held until its own statement, whichever press this is.
+            disabled={busy || (!statementGiven && seatTapArgs(proposal.plan) === null) || routineGate}
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
@@ -1757,10 +1871,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             <>
               {/* #797 — the at-machine statement is the ONE statement at Cut step 1 (which names
                   the probe), so this step asks nothing of its own; it reads whether it was given. */}
+              {routinePreview}
               <button
                 type="button"
                 data-testid="engrave-registration-start"
-                disabled={!statementGiven}
+                disabled={!statementGiven || routineGate}
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >
