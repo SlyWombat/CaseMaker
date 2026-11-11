@@ -28,11 +28,14 @@ import {
   SELECTION_CHIP_ON,
   useSelectionChipGrid,
 } from '@/components/selectionChip';
+import { Explain } from '@/components/welcome/Explain';
+import { GLOSSARY, type GlossaryTerm } from '@/components/welcome/glossary';
 import {
   OPERATION_GROUPS,
   operationOptionsInGroup,
   operationTypesInGroup,
   type OperationOptionDef,
+  type OperationTypeDef,
   type OperationTypeId,
 } from './operationTypes';
 
@@ -52,6 +55,31 @@ const OPTION_CHIP: CSSProperties = {
 };
 const OPTION_CHIP_DISABLED: CSSProperties = { ...OPTION_CHIP, color: '#6b7480', cursor: 'not-allowed', opacity: 0.7 };
 const IMPORTS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 10 };
+
+/**
+ * #1109 item 9 — A CHIP WHOSE LABEL NAMES A GLOSSARY TERM shows the glossary's line as its visible
+ * help (the approved operator words — the same words the blurb already carried for most of these).
+ * Where the blurb states a fact the gloss does not, it follows the gloss after the em dash.
+ */
+const CHIP_TERM: Partial<Record<OperationTypeId, GlossaryTerm>> = {
+  'v-carve': 'v-carve',
+  'v-carve-variable': 'variable-depth',
+  inlay: 'inlay',
+  prism: 'prism',
+  flute: 'flute',
+  texture: 'texture',
+  'thread-external': 'boss',
+};
+
+function ChipHelp({ type }: { type: OperationTypeDef }): JSX.Element {
+  const term = CHIP_TERM[type.id];
+  if (term === undefined) {
+    return <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>{type.blurb}</span>;
+  }
+  const gloss = GLOSSARY[term];
+  const extra = gloss.toLowerCase().includes(type.blurb.toLowerCase()) ? undefined : type.blurb;
+  return <Explain term={term}>{extra}</Explain>;
+}
 
 export interface OperationPickerProps {
   /** `select` = the wizard's step 4; `add` = the panel's "+ Add operation" (#685). */
@@ -111,10 +139,9 @@ export function OperationPicker({
                   onClick={() => onPick(t.id)}
                 >
                   <span style={{ display: 'block' }}>{t.label}</span>
-                  {/* #1109 — the blurb is VISIBLE help, not a title: touch and keyboard see it. */}
-                  <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>
-                    {t.blurb}
-                  </span>
+                  {/* #1109 — the help is VISIBLE, not a title: a glossed term's line comes from the
+                      glossary, every other chip keeps its blurb. */}
+                  <ChipHelp type={t} />
                 </button>
               );
             })}
@@ -134,22 +161,29 @@ export function OperationPicker({
                 <span style={OPTIONS_LABEL}>{row.label}</span>
                 {row.options.map((option) => {
                   const enabled = optionEnabled?.(option) ?? true;
+                  // #1109 item 8 — the hover title becomes a VISIBLE line under its chip: the same
+                  // text, on the screen, for touch and for anyone who never hovers.
+                  const help =
+                    enabled
+                      ? option.title
+                      : `A ${option.label.toLowerCase()} follows another item; add a label or a shape first.`;
                   return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      data-testid={option.testId}
-                      disabled={!enabled}
-                      title={
-                        enabled
-                          ? option.title
-                          : `A ${option.label.toLowerCase()} follows another item; add a label or a shape first.`
-                      }
-                      style={enabled ? OPTION_CHIP : OPTION_CHIP_DISABLED}
-                      onClick={() => onOption?.(option)}
-                    >
-                      {option.label}
-                    </button>
+                    <div key={option.id} style={{ display: 'grid', gap: 2 }}>
+                      <button
+                        type="button"
+                        data-testid={option.testId}
+                        disabled={!enabled}
+                        style={enabled ? OPTION_CHIP : OPTION_CHIP_DISABLED}
+                        onClick={() => onOption?.(option)}
+                      >
+                        {option.label}
+                      </button>
+                      {help !== undefined && (
+                        <span style={HINT} data-testid={`${option.testId}-help`}>
+                          {help}
+                        </span>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -161,26 +195,37 @@ export function OperationPicker({
         <div style={IMPORTS} data-testid="operation-picker-imports">
           <span style={OPTIONS_LABEL}>From a file</span>
           {onImportOutline !== undefined && (
-            <button
-              type="button"
-              data-testid="engrave-add-import-outline"
-              disabled={importing}
-              title="Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open paths become Engrave (line) operations. Text and images are reported, not dropped."
-              onClick={onImportOutline}
-            >
-              {importing ? 'Reading…' : 'Import outline or lines…'}
-            </button>
+            <div style={{ display: 'grid', gap: 2 }}>
+              <button
+                type="button"
+                data-testid="engrave-add-import-outline"
+                disabled={importing}
+                onClick={onImportOutline}
+              >
+                {importing ? 'Reading…' : 'Import outline or lines…'}
+              </button>
+              {/* #1109 item 8 — the long help is a visible line, not a title. */}
+              <span style={HINT} data-testid="engrave-add-import-outline-help">
+                Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open
+                paths become Engrave (line) operations. Text and images are reported, not dropped.
+              </span>
+            </div>
           )}
           {onImportImage !== undefined && (
-            <button
-              type="button"
-              data-testid="engrave-add-trace-image"
-              disabled={importing}
-              title="Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold, despeckle and corner smoothing are live in the dialog."
-              onClick={onImportImage}
-            >
-              {importing ? 'Reading…' : 'Trace image…'}
-            </button>
+            <div style={{ display: 'grid', gap: 2 }}>
+              <button
+                type="button"
+                data-testid="engrave-add-trace-image"
+                disabled={importing}
+                onClick={onImportImage}
+              >
+                {importing ? 'Reading…' : 'Trace image…'}
+              </button>
+              <span style={HINT} data-testid="engrave-add-trace-image-help">
+                Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold,
+                despeckle and corner smoothing are live in the dialog.
+              </span>
+            </div>
           )}
         </div>
       )}

@@ -33,7 +33,7 @@ test('#1109 — the four wizard steps on the desktop bundle, one screenshot each
   await expect(page.getByTestId('start-wizard-machine-state')).toContainText('Online', { timeout: 30_000 });
   expect(fake.lines()).toContain('?');
   // The baseline is the step as it settles, not a form that reached it (the route line still says how).
-  await page.screenshot({ path: 'test-results/1109-dev-step1-machine.png' });
+  await expect(page).toHaveScreenshot('1109-dev-step1-machine.png');
 
   // Step 2 — the question.
   await page.getByTestId('start-wizard-next').click();
@@ -42,17 +42,17 @@ test('#1109 — the four wizard steps on the desktop bundle, one screenshot each
   // behind Something else…, which is where the walk's pick lives now.
   await page.getByTestId('start-wizard-preset-something-else').click();
   await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.screenshot({ path: 'test-results/1109-dev-step2-operation.png' });
+  await expect(page).toHaveScreenshot('1109-dev-step2-operation.png');
 
   // Step 3 — the blank.
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
-  await page.screenshot({ path: 'test-results/1109-dev-step3-stock.png' });
+  await expect(page).toHaveScreenshot('1109-dev-step3-stock.png');
 
   // Step 4 — holding, which the found machine makes the VISE's (this set's point).
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-holding-picture').first()).toHaveAttribute('data-mechanism', 'vise');
   await expect(page.getByTestId('engrave-setup-mount-row-ledge')).toBeVisible();
-  await page.screenshot({ path: 'test-results/1109-dev-step4-holding.png' });
+  await expect(page).toHaveScreenshot('1109-dev-step4-holding.png');
 });

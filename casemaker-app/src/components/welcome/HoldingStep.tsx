@@ -293,7 +293,7 @@ export function HoldingPicture({
                 , or{' '}
                 <button
                   type="button"
-                  className="btn btn--sm"
+                  className="sw-btn btn btn--sm"
                   data-testid="engrave-setup-clamp-remove"
                   onClick={() => bed.onRemoveClamp?.(bed.selectedClamp)}
                 >
@@ -1509,6 +1509,7 @@ function HoldChoice({
           const isSelected = hold.x === selected.x && hold.y === selected.y && hold.z === selected.z;
           return (
             <button
+                className="sw-btn"
               key={`${hold.x}-${hold.y}-${hold.z}`}
               type="button"
               aria-pressed={isSelected}
@@ -1538,7 +1539,7 @@ function HoldChoice({
           {items} item{items === 1 ? ' is' : 's are'} on the part&rsquo;s face that is {faceWords}.
           <button
             type="button"
-            className="btn btn--sm"
+            className="sw-btn btn btn--sm"
             style={{ marginLeft: 6 }}
             data-testid="engrave-setup-orientation-move-items"
             onClick={onMoveItemsToTop}
@@ -2205,7 +2206,7 @@ export function HoldingStep({
             {count < maxClamps && (
               <>
                 {' · '}
-                <button type="button" className="btn btn--sm" data-testid="engrave-setup-clamp-add" onClick={addClamp}>
+                <button type="button" className="sw-btn btn btn--sm" data-testid="engrave-setup-clamp-add" onClick={addClamp}>
                   + clamp
                 </button>
               </>
@@ -2292,6 +2293,7 @@ export function HoldingStep({
             Makera’s rule for {isBlock ? `${fmt(jawSpan)} mm across the section` : `⌀${fmt(jawSpan)}`}: standard under ⌀20,
             reverse inner 20–35, reverse outer over 35
           </span>
+          <Explain term="reverse-teeth" />
           <Explain term="self-centring-scroll">Reverse is them turned round for larger stock.</Explain>
         </FieldRow>
         {isBlock && (
@@ -2523,7 +2525,7 @@ export function HoldingStep({
           {canReachMachine && (
             <button
               type="button"
-              className="btn btn--sm"
+              className="sw-btn btn btn--sm"
               style={{ marginLeft: 'auto' }}
               data-testid="engrave-setup-change-machine"
               onClick={() => changeMachine(null, HOLDING_MOUNT_WORDS[current])}
@@ -2585,7 +2587,7 @@ export function HoldingStep({
                   {machine === null && (
                     <button
                       type="button"
-                      className="btn btn--sm"
+                      className="sw-btn btn btn--sm"
                       data-testid="engrave-setup-no-hold-add-machine"
                       onClick={() => onOpenManage?.()}
                     >
@@ -2594,7 +2596,7 @@ export function HoldingStep({
                   )}
                   <button
                     type="button"
-                    className="btn btn--sm"
+                    className="sw-btn btn btn--sm"
                     data-testid="engrave-setup-no-hold-back"
                     onClick={() => onBackToStock?.()}
                   >
@@ -2812,6 +2814,7 @@ export function HoldingStep({
           </div>
           {narrow && (
             <button
+                className="sw-btn"
               type="button"
               data-testid="engrave-setup-holding-picture-enlarge"
               onClick={() => setPictureOpen((open) => !open)}
@@ -2845,6 +2848,7 @@ export function HoldingStep({
             {fmt(fix.stockProud)} mm proud.
           </p>
           <button
+                className="sw-btn"
             type="button"
             data-testid="engrave-setup-fix-proud"
             onClick={() => onAnswers(withVise(answers, { stockProud: fix.stockProud, source: fix.source }))}
@@ -2936,13 +2940,21 @@ function MountRow({
       )}
       {option.mount === 'ledge' && (
         <div style={{ marginLeft: 22 }} data-testid="engrave-setup-ledge-gloss">
+          {/* #1109 item 9 — this row's sentence is where the step first says "proud". */}
+          <Explain term="proud" />
           <Explain term="jaw-ledge" />
+        </div>
+      )}
+      {/* #1109 item 9 — the bracket row's refusal is the step's first "anchor 1". */}
+      {option.mount === 'bed-bracket' && option.disabled && (
+        <div style={{ marginLeft: 22 }} data-testid="engrave-setup-anchor-gloss">
+          <Explain term="anchor-1" />
         </div>
       )}
       {option.disabled && option.action != null && (
         <button
           type="button"
-          className="btn btn--sm"
+          className="sw-btn btn btn--sm"
           style={{ marginLeft: 22, marginTop: 2 }}
           // The change wizard's press keeps its own id; the other two are `…-action-…`.
           data-testid={

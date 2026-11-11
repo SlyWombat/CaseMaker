@@ -34,6 +34,7 @@ import { VISE_FLOOR_DEPTH } from './fixture';
 import { rotaryOf, type Mill, type SizedMachine } from './machine';
 import { isConductiveMaterial, isMetalMaterial, materialFamilyOf, MATERIAL_LABELS } from './materials';
 import { ROTARY_MAX_DIAMETER_MM, ROTARY_MAX_LENGTH_MM } from './rotary/wrap';
+import { blocker, FIELD_EXAMPLES, typeExample } from './wizardCopy';
 import type { EngraveFacing, EngraveJob, FieldSource, JobStockEntry, JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 
 /** The forms a job's stock can take, in the order the wizard's pictures offer them. */
@@ -487,8 +488,10 @@ export function boxProblem(box: StockBox, machine: SizedMachine): string | null 
   const names = { length: 'length', width: 'width', thickness: 'thickness' } as const;
   for (const key of ['length', 'width', 'thickness'] as const) {
     const v = box[key];
-    // #1109 — the blocker proposes a value.
-    if (!Number.isFinite(v) || v <= 0) return `${names[key].charAt(0).toUpperCase()}${names[key].slice(1)} needs a size — type a number above 0 (for example 80)`;
+    // #1109 — the blocker proposes the field's own decided default.
+    if (!Number.isFinite(v) || v <= 0) {
+      return blocker(names[key].charAt(0).toUpperCase() + names[key].slice(1), 'a size above 0', typeExample(FIELD_EXAMPLES[key]));
+    }
   }
   const t = travel(machine);
   if (box.length > t.length) {
@@ -523,7 +526,7 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
   for (const key of STOCK_SIZE_FIELDS[form]) {
     const v = size[key];
     if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) {
-      return `${key.charAt(0).toUpperCase()}${key.slice(1)} needs a size — type a number above 0 (for example 80)`;
+      return blocker(key.charAt(0).toUpperCase() + key.slice(1), 'a size above 0', typeExample(FIELD_EXAMPLES[key]));
     }
   }
   if (form === 'rod' || form === 'tube') return rotaryEnvelopeProblem(size, machine);

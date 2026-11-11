@@ -202,7 +202,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     // #1106 item 7 — the single-machine header is gone; the state line is the step's machine line.
     expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
     expect(screen.queryByTestId('start-wizard-machine-address')).toBeNull();
-    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · idle');
     // The removed essay (A3): the frame is still saved, it is no longer printed on step 1.
     expect(screen.queryByTestId('start-wizard-machine-frame')).toBeNull();
 
@@ -224,7 +224,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     render(<StartWizard />);
 
     await waitForState('found');
-    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · idle');
     expect(useSettingsStore.getState().machineCalibration).toBeUndefined();
   });
 

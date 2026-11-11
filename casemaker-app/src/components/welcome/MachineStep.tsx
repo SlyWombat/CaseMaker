@@ -4,7 +4,7 @@
  * The shell owns the step index and the footer; this component owns the step's body. #682 replaced
  * the old picker-and-check body with the design's (`docs/design/first-job-flow.md` §3.2):
  *
- *     Makera Z1 “Zoomba” · 192.168.10.43      ● Online · Idle · checked 09:02   [ Check again ]
+ *     Makera Z1 “Zoomba” · 192.168.10.43      ● Online · idle · checked 09:02   [ Check again ]
  *                                                          ▸ another machine…
  *
  * - The location's machine is the step's machine: its name and address are on screen and the check
@@ -21,6 +21,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
+import { Explain } from './Explain';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords, type MachineMountKind } from '@/platform/machineChange';
@@ -230,7 +231,9 @@ export function MachineStep({
       ? readMachineRest(machine.status)?.homed === true
       : false;
   // #1109 — `homed` is the spec's word; the operator reads what it means.
-  const word = found ? `Online · ${wordBase}${homed ? ' · knows where it is' : ''}` : wordBase;
+  // #1109 item 10 — the state word is LOWER CASE after "Online ·", per the table ("Online · idle").
+  const stateWordLower = wordBase.charAt(0).toLowerCase() + wordBase.slice(1);
+  const word = found ? `Online · ${stateWordLower}${homed ? ' · knows where it is' : ''}` : wordBase;
   const checked = found ? timeOfDay(machine.observedAt) : null;
 
   // Last seen belongs to the machine this line is about. When a house record exists, another
@@ -407,13 +410,19 @@ export function MachineStep({
               line says when that was the way, plainly, rather than leaving the operator to guess
               why "the search" found nothing. */}
           {found && route !== null && (
-            <p style={NOTE} data-testid="start-wizard-machine-route">
-              {route === 'recorded'
-                ? 'Found at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
-                : route === 'network'
-                  ? 'Found on the network.'
-                  : 'Reached at the address you gave.'}
-            </p>
+            <>
+              <p style={NOTE} data-testid="start-wizard-machine-route">
+                {/* #1109 item 9 — the approved copy: "the address you wrote" is the plain form of
+                    the recorded address. "Broadcasts" stays the engineer's word, so it carries its
+                    gloss on the screen. */}
+                {route === 'recorded'
+                  ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                  : route === 'network'
+                    ? 'Found on the network.'
+                    : 'Reached at the address you gave.'}
+              </p>
+              {route === 'recorded' && <Explain term="broadcasts" />}
+            </>
           )}
 
           {!checking && outcome === 'not-found' && (

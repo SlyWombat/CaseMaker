@@ -43,6 +43,16 @@ The approved term list is on #1109 (issuecomment-6769589449) with the maintainer
 | the house's stock | Stock step, provenance | "the house's stock" | *the stock this workshop keeps* | "House" is internal |
 | machine relay | Machine step, web build | the relay sentence | dropped — positive sentence (#1106): *This page can write, check and simulate; to run the machine, open the desktop app.* | Says what it can do |
 
+**Item 9's result (2026-11-11):** eighteen of these terms are rendered by a wizard step and stay in
+`glossary.ts`, each wrapped at its first use in `Explain` — v-carve, variable depth, inlay, prism,
+flute, texture, relief, Gerber, boss, simulate only, proud, jaw ledge, stick-out, neck for parting,
+self-centring scroll, anchor 1, reverse teeth, broadcasts. Six are not on any step and were
+deleted from the glossary: *medial axis* (no wizard copy), *helixed* (the bore chip's plain words),
+*run-out* (the block-chuck note says *how far it wobbles off true*), and *recorded address* /
+*homed* / *the house's stock*, whose approved plain lines now carry the meaning (*the address you
+wrote*, *knows where it is*, *the stock this workshop keeps*). The checked-in list is
+`tests/unit/glossaryTerms.json`; a term no step renders fails `wizardCopy.spec.tsx`.
+
 ## 2. Step 1 — Machine
 
 | File / key | Today | New | Why |
@@ -53,10 +63,16 @@ The approved term list is on #1109 (issuecomment-6769589449) with the maintainer
 | `MachineStep.tsx` profile-only row (#1106) | (new) | *profile only — vendor defaults; connect it at Cut* | Approved with #1106 |
 | Wizard footer / Cut and Holding "Change the machine…" | "Change the machine…" (step 1 points here) | Same words; the actions open this step's change button | One phrase, one place |
 
-## 3. Step 2 — What are you cutting?
+## 3. Step 2 — What are you making?
+
+*(#1100 item 4 supersedes this pass's earlier title; the code title lands with #1100.)*
 
 The chip labels stay; the `blurb` currently lives in a `title` only. It becomes one visible line under
-the chip (or on the preset card), through `Explain` where a term needs a gloss.
+the chip (or on the preset card), through `Explain` where a term needs a gloss: V-carve, V-carve
+variable depth, Inlay, Prism, Flute, Texture and Thread a boss carry the glossary's line as their
+help (Thread a boss follows it with the chip's own sentence); the Gerber card shows its gloss under
+the blurb; the other chips keep their blurb. On a rod, Relief and the *simulate only* tag carry
+their lines in the rotary picker.
 
 | File / key | Today (title only) | New (visible) | Why |
 |---|---|---|---|
@@ -118,6 +134,11 @@ only caller of `createEmptyJob()`.
 | `stockStart.ts:440` | "the <field> needs a number in mm, above 0" | *<Field> needs a size — type a number above 0 (for example 80).* | Sentence case; a value |
 | `stockStart.ts:475` | "the <field> needs a number in mm, above 0" | the same, with the field's own example | as above |
 | `StartStockStep.tsx:515` (copper) | "the copper thickness needs a number in mm, above 0" | *The copper thickness needs a size above 0 — 1 oz is 0.035 mm.* | Proposes a value |
+| `operationCreate.ts` cut-out length | "The shape needs a length above 0 mm." | *The shape needs a length above 0 — type a number in mm (for example 60).* | #1109 item 3: the card's decided default |
+| `operationCreate.ts` cut-out width | "The shape needs a width above 0 mm." | *The shape needs a width above 0 — type a number in mm (for example 40).* | as above |
+| `operationCreate.ts` pocket length | "The pocket needs a length above 0 mm." | *The pocket needs a length above 0 — type a number in mm (for example 60).* | as above |
+| `operationCreate.ts` pocket width | "The pocket needs a width above 0 mm." | *The pocket needs a width above 0 — type a number in mm (for example 40).* | as above |
+| `operationCreate.ts` pocket depth | "Depth must be above 0 mm." | *The pocket depth needs a size above 0 — type a number in mm (for example 6).* | as above |
 | `stockStart.ts` rod problems | "the vise holds a rod up to 20 mm standing on its end — this rod is 100 mm; hold it in the rotary chuck" | *The vise holds a rod up to 20 mm standing on its end — this one is 100 mm; hold it in the rotary chuck.* | Sentence case; the action stays |
 
 ## 7. Component set
@@ -132,9 +153,14 @@ only caller of `createEmptyJob()`.
 
 ## 8. Specs and baselines
 
-- `wizardCopy.spec.tsx`: no element whose only help is a `title`; `glossaryTerms.json` covers every
-  term the steps render (a new term without an entry fails).
-- `blockers.spec.ts`: every blocker contains a digit, or the words "type"/"pick".
+- `wizardCopy.spec.tsx`: renders all four steps (and the flat, picker-open and rotary variants of
+  the question, and the vise, rotary and empty-bed variants of Holding). Fails on (a) any `title`
+  whose words are not also on the screen, (b) a term in `glossaryTerms.json` that no step renders
+  (the glossary and the list must name the same terms), and (c) a step that shows a listed term
+  for the first time without its `Explain` line.
+- `blockers.spec.ts`: every blocker carries an explicit verb (type / pick / try / choose) — the digit alone is
+  not a suggestion ("above 0 mm" satisfied the old rule by accident) — and a numeric one has the one
+  `blocker()` shape with the field's decided example.
 - RTL: the provenance sentence survives typing "3" then "36" and disappears after blur with 40.
 - Playwright baselines of all four steps on the house app (web) and the dev build (vise), approved by
   the maintainer.

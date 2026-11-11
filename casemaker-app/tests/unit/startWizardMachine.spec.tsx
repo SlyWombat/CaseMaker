@@ -138,7 +138,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(machine?.host).toBe(HOUSE_HOST);
     // #693's reader: Idle with MPos at the Z1's homed rest is `homed`; the check sends no `$H`.
     expect(stateLine().textContent).toBe(
-      `Online · Idle · knows where it is · checked ${hhmm(machine!.observedAt)}`,
+      `Online · idle · knows where it is · checked ${hhmm(machine!.observedAt)}`,
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
   });
@@ -150,9 +150,9 @@ describe('#682 — step 1 is the house’s machine', () => {
 
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(stateLine().textContent).toContain('Online');
-    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain(
-      'Found at its recorded address',
-    );
+    // #1109 item 9 — the approved plain line, and the trade word "broadcasts" glossed beneath it.
+    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('Found at the address you wrote');
+    expect(screen.getByTestId('explain-broadcasts').textContent).toContain('Found on the network');
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('cannot receive broadcasts');
     // The route is remembered with the check, so a re-opened wizard can still say it.
     expect(useMachineStore.getState().route).toBe('recorded');
@@ -220,7 +220,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     render(<StartWizard />);
 
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
-    expect(stateLine().textContent).toContain('Online · Idle');
+    expect(stateLine().textContent).toContain('Online · idle');
     expect(stateLine().textContent).not.toContain('homed');
     const machine = useMachineStore.getState().machine;
     expect(stateLine().textContent).toContain(`· checked ${hhmm(machine!.observedAt)}`);
@@ -304,7 +304,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(screen.queryByTestId('start-wizard-machine-list')).toBeNull();
     expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
-    expect(stateLine().textContent).toContain('Online · Idle');
+    expect(stateLine().textContent).toContain('Online · idle');
   });
 
   it('the old header, fold and typed address are gone; the rows are the picker and Add a machine… opens Manage', async () => {

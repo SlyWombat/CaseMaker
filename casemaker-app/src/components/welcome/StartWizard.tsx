@@ -1237,9 +1237,8 @@ export function StartWizard(): JSX.Element {
             </h2>
             <button
               type="button"
-              className="sw-close"
+              className="sw-btn sw-close"
               aria-label="Close"
-              title="Close"
               data-testid="start-wizard-close"
               onClick={closeWizard}
             >
@@ -1273,6 +1272,7 @@ export function StartWizard(): JSX.Element {
               </p>
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <button
+                className="sw-btn"
                   type="button"
                   data-testid="start-wizard-replace-yes"
                   onClick={() => {
@@ -1283,7 +1283,8 @@ export function StartWizard(): JSX.Element {
                 >
                   Replace it
                 </button>
-                <button type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
+                <button
+                className="sw-btn" type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
                   Keep it
                 </button>
               </div>
@@ -1315,6 +1316,16 @@ export function StartWizard(): JSX.Element {
               {sentence(mountBlocked)}
             </p>
           )}
+          {/* #1109 item 8 — the primary's blocked reason is a VISIBLE line, not only a title. The
+              untouched step already has operationUnblock above (the same sentence), so this line
+              takes the answers it does not: one line, one id. */}
+          {operationUnblock === null &&
+            step === 'operation' &&
+            operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null && (
+              <p style={UNBLOCK} data-testid="start-wizard-operation-unblock">
+                {sentence(operationCreateBlocked(operationChoice, { reEntry: jobStarted })!)}
+              </p>
+            )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* #726 P10 — step 1 has no Back, and no footer Cancel: the header's ✕ is the one way
                 out every step carries; the footer offers only what moves the flow. */}
@@ -1389,9 +1400,6 @@ export function StartWizard(): JSX.Element {
                 // picked the step draws no sentence (its line speaks for a picked item), so a
                 // disabled control would otherwise say nothing at all.
                 disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
-                title={
-                  operationCreateBlocked(operationChoice, { reEntry: jobStarted }) ?? undefined
-                }
                 onClick={next}
               >
                 {operationChoice === null

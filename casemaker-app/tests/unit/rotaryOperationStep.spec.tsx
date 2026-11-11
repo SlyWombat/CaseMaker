@@ -123,7 +123,10 @@ describe('#752 the rotary Operation step', () => {
     fireEvent.change(screen.getByTestId('start-wizard-op-flute-length'), { target: { value: '30' } });
     expect(lastChoice(onChoice)).toEqual({ type: 'flute', lengthMm: 30 });
     fireEvent.change(screen.getByTestId('start-wizard-op-flute-length'), { target: { value: '0' } });
-    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('The flute needs a length above 0 — type a number in mm.');
+    // #1109 item 3 — the blocker proposes the field's decided example (length → 80).
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBe(
+      'The flute needs a length above 0 — type a number in mm (for example 80).',
+    );
   });
 
   it('Relief asks for its file; Create waits for one that reads cleanly', () => {
