@@ -140,17 +140,6 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.cornerClearanceMm", 2.0, "mm"),
     ("registration.surfaceBandMm", 0.25, "mm"),
     ("registration.edgeMarginMm", 0.5, "mm"),
-    // #1199 field 7 - the footprint shrink for a probe top touch and the growth for a cutter, both
-    // CHOSEN, not measured; `defaultsClient.ts` states the same 0..=20 mm bounds.
-    ("registration.probeFootprintShrinkMm", 3.0, "mm"),
-    ("registration.cutterFootprintGrowMm", 1.0, "mm"),
-    // #1199 field 7 (analyst 2026-11-11) - the hold's placement uncertainty, per axis and per hold
-    // kind. CHOSEN, not measured; the bench replaces them with measured spreads. Bounds mirror
-    // `defaultsClient.ts`.
-    ("registration.vise.placementAcrossJawsMm", 0.5, "mm"),
-    ("registration.vise.placementAlongJawsMm", 5.0, "mm"),
-    ("registration.tape.placementMm", 10.0, "mm"),
-    ("registration.tape.placementRotationDeg", 2.0, "deg"),
     // #475 - the surface touches across the cut regions' extents: a centre plus both extents on each
     // axis. CHOSEN, not measured; `defaultsClient.ts` states the same 5..=9 whole-number bound.
     ("registration.surfaceTouchCount", 5.0, "touches"),
