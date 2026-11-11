@@ -1786,6 +1786,18 @@
       "setAt": null,
       "unit": "mm",
       "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
+    },
+    "registration.probeFootprintShrinkMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.cutterFootprintGrowMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
     }
   },
   "accessories": [

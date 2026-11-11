@@ -140,6 +140,10 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     ("registration.cornerClearanceMm", 2.0, "mm"),
     ("registration.surfaceBandMm", 0.25, "mm"),
     ("registration.edgeMarginMm", 0.5, "mm"),
+    // #1199 field 7 - the footprint shrink for a probe top touch and the growth for a cutter, both
+    // CHOSEN, not measured; `defaultsClient.ts` states the same 0..=20 mm bounds.
+    ("registration.probeFootprintShrinkMm", 3.0, "mm"),
+    ("registration.cutterFootprintGrowMm", 1.0, "mm"),
     // #475 - the surface touches across the cut regions' extents: a centre plus both extents on each
     // axis. CHOSEN, not measured; `defaultsClient.ts` states the same 5..=9 whole-number bound.
     ("registration.surfaceTouchCount", 5.0, "touches"),
@@ -489,6 +493,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("margins.zToleranceMm", 0.05, "mm", "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"),
     ("margins.minFloorMm", 1.0, "mm", "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"),
     ("margins.edgeMarginMm", 1.0, "mm", "chosen, not measured: how close an item may come to a stock edge; seeds each new job"),
+    ("registration.probeFootprintShrinkMm", 3.0, "mm", "chosen, not measured: the least a probe top touch footprint is shrunk below the blank outline; tip radius plus placement uncertainty may exceed it"),
+    ("registration.cutterFootprintGrowMm", 1.0, "mm", "chosen, not measured: how far a cutter region grows beyond the blank outline, on top of its radius"),
     ("margins.jawClearanceMm", 1.0, "mm", "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"),
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
@@ -779,6 +785,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.edgeMarginMm" => Some(need(
             n.is_some_and(|v| (0.01..=20.0).contains(&v)),
             "0.01 to 20 mm",
+        )),
+        "registration.probeFootprintShrinkMm" | "registration.cutterFootprintGrowMm" => Some(need(
+            n.is_some_and(|v| (0.0..=20.0).contains(&v)),
+            "0 to 20 mm",
         )),
         "registration.surfaceSeekMm" => Some(need(
             n.is_some_and(|v| (1.0..=100.0).contains(&v)),
