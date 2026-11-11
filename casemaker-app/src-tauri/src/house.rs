@@ -2852,9 +2852,12 @@ mod tests {
         assert_eq!(switched.case_colour.as_deref(), Some("yellow"));
         assert_eq!(switched.kept_in.as_deref(), Some("box A"));
         assert!(!switched.use_in_plans);
-        // The served document says the switch, so the next build of the app reads the same fact.
+        // The served document says the switch, in the wire format's own words (camelCase), so the
+        // next build of the app reads the same fact.
         let raw = serde_json::to_value(switched).unwrap();
-        assert_eq!(raw["use_in_plans"], serde_json::json!(false));
+        assert_eq!(raw["useInPlans"], serde_json::json!(false));
+        assert_eq!(raw["caseColour"], serde_json::json!("yellow"));
+        assert_eq!(raw["keptIn"], serde_json::json!("box A"));
 
         // An item that states no case/place carries none, and a document written before the fields
         // existed reads them as absent with the switch ON.
@@ -2864,9 +2867,9 @@ mod tests {
         assert!(plain.use_in_plans);
         let mut older = serde_json::to_value(plain).unwrap();
         let object = older.as_object_mut().unwrap();
-        object.remove("case_colour");
-        object.remove("kept_in");
-        object.remove("use_in_plans");
+        object.remove("caseColour");
+        object.remove("keptIn");
+        object.remove("useInPlans");
         let old: InventoryItem = serde_json::from_value(older).unwrap();
         assert_eq!(old.case_colour, None);
         assert_eq!(old.kept_in, None);
