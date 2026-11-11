@@ -184,6 +184,8 @@ export interface RegistrationOutcome {
     aboveBandMm?: number | null;
   }[];
   probeRefZ: number;
+  /** #1199 — the machine's own travel height (`toolChange.clearanceZ`), carried from the plan (absent on older records). */
+  machineClearanceZ?: number;
   /**
    * The plan's seek height, in MACHINE Z — the resolved machine's `toolChange.clearanceZ` it sought from
    * (carried so the recovery sentence names the same height the plan lifted to, never a constant).
@@ -589,6 +591,7 @@ export function computeOutcome(plan: RegistrationPlan, data: RunData): Registrat
     ...(data.surfaceAt === undefined ? {} : { surfaceAt: data.surfaceAt }),
     ...(data.surfaceChecks === undefined ? {} : { surfaceChecks: data.surfaceChecks }),
     probeRefZ: data.probeRefZ,
+    machineClearanceZ: plan.machineClearanceZ,
     seekFromMachineZ: plan.seek.fromMachineZ,
     currentG54: onBracket ? null : g54InForce,
     correctedG54,

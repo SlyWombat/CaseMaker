@@ -118,6 +118,8 @@ const yes = async () => true;
 function deps(console: { send(line: string): Promise<ConsoleSendResult> }) {
   return {
     console,
+    // #1199 — the live machine clearance every executor now requires; this file's plans seek from −20.
+    liveClearanceZ: -20,
     operator: async (step: { kind: string }) => (step.kind === 'fit-probe' || step.kind === 'confirm-mount' ? true : yes()),
   };
 }

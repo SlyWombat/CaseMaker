@@ -105,7 +105,7 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
-import { motionOrderGuard } from './motionOrder';
+import { motionOrderGuard, planTravelProblem } from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -235,6 +235,26 @@ export interface ExecDeps {
    * separated from the probe's seating and is not used across a fitting.
    */
   lastRecordedTopProbeRefZ?: number | null;
+  /**
+   * #1199 item 2 — THE LIVE MACHINE'S CLEARANCE at RUN time (`toolChange.clearanceZ` of the
+   * resolved machine/profile), read by the caller when the run starts. The executor refuses when
+   * the plan's travel height or its recorded clearance sits below this, and builds the safe-Z
+   * guard from it. REQUIRED: a run proves its plan against the machine as it is now, and tsc
+   * makes every caller state the value (a test may pass the plan's own clearance).
+   */
+  liveClearanceZ: number;
+}
+
+/**
+ * #1199 item 2 — the clearance a plan may run under, proven against the LIVE machine when the
+ * caller supplies it. Returns the value to build the guard from, or the refusal sentence.
+ */
+function liveClearanceFor(plan: RegistrationPlan, deps: ExecDeps): { clearanceZ: number; problem: string | null } {
+  const live = Number.isFinite(deps.liveClearanceZ as number) ? (deps.liveClearanceZ as number) : (plan.machineClearanceZ ?? Number.NaN);
+  const problem =
+    planTravelProblem(plan.seek.fromMachineZ, live, 'plan’s travel height') ??
+    planTravelProblem(plan.machineClearanceZ ?? Number.NaN, live, 'plan’s recorded clearance');
+  return { clearanceZ: live, problem };
 }
 
 export interface Transcript {
@@ -305,6 +325,12 @@ function session(
    * the stylus still deflected must release it before the epilogue's home, or that rapid alarms.
    */
   releaseProbeOnStop = false,
+  /**
+   * #1199 field 7 — WHERE A DESCENT BELOW THE CLEARANCE MAY HAPPEN for this session (the plan's
+   * stock box, its edge-find windows and its tap target). Absent: the clearance/order rules apply
+   * without a footprint check.
+   */
+  descentAllowed?: (machine: boolean, x: number, y: number) => boolean,
 ) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
@@ -327,7 +353,7 @@ function session(
    * line sent from below it — so a routine that lifts to a band height and traverses is stopped
    * before the line reaches the wire, and a descent is only ever taken at the point to be probed.
    */
-  const motion = motionOrderGuard(seekFromMachineZ);
+  const motion = motionOrderGuard(seekFromMachineZ, descentAllowed === undefined ? {} : { descentAllowed });
 
   /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
   function stoppedByOperator(): boolean {
@@ -1669,6 +1695,7 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
     ];
     const outcome: RegistrationOutcome = {
       edges: [],
+      machineClearanceZ: opts.seekFromMachineZ,
       offset: { x: r3(centreWork.x - plan.at.x), y: r3(centreWork.y - plan.at.y) },
       measured: { x: true, y: true },
       centre: centreWork,
@@ -2066,7 +2093,10 @@ export async function runRegistration(
   deps: ExecDeps,
   spreadPlan?: SurfaceSpreadPlan,
 ): Promise<RunResult> {
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
+  const cleared = liveClearanceFor(plan, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -2578,7 +2608,10 @@ export async function retouchSurface(
       transcript: [],
     };
   }
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
+  const cleared = liveClearanceFor(plan, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
@@ -2875,7 +2908,9 @@ export async function runFlipRegistration(
   // whose G38.5 release follows the reading, so a Stop (or a refused line) between the trigger and
   // the release leaves the ball deflected whatever probe make it is; the epilogue's release is a
   // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
-  const io = session(deps, ctx.seek.fromMachineZ, s.idlePollLimit, true);
+  const cleared = liveClearanceFor(ctx, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, s.idlePollLimit, true);
   let powered = false;
   try {
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
@@ -3121,6 +3156,7 @@ export async function runFlipRegistration(
     const problems: string[] = [];
     const outcome: RegistrationOutcome = {
       edges: [...frontRecs, seedRec].map((rec) => edgeFrom(rec, s.tipRadiusMm)),
+      machineClearanceZ: ctx.machineClearanceZ,
       offset: { x: r3(correctedG54.x - g54.x), y: r3(correctedG54.y - g54.y) },
       measured: { x: true, y: true },
       centre: { ...origin },

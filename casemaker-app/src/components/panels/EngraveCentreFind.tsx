@@ -117,7 +117,7 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
           parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
           ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
         },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: plan.seek.fromMachineZ },
       );
       if (!alive.current) return;
       if (!r.ok) {
@@ -145,7 +145,7 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
     try {
       const a = await applyCorrection(
         result.outcome,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: result.outcome.machineClearanceZ ?? Number.NaN },
         { confirmed: true },
       );
       if (!alive.current) return;
