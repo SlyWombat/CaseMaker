@@ -217,3 +217,35 @@ describe('#1211 acceptance — the property over rods, sections and probes', () 
     }
   }
 });
+
+// #1211 field 5 (remainder) — A WORK-FRAME LINE IS PROVABLE WHEN THE CALLER STATES THE WORK
+// ORIGIN'S MACHINE X. The centre find speaks G54 work coordinates; the chuck keep-out is machine
+// X. Without an origin the guard keeps refusing (above); with one it maps the line and applies the
+// same rule — inside the keep-out at any Z is refused, outside is allowed.
+describe('#1211 field 5 — the keep-out on a work-frame line, with the origin stated', () => {
+  const ORIGIN_X = -213.498; // the bench fixture's G54 machine X
+  const keepOut = { maxMachineX: -196.5, what: 'chuck', workOriginMachineX: ORIGIN_X };
+
+  it('REFUSES a work X line whose mapped machine X is inside the keep-out', () => {
+    const guard = motionOrderGuard(CLEARANCE, { travelKeepOut: keepOut });
+    guard.observe('$H');
+    guard.observe(`G53 G0 Z${CLEARANCE}`);
+    // work 10 -> machine -203.498, inside -196.5
+    const problem = guard.observe('G0 X10.000 Y20.000');
+    expect(problem).not.toBeNull();
+    expect(problem).toContain('keep-out');
+  });
+
+  it('ALLOWS a work X line whose mapped machine X is clear of the keep-out', () => {
+    const guard = motionOrderGuard(CLEARANCE, { travelKeepOut: keepOut });
+    guard.observe('$H');
+    guard.observe(`G53 G0 Z${CLEARANCE}`);
+    // work 30 -> machine -183.498, clear
+    expect(guard.observe('G0 X30.000 Y20.000')).toBeNull();
+    // A one-axis modal X move is mapped the same way.
+    expect(guard.observe('G0 X31.000')).toBeNull();
+    const problem = guard.observe('G0 X10.000');
+    expect(problem).not.toBeNull();
+    expect(problem).toContain('keep-out');
+  });
+});
