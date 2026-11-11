@@ -361,6 +361,36 @@ describe('the "my machine" migration into the location (#412)', () => {
     expect(next.margins?.minFloor).toBe(0.3);
   });
 
+  it('#1202 — a write-through carries every served section it does not own: currentBlank, registrations, completedRoutines', () => {
+    setLocal({ vise: true });
+    const { record } = mergeMachine(localMachine(), null, null, '2026-10-15T07:00:00.000Z');
+    const served: MachineRecord = {
+      ...record,
+      // The three sections a hardcoded rebuild dropped (#1179, #1123-40, #1202) — and, by the same
+      // rule, any field a later build adds that this one has never heard of.
+      currentBlank: { 'job-1': 'blank-abc' },
+      registrations: [{ jobId: 'job-1', setupId: 's1', writtenAt: '2026-11-10T09:00:00.000Z' }],
+      completedRoutines: [
+        { routine: 'seat-press', shape: '0f3c9a11', at: '2026-11-11T09:12:00.000Z', build: { version: '1.0.0', commit: 'abc1234' } },
+      ],
+    } as unknown as MachineRecord;
+    // Nothing changed locally: the merge is a NO-OP against the served record — a status line or a
+    // settings tick must not become a machine PUT that erases what other writers put there.
+    const { record: unchanged } = mergeMachine(localMachine(), served, served, 'later');
+    expect(sameRecord(unchanged, served)).toBe(true);
+    expect(unchanged.completedRoutines).toHaveLength(1);
+    // A local section change still writes, and the sections it does not own ride along untouched.
+    useSettingsStore.setState({ margins: { ...MARGIN_DEFAULTS, minFloor: 0.3, source: 'user' } });
+    const { record: next } = mergeMachine(localMachine(), served, served, 'later');
+    expect(next.margins?.minFloor).toBe(0.3);
+    expect(next.currentBlank).toEqual({ 'job-1': 'blank-abc' });
+    expect(next.registrations).toHaveLength(1);
+    expect(next.completedRoutines?.[0]?.shape).toBe('0f3c9a11');
+    // A NEW window (no baseline yet) keeps them too.
+    const { record: fresh } = mergeMachine(localMachine(), served, null, 'later');
+    expect(fresh.completedRoutines?.[0]?.routine).toBe('seat-press');
+  });
+
   it('compares records by content, not key order', () => {
     setLocal({ vise: true, calibration: true });
     const { record: mine } = mergeMachine(localMachine(), null, null, '2026-10-15T00:00:00.000Z');

@@ -227,7 +227,6 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
 
   // SHOWN == SENT (in order): every shown line appears in the console's received list, in sequence.
   const sent = fake.lines();
-  fs.writeFileSync('/tmp/dbg1202-lines.json', JSON.stringify({ shown: lines, sent }, null, 1));
   let at = 0;
   for (const line of lines) {
     const found = sent.indexOf(line, at);
@@ -249,12 +248,12 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
 
 });
 
-// THE RELOAD-BASED HALF, KNOWN-BROKEN AT THE TIME OF WRITING: on a fresh load a machine record
-// WITHOUT `completedRoutines` is written back ~10 s in (it arrives after any seed or datum write,
-// and the served document is left with the key absent — the app then reads null). The record's own
-// unit and cargo round-trips cover the data; this walk is parked until that stale-load write is
-// found and fixed (logged with #1202's follow-ups).
-test.fixme('the same card is unmarked once its routine is recorded, and a changed shape re-marks it (#1202)', async ({
+// THE RELOAD HALF. Once the seat routine is recorded, a fresh card for the SAME routine is
+// unmarked and its press available; a changed sequence (the same id, a different shape) is a NEW
+// routine and re-marks it. This walk was parked while the write-through dropped `completedRoutines`
+// on every status tick — the merge fix it now covers (#1202, `mergeMachine` spreads the served
+// record field for field).
+test('the same card is unmarked once its routine is recorded, and a changed shape re-marks it (#1202)', async ({
   cm,
   page,
 }) => {
@@ -265,29 +264,38 @@ test.fixme('the same card is unmarked once its routine is recorded, and a change
     movingEtag: true,
     writes: 'applied',
   });
+  await installFakeConsole(page, { steps: 20 });
+  await page.route('**/api/v1/defaults/**', async (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }),
+  );
   await cm.ready();
+  await openSeatProposal(page);
 
-  // The registration routine's shape, as the card shows it, is recorded on the machine; a reload
-  // then shows the same routine unmarked and its press available.
-  await openCutRegistration(page);
-  const again = page.getByTestId('engrave-registration-routine');
-  const regShape = await again.getAttribute('data-shape');
+  // The seat press's identity, as the card shows it, and its first-run mark.
+  const routine = page.getByTestId('engrave-registration-routine');
+  await expect(routine).toHaveAttribute('data-routine', 'seat-press', { timeout: 60_000 });
+  const shape = await routine.getAttribute('data-shape');
+  expect(shape).toMatch(/^[0-9a-f]{8}$/);
+  await expect(page.getByTestId('engrave-registration-first-run')).toContainText('has not run on this machine before');
+
+  // RECORD THAT SHAPE — through the fixture's own write path, from a settled page — and reload:
+  // the same routine is unmarked, and the press (with Cut step 1's statement given) is available.
   await page.goto('/');
   await cm.ready();
   await seedCompletions(page, [
-    { routine: 'registration', shape: regShape, at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
+    { routine: 'seat-press', shape, at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
   ]);
   await page.goto('/');
   await cm.ready();
   await openCutRegistration(page);
-  await expect(page.getByTestId('engrave-registration-routine')).toHaveAttribute('data-shape', regShape!, { timeout: 60_000 });
+  await expect(page.getByTestId('engrave-registration-routine')).toHaveAttribute('data-shape', shape!, { timeout: 60_000 });
   await expect(page.getByTestId('engrave-registration-first-run')).toHaveCount(0);
 
-  // A changed sequence — the same id under a different shape — is a NEW routine and re-marks it.
+  // A CHANGED SEQUENCE — the same routine id under a different shape — is a new routine: re-marked.
   await page.goto('/');
   await cm.ready();
   await seedCompletions(page, [
-    { routine: 'registration', shape: 'deadbeef', at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
+    { routine: 'seat-press', shape: 'deadbeef', at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
   ]);
   await page.goto('/');
   await cm.ready();
