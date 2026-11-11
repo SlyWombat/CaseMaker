@@ -2293,6 +2293,7 @@ export function HoldingStep({
             Makera’s rule for {isBlock ? `${fmt(jawSpan)} mm across the section` : `⌀${fmt(jawSpan)}`}: standard under ⌀20,
             reverse inner 20–35, reverse outer over 35
           </span>
+          <Explain term="reverse-teeth" />
           <Explain term="self-centring-scroll">Reverse is them turned round for larger stock.</Explain>
         </FieldRow>
         {isBlock && (
@@ -2939,7 +2940,15 @@ function MountRow({
       )}
       {option.mount === 'ledge' && (
         <div style={{ marginLeft: 22 }} data-testid="engrave-setup-ledge-gloss">
+          {/* #1109 item 9 — this row's sentence is where the step first says "proud". */}
+          <Explain term="proud" />
           <Explain term="jaw-ledge" />
+        </div>
+      )}
+      {/* #1109 item 9 — the bracket row's refusal is the step's first "anchor 1". */}
+      {option.mount === 'bed-bracket' && option.disabled && (
+        <div style={{ marginLeft: 22 }} data-testid="engrave-setup-anchor-gloss">
+          <Explain term="anchor-1" />
         </div>
       )}
       {option.disabled && option.action != null && (

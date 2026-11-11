@@ -28,11 +28,14 @@ import {
   SELECTION_CHIP_ON,
   useSelectionChipGrid,
 } from '@/components/selectionChip';
+import { Explain } from '@/components/welcome/Explain';
+import { GLOSSARY, type GlossaryTerm } from '@/components/welcome/glossary';
 import {
   OPERATION_GROUPS,
   operationOptionsInGroup,
   operationTypesInGroup,
   type OperationOptionDef,
+  type OperationTypeDef,
   type OperationTypeId,
 } from './operationTypes';
 
@@ -52,6 +55,31 @@ const OPTION_CHIP: CSSProperties = {
 };
 const OPTION_CHIP_DISABLED: CSSProperties = { ...OPTION_CHIP, color: '#6b7480', cursor: 'not-allowed', opacity: 0.7 };
 const IMPORTS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginTop: 10 };
+
+/**
+ * #1109 item 9 — A CHIP WHOSE LABEL NAMES A GLOSSARY TERM shows the glossary's line as its visible
+ * help (the approved operator words — the same words the blurb already carried for most of these).
+ * Where the blurb states a fact the gloss does not, it follows the gloss after the em dash.
+ */
+const CHIP_TERM: Partial<Record<OperationTypeId, GlossaryTerm>> = {
+  'v-carve': 'v-carve',
+  'v-carve-variable': 'variable-depth',
+  inlay: 'inlay',
+  prism: 'prism',
+  flute: 'flute',
+  texture: 'texture',
+  'thread-external': 'boss',
+};
+
+function ChipHelp({ type }: { type: OperationTypeDef }): JSX.Element {
+  const term = CHIP_TERM[type.id];
+  if (term === undefined) {
+    return <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>{type.blurb}</span>;
+  }
+  const gloss = GLOSSARY[term];
+  const extra = gloss.toLowerCase().includes(type.blurb.toLowerCase()) ? undefined : type.blurb;
+  return <Explain term={term}>{extra}</Explain>;
+}
 
 export interface OperationPickerProps {
   /** `select` = the wizard's step 4; `add` = the panel's "+ Add operation" (#685). */
@@ -111,10 +139,9 @@ export function OperationPicker({
                   onClick={() => onPick(t.id)}
                 >
                   <span style={{ display: 'block' }}>{t.label}</span>
-                  {/* #1109 — the blurb is VISIBLE help, not a title: touch and keyboard see it. */}
-                  <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>
-                    {t.blurb}
-                  </span>
+                  {/* #1109 — the help is VISIBLE, not a title: a glossed term's line comes from the
+                      glossary, every other chip keeps its blurb. */}
+                  <ChipHelp type={t} />
                 </button>
               );
             })}

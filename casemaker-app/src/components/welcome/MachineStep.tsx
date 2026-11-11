@@ -21,6 +21,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
+import { Explain } from './Explain';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
 import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords, type MachineMountKind } from '@/platform/machineChange';
@@ -409,13 +410,19 @@ export function MachineStep({
               line says when that was the way, plainly, rather than leaving the operator to guess
               why "the search" found nothing. */}
           {found && route !== null && (
-            <p style={NOTE} data-testid="start-wizard-machine-route">
-              {route === 'recorded'
-                ? 'Found at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
-                : route === 'network'
-                  ? 'Found on the network.'
-                  : 'Reached at the address you gave.'}
-            </p>
+            <>
+              <p style={NOTE} data-testid="start-wizard-machine-route">
+                {/* #1109 item 9 — the approved copy: "the address you wrote" is the plain form of
+                    the recorded address. "Broadcasts" stays the engineer's word, so it carries its
+                    gloss on the screen. */}
+                {route === 'recorded'
+                  ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                  : route === 'network'
+                    ? 'Found on the network.'
+                    : 'Reached at the address you gave.'}
+              </p>
+              {route === 'recorded' && <Explain term="broadcasts" />}
+            </>
           )}
 
           {!checking && outcome === 'not-found' && (

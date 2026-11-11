@@ -150,9 +150,9 @@ describe('#682 — step 1 is the house’s machine', () => {
 
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(stateLine().textContent).toContain('Online');
-    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain(
-      'Found at its recorded address',
-    );
+    // #1109 item 9 — the approved plain line, and the trade word "broadcasts" glossed beneath it.
+    expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('Found at the address you wrote');
+    expect(screen.getByTestId('explain-broadcasts').textContent).toContain('Found on the network');
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('cannot receive broadcasts');
     // The route is remembered with the check, so a re-opened wizard can still say it.
     expect(useMachineStore.getState().route).toBe('recorded');

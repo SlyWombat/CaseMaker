@@ -184,7 +184,7 @@ describe('a shelf entry as the stock (#418)', () => {
     expect(STOCK_SIZE_FIELDS.rod).toEqual(['diameter', 'length']);
     expect(STOCK_SIZE_FIELDS.tube).toEqual(['diameter', 'wall', 'length']);
     expect(formSizeProblem('disc', { diameter: 50, thickness: 5 }, Z1)).toBeNull();
-    expect(formSizeProblem('disc', { thickness: 5 }, Z1)).toBe('Diameter needs a size — type a number above 0 (for example 80)');
+    expect(formSizeProblem('disc', { thickness: 5 }, Z1)).toBe('Diameter needs a size above 0 — type a number in mm (for example 20).');
     // A rod's length is its height standing on end. The vise's grip is only the picture's sentence
     // (#713): a longer rod is the chuck's job and the answer stands.
     expect(formSizeProblem('rod', { length: 18, diameter: 12 }, Z1)).toBeNull();
@@ -199,7 +199,7 @@ describe('a shelf entry as the stock (#418)', () => {
       "160 mm does not fit the rotary's ⌀80 × 150 mm.",
     );
     // A tube must state its wall, and its box is the OUTER diameter like a rod's.
-    expect(formSizeProblem('tube', { diameter: 40, length: 100 }, Z1)).toBe('Wall needs a size — type a number above 0 (for example 80)');
+    expect(formSizeProblem('tube', { diameter: 40, length: 100 }, Z1)).toBe('Wall needs a size above 0 — type a number in mm (for example 2).');
     expect(formSizeProblem('tube', { diameter: 40, wall: 2, length: 100 }, Z1)).toBeNull();
     expect(boxForForm('disc', { diameter: 50, thickness: 5 })).toEqual({ length: 50, width: 50, thickness: 5 });
     expect(boxForForm('rod', { length: 18, diameter: 12 })).toEqual({ length: 12, width: 12, thickness: 18 });
@@ -330,7 +330,7 @@ describe('a typed piece, and putting it on the shelf', () => {
   it('a half-typed size is a refusal, not a job', () => {
     expect(stockFromMade({ ...made, thickness: Number.NaN }, Z1)).toEqual({
       ok: false,
-      reason: 'Thickness needs a size — type a number above 0 (for example 80)',
+      reason: 'Thickness needs a size above 0 — type a number in mm (for example 12).',
     });
   });
 });

@@ -79,9 +79,9 @@ describe('#1180 — #1107 supersedes item 3’s empty job on a new run', () => {
     // The primary still reads Create the job, and it carries the reason it cannot press.
     expect(primary().textContent).toBe('Create the job');
     expect(primary().disabled).toBe(true);
-    expect(primary().getAttribute('title')).toBe('Pick what to make first.');
-    // With nothing picked the step draws no line of its own; the reason is the title's.
-    expect(screen.queryByTestId('start-wizard-create-unblock')).toBeNull();
+    // #1109 item 8 — the reason is a VISIBLE line above the footer, never only a title.
+    expect(primary().getAttribute('title')).toBeNull();
+    expect(screen.getByTestId('start-wizard-operation-unblock').textContent).toBe('Pick what to make first.');
 
     // A disabled press changes nothing: the wizard stays, the job keeps its own items.
     const before = useEngraveJobStore.getState().job.labels.length;
@@ -131,7 +131,8 @@ describe('#1183 — the empty job gets its own, deliberate door', () => {
     openAtQuestion();
     // The primary keeps #1107's refusal; the secondary is the deliberate way in.
     expect(primary().disabled).toBe(true);
-    expect(primary().getAttribute('title')).toBe('Pick what to make first.');
+    expect(primary().getAttribute('title')).toBeNull();
+    expect(screen.getByTestId('start-wizard-operation-unblock').textContent).toBe('Pick what to make first.');
     expect(emptyDoor().textContent).toBe('Start with an empty job');
 
     // The shipped demo lines are not the operator's work, so there is nothing to ask about.
@@ -147,7 +148,8 @@ describe('#1183 — the empty job gets its own, deliberate door', () => {
     fireEvent.click(screen.getByTestId('start-wizard-back'));
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · What are you cutting?');
     expect(primary().disabled).toBe(true);
-    expect(primary().getAttribute('title')).toBe('Pick what to make first.');
+    expect(primary().getAttribute('title')).toBeNull();
+    expect(screen.getByTestId('start-wizard-operation-unblock').textContent).toBe('Pick what to make first.');
     expect(emptyDoor().textContent).toBe('Start with an empty job');
     expect(useEngraveJobStore.getState().job.labels).toHaveLength(0);
   });
@@ -201,7 +203,8 @@ describe('#1183 — the empty job gets its own, deliberate door', () => {
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 3 of 4 · Stock');
     fireEvent.click(screen.getByTestId('start-wizard-back'));
     expect(primary().disabled).toBe(true);
-    expect(primary().getAttribute('title')).toBe('Pick what to make first.');
+    expect(primary().getAttribute('title')).toBeNull();
+    expect(screen.getByTestId('start-wizard-operation-unblock').textContent).toBe('Pick what to make first.');
     expect(screen.queryByTestId('start-wizard-preset-text')).toBeNull();
   });
 

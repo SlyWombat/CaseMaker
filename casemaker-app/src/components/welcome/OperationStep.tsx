@@ -33,6 +33,7 @@ import { OperationPicker } from '@/components/panels/OperationPicker';
 import { SELECTED_FILL, useSelectionChipGrid } from '@/components/selectionChip';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
+import { Explain } from './Explain';
 import { PresetArt } from './PresetArt';
 import {
   LETTER_SIZES,
@@ -1009,6 +1010,9 @@ export function OperationStep({
                 </span>
                 <b style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</b>
                 <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{p.blurb}</span>
+                {/* #1109 item 9 — "Gerbers" in this card's line is the board's file format; the
+                    gloss is the first use of the word on the step. */}
+                {p.id === 'pcb' && <Explain term="gerber" />}
               </button>
             ))}
           </div>

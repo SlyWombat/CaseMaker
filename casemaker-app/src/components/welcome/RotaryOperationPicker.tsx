@@ -16,7 +16,16 @@ import {
   SELECTION_CHIP_ON,
   useSelectionChipGrid,
 } from '@/components/selectionChip';
+import { Explain } from './Explain';
+import { GLOSSARY, type GlossaryTerm } from './glossary';
 import { ROTARY_OPERATION_GROUPS, type RotaryOperationId } from './rotaryOperations';
+
+/**
+ * #1109 item 9 — the rotary chips whose word has a glossary line ("Relief from a mesh" is the first
+ * place the rod path says "relief"). The visible help is the gloss, then the chip's own blurb when
+ * that says something the gloss does not.
+ */
+const ROTARY_TERM: Partial<Record<RotaryOperationId, GlossaryTerm>> = { relief: 'relief' };
 
 const GROUP_LABEL: CSSProperties = { fontSize: 11, fontWeight: 600, color: '#9aa4b0', margin: '8px 0 3px' };
 const TAGS: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', margin: '2px 0 0' };
@@ -43,7 +52,11 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
               const on = !disabled && selected === op.id;
               // #1109 item 8 — the hover help is a VISIBLE line under the chip, in the blurb's own
               // words (rotaryOperations.ts); a refused chip shows its reason there instead.
+              // #1109 item 9 — a glossed word's line comes from the glossary first.
               const help = op.reason ?? op.blurb;
+              const term = disabled ? undefined : ROTARY_TERM[op.id];
+              const extra =
+                term !== undefined && !GLOSSARY[term].toLowerCase().includes(op.blurb.toLowerCase()) ? op.blurb : undefined;
               return (
                 <div key={op.id} style={{ display: 'grid', gap: 2 }}>
                   <button
@@ -57,29 +70,37 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
                   >
                     {op.label}
                   </button>
-                  {help !== null && (
-                    <span
-                      data-testid={`${testidFor(op.id)}-help`}
-                      style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}
-                    >
-                      {help}
-                    </span>
-                  )}
+                  {help !== null &&
+                    (term === undefined ? (
+                      <span
+                        data-testid={`${testidFor(op.id)}-help`}
+                        style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}
+                      >
+                        {help}
+                      </span>
+                    ) : (
+                      <Explain term={term}>{extra}</Explain>
+                    ))}
                 </div>
               );
             })}
           </div>
           {group.id === '3d' && group.operations.some((op) => op.tag !== null) && (
             // A fact tag beside its operation — `simulate only` — never a disabled state.
-            <div style={TAGS}>
-              {group.operations
-                .filter((op) => op.tag !== null)
-                .map((op) => (
-                  <span key={`tag-${op.id}`} data-testid={`rotary-operation-tag-${op.id}`} style={TAG}>
-                    {op.tag}
-                  </span>
-                ))}
-            </div>
+            <>
+              <div style={TAGS}>
+                {group.operations
+                  .filter((op) => op.tag !== null)
+                  .map((op) => (
+                    <span key={`tag-${op.id}`} data-testid={`rotary-operation-tag-${op.id}`} style={TAG}>
+                      {op.tag}
+                    </span>
+                  ))}
+              </div>
+              {/* #1109 item 9 — the tag's word says what this build cannot do; the gloss says what
+                  the operator can. */}
+              <Explain term="simulate-only" />
+            </>
           )}
         </div>
       ))}
