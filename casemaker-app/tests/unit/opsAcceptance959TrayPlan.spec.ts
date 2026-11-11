@@ -45,12 +45,15 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     expect(measured, 'the tray measured nothing').not.toBeNull();
     // #1186 — THE TRAY'S CYCLE IS PINNED (±5 %; RE-PIN ONLY WITH A STATED REASON). Rule 1 ranks
     // candidate chains by the time they will really take, so the tray is the acceptance tier's
-    // canary for the picker: this is the whole plan's posted-text cycle through `planModelCam`
-    // (5309.07 s measured on 1186-bench @ 70e83ce48, 2026-11-10: 20 pockets + 1 contour, 5 runs on
-    // 4 cutters, coverage 99.75 % against the vendor's 99.52 %, cut-into 0.00 %, seven lines
-    // passing; the same 5309.07 s was measured on 1186-planner-time @ 079d3f75c). A change that
-    // moves it is either a real improvement — re-pin and say why here — or a regression to fix.
-    const TRAY_CYCLE_PIN_SECONDS = 5309;
+    // canary for the picker: this is the whole plan's posted-text cycle through `planModelCam`.
+    // RE-PINNED 2026-11-11 at 6216eaa89 (4856.7 s): the tray-top group — #1219's feed-row
+    // step-over, #1227's 0.001 ring inset and #1223's nested lobe order — plans the same tray with
+    // less pocket travel; measured 4856.7 s where 1186-bench/planner-time measured 5309.07 s
+    // (20 pockets + 1 contour, 5 runs on 4 cutters, coverage 99.75 % against the vendor's 99.52 %,
+    // cut-into 0.00 %, seven lines passing). Attribution on k3: green at 88e280183 (before the
+    // group), red at 6216eaa89 and unchanged across #1225. A change that moves it is either a real
+    // improvement — re-pin and say why here — or a regression to fix.
+    const TRAY_CYCLE_PIN_SECONDS = 4857;
     const cycleDrift = Math.abs(measured!.ours.cycleSeconds - TRAY_CYCLE_PIN_SECONDS) / TRAY_CYCLE_PIN_SECONDS;
     expect(
       cycleDrift,
