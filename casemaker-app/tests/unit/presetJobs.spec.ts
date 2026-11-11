@@ -78,7 +78,7 @@ async function cutPreset(id: ReceiptPresetId): Promise<{ code: number; receipt: 
 }
 
 describe('#1100 — the preset defaults reach the four gates', () => {
-  for (const id of ['sign', 'cutout', 'pocket'] as const) {
+  for (const id of ['sign', 'signLarge', 'cutout', 'pocket'] as const) {
     it(`${id}: posts and passes generated / verified / simulated / prediction`, async () => {
       const { code, receipt } = await cutPreset(id);
       expect(receipt).not.toBeNull();

@@ -13,7 +13,10 @@
 
 import { blankLabelSeed, BLANK_BAND_FILL_FALLBACK } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { inkBoxOf } from '@/engine/cnc/engrave/inkBox';
 import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
+import { proposeStock } from '@/engine/cnc/stockProposal';
+import { readDefault } from '@/platform/defaultsClient';
 import { applyHoldAnswers, defaultSetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
 import { HOUSE_STOCK } from '@/components/welcome/workShape';
@@ -24,7 +27,7 @@ import type { StockProposal, WorkShape } from '@/engine/cnc/stockProposal';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import type { EngraveJob } from '@/types/engraveJob';
 
-export type ReceiptPresetId = 'sign' | 'cutout' | 'pocket';
+export type ReceiptPresetId = 'sign' | 'signLarge' | 'cutout' | 'pocket';
 
 /** The demo document's line, cleared: a preset makes its own items. */
 function bare(job: EngraveJob): EngraveJob {
@@ -108,6 +111,37 @@ export function presetDefaultJob(id: ReceiptPresetId): EngraveJob {
       // The text's own margin is not measured here; with it unknown the recommendation still
       // refuses nothing and the 36 mm stick is the block seat (above the vise floor).
       return seatedByRecommendation(job, { type: 'engrave', text: 'Hello', depth: 0.5, font: DEFAULT_FONT_ID }, null);
+    }
+    /**
+     * #1100 item 3 (ruling b) — CHOOSING Large asks for the plate: 60 mm letters, the line's own
+     * extent plus the shop's sign margin on every side, and the line laid at 60 (the fitted size
+     * on that plate is at least 60, so the card's size stands).
+     */
+    case 'signLarge': {
+      const sizeMm = 60;
+      const measure = labelGlyphMeasure([]);
+      const box = inkBoxOf('Hi', DEFAULT_FONT_ID, 'bold', sizeMm, measure);
+      const work: WorkShape = { kind: 'text', size: { length: box.width, width: box.height }, depth: 0.5, sign: true };
+      const signMarginMm = readDefault(null, 'stock.signMarginMm').value;
+      const proposal = proposeStock(work, { signMarginMm })!;
+      const stock = plateStock(proposal.length, proposal.width, proposal.thickness);
+      const seeded =
+        blankLabelSeed({
+          blank: { length: stock.length, width: stock.width, pocket: null },
+          edgeMargin: base.edgeMargin,
+          text: 'Hi',
+          font: DEFAULT_FONT_ID,
+          weight: 'bold',
+          depth: 0.5,
+          textAlong: 'x',
+          bandFill: BLANK_BAND_FILL_FALLBACK,
+          measure,
+          avoid: [],
+        }) ?? null;
+      const label = seeded === null ? null : { ...seeded, size: Math.min(sizeMm, seeded.size) };
+      const job = { ...base, name: 'preset-sign-large', stock, labels: label === null ? [] : [label] };
+      const choice: OperationChoice = { type: 'engrave', text: 'Hi', depth: 0.5, font: DEFAULT_FONT_ID, sizeMm };
+      return seatedByRecommendation(job, choice, work);
     }
     case 'cutout': {
       const stock = plateStock(80, 60, 12);

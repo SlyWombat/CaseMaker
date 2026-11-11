@@ -37,6 +37,7 @@ import { Explain } from './Explain';
 import { PresetArt } from './PresetArt';
 import {
   LETTER_SIZES,
+  letterSizeIdFor,
   WIZARD_PRESETS,
   defaultPresetAnswers,
   letterSizeMm,
@@ -388,7 +389,9 @@ export function OperationStep({
   );
   const [answers, setAnswers] = useState<PresetAnswers>(() => ({
     ...defaultPresetAnswers(),
-    ...(seed?.type === 'engrave' ? { text: seed.text, font: seed.font } : {}),
+    ...(seed?.type === 'engrave'
+      ? { text: seed.text, font: seed.font, letterSize: letterSizeIdFor(seed.sizeMm) }
+      : {}),
     ...(seed?.type === 'cutout'
       ? { shape: seed.shape, lengthMm: seed.length, widthMm: seed.width, radiusMm: seed.radius }
       : {}),
@@ -398,15 +401,14 @@ export function OperationStep({
   }));
   const choosePreset = (id: PresetId): void => {
     // #1107 item 2 — a FLAT card is a way back to flat stock, and names the rod pick it drops.
-    // (The dowel card is the rotary door and Something else… is the fold, where the rotary chips
-    // live while a rod intent is in force; both keep the frame. part-3d/pcb go through pickFlat.)
+    // (Something else… is the fold, where the rotary chips live while a rod intent is in force,
+    // so it keeps the frame. part-3d/pcb go through pickFlat.)
     const flatViaPicker = id === 'part-3d' || id === 'pcb';
-    if (!flatViaPicker && id !== 'dowel' && id !== 'something-else') nameDroppedRodPick();
+    if (!flatViaPicker && id !== 'something-else') nameDroppedRodPick();
     setPreset(id);
     setDropError(null);
     if (id === 'part-3d') pickFlat('surface');
     else if (id === 'pcb') pickFlat('pcb');
-    else if (id === 'dowel') setRotaryPicked('engrave');
     else setPicked(null);
     // The card's own selection lands after any picker reset the branch above performed.
     setPreset(id);
@@ -601,7 +603,15 @@ export function OperationStep({
                     : null
     : preset === 'sign'
       ? // #1100 — the sign's depth is the job's stock-aware default, as every engrave entry's is.
-        { type: 'engrave', text: answers.text, depth: newItemDepthFor(job), font: answers.font, sizeMm: letterSizeMm(answers.letterSize) }
+        {
+          type: 'engrave',
+          text: answers.text,
+          depth: newItemDepthFor(job),
+          font: answers.font,
+          // Ruling b — no size chosen is #930's fitted line (the house stick); a chosen size
+          // carries the plate-sized sign flow.
+          ...(answers.letterSize === null ? {} : { sizeMm: letterSizeMm(answers.letterSize) }),
+        }
       : preset === 'cutout' || preset === 'pocket'
       ? presetChoice(preset, answers)
       : design !== null
@@ -819,6 +829,9 @@ export function OperationStep({
   const surfaceField = rotary ? rotaryPicked === 'relief' : picked === 'surface';
   // #874 — the board is the second file chip, so its field is the chosen chip's box like any other.
   const pcbField = !rotary && picked === 'pcb';
+  // #1100 item 1 — a selected FILE card hosts its own field (the card spans both columns).
+  const surfaceInCard = preset === 'part-3d';
+  const pcbInCard = preset === 'pcb';
   const vcarveField = rotary && rotaryPicked === 'v-carve';
   const pocketField = rotary && rotaryPicked === 'pocket';
   const fluteField = rotary && rotaryPicked === 'flute';
@@ -849,6 +862,202 @@ export function OperationStep({
       </div>
     </div>
   );
+
+      const surfaceFieldNode = surfaceField ? (
+        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
+          <WizardFileField
+            accept={WIZARD_FILE_ACCEPT}
+            inputTestId="start-wizard-op-surface-file"
+            inputLabel="Mesh to surface"
+            testId="start-wizard-op-surface-picker"
+            nameTestId="start-wizard-op-surface-name"
+            errorTestId="start-wizard-op-surface-error"
+            kinds="STL, 3MF, STEP, OBJ, SVG, DXF, PNG or Gerber"
+            reading={surfaceReading}
+            chosen={
+              surfaceFileName === null
+                ? null
+                : { name: surfaceFileName, fact: surface === null ? null : boxFact(surface.size) }
+            }
+            error={surfaceError}
+            thumbnail={
+              surface !== null && surface.data !== undefined ? (
+                <WizardThumbnail
+                  source={
+                    surface.format === 'png'
+                      ? { kind: 'picture', name: surface.name, data: surface.data, size: surface.size }
+                      : { kind: 'mesh', name: surface.name, data: surface.data, size: surface.size }
+                  }
+                  sentence={proposalSentence}
+                />
+              ) : undefined
+            }
+            onFiles={(files) => {
+              // #1098 — a drawing or a Gerber set picked here switches the format; a mesh or a
+              // picture is read as before, and an unknown file is refused by this field's own
+              // reader, so the sentence lands under the field that took it.
+              const file = files[0];
+              if (file === undefined) return;
+              const dot = file.name.lastIndexOf('.');
+              const ext = dot < 0 ? '' : file.name.slice(dot).toLowerCase();
+              if (OUTLINE_FILE_EXTENSIONS.includes(ext) || GERBER_FILE_EXTENSIONS.includes(ext)) {
+                void acceptFiles(files);
+              } else {
+                void chooseGoal(file);
+              }
+            }}
+          >
+            {surfaceNote !== null && (
+              <p style={MUTED} data-testid="start-wizard-op-surface-note">
+                {surfaceNote}
+              </p>
+            )}
+          </WizardFileField>
+          {/* Part or mould is a question about a MESH: a picture has only the part, and says why. */}
+          {surface !== null && (
+            <div style={FIELDS} role="radiogroup" aria-label="What to make">
+              <label style={FIELD_LABEL}>
+                <input
+                  type="radio"
+                  name="start-wizard-op-surface-make"
+                  checked={surface.format === 'png' || !makeMold}
+                  data-testid="start-wizard-op-surface-make-part"
+                  onChange={() => setMakeMold(false)}
+                />
+                <span>Make the part</span>
+              </label>
+              {surface.format !== 'png' && (
+                <label style={FIELD_LABEL}>
+                  <input
+                    type="radio"
+                    name="start-wizard-op-surface-make"
+                    checked={makeMold}
+                    data-testid="start-wizard-op-surface-make-mold"
+                    onChange={() => setMakeMold(true)}
+                  />
+                  <span>Make a mould of it</span>
+                </label>
+              )}
+              {surface.format === 'png' && (
+                <p style={MUTED} data-testid="start-wizard-op-surface-picture-note">
+                  a picture has one side
+                </p>
+              )}
+            </div>
+          )}
+          {makeMold && surface !== null && surface.format !== 'png' && (
+            <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
+              The part's shape is cut as a cavity from the top, turned over so a casting reads the
+              right way round. One side only: a part with undercuts needs a two-part mould.
+            </p>
+          )}
+          {/* #1107 / #1164 — the reliefs' depth limit, stated plainly until the fix lands.
+              (Delete this block in one line when #1164 is in.) */}
+          {rotary && rotaryPicked === 'relief' && (
+            <p style={MUTED} data-testid="start-wizard-rotary-relief-depth-note">
+              A relief on the rod can be planned and previewed here, but do not cut it yet. Where
+              the shape goes deep towards the rod&apos;s centre, this build can take the cutter up
+              to about 1 mm into the design; a fix is on its way.
+            </p>
+          )}
+          {unblockLine}
+        </div>
+      ) : null;
+
+      const pcbFieldNode = pcbField ? (
+        <div data-testid="start-wizard-op-pcb" style={FIELD_BOX}>
+          <WizardFileField
+            accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
+            multiple
+            inputTestId="start-wizard-op-pcb-files"
+            inputLabel="Gerber and drill files"
+            testId="start-wizard-op-pcb-picker"
+            nameTestId="start-wizard-op-pcb-name"
+            errorTestId="start-wizard-op-pcb-error"
+            kinds="Gerber and drill files, or the board's .zip"
+            reading={pcbReading}
+            chosen={pcbFilesName === null ? null : { name: pcbFilesName }}
+            error={pcbError}
+            // #1099 item 2 — a read board shows its outline and the set's file count, with the
+            // same proposal sentence a mesh's thumbnail carries.
+            thumbnail={
+              pcbBoard !== null ? (
+                <WizardThumbnail
+                  source={{ kind: 'board', board: pcbBoard, files: pcbFileCount }}
+                  sentence={proposalSentence}
+                />
+              ) : undefined
+            }
+            onFiles={(files) => void readPcbSet(files)}
+          />
+          <p style={MUTED}>
+            The copper, holes and outline become items. A board is cut from copper-clad PCB.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {pcbSummary !== null && !pcbReading && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
+                {pcbSummary}
+              </span>
+            )}
+            {pcbHoldingFix !== null && !pcbReading && job.workholding.kind !== 'tape' && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-holding-notice">
+                {pcbHoldingFix}{' '}
+                <button
+                  className="sw-btn"
+                  type="button"
+                  data-testid="start-wizard-op-pcb-use-holding"
+                  onClick={() => {
+                    const reheld = useEngraveJobStore.getState().usePcbHolding();
+                    setPcbHoldingFix(null);
+                    // #814 — say what the re-hold did to the turned-over side, if anything.
+                    const note = pcbReHoldNote(reheld);
+                    if (note !== null) setPcbSummary(note);
+                  }}
+                >
+                  Tape it to the bed
+                </button>
+              </span>
+            )}
+            {pcbAlignment !== null && !pcbReading && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-alignment-notice">
+                {pcbAlignment.message}{' '}
+                {pcbAlignment.holes.length > 0 && (
+                  <button
+                    className="sw-btn"
+                    type="button"
+                    data-testid="start-wizard-op-pcb-add-alignment"
+                    onClick={() => {
+                      useEngraveJobStore
+                        .getState()
+                        .addPcbAlignmentHoles(pcbAlignment.holes, pcbAlignment.diameterMm);
+                      setPcbAlignment(null);
+                    }}
+                  >
+                    Add two {pcbAlignment.diameterMm} mm alignment holes
+                  </button>
+                )}
+              </span>
+            )}
+            {pcbStockFix !== null && !pcbReading && job.stock.material !== 'pcb' && (
+              <span style={MUTED} data-testid="start-wizard-op-pcb-stock-notice">
+                {pcbStockFix}{' '}
+                <button
+                  className="sw-btn"
+                  type="button"
+                  data-testid="start-wizard-op-pcb-use-stock"
+                  onClick={() => {
+                    useEngraveJobStore.getState().usePcbStock();
+                    setPcbStockFix(null);
+                  }}
+                >
+                  Use PCB stock
+                </button>
+              </span>
+            )}
+          </div>
+          {unblockLine}
+        </div>
+      ) : null;
 
   return (
     <div
@@ -1014,26 +1223,40 @@ export function OperationStep({
             aria-label="What are you making?"
             style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, margin: '4px 0 8px' }}
           >
-            {WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true).map((p) => (
-              <button
-                className="sw-btn"
-                key={p.id}
-                type="button"
-                data-testid={`start-wizard-preset-${p.id}`}
-                aria-pressed={preset === p.id}
-                onClick={() => choosePreset(p.id)}
-                style={preset === p.id ? PRESET_ON : PRESET}
-              >
-                <span style={{ color: preset === p.id ? '#8ab4f8' : '#c9d4e2', lineHeight: 0 }}>
-                  <PresetArt id={p.id} />
-                </span>
-                <b style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</b>
-                <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{p.blurb}</span>
-                {/* #1109 item 9 — "Gerbers" in this card's line is the board's file format; the
-                    gloss is the first use of the word on the step. */}
-                {p.id === 'pcb' && <Explain term="gerber" />}
-              </button>
-            ))}
+
+            {WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true).map((p) => {
+              const card = (
+                <button
+                  key={p.id}
+                  className="sw-btn"
+                  type="button"
+                  data-testid={`start-wizard-preset-${p.id}`}
+                  aria-pressed={preset === p.id}
+                  onClick={() => choosePreset(p.id)}
+                  style={preset === p.id ? PRESET_ON : PRESET}
+                >
+                  <span style={{ color: preset === p.id ? '#8ab4f8' : '#c9d4e2', lineHeight: 0 }}>
+                    <PresetArt id={p.id} />
+                  </span>
+                  <b style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</b>
+                  <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{p.blurb}</span>
+                  {/* #1109 item 9 — "Gerbers" in this card's line is the board's file format; the
+                      gloss is the first use of the word on the step. */}
+                  {p.id === 'pcb' && <Explain term="gerber" />}
+                </button>
+              );
+              // #1100 item 1 — a selected FILE card spans both columns and hosts its own field
+              // under the blurb; the foot-of-step copy is not drawn beside it.
+              const hostsField = preset === p.id && (p.id === 'part-3d' || p.id === 'pcb');
+              if (!hostsField) return card;
+              return (
+                <div key={p.id} data-testid={`start-wizard-preset-card-${p.id}`} style={{ gridColumn: '1 / -1', display: 'grid', gap: 6 }}>
+                  {card}
+                  {p.id === 'part-3d' ? surfaceFieldNode : pcbFieldNode}
+                </div>
+              );
+            })}
+
           </div>
           {rotaryFacts.owned && !rotaryFacts.onPins && rodCards}
           {preset === 'something-else' && (
@@ -1435,201 +1658,12 @@ export function OperationStep({
         </div>
       )}
 
-      {surfaceField && (
-        <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
-          <WizardFileField
-            accept={WIZARD_FILE_ACCEPT}
-            inputTestId="start-wizard-op-surface-file"
-            inputLabel="Mesh to surface"
-            testId="start-wizard-op-surface-picker"
-            nameTestId="start-wizard-op-surface-name"
-            errorTestId="start-wizard-op-surface-error"
-            kinds="STL, 3MF, STEP, OBJ, SVG, DXF, PNG or Gerber"
-            reading={surfaceReading}
-            chosen={
-              surfaceFileName === null
-                ? null
-                : { name: surfaceFileName, fact: surface === null ? null : boxFact(surface.size) }
-            }
-            error={surfaceError}
-            thumbnail={
-              surface !== null && surface.data !== undefined ? (
-                <WizardThumbnail
-                  source={
-                    surface.format === 'png'
-                      ? { kind: 'picture', name: surface.name, data: surface.data, size: surface.size }
-                      : { kind: 'mesh', name: surface.name, data: surface.data, size: surface.size }
-                  }
-                  sentence={proposalSentence}
-                />
-              ) : undefined
-            }
-            onFiles={(files) => {
-              // #1098 — a drawing or a Gerber set picked here switches the format; a mesh or a
-              // picture is read as before, and an unknown file is refused by this field's own
-              // reader, so the sentence lands under the field that took it.
-              const file = files[0];
-              if (file === undefined) return;
-              const dot = file.name.lastIndexOf('.');
-              const ext = dot < 0 ? '' : file.name.slice(dot).toLowerCase();
-              if (OUTLINE_FILE_EXTENSIONS.includes(ext) || GERBER_FILE_EXTENSIONS.includes(ext)) {
-                void acceptFiles(files);
-              } else {
-                void chooseGoal(file);
-              }
-            }}
-          >
-            {surfaceNote !== null && (
-              <p style={MUTED} data-testid="start-wizard-op-surface-note">
-                {surfaceNote}
-              </p>
-            )}
-          </WizardFileField>
-          {/* Part or mould is a question about a MESH: a picture has only the part, and says why. */}
-          {surface !== null && (
-            <div style={FIELDS} role="radiogroup" aria-label="What to make">
-              <label style={FIELD_LABEL}>
-                <input
-                  type="radio"
-                  name="start-wizard-op-surface-make"
-                  checked={surface.format === 'png' || !makeMold}
-                  data-testid="start-wizard-op-surface-make-part"
-                  onChange={() => setMakeMold(false)}
-                />
-                <span>Make the part</span>
-              </label>
-              {surface.format !== 'png' && (
-                <label style={FIELD_LABEL}>
-                  <input
-                    type="radio"
-                    name="start-wizard-op-surface-make"
-                    checked={makeMold}
-                    data-testid="start-wizard-op-surface-make-mold"
-                    onChange={() => setMakeMold(true)}
-                  />
-                  <span>Make a mould of it</span>
-                </label>
-              )}
-              {surface.format === 'png' && (
-                <p style={MUTED} data-testid="start-wizard-op-surface-picture-note">
-                  a picture has one side
-                </p>
-              )}
-            </div>
-          )}
-          {makeMold && surface !== null && surface.format !== 'png' && (
-            <p style={MUTED} data-testid="start-wizard-op-surface-mold-note">
-              The part's shape is cut as a cavity from the top, turned over so a casting reads the
-              right way round. One side only: a part with undercuts needs a two-part mould.
-            </p>
-          )}
-          {/* #1107 / #1164 — the reliefs' depth limit, stated plainly until the fix lands.
-              (Delete this block in one line when #1164 is in.) */}
-          {rotary && rotaryPicked === 'relief' && (
-            <p style={MUTED} data-testid="start-wizard-rotary-relief-depth-note">
-              A relief on the rod can be planned and previewed here, but do not cut it yet. Where
-              the shape goes deep towards the rod&apos;s centre, this build can take the cutter up
-              to about 1 mm into the design; a fix is on its way.
-            </p>
-          )}
-          {unblockLine}
-        </div>
-      )}
+      {!surfaceInCard && surfaceFieldNode}
 
-      {pcbField && (
-        <div data-testid="start-wizard-op-pcb" style={FIELD_BOX}>
-          <WizardFileField
-            accept=".gbr,.gtl,.gbl,.gko,.gm1,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.drl,.xln,.zip"
-            multiple
-            inputTestId="start-wizard-op-pcb-files"
-            inputLabel="Gerber and drill files"
-            testId="start-wizard-op-pcb-picker"
-            nameTestId="start-wizard-op-pcb-name"
-            errorTestId="start-wizard-op-pcb-error"
-            kinds="Gerber and drill files, or the board's .zip"
-            reading={pcbReading}
-            chosen={pcbFilesName === null ? null : { name: pcbFilesName }}
-            error={pcbError}
-            // #1099 item 2 — a read board shows its outline and the set's file count, with the
-            // same proposal sentence a mesh's thumbnail carries.
-            thumbnail={
-              pcbBoard !== null ? (
-                <WizardThumbnail
-                  source={{ kind: 'board', board: pcbBoard, files: pcbFileCount }}
-                  sentence={proposalSentence}
-                />
-              ) : undefined
-            }
-            onFiles={(files) => void readPcbSet(files)}
-          />
-          <p style={MUTED}>
-            The copper, holes and outline become items. A board is cut from copper-clad PCB.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {pcbSummary !== null && !pcbReading && (
-              <span style={MUTED} data-testid="start-wizard-op-pcb-summary">
-                {pcbSummary}
-              </span>
-            )}
-            {pcbHoldingFix !== null && !pcbReading && job.workholding.kind !== 'tape' && (
-              <span style={MUTED} data-testid="start-wizard-op-pcb-holding-notice">
-                {pcbHoldingFix}{' '}
-                <button
-                className="sw-btn"
-                  type="button"
-                  data-testid="start-wizard-op-pcb-use-holding"
-                  onClick={() => {
-                    const reheld = useEngraveJobStore.getState().usePcbHolding();
-                    setPcbHoldingFix(null);
-                    // #814 — say what the re-hold did to the turned-over side, if anything.
-                    const note = pcbReHoldNote(reheld);
-                    if (note !== null) setPcbSummary(note);
-                  }}
-                >
-                  Tape it to the bed
-                </button>
-              </span>
-            )}
-            {pcbAlignment !== null && !pcbReading && (
-              <span style={MUTED} data-testid="start-wizard-op-pcb-alignment-notice">
-                {pcbAlignment.message}{' '}
-                {pcbAlignment.holes.length > 0 && (
-                  <button
-                className="sw-btn"
-                    type="button"
-                    data-testid="start-wizard-op-pcb-add-alignment"
-                    onClick={() => {
-                      useEngraveJobStore
-                        .getState()
-                        .addPcbAlignmentHoles(pcbAlignment.holes, pcbAlignment.diameterMm);
-                      setPcbAlignment(null);
-                    }}
-                  >
-                    Add two {pcbAlignment.diameterMm} mm alignment holes
-                  </button>
-                )}
-              </span>
-            )}
-            {pcbStockFix !== null && !pcbReading && job.stock.material !== 'pcb' && (
-              <span style={MUTED} data-testid="start-wizard-op-pcb-stock-notice">
-                {pcbStockFix}{' '}
-                <button
-                className="sw-btn"
-                  type="button"
-                  data-testid="start-wizard-op-pcb-use-stock"
-                  onClick={() => {
-                    useEngraveJobStore.getState().usePcbStock();
-                    setPcbStockFix(null);
-                  }}
-                >
-                  Use PCB stock
-                </button>
-              </span>
-            )}
-          </div>
-          {unblockLine}
-        </div>
-      )}
+
+      {!pcbInCard && pcbFieldNode}
+
+
 
       {/* #1183 — THE EMPTY JOB'S DOOR. Under everything the question offers, at link weight:
           starting from nothing is deliberate, never the default press. A NEW run only — a

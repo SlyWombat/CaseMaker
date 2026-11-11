@@ -103,7 +103,7 @@ function progress(): string {
 /** Step 1 → step 2, the question — the work comes before the blank. */
 function toQuestion(): void {
   fireEvent.click(screen.getByTestId('start-wizard-next'));
-  expect(progress()).toContain('What are you cutting?');
+  expect(progress()).toContain('What are you making?');
 }
 
 /** Leaving the blank: a job with items on it asks before it is replaced. */
@@ -263,7 +263,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '123' } });
     // Back to the question, then forward again: the proposal must not overwrite the answer.
     fireEvent.click(screen.getByTestId('start-wizard-back'));
-    expect(progress()).toContain('What are you cutting?');
+    expect(progress()).toContain('What are you making?');
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('123');

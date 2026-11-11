@@ -31,7 +31,7 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('start-wizard-next').click();
 
   // Step 2 — the question, first since #897: its answer is what the blank is sized from.
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
   await openSignCard(page);
   await page.getByTestId('start-wizard-preset-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();
@@ -133,7 +133,7 @@ test('step 2 refuses a new run with nothing picked, and a pick walks on (#1107 s
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText(
-    'Step 2 of 4 · What are you cutting?',
+    'Step 2 of 4 · What are you making?',
   );
   // Nothing picked: the primary still reads Create the job, and it carries its reason.
   // #1109 item 8 — the reason is a VISIBLE line now, not only the button's title.
@@ -180,7 +180,7 @@ test('#1183 — start with an empty job: the secondary lands on Stock, Back retu
   });
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // The primary keeps #1107's refusal; the door is the secondary, at link weight.
   // #1109 item 8 — the refusal's sentence is the step's visible line.
@@ -197,7 +197,7 @@ test('#1183 — start with an empty job: the secondary lands on Stock, Back retu
   // No changes nothing and keeps the operator on the question.
   await page.getByTestId('start-wizard-replace-no').click();
   await expect(page.getByTestId('start-wizard-replace-confirm')).toHaveCount(0);
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // Yes replaces it with the empty job and walks on to the blank.
   await page.getByTestId('start-wizard-empty-job').click();
@@ -207,7 +207,7 @@ test('#1183 — start with an empty job: the secondary lands on Stock, Back retu
 
   // Back returns to the question with nothing picked, the door still offered, and the job empty.
   await page.getByTestId('start-wizard-back').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
   await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
   await expect(page.getByTestId('start-wizard-empty-job')).toBeVisible();
 
@@ -227,7 +227,7 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-surface').click();

@@ -119,7 +119,7 @@ describe('#1107 — the dowel starter', () => {
       useStartWizardStore.getState().openWizard('machine', 'dowel');
     });
     render(<WizardHost />);
-    await waitFor(() => expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?'), {
+    await waitFor(() => expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?'), {
       timeout: 15_000,
     });
     expect(screen.getByTestId('start-wizard-op-text')).toBeDefined();
@@ -135,7 +135,7 @@ describe('#1107 — the dowel starter', () => {
       useStartWizardStore.getState().openWizard('machine', 'dowel');
     });
     render(<WizardHost />);
-    await waitFor(() => expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?'), {
+    await waitFor(() => expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?'), {
       timeout: 15_000,
     });
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });

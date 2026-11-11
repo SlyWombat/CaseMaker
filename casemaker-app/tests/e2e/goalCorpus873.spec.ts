@@ -27,7 +27,7 @@ async function wizardGoal(page: import('@playwright/test').Page, file: string, s
   await page.getByTestId('start-wizard-next').click(); // machine → the question
 
   // What: Surface a mesh, and the file. The pick is shown by name, never "No file chosen" (#870).
-  await expect(page.getByTestId('start-wizard-progress')).toContainText('What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toContainText('What are you making?');
   await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-surface').click();
   const name = file.split(/[\\/]/).pop()!;

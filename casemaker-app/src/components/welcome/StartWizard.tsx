@@ -68,7 +68,7 @@ import type { MachineRecord } from '@/platform/locationClient';
  *
  * ```
  * Step 1 of 4 · Machine      the machine the job is written for, and a check (never a gate)
- * Step 2 of 4 · What are you cutting?   the grouped picker and the field the pick needs
+ * Step 2 of 4 · What are you making?   the grouped picker and the field the pick needs
  * Step 3 of 4 · Stock        the blank the work is sized from, then where the piece comes from
  * Step 4 of 4 · Holding      how it is held, and what that does to the blank
  * ```
@@ -83,7 +83,7 @@ import type { MachineRecord } from '@/platform/locationClient';
  * controls re-open this same wizard at the step they name (`openWizard('stock' | 'holding')`), with
  * the same counter — not a second modal with a second numbering (A1, B3, A10, E1).
  *
- * The old second modal (`EngraveSetupFlow`) is gone: its "What are you cutting?" question is step
+ * The old second modal (`EngraveSetupFlow`) is gone: its "What are you making?" question is step
  * 2, its material and blank questions step 3, and its holding question step 4. Nothing is handed
  * off to a second overlay; the wizard lands in Design with the item made, its row open.
  *
@@ -930,6 +930,8 @@ export function StartWizard(): JSX.Element {
           depth: choice.depth,
           font: choice.font,
           ...(choice.reads === undefined ? {} : { reads: choice.reads }),
+          // #1100 item 3a — the sign card's letter size is the line's cap height.
+          ...(choice.sizeMm === undefined ? {} : { sizeMm: choice.sizeMm }),
         });
       } else if (choice.type === 'surface') {
         // #685 — Surface a mesh is the one operation whose item is not a store "add": the file

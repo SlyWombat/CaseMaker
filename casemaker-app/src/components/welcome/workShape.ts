@@ -82,7 +82,8 @@ export function proposedStockFor(
     work.kind === 'outline' ||
     work.kind === 'cutout' ||
     work.kind === 'pocket' ||
-    work.kind === 'rod'
+    work.kind === 'rod' ||
+    (work.kind === 'text' && work.sign === true)
   ) {
     return proposed;
   }
@@ -204,7 +205,13 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
         choice.sizeMm ?? PROPOSED_TEXT_SIZE_MM,
         labelGlyphMeasure(job.customFonts ?? []),
       );
-      return { kind: 'text', size: { length: box.width, width: box.height }, depth: choice.depth };
+      return {
+        kind: 'text',
+        size: { length: box.width, width: box.height },
+        depth: choice.depth,
+        // #1100 item 3 — the SIGN card states its letter size; that line sizes its own plate.
+        ...(choice.sizeMm !== undefined ? { sign: true } : {}),
+      };
     }
     default:
       return { kind: 'none' };
@@ -227,5 +234,6 @@ export function proposalContextFor(
     shelf,
     jobMaterial: untouchedDemo ? null : job.stock.material,
     plateThicknessMm: readDefault(defaults, 'stock.defaultPlateThicknessMm').value,
+    signMarginMm: readDefault(defaults, 'stock.signMarginMm').value,
   };
 }

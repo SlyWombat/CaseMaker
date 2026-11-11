@@ -259,7 +259,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('start-wizard-next'));
     // #897 — the work comes before the blank: step 2 is the question.
-    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
   });
 
   it('a build with no socket does not ask to connect one: the note, Close, Continue (#346)', () => {
@@ -281,7 +281,7 @@ describe('#280/#682 — step 1, the machine check', () => {
       expect(screen.getByTestId('start-wizard-next').textContent).toBe('Next: what are you making');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
       // #897 — the work comes before the blank: step 2 is the question.
-      expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+      expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
     } finally {
       caps.drive = true;
     }
@@ -538,7 +538,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
   /** Step 1 → step 2, the question — the work comes before the blank (#897). */
   function toQuestion(): void {
     fireEvent.click(screen.getByTestId('start-wizard-next'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
   }
 
   /** The question answered → stock → holding: the rest of the one wizard. */

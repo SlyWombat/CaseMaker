@@ -1032,6 +1032,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the house's common plate \u2014 the thickness a drawing's blank starts at when no shelf plate holds it"
     },
+    "stock.signMarginMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the margin the sign preset's proposed plate leaves on every side of its line"
+    },
     "tape.stripCount": {
       "value": 5.0,
       "source": "seeded",

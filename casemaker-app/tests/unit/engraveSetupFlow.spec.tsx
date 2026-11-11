@@ -383,7 +383,7 @@ describe('guided job setup — the flow in the panel (#254, #681)', () => {
     fireEvent.click(screen.getByTestId('engrave-hold-edit'));
     fireEvent.click(screen.getByTestId('start-wizard-back'));
     fireEvent.click(screen.getByTestId('start-wizard-back'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
     expect(screen.getByTestId('start-wizard-operation-next').textContent).toBe('Done');
   });
 
