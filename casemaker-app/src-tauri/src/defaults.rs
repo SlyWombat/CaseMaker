@@ -374,8 +374,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // chosen, not measured, and `defaultsClient.ts` states the same bounds and fallbacks.
     ("adaptive.entryClearanceMm", 0.5, "mm", "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"),
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
-    ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured: two cutter chains whose leftover differs by less than this share of the goal's surface count as equal on leftover, so time and bit changes decide between them"),
-    ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured: leftover standing more than this above the goal is tall; the leftover tolerance never treats two cutter chains as equal when one leaves more tall material"),
+    ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured. Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen."),
+    ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
     // ── #451 adaptive settings (end)

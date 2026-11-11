@@ -1709,14 +1709,14 @@
       "source": "seeded",
       "setAt": null,
       "unit": "%",
-      "note": "chosen, not measured: two cutter chains whose leftover differs by less than this share of the goal's surface count as equal on leftover, so time and bit changes decide between them"
+      "note": "chosen, not measured. Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen."
     },
     "plan.leftoverTallMm": {
       "value": 1.0,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: leftover standing more than this above the goal is tall; the leftover tolerance never treats two cutter chains as equal when one leaves more tall material"
+      "note": "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."
     },
     "adaptive.residualShare": {
       "value": 0.005,

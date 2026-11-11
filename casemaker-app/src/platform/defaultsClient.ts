@@ -708,13 +708,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: 0.95,
   },
   'plan.leftoverEquivalencePct': {
-    label: 'leftover two cutter chains may differ by and still count as equal',
+    label: 'Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen.',
     unit: '%',
     rule: z.number().min(0).max(5),
     fallback: 0.5,
   },
   'plan.leftoverTallMm': {
-    label: 'height above the goal at which leftover counts as tall (never forgiven by the leftover tolerance)',
+    label: 'Material left standing taller than this is never traded for a faster set of cutters.',
     unit: 'mm',
     rule: z.number().min(0.1).max(50),
     fallback: 1,

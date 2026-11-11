@@ -386,6 +386,12 @@ export interface SequenceChoice {
    * not the least-leftover chain. Cells and seconds are the picker's own numbers.
    */
   leftoverTolerance?: { tolerancePct: number; chosenLeftoverCells: number; bestLeftoverCells: number; cellAreaMm2: number; savedSeconds: number };
+  /**
+   * #1232 (planner v3 A6) — set only when the TALL rule kept a slower set: the fastest set that
+   * was passed over left this many more tall cells, and was this many seconds faster. The sheet
+   * states it so a longer job has a reason on it.
+   */
+  tallGuard?: { extraTallCells: number; cellAreaMm2: number; givenUpSeconds: number };
 }
 
 const EPS = 1e-9;
@@ -1018,7 +1024,7 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): readonly [number, number, number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tallTerm = true): readonly [number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -1047,6 +1053,9 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): re
   // planner v3 A1 + A1b — with the tolerance on: fewer TALL cells always ranks first (the factor
   // makes one tall cell outweigh any leftover count), and a leftover at or under the floor ranks AS
   // the floor. With the tolerance off (`leftoverFloor` null) this is the plain leftover, as before.
+  // planner v3 A6 (#1232) — `tallTerm = false` is the rank #1217 had before A1b: the same floor,
+  // the same keys, the tall term ignored. It is used ONLY to ask what the pick would have been
+  // without the tall rule; the real sort always passes the default.
   const floored =
     ranked.coverage === null
       ? Number.POSITIVE_INFINITY
@@ -1056,7 +1065,7 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): re
   const leftover =
     leftoverFloor === null || ranked.coverage === null
       ? floored
-      : (ranked.tallCells ?? 0) * 2 * ((ranked.coveredCells ?? 0) + 1) + floored;
+      : (tallTerm ? (ranked.tallCells ?? 0) * 2 * ((ranked.coveredCells ?? 0) + 1) : 0) + floored;
   const demoted = ranked.eligible ? 0 : 1;
   // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
   // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
@@ -1074,6 +1083,34 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): re
     fluteRank,
     signature,
   ] as const;
+}
+
+/**
+ * #1232 (planner v3 A6) — DID THE TALL RULE KEEP A SLOWER SET? The leftover tolerance (#1217)
+ * treats sets within a share of each other as equal on leftover and lets time decide; the tall
+ * rule (#1224) refuses a faster set that leaves more material standing above the shop's tall
+ * limit. When that rule is what kept a slower set, the sheet has had no reason to give.
+ *
+ * The set that counts is the one the pick WOULD have been with the tall term taken out and
+ * everything else the same (`chooseSequence` sorts a copy with `tallTerm = false`); this helper
+ * states what that displacement cost, or null when there is nothing to say. A set that is not
+ * taller, not faster, or is the chosen set itself was not passed over for tall material.
+ */
+export interface TallGuardNote {
+  /** How many more cells it would leave standing above the tall limit than the chosen set. */
+  extraTallCells: number;
+  /** How many seconds faster it was. */
+  givenUpSeconds: number;
+}
+
+export function tallGuardOf(
+  chosen: { tallCells: number; totalSeconds: number },
+  displaced: { tallCells: number; totalSeconds: number },
+): TallGuardNote | null {
+  const extraTallCells = displaced.tallCells - chosen.tallCells;
+  const givenUpSeconds = Math.round(chosen.totalSeconds - displaced.totalSeconds);
+  if (!(extraTallCells > 0) || !(givenUpSeconds > 0)) return null;
+  return { extraTallCells, givenUpSeconds };
 }
 
 /** The rank WITHOUT the coverage keys — the order the picker used before #961, and the one the
@@ -1289,31 +1326,35 @@ export function chooseSequence(
     const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
     leftoverFloor = bestLeftover + (tolerancePct / 100) * coveredCells;
   }
-  const compareRanked = (a: RankedSequence, b: RankedSequence): number => {
-    const ra = rankOf(a, leftoverFloor);
-    const rb = rankOf(b, leftoverFloor);
-    for (let i = 0; i < 8; i++) {
-      if (ra[i]! < rb[i]!) return -1;
-      if (ra[i]! > rb[i]!) return 1;
-    }
-    const ta = primaryOf(a);
-    const tb = primaryOf(b);
-    if (ta !== undefined && tb !== undefined && cuttingDiameter(ta) === cuttingDiameter(tb)) {
-      const picked = pickAmongEquals(
-        // The chains' own priced stage time is the pick's last key before the signature.
-        pickKeysOf(ta, deepestFeatureMm, a.cost.estimateSeconds),
-        pickKeysOf(tb, deepestFeatureMm, b.cost.estimateSeconds),
-        reachMarginMm,
-      );
-      if (picked !== 0) return picked > 0 ? -1 : 1;
-    }
-    // #1186 — the tuple's tail: the flute rank (index 8), then the signature (index 9). The
-    // signature used to sit at 8 and decide same-diameter ties by id before #1114's preference
-    // could; the flute rank now takes that place.
-    if (ra[8]! < rb[8]!) return -1;
-    if (ra[8]! > rb[8]!) return 1;
-    return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
-  };
+  // planner v3 A6 (#1232) — the comparator takes the floor and whether the tall term is in, so
+  // the pick with the tall term OFF (the note's question) is the same keys in the same order.
+  const compareRankedWith = (floor: number | null, tallTerm: boolean) =>
+    (a: RankedSequence, b: RankedSequence): number => {
+      const ra = rankOf(a, floor, tallTerm);
+      const rb = rankOf(b, floor, tallTerm);
+      for (let i = 0; i < 8; i++) {
+        if (ra[i]! < rb[i]!) return -1;
+        if (ra[i]! > rb[i]!) return 1;
+      }
+      const ta = primaryOf(a);
+      const tb = primaryOf(b);
+      if (ta !== undefined && tb !== undefined && cuttingDiameter(ta) === cuttingDiameter(tb)) {
+        const picked = pickAmongEquals(
+          // The chains' own priced stage time is the pick's last key before the signature.
+          pickKeysOf(ta, deepestFeatureMm, a.cost.estimateSeconds),
+          pickKeysOf(tb, deepestFeatureMm, b.cost.estimateSeconds),
+          reachMarginMm,
+        );
+        if (picked !== 0) return picked > 0 ? -1 : 1;
+      }
+      // #1186 — the tuple's tail: the flute rank (index 8), then the signature (index 9). The
+      // signature used to sit at 8 and decide same-diameter ties by id before #1114's preference
+      // could; the flute rank now takes that place.
+      if (ra[8]! < rb[8]!) return -1;
+      if (ra[8]! > rb[8]!) return 1;
+      return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
+    };
+  const compareRanked = compareRankedWith(leftoverFloor, true);
   feasible.sort(compareRanked);
   // planner v3 A1 — did the tolerance change the pick? Compare with the order the old rule gives.
   let leftoverTolerance: SequenceChoice['leftoverTolerance'];
@@ -1335,6 +1376,24 @@ export function chooseSequence(
       cellAreaMm2: chosenRanked.cellAreaMm2 ?? 0,
       savedSeconds: Math.round(strict.cost.totalSeconds - chosenRanked.cost.totalSeconds),
     };
+  }
+  // planner v3 A6 — did the tall rule keep a slower set? (the sheet says so)
+  let tallGuard: SequenceChoice['tallGuard'];
+  if (tolerancePct > 0 && chosenRanked !== undefined && chosenRanked.coverage !== null && measured.length > 0) {
+    // The pick as #1217 had it, for the note only: the floor from ALL measured sets (not the
+    // cleanest ones #1224 uses), every key in the same order, and the tall term off.
+    const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
+    const plainFloor = Math.min(...measured.map((r) => r.coverage!)) + (tolerancePct / 100) * coveredCells;
+    const displaced = [...feasible].sort(compareRankedWith(plainFloor, false))[0];
+    if (displaced !== undefined && displaced !== chosenRanked && displaced.coverage !== null) {
+      const note = tallGuardOf(
+        { tallCells: chosenRanked.tallCells ?? 0, totalSeconds: chosenRanked.cost.totalSeconds },
+        { tallCells: displaced.tallCells ?? 0, totalSeconds: displaced.cost.totalSeconds },
+      );
+      if (note !== null) {
+        tallGuard = { extraTallCells: note.extraTallCells, cellAreaMm2: chosenRanked.cellAreaMm2 ?? 0, givenUpSeconds: note.givenUpSeconds };
+      }
+    }
   }
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient
   // flute, or the key) instead of deferring to a policy issue.
@@ -1424,6 +1483,7 @@ export function chooseSequence(
     unplanned: best.failures,
     ...(pickNote === null ? {} : { pickNote }),
     ...(leftoverTolerance === undefined ? {} : { leftoverTolerance }),
+    ...(tallGuard === undefined ? {} : { tallGuard }),
   };
 }
 
