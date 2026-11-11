@@ -96,34 +96,31 @@ describe.skipIf(TRAY === undefined)('#1037 the M1 tray reaches Generate with the
     const blind = { ...flat(42, '42 x blind flat'), diameter: null, tipDiameter: null } as Tool;
     const set = OWNED.filter((_, i) => i !== 0).concat(blind);
     const out = await generateGoalProgram(job, target, OWNED[2]!, null, { shop: { tools: set.map(entry) } });
-    expect(out.ok).toBe(true);
-    const contourOps = out.plan!.perSetup.flatMap((s) => s.ops).filter((o) => o.kind === 'contour');
-    expect(contourOps.length, 'no chain link covers the profile').toBe(0);
-    const warned = out.findings.find((f) => f.code === 'goal-not-freed');
-    expect(warned?.severity).toBe('warning');
-    expect(warned?.message).toContain('the chosen chain does not free the part');
-    expect(warned?.message).toContain('42 mm flute that reaches it');
-    expect(warned?.message).toContain('no step of the chosen chain covers the profile');
-    // The self-contradicting form the Manager's review named is not what is said.
-    expect(warned?.message).not.toContain('longest stated flute');
+    // #1195 (the analyst's field) SUPERSEDES the #1037 statement here too: the blind flat states a
+    // 42 mm flute but cannot CUT (no diameter), so no chain can prove the 27.2 mm profile and the
+    // plan refuses with the named sentence rather than posting an unfreed part.
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(false);
+    const said = out.errors.map((e) => e.message).join('; ');
+    expect(said).toContain('nothing can free this part');
+    expect(said).toContain('27.2 mm');
+    expect(out.findings.some((f) => f.code === 'goal-not-freed')).toBe(false);
   }, 600_000);
 
-  it('with the ×42 flat removed the run POSTS with no freeing contour and STATES it: goal-not-freed, 27.2 and 25', async () => {
+  it('with the ×42 flat removed the run REFUSES, naming the reach and the unstated cutters (#1195)', async () => {
     const target = await placedTarget(TRAY!, [110, 140], -1.2);
     const job = trayJob(target);
     const set = OWNED.filter((_, i) => i !== 0);
     const out = await generateGoalProgram(job, target, OWNED[2]!, null, { shop: { tools: set.map(entry) } });
-    // 6b's ruling: an unfreed part is a STATEMENT, never a refusal — the plan posts.
-    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
-    expect(out.nc).not.toBeNull();
-    expect(out.plan!.perSetup.flatMap((s) => s.ops).some((o) => o.kind === 'contour')).toBe(false);
-    // The silence was the bug: the warning names the profile floor, the longest stated flute and
-    // the action, and it is never the old whole-goal ball verdict.
-    const warned = out.findings.find((f) => f.code === 'goal-not-freed');
-    expect(warned?.severity).toBe('warning');
-    expect(warned?.message).toContain('floor is 27.2 mm');
-    expect(warned?.message).toContain('25 mm');
-    expect(warned?.message).toContain('free it by hand');
+    // #1195 (the analyst's field) SUPERSEDES #1037's "an unfreed part is a statement" ruling: the
+    // freeing contour's reach is a HARD CONSTRAINT on the pick, so a job with no stated-reaching
+    // cutter must not post a part it cannot free. The sentence names the profile and the way out.
+    expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(false);
+    const said = out.errors.map((e) => e.message).join('; ');
+    expect(said).toContain('nothing can free this part');
+    expect(said).toContain('27.2 mm');
+    expect(said).toContain('state a flute length on');
+    // The old warning is not how this is stated any more.
+    expect(out.findings.some((f) => f.code === 'goal-not-freed')).toBe(false);
     expect(out.findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
   }, 600_000);
 });
