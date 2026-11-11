@@ -1010,6 +1010,27 @@
       "unit": "mm",
       "note": "chosen, not measured: the house's common plate \u2014 the thickness a drawing's blank starts at when no shelf plate holds it"
     },
+    "tape.stripCount": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "strips",
+      "note": "chosen, not measured: how many strips of tape go under a blank"
+    },
+    "tape.stripWidthMm": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the width of one strip \u2014 the house roll is Makera's 20 mm double-sided tape"
+    },
+    "clamps.maxCount": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "clamps",
+      "note": "chosen, not measured: the most clamps one bracket job states \u2014 the bracket's two free edges take four comfortably"
+    },
     "rotary.gripMm": {
       "value": 15.0,
       "source": "seeded",
@@ -1717,6 +1738,13 @@
       "unit": "x",
       "note": "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"
     },
+    "stock.shelfMatchMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"
+    },
     "clamp.refuseFraction": {
       "value": 0.5,
       "source": "seeded",
@@ -1807,6 +1835,27 @@
       "setAt": null,
       "unit": "mm",
       "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
+    },
+    "vise.cutProudMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the seat recommendation wants the seat's proud height at least the cut plus this, so the cutter's flute is not in the jaws at the bottom of the cut"
+    },
+    "vise.jawSideClearanceMm": {
+      "value": 6.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a cut within this of the gripped edge can be under the jaws \u2014 the largest cutter radius the wizard expects (3 mm) plus 3 mm"
+    },
+    "vise.jawTopToleranceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"
     },
     "registration.guardedFloorMarginMm": {
       "value": 1.0,

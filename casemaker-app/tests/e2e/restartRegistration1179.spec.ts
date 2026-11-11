@@ -324,6 +324,11 @@ test('#1179 blank identity — a no-id job on a legacy machine: three touches, t
 
   // THE SINGLE-SURFACE-TOUCH transcript: the fresh blank's plan has NO check points, so the run
   // takes the one surface seek and its notes never say the top was measured on a cut blank.
+  // #1202 — the fresh plan is a different routine SHAPE (one surface touch), never run on this
+  // machine: the card marks it and its own statement holds the Start (the cut-blank shape's tick
+  // does not carry across).
+  const freshTick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await freshTick.count()) > 0) await freshTick.check();
   await page.getByTestId('engrave-registration-start').click();
   await page.getByTestId('engrave-registration-continue').click(); // the clamp confirm
   // The run settles at the measured state (the write press exists; the fold may have closed).

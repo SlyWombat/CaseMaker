@@ -310,6 +310,26 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         12.0,
         "mm",
         "chosen, not measured: the house's common plate — the thickness a drawing's blank starts at when no shelf plate holds it",
+    ),
+    // #1102 — the tape under a blank, as the run sheet states it.
+    (
+        "tape.stripCount",
+        5.0,
+        "strips",
+        "chosen, not measured: how many strips of tape go under a blank",
+    ),
+    (
+        "tape.stripWidthMm",
+        20.0,
+        "mm",
+        "chosen, not measured: the width of one strip — the house roll is Makera's 20 mm double-sided tape",
+    ),
+    // #1102 — the most clamps a bracket job states.
+    (
+        "clamps.maxCount",
+        4.0,
+        "clamps",
+        "chosen, not measured: the most clamps one bracket job states — the bracket's two free edges take four comfortably",
     ),    // #434 — peck drilling with drill bits: the pecks chosen, the feeds placeholders. None measured.
     ("drill.peckDiameters", 1.0, "x", "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"),
     ("drill.peckClearanceMm", 0.5, "mm", "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"),
@@ -532,7 +552,15 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // not a setting.
     ("vise.uncertaintyMm", 0.5, "mm", "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"),
     ("vise.defaultStockProudMm", 4.0, "mm", "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"),
+    // #1103/#1207 — the recommended seat's chosen numbers: how much proud height the cut keeps in
+    // hand, how near the gripped edge a cut can be under the jaws, and the tolerance at the jaw tops.
+    ("vise.cutProudMarginMm", 1.0, "mm", "chosen, not measured: the seat recommendation wants the seat's proud height at least the cut plus this, so the cutter's flute is not in the jaws at the bottom of the cut"),
+    ("vise.jawSideClearanceMm", 6.0, "mm", "chosen, not measured: a cut within this of the gripped edge can be under the jaws — the largest cutter radius the wizard expects (3 mm) plus 3 mm"),
+    ("vise.jawTopToleranceMm", 0.5, "mm", "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"),
     ("vise.minCoverageFraction", 0.5, "x", "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"),
+    // #1105 — the stock step pre-selects a shelf blank within this of the proposal (both the
+    // thickness and the length × width, either orientation).
+    ("stock.shelfMatchMm", 1.0, "mm", "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"),
     ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
 ];
@@ -865,9 +893,25 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20 mm",
         )),
+        "vise.cutProudMarginMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
+        )),
+        "vise.jawSideClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=30.0).contains(&v)),
+            "0 to 30 mm",
+        )),
+        "vise.jawTopToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
+        )),
         "vise.minCoverageFraction" => Some(need(
             n.is_some_and(|v| (0.05..=1.0).contains(&v)),
             "0.05 to 1, a share of the stock's width",
+        )),
+        "stock.shelfMatchMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
         )),
         "clamp.refuseFraction" => Some(need(
             n.is_some_and(|v| (0.01..=5.0).contains(&v)),
@@ -1076,6 +1120,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
         "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
+        "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
+        "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
+        "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),
         "tools.wearWeight.plastic"
         | "tools.wearWeight.wood"
         | "tools.wearWeight.aluminium"

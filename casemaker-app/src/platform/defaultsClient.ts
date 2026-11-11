@@ -190,6 +190,26 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(20),
     fallback: VISE_DEFAULT_STOCK_PROUD_FALLBACK,
   },
+  // #1103/#1207 — THE RECOMMENDED SEAT's three chosen numbers (the Holding step's arrival seat reads
+  // the work). Each fallback is the number the code compiled before it was a setting.
+  'vise.cutProudMarginMm': {
+    label: 'seat recommendation: the cut must stand this far below the seat’s proud height (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(10),
+    fallback: 1,
+  },
+  'vise.jawSideClearanceMm': {
+    label: 'seat recommendation: a cut this near the gripped edge can be under the jaws (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(30),
+    fallback: 6,
+  },
+  'vise.jawTopToleranceMm': {
+    label: 'seat recommendation: a cut ending less than this above the jaw tops is treated as reaching them (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(5),
+    fallback: 0.5,
+  },
   'vise.minCoverageFraction': {
     label: 'vise jaw Y coverage before a short-jaw warning (chosen)',
     unit: 'x',
@@ -203,6 +223,17 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: CLAMP_REFUSE_FRACTION_FALLBACK,
   },
   // ── #448 (end)
+  // ── #1105 (begin) — the stock step's chosen tolerance: a shelf blank within this of the
+  // proposal's length, width and thickness (either orientation) is the same blank for the
+  // operator's purpose and is pre-selected on arrival. The house's blanks are drawn in round
+  // numbers, not cut to the design's tenths.
+  'stock.shelfMatchMm': {
+    label: 'Stock step: a shelf blank within this of the proposal is pre-selected (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(10),
+    fallback: 1,
+  },
+  // ── #1105 (end)
   // #423 — the run screen's watch. 2000 ms is the poll's floor (0.6 s faulted the controller, #386).
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },
@@ -305,6 +336,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tape.insetMm': { label: 'tape inset from every edge (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 2 },
   // #1098 — the plate a drawing is worked on when the shelf holds none that fits (#1207).
   'stock.defaultPlateThicknessMm': { label: 'default plate thickness for a drawing (chosen)', unit: 'mm', rule: z.number().min(1).max(100), fallback: 12 },
+  // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
+  'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
+  'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },
+  // #1102 — the most clamps one bracket job states.
+  'clamps.maxCount': { label: 'most clamps on one bracket job (chosen)', unit: 'clamps', rule: z.number().int().min(1).max(8), fallback: 4 },
   // #414 — runtime is weighted by the material cut (the maintainer, 2026-10-16). Chosen, not measured.
   'tools.wearWeight.plastic': { label: 'wear weight, plastic', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },
   'tools.wearWeight.wood': { label: 'wear weight, wood', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },

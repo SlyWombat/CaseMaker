@@ -1506,8 +1506,20 @@ export interface TapeHold {
    * expectation the picture draws and the registration starts from.
    */
   where: { x: Mm; y: Mm } | null;
-  /** What the tape keeps square: the bed's front edge. The program is never rotated (§3.4). */
-  squareTo: 'front';
+  /**
+   * What the tape keeps square: the bed's front edge, or (#1102) the bracket's fence when `fence`
+   * is set. The program is never rotated (§3.4).
+   */
+  squareTo: 'front' | 'fence';
+  /**
+   * #1102 — THE BRACKET AS A FENCE: what LOCATES the taped blank (the tape holds it down). The
+   * blank is pushed into the bracket's corner; the datum is the bracket corner from the anchor
+   * record, with no probing of the bracket at job time. Absent or null = no fence: the operator
+   * squares the blank to the bed's front edge and the probe finds it. With a fence `where` is
+   * `null` (derived from the fence when read) and `squareTo` is `'fence'`. Absent keeps every
+   * stored job byte-identical.
+   */
+  fence?: BedFence | null;
   /** Where these numbers came from — the same provenance rule as the vise (decision 28). */
   source: 'default' | 'saved' | 'measured';
 }
@@ -1536,6 +1548,27 @@ export interface BracketObstacle {
 }
 
 /**
+ * #1102 — THE BRACKET AS A FENCE, outside the stock like a side clamp: it locates the taped
+ * blank, it does not hold it. Its arms are still fixture boxes for the `bracket-in-path` check at
+ * Generate, and at the machine #1199's footprint rule keeps the tools off them. Only the corner
+ * fence exists (the blank touches both arms); a one-arm fence needs an edge find on tape, which
+ * is not proven on the machine.
+ */
+export interface BedFence {
+  kind: 'bracket';
+  /** The anchor the bracket is pinned at, as {@link BracketHold.anchor}. */
+  anchor: 1 | 2;
+  /** As {@link BracketHold.placement}. Absent = `anchored`. */
+  placement?: 'anchored' | 'placed';
+  /** The bracket fitted, as its fixture record names it — `thin`, the Makera kit's L-bracket. */
+  variant: string;
+  /** Which arms the blank touches: the corner, both of them. */
+  edges: 'corner';
+  /** As {@link BracketHold.obstacles}. */
+  obstacles?: BracketObstacle[];
+}
+
+/**
  * A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6).
  *
  * The CLAMP PLACES are the job's own: the CAM, the verifier and the simulation check these, never
@@ -1558,8 +1591,8 @@ export interface BracketHold {
   variant: string;
   /**
    * The clamp places, on the free edges: `back` and `right` (the bracket holds the front and the
-   * left). One to four, in the order the operator sees them; ZERO only when the board under the
-   * blank is taped — the vendor tray's side-2 hold, the bracket as the fence only.
+   * left). One to four, in the order the operator sees them. A bracket with NO clamps is a fence,
+   * not a hold (#1102): it is stated as a `tape` hold with a {@link BedFence}.
    */
   clamps: ClampPlacement[];
   /**

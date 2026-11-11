@@ -20,6 +20,8 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetStartWizard } from '@/store/startWizardStore';
+import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
+import { useMachineChangeStore } from '@/store/machineChangeStore';
 import { MachineRecordSchema, type MachineRecord } from '@/platform/locationClient';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -37,6 +39,9 @@ vi.mock('@/platform/capabilities', async (orig) => {
     },
   };
 });
+
+// jsdom has no geometry worker; startFromStock schedules one after the job is made.
+vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async () => {}) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -108,6 +113,7 @@ beforeEach(() => {
   resetMachineStore();
   resetLocationStore();
   resetStartWizard();
+  resetManageMode();
   useEngraveJobStore.setState({ job: defaultEngraveJob() });
   useClient(bench());
 });
@@ -119,13 +125,15 @@ afterEach(() => {
 });
 
 describe('#682 — step 1 is the house’s machine', () => {
-  it('names the location’s machine and checks it when the step opens — no click', async () => {
+  it('the location’s machine is the selected row, and the check runs when the step opens — no click', async () => {
     withHouse();
     render(<StartWizard />);
 
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1 “Zoomba”');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe(HOUSE_HOST);
+    // #1106 item 7 — the old single-machine header is gone: the ROW is where the machine is named.
+    const row = screen.getByTestId(`start-wizard-machine-row-${HOUSE.id}`);
+    expect(row.textContent).toContain('Makera Z1 “Zoomba”');
+    expect(row.getAttribute('aria-pressed')).toBe('true');
     const machine = useMachineStore.getState().machine;
     expect(machine?.host).toBe(HOUSE_HOST);
     // #693's reader: Idle with MPos at the Z1's homed rest is `homed`; the check sends no `$H`.
@@ -143,7 +151,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(stateLine().textContent).toContain('Online');
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain(
-      'Found at the address you wrote',
+      'Found at its recorded address',
     );
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('cannot receive broadcasts');
     // The route is remembered with the check, so a re-opened wizard can still say it.
@@ -265,7 +273,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(stateLine().textContent).toContain('Offline');
     expect(stateLine().textContent).not.toContain('Online');
     expect(stateLine().textContent).toContain('last seen 2026-10-25 13:55');
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1 “Zoomba”');
+    expect(screen.getByTestId(`start-wizard-machine-row-${HOUSE.id}`).textContent).toContain('Makera Z1 “Zoomba”');
     expect(screen.getByTestId('start-wizard-machine-offline-note').textContent).toBe(
       'The job can be written, checked and simulated now; the machine is needed at Cut.',
     );
@@ -290,17 +298,18 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
   });
 
-  it('with no location record, a found machine names itself and its address', async () => {
+  it('with no location record, the check’s own line names the state and there is no row to name', async () => {
     render(<StartWizard />);
 
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe(HOUSE_HOST);
+    expect(screen.queryByTestId('start-wizard-machine-list')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
     expect(stateLine().textContent).toContain('Online · Idle');
   });
 
-  it('the address and Connect live under the one fold; the paragraphs and placeholder are gone', async () => {
+  it('the old header, fold and typed address are gone; the rows are the picker and Add a machine… opens Manage', async () => {
     withHouse();
+    resetManageMode();
     render(<StartWizard />);
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
 
@@ -309,57 +318,21 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(screen.queryByTestId('start-wizard-machine-pick-note')).toBeNull();
     expect(screen.queryByText(/Every job is written for one machine/)).toBeNull();
     expect(screen.queryByText(/Whether a machine is on the network/)).toBeNull();
+    // #1106 item 7 — the single-machine header and the "another machine…" fold are gone.
+    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-machine-address')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-machine-another')).toBeNull();
     expect(screen.queryByTestId('start-wizard-address')).toBeNull();
     expect(screen.queryByTestId('start-wizard-connect-address')).toBeNull();
-
-    fireEvent.click(screen.getByTestId('start-wizard-machine-another'));
-    const input = screen.getByTestId('start-wizard-address');
-    expect(input.getAttribute('placeholder')).toBeNull();
-    const connect = screen.getByTestId('start-wizard-connect-address') as HTMLButtonElement;
-    // #875 — the empty field disables Connect, and that IS the unblock; the sentence that repeated
-    // it appeared the instant the fold opened, before anything was wrong, so it is gone.
-    expect(connect.disabled).toBe(true);
-    expect(screen.queryByTestId('start-wizard-machine-address-unblock')).toBeNull();
-    fireEvent.change(input, { target: { value: '10.0.0.7' } });
-    expect(connect.disabled).toBe(false);
-    // A hostname is letters: the phone's keypad offers them.
-    expect(input.getAttribute('inputmode')).toBe('url');
-    expect(input.getAttribute('autocapitalize')).toBe('off');
-    expect(input.getAttribute('spellcheck')).toBe('false');
-
-    // One fold: the same control closes it, and the field goes with it.
-    fireEvent.click(screen.getByTestId('start-wizard-machine-another'));
-    expect(screen.queryByTestId('start-wizard-address')).toBeNull();
+    // The record is a row, selected; the list's last row opens Manage › Machines (item 6).
+    expect(screen.getByTestId(`start-wizard-machine-row-${HOUSE.id}`).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByTestId('start-wizard-add-machine'));
+    expect(useManageModeStore.getState().open).toBe(true);
+    expect(useManageModeStore.getState().scope).toBe('machines');
   });
 
-  it('Connect checks the typed address instead of searching, and the line follows it', async () => {
-    withHouse();
-    let searches = 0;
-    const client = bench();
-    useClient({
-      ...client,
-      discover: async () => {
-        searches += 1;
-        return [{ name: 'Makera_Z1_010290', host: HOUSE_HOST, port: 2222, busy: false }];
-      },
-    });
-    render(<StartWizard />);
-    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
-
-    fireEvent.click(screen.getByTestId('start-wizard-machine-another'));
-    fireEvent.change(screen.getByTestId('start-wizard-address'), { target: { value: '10.0.0.7' } });
-    fireEvent.click(screen.getByTestId('start-wizard-connect-address'));
-
-    await waitFor(() =>
-      expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('10.0.0.7'),
-    );
-    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
-    expect(stateLine().textContent).toContain('Online · Idle');
-    // The typed route is the manual fallback, not a second search.
-    expect(searches).toBe(1);
-    // It said nothing about what it is, so the step names no model for it.
-    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
-  });
+  // #1106 item 7 — the typed-address route ("Connect") is gone with the fold: the records are the
+  // picker, and their own addresses are what the probe batch uses (#882 above).
 
   it('Next is not gated while the check is still running', async () => {
     withHouse();
@@ -385,5 +358,45 @@ describe('#682 — step 1 is the house’s machine', () => {
     await act(async () => {
       release!();
     });
+    // #1106 item 4 — the result landed after the step was left: it is DISCARDED, never written.
+    expect(useMachineStore.getState().outcome).toBeNull();
+    expect(useMachineStore.getState().machine).toBeNull();
+  });
+
+  it('a location with one machine selects it without a click', async () => {
+    withHouse();
+    render(<StartWizard />);
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    expect(screen.getByTestId(`start-wizard-machine-row-${HOUSE.id}`).getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('Change what’s on the bed… opens the machine-change store for the SELECTED row’s record (#1106 item 10)', async () => {
+    withHouse();
+    render(<StartWizard />);
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+    fireEvent.click(screen.getByTestId('start-wizard-change-bed'));
+    expect(useMachineChangeStore.getState().open).toBe(true);
+    expect(useMachineChangeStore.getState().request.machineId).toBe(HOUSE.id);
+  });
+
+  it('creating a job writes the last machine (#1106 item 5)', async () => {
+    window.localStorage.removeItem('casemaker.lastMachineId');
+    withHouse();
+    render(<StartWizard />);
+    await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
+
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    // Step 2 — the sign preset, with its own text field.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'A block' } });
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    const stockNext = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
+    await waitFor(() => expect(stockNext.disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(stockNext);
+    });
+    expect(window.localStorage.getItem('casemaker.lastMachineId')).toBe(HOUSE.id);
   });
 });

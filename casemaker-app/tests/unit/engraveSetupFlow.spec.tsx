@@ -215,21 +215,24 @@ describe('round stock — the cut face is a circle, not its box (#683)', () => {
 });
 
 describe('the material list the job may be cut in (#347)', () => {
-  it('is the starting table’s materials plus the machine’s own, in that order, with no duplicates', () => {
+  it('is the starting table’s materials plus the machine’s own, in family order, with no duplicates', () => {
     const values = materialOptionsFor(Z1).map((o) => o.value);
+    // #1105 item 2 — the two sources' own orders are kept WITHIN each family, but the families read
+    // Woods, boards & foams, Plastics, Metals, circuit board — the order a woodworker reads them.
     expect(values).toEqual([
-      // What this app can cut with no help, in the table's own order…
-      'softwood', 'hardwood', 'mdf', 'pla', 'petg', 'plastic',
-      // …then the Z1's own list, which the starting table has no row for: the vendor's
-      // `t_MaterialList` in this app's words, metals included, plus the printed-blank classes
-      // PrusaSlicer names (#456).
+      // Woods: the table's own order.
+      'softwood', 'hardwood', 'mdf',
+      // The cast resin board the M1 stock is (#1066), before the plastics.
+      'epoxy-tooling',
+      // Plastics: the table's, then the Z1's own list which the table has no row for (the vendor's
+      // `t_MaterialList` in this app's words, plus the printed-blank classes PrusaSlicer names #456).
+      'pla', 'petg', 'plastic',
       'abs', 'acrylic',
       'pet', 'asa', 'hips', 'pa', 'pa-cf', 'pa-gf', 'pc', 'pp', 'tpu', 'pva',
+      // Metals, in the profile's own order.
       'aluminium-6061', 'aluminium-7075', 'brass', 'copper',
-      // #743 P-1 — Makera's PCB row, in the profile's own order.
+      // #743 P-1 — Makera's PCB row.
       'pcb',
-      // #1066 — Makera's Epoxy Tooling board, the M1 stock.
-      'epoxy-tooling',
     ]);
     // Every one of them has a word to show; offering a value the app cannot label would render a
     // blank `<option>`.

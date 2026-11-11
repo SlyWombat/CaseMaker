@@ -210,25 +210,35 @@ test('#725 B7/W11 — a through cut taped on the wasteboard generates; a bare be
   await expect(page.getByTestId('engrave-run-errors')).toHaveCount(0);
 });
 
-test('#725 B6 — hovering a mount row previews it without moving the wizard’s controls', async ({ cm, page }) => {
+test('#725 B6 — a hovered mount row does not preview; the picture follows the SELECTION (#1104)', async ({ cm, page }) => {
   await fakeHouse(page, { anchor: true });
   await cm.ready();
   await typePlate(page, [100, 60, 6]);
 
-  // A 6 mm plate on a bed carrying the bracket takes the bracket; hovering the TAPE row previews
-  // the (shorter) taped picture. Before #725 B6 the picture's height resized the centred wizard
-  // and the control under the pointer was pushed out from under it — a hover/reflow loop.
-  await expect(page.getByTestId('engrave-setup-holding-picture')).toHaveAttribute('data-mount', 'bed-bracket');
+  // A 6 mm plate on a bed carrying the bracket takes the bracket. #1104 — THE PICTURE FOLLOWS THE
+  // SELECTION: a row under the pointer or focus no longer redraws it, so hovering/focusing the
+  // TAPE row leaves the bracket picture (the old hover preview was the #725 B6 reflow defect: the
+  // shorter taped picture resized the centred wizard and pushed the control out from under the
+  // pointer). The no-reflow guard stays; SELECTING tape is what moves the picture.
+  const picture = page.getByTestId('engrave-setup-holding-picture');
+  await expect(picture).toHaveAttribute('data-mount', 'bed-bracket');
   const next = page.getByTestId('engrave-setup-next');
   const before = await next.boundingBox();
   await page.getByTestId('engrave-setup-mount-row-bed-tape').hover();
   await page.waitForTimeout(500);
-  await expect(page.getByTestId('engrave-setup-holding-picture')).toHaveAttribute('data-mount', 'bed-tape');
+  await expect(picture).toHaveAttribute('data-mount', 'bed-bracket');
+  await page.getByTestId('engrave-setup-mount-bed-tape').focus();
+  await page.waitForTimeout(200);
+  await expect(picture).toHaveAttribute('data-mount', 'bed-bracket');
   const after = await next.boundingBox();
   expect(before).not.toBeNull();
   expect(after).not.toBeNull();
   expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
   expect(Math.abs(after!.x - before!.x)).toBeLessThan(1);
+
+  // The selection is the one thing that moves it.
+  await page.getByTestId('engrave-setup-mount-bed-tape').check();
+  await expect(picture).toHaveAttribute('data-mount', 'bed-tape');
 });
 
 test('#725 W11 — a bare bed with no board under it says what to put there', async ({ cm, page }) => {

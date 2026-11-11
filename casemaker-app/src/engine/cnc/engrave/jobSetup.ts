@@ -59,6 +59,7 @@ import {
   bracketMount,
   bracketSettings,
   defaultClampPlacements,
+  maxClampsOf,
   validateBracketMount,
   type ClampPlacement,
   type MountObstacles,
@@ -67,7 +68,9 @@ import {
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
+  BedFence,
   BracketHold,
+  BracketObstacle,
   EngraveAnyItem,
   EngraveChamfer,
   EngraveCutout,
@@ -361,6 +364,7 @@ export type JobFindingCode =
   // edge of the stock (it would not hold). Both are the Holding step's own checks, raised here too
   // so the document gate and the step cannot disagree, and Generate refuses before a path exists.
   | 'clamps-overlap'
+  | 'too-many-clamps'
   | 'clamp-off-stock'
   // #434 — a drill bit is the cutter of a DRILL-ONLY program. Hand-edited work that pairs one with
   // a region, trace or thread is refused by name: a drill cannot open a region, and one program has
@@ -1060,6 +1064,10 @@ export function jobTool(job: EngraveJob): Tool | null {
 export function workholdingFor(job: EngraveJob): Workholding {
   const { length, width, thickness } = job.stock;
   const shift = viseJawShift(job.sacrificial);
+  if (job.workholding.kind === 'tape' && job.workholding.tape.fence != null) {
+    // #1102 — the tape holds, the bracket's corner locates: the planner's hold is the bracket's.
+    return { kind: 'anchor-bracket', anchor: job.workholding.tape.fence.anchor, offset: [0, 0] };
+  }
   if (job.workholding.kind === 'tape') {
     // The tape holds along the whole underside: the contact IS the stock's footprint.
     return { kind: 'tape-down', contact: rectProfile(length, width) };
@@ -1191,7 +1199,12 @@ export function jobMount(job: EngraveJob, setupIndex = 0): Mount {
   if (stored !== undefined) return stored;
   // #707 BM-1 — a derived setup for a bed job is the job's own mount: the workholding names it
   // with the same word the setups engine does (`tape` / `bracket`).
-  if (job.workholding.kind === 'tape' || job.workholding.kind === 'bracket') return job.workholding.kind;
+  // #1102 — A TAPED JOB WITH A FENCE IS THE BRACKET'S MOUNT: the bracket's corner is the datum
+  // and its arms are the fixture, so the registration planner, the footprint, the bed findings and
+  // the verifier all resolve it HERE, once, and cannot disagree. (The tape still holds: the hold
+  // readers below read `workholding` itself.)
+  if (job.workholding.kind === 'tape') return jobFence(job) === null ? 'tape' : 'bracket';
+  if (job.workholding.kind === 'bracket') return 'bracket';
   // #240 — a derived setup for a rotary job is still read as the flat vise (see
   // `workholdingFor`).
   return 'vise';
@@ -1211,7 +1224,41 @@ function derivedMount(job: EngraveJob): MountSpec {
  * bracket job is given (`defaultBracketHold`).
  */
 export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampPlacement[] | null {
+  // #1102 — a fenced tape job has NO clamps (an empty list is a real answer: nothing stands over
+  // the stock, the tape holds it); only the arms are the fixture.
+  if (jobFence(job) !== null) return [];
   return job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : null;
+}
+
+/** #1102 — the bracket as a fence the job states (a taped hold with a fence), or null. */
+export function jobFence(job: Pick<EngraveJob, 'workholding'>): BedFence | null {
+  return job.workholding.kind === 'tape' ? (job.workholding.tape.fence ?? null) : null;
+}
+
+/**
+ * #1102 — THE MOUNT WHOSE BOXES ARE THE FIXTURE. `jobMount`'s word, except that a taped job with a
+ * fence is the bracket's arms (the tape holds, the bracket locates): the verifier, the sweep, the
+ * preview and the laser-surface check all ask THIS, so the arms are posted once and the same way
+ * for a clamped job and a fenced one. The setups engine keeps reading `jobMount` (a taped job is
+ * still `tape` there: the board flag, the hold).
+ */
+export function fixtureMountOf(job: EngraveJob, setupIndex = 0): Mount {
+  const mount = jobMount(job, setupIndex);
+  // A stored setup may still name 'tape' for a fenced job (#419): the fence's arms are its fixture.
+  return mount === 'tape' && jobFence(job) !== null ? 'bracket' : mount;
+}
+
+/** #1102 — how the bracket is bolted down for a job whose bracket holds or fences it, else null. */
+export function bracketPlacementOf(job: Pick<EngraveJob, 'workholding'>): 'anchored' | 'placed' | null {
+  if (job.workholding.kind === 'bracket') return job.workholding.bracket.placement ?? 'anchored';
+  const fence = jobFence(job);
+  return fence === null ? null : (fence.placement ?? 'anchored');
+}
+
+/** The job's own obstacle boxes: the bracket hold's, or the fence's. */
+export function jobFixtureVoids(job: Pick<EngraveJob, 'workholding'>): BracketObstacle[] | null {
+  if (job.workholding.kind === 'bracket') return job.workholding.bracket.obstacles ?? null;
+  return jobFence(job)?.obstacles ?? null;
 }
 
 /**
@@ -1230,11 +1277,11 @@ export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampP
 export function jobMountObstacles(job: EngraveJob, defaults: ShopDefaults | null): MountObstacles | null {
   return bracketMount(
     { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
-    jobMount(job),
+    fixtureMountOf(job),
     defaults,
     job.sacrificial.under?.thickness ?? 0,
     clampPlacementsFor(job),
-    job.workholding.kind === 'bracket' ? job.workholding.bracket.obstacles : null,
+    jobFixtureVoids(job),
   );
 }
 
@@ -2155,8 +2202,9 @@ export function validateJob(
       { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
       job.workholding.bracket.clamps,
       read,
+      maxClampsOf(options.defaults),
     )) {
-      if (m.code === 'clamps-overlap' || m.code === 'clamp-off-stock') {
+      if (m.code === 'clamps-overlap' || m.code === 'clamp-off-stock' || m.code === 'too-many-clamps') {
         findings.push({ severity: 'error', code: m.code, message: m.text });
       }
     }

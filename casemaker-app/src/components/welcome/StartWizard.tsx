@@ -5,7 +5,6 @@ import { DEFAULT_FONT_ID, ensureLabelFontsLoaded, ensureSeedFontsLoaded } from '
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { jobVise } from '@/engine/cnc/fixture';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
-import { canReachMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import { useSettingsStore } from '@/store/settingsStore';
 import { findTemplateAcrossSources } from '@/library/templateRegistry';
@@ -16,6 +15,7 @@ import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
 import { toLineTraces, toVectorShape } from '@/engine/import/outlineImport';
 import { useMachineStore } from '@/store/machineStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { useLocationStore } from '@/store/locationStore';
 import { machineForJob } from '@/platform/bedProfiles';
 import { useStartWizardStore } from '@/store/startWizardStore';
@@ -33,7 +33,7 @@ import { addOperationOfType, jobHasOperations } from '@/components/panels/operat
 import type { Project } from '@/types/project';
 import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
-import { facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
+import { facingShopFrom, isJobForm, isRoundStock, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
 import {
@@ -49,8 +49,8 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { openMachineChange } from '@/components/machine-change';
-import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
-import { accessoryFor } from '@/platform/machineChange';
+import { boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
+import { accessoryFor, activeProfileOf } from '@/platform/machineChange';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
@@ -251,6 +251,11 @@ function seedFromPending(p: PendingStock): StartStockSeed | undefined {
   };
 }
 
+/** A refusal as a sentence: the reason already ends with its full stop (#1104 item 8); one that does not gets one. */
+function sentence(reason: string): string {
+  return /[.!?]$/.test(reason) ? reason : `${reason}.`;
+}
+
 export function StartWizard(): JSX.Element {
   const closeWizard = useStartWizardStore((s) => s.closeWizard);
   const initialStep = useStartWizardStore((s) => s.initialStep);
@@ -293,6 +298,18 @@ export function StartWizard(): JSX.Element {
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
   const [step, setStep] = useState<WizardStepId>(initialStep);
+  // #1106 item 4 — the machine check's request counter; see runCheck.
+  const checkSeq = useRef(0);
+  useEffect(() => {
+    // Leaving step 1 discards whatever the check still has in flight; the unmount does too.
+    if (step !== 'machine') checkSeq.current += 1;
+  }, [step]);
+  useEffect(
+    () => () => {
+      checkSeq.current += 1;
+    },
+    [],
+  );
   // #726 W19/P12 — the phone layout: a 16 px content edge, and Holding stacks (HoldingStep reads
   // the same query for its own grid, so the two never disagree at the breakpoint).
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -328,7 +345,6 @@ export function StartWizard(): JSX.Element {
     setJobStarted(true);
     setProjectCreatedHere(true);
   }
-  const [address, setAddress] = useState('');
   const [answers, setAnswers] = useState<SetupAnswers>(() =>
     defaultSetupAnswers(useEngraveJobStore.getState().job),
   );
@@ -502,7 +518,11 @@ export function StartWizard(): JSX.Element {
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
-  async function runCheck(host?: string): Promise<void> {
+  async function runCheck(): Promise<void> {
+    // #1106 item 4 — ONE probe batch, and a late result is NEVER written: each request carries a
+    // number, and leaving the step or selecting another row bumps it, so only the current request
+    // may set the result. The recorded rows are probed in parallel by the one existing batch.
+    const seq = ++checkSeq.current;
     setBusy(true);
     try {
       // #882 — THE LOCATION'S MACHINES GO WITH THE SEARCH. A LAN server on a bridge network cannot
@@ -511,7 +531,8 @@ export function StartWizard(): JSX.Element {
       const recorded = (machines ?? []).flatMap((m) =>
         m.address === null ? [] : [{ host: m.address.host, port: m.address.port, profileId: m.profileId }],
       );
-      const result = await probeMachine(host === undefined ? { recorded } : { host });
+      const result = await probeMachine({ recorded });
+      if (seq !== checkSeq.current) return;
       setProbeResult(result);
       // The machine's own coordinate frame, saved where its provenance lives (#279). Only a
       // COMPLETE read ever produces one, so this cannot half-apply; a read that failed leaves the
@@ -599,6 +620,8 @@ export function StartWizard(): JSX.Element {
   async function startFromStock(p: PendingStock): Promise<void> {
     setStarting(true);
     setStartError(null);
+    // #1106 item 5 — creating a job is using the machine: remember the selected record.
+    if (selectedMachine !== null) writeLastMachineId(selectedMachine.id);
     try {
       const store = useEngraveJobStore.getState();
       const machineId = store.job.machineId;
@@ -668,6 +691,11 @@ export function StartWizard(): JSX.Element {
         seeded.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
         viseOnPins,
+        // #1103 item 7 — the seat judged is the one the Holding step arrives in: the same work facts,
+        // the house's boards and the recommendation's own shop numbers.
+        workFactsOf(operationChoice, proposal, work),
+        boardChoices(activeProfileOf(selectedMachine)),
+        seatShopFrom(useShopDefaultsStore.getState().defaults),
       );
       // The empty design: a stock pick brings no lines. (A design file brings its own items.)
       store.replace({
@@ -777,6 +805,11 @@ export function StartWizard(): JSX.Element {
         after.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
         viseOnPins,
+        // #1103 item 7 — the seat judged is the one the Holding step arrives in: the same work facts,
+        // the house's boards and the recommendation's own shop numbers.
+        workFactsOf(operationChoice, proposal, work),
+        boardChoices(activeProfileOf(selectedMachine)),
+        seatShopFrom(useShopDefaultsStore.getState().defaults),
       );
       store.replace({ ...after, stockEntry: p.choice.entry, facing });
       settled();
@@ -862,6 +895,8 @@ export function StartWizard(): JSX.Element {
   }
 
   function createEmptyJobNow(): void {
+    // #1106 item 5 — the empty-job door creates a job too: the machine in step 1 is the last used.
+    if (selectedMachine !== null) writeLastMachineId(selectedMachine.id);
     const store = useEngraveJobStore.getState();
     const machineId = store.job.machineId;
     // A NEW document: the machine chosen in step 1 is kept, everything else is the shipped
@@ -1072,10 +1107,8 @@ export function StartWizard(): JSX.Element {
           machine={machine}
           reason={reason}
           route={machineRoute}
-          address={address}
-          onAddress={setAddress}
-          onCheck={(host) => {
-            void runCheck(host);
+          onCheck={() => {
+            void runCheck();
           }}
           // #1106 — the step is a picker: the job's machine is the selected row, the last used is
           // first, and the bed is changed from here.
@@ -1083,6 +1116,8 @@ export function StartWizard(): JSX.Element {
           selectedMachineId={selectedMachine?.id ?? null}
           lastMachineId={readLastMachineId()}
           onSelectMachine={(id) => {
+            // #1106 item 4 — a selection change discards a check still in flight.
+            checkSeq.current += 1;
             setSelectedRecordId(id);
             const record = machines?.find((m) => m.id === id);
             if (record?.profileId) useEngraveJobStore.getState().setMachine(record.profileId);
@@ -1090,6 +1125,8 @@ export function StartWizard(): JSX.Element {
           }}
           onChangeBed={() =>
             openMachineChange({
+              // #1106 item 10 — the SELECTED row's record, not "the location's first machine".
+              machineId: selectedMachine?.id,
               forJob: { name: job.name, holding: job.workholding.kind },
               onDone: () => undefined,
             })
@@ -1122,6 +1159,8 @@ export function StartWizard(): JSX.Element {
           // #1103 — the recommended seat reads what the work takes, from the question step.
           work={workFactsOf(operationChoice, proposal, work)}
           onAnswers={applyHoldAnswers}
+          onOpenManage={() => useManageModeStore.getState().openManage('machines')}
+          onBackToStock={() => setStep('stock')}
           onRotary={applyRotaryHolding}
           onBedHold={applyBedHolding}
           onHold={applyStockHold}
@@ -1159,8 +1198,10 @@ export function StartWizard(): JSX.Element {
   // too long for it, Next is disabled and carries the one sentence that unblocks it (hold it in
   // the rotary chuck, or change the stock). The mount options already refuse those seats; this is
   // the footer's same rule, because a job opened on a vise mount would otherwise pass through.
+  // #1104 — one predicate for "round": a rod, a tube or a cylinder (isRoundStock), the same one the rows use.
   const roundStock =
-    job.stockEntry?.form === 'rod' || job.stockEntry?.form === 'tube' || job.stock.shape === 'cylinder';
+    (job.stockEntry?.form !== undefined && isJobForm(job.stockEntry.form) && isRoundStock(job.stockEntry.form)) ||
+    job.stock.shape === 'cylinder';
   // The answers' mount is the rotary when the job is in the chuck; otherwise the vise answers'
   // seat names it (the same reading HoldingStep draws its radios from).
   const currentHolding = answers.workholding === 'rotary' ? 'rotary' : currentMount(answers);
@@ -1266,12 +1307,12 @@ export function StartWizard(): JSX.Element {
           )}
           {holdingBlock !== null && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-block">
-              {holdingBlock}.
+              {sentence(holdingBlock)}
             </p>
           )}
           {holdingBlock === null && mountBlocked !== null && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-unblock">
-              {mountBlocked}.
+              {sentence(mountBlocked)}
             </p>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1299,8 +1340,10 @@ export function StartWizard(): JSX.Element {
 
             {step === 'machine' && (
               // The SAME test id either way: it is the button that advances, whatever it says.
+              // #1106 item 9 — ONE label on both builds: a job can always be written, checked and
+              // simulated, so the press is never "without a machine" (title per #1100 item 4).
               <button type="button" className="sw-btn sw-btn--primary" data-testid="start-wizard-next" onClick={next}>
-                {canReachMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
+                {wizardStep('machine').nextLabel}
               </button>
             )}
             {step === 'stock' && confirmReplace === null && (

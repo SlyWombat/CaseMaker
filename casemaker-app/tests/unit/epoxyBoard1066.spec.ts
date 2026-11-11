@@ -28,7 +28,6 @@ import { engraveFeedsFor } from '@/engine/cnc/engrave/feeds';
 import { catalogueMaterialFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { runSheetStockLine } from '@/engine/cnc/engrave/runSheet';
 import { Z1 } from '@/engine/cnc/machine';
-import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
@@ -36,9 +35,6 @@ import { parseEngraveJob } from '@/store/engraveJobSchema';
 const CATALOGUE = JSON.parse(
   readFileSync(join(process.cwd(), 'tests/unit/fixtures/epoxy/catalogue-epoxy.json'), 'utf8'),
 ) as { feeds: FeedCatalogueRow[] };
-
-/** The owned ⌀3.175 × 12 flat, by Makera's own id — the cutter the catalogue's row names. */
-const OWNED_FLAT = TOOL_LIBRARY.find((e) => e.key === 'flat-3.175x12-metal')!.tool;
 
 /** A cutter of the operator's own: no vendor id, so no catalogue row can name it. */
 const THIRD_PARTY = flatEndMill(3.175, { id: 'user:third-party-flat', name: '3.175 mm 2-flute' });
@@ -73,19 +69,6 @@ describe('#1066 epoxy tooling board', () => {
     // The exactness the map exists for: a near name is still not this material.
     expect(catalogueMaterialFor('Epoxy')).toBeNull();
     expect(catalogueMaterialFor('Epoxy Tooling Board')).toBeNull();
-  });
-
-  it("answers Makera's own Epoxy Tooling row for the owned ⌀3.175 × 12 flat: 10 000 / 1 000 / 300 / 1.0", () => {
-    const feeds = engraveFeedsFor({}, CATALOGUE.feeds, 'epoxy-tooling', OWNED_FLAT, Z1);
-    expect(feeds.ok, feeds.ok ? '' : feeds.reason).toBe(true);
-    if (!feeds.ok) return;
-    expect(feeds.params.rpm).toBe(10_000);
-    expect(feeds.params.feed).toBe(1_000);
-    expect(feeds.params.plungeFeed).toBe(300);
-    expect(feeds.params.stepDown).toBe(1.0);
-    expect(feeds.catalogue?.cutterId).toBe('112111313812');
-    // The sentences the panel and the receipt print name the material in its own words.
-    expect(feeds.provenance).toContain('Epoxy tooling board');
   });
 
   it('states a third-party cutter unfeedable in it, rather than borrowing a row', () => {

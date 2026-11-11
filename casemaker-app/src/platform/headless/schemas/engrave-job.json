@@ -8657,6 +8657,116 @@
             "tape": {
               "description": "The tape the job was set up with.",
               "properties": {
+                "fence": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "anchor": {
+                          "anyOf": [
+                            {
+                              "const": 1,
+                              "type": "number"
+                            },
+                            {
+                              "const": 2,
+                              "type": "number"
+                            }
+                          ],
+                          "description": "The anchor the bracket is pinned at."
+                        },
+                        "edges": {
+                          "const": "corner",
+                          "description": "Which arms the blank touches: the corner, both of them.",
+                          "type": "string"
+                        },
+                        "kind": {
+                          "const": "bracket",
+                          "description": "What the fence is: the bracket of the Makera kit.",
+                          "type": "string"
+                        },
+                        "obstacles": {
+                          "description": "Boxes the mount cannot know, as the bracket hold states them.",
+                          "items": {
+                            "properties": {
+                              "id": {
+                                "description": "A stable id for the box, so a finding can name it.",
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "label": {
+                                "description": "The box in landmark words — \"the counterbored hole, 8 mm in from the left edge\".",
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "max": {
+                                "description": "The box’s high corner in the work frame, mm.",
+                                "prefixItems": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "number"
+                                  }
+                                ],
+                                "type": "array"
+                              },
+                              "min": {
+                                "description": "The box’s low corner in the work frame: X 0..length, Y 0..width, Z0 on the stock’s top, mm.",
+                                "prefixItems": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "number"
+                                  }
+                                ],
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label",
+                              "min",
+                              "max"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "placement": {
+                          "description": "As the bracket hold's placement: absent = 'anchored'.",
+                          "enum": [
+                            "anchored",
+                            "placed"
+                          ],
+                          "type": "string"
+                        },
+                        "variant": {
+                          "description": "The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket.",
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "anchor",
+                        "variant",
+                        "edges"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The bracket as a fence: what LOCATES the taped blank (the tape holds it). Absent or null = no fence; the blank is squared to the bed's front edge. With a fence, where is null and squareTo is 'fence'."
+                },
                 "inset": {
                   "description": "How far in from every edge the tape strips stop, in millimetres.",
                   "minimum": 0,
@@ -8672,8 +8782,11 @@
                   "type": "string"
                 },
                 "squareTo": {
-                  "const": "front",
-                  "description": "What the tape keeps square: the bed's front edge. The program is never rotated.",
+                  "description": "What the tape keeps square: the bed's front edge, or the bracket's fence when one is stated. The program is never rotated.",
+                  "enum": [
+                    "front",
+                    "fence"
+                  ],
                   "type": "string"
                 },
                 "thickness": {
@@ -8748,7 +8861,7 @@
                   "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
                 },
                 "clamps": {
-                  "description": "The clamp places the job was set up with, on the free edges. One to four; ZERO only when the board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).",
+                  "description": "The clamp places the job was set up with, on the free edges. At least one: a bracket with no clamps is a fence, stated as a taped hold located against the bracket. How many a job may state is the shop's clamps.maxCount, checked when the job is validated, not here.",
                   "items": {
                     "properties": {
                       "at": {
@@ -8779,7 +8892,6 @@
                     ],
                     "type": "object"
                   },
-                  "maxItems": 4,
                   "type": "array"
                 },
                 "obstacles": {

@@ -35,6 +35,10 @@ export function workFactsOf(
     if (work.kind === 'text') return Math.max(0, Math.min((proposal.length - work.size.length) / 2, (proposal.width - work.size.width) / 2));
     if (work.kind === 'outline') return Math.max(0, Math.min((proposal.length - work.length) / 2, (proposal.width - work.width) / 2));
     if (work.kind === 'mesh') return 0;
+    // #1103 — a preset's cut-out or pocket: the proposal's margin each side.
+    if (work.kind === 'cutout' || work.kind === 'pocket') {
+      return Math.max(0, Math.min((proposal.length - work.length) / 2, (proposal.width - work.width) / 2));
+    }
     return null;
   })();
   switch (choice.type) {
@@ -49,6 +53,12 @@ export function workFactsOf(
       return { deepestCutMm: thickness, through: true, reachesEdgeWithinMm: 0 };
     case 'flat':
       return { deepestCutMm: choice.depth, through: false, reachesEdgeWithinMm: null };
+    case 'cutout':
+      // #1103 — Cut out a shape goes through the blank, whatever its margin.
+      return { deepestCutMm: thickness, through: true, reachesEdgeWithinMm: margin };
+    case 'pocket':
+      // #1103 — A preset pocket: its own depth (a bare chip with none states 0), not through.
+      return { deepestCutMm: choice.depth ?? 0, through: false, reachesEdgeWithinMm: margin };
     case 'faces-all-round':
       // The flats are turned on a rod (the rotary mount), not seated in the vise.
       return { ...NOTHING };

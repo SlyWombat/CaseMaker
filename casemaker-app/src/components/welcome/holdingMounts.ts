@@ -44,7 +44,7 @@ import {
   type ClampPlacement,
   type StockSize,
 } from '@/engine/cnc/mounts/bracket';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { BedProfile, FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import {
   MACHINE_MOUNT_WORDS,
@@ -219,16 +219,16 @@ export function facingForSeat(
   stock: { thickness: number },
   shop: Partial<FacingDepthShop> | undefined,
   jaws = true,
+  /** #1103 item 7 — what the work takes: the seat judged is the one the Holding step arrives in. */
+  work?: SeatWorkFacts | null,
+  /** The house's boards, thinnest first (none: the typed default). */
+  choices: readonly BoardChoice[] = [],
+  seatShop?: SeatShop,
 ): Pick<EngraveFacing, 'enabled' | 'depth' | 'source'> {
   const seed = facingSeed(finish, material, shop);
   if (!seed.enabled || !jaws) return seed;
-  const mount = recommendedMount(stock);
-  const proud =
-    mount === 'block'
-      ? stock.thickness - VISE_FLOOR_DEPTH
-      : mount === 'board'
-        ? boardSeatProud(stock.thickness, DEFAULT_BOARD_MM)
-        : stock.thickness - LEDGE_STEP;
+  const seat = recommendSeat(stock, work ?? null, choices, true, seatShop);
+  const proud = seatProudOf(stock, seat.mount, seat.boardMm);
   // The pass must END above the jaw tops: a pass exactly as deep as the proud leaves the cutter on
   // the jaw plane with nothing but the model's uncertainty in hand.
   return proud > seed.depth ? seed : { enabled: false, depth: 0, source: 'seed' };
@@ -252,19 +252,40 @@ export function applyRecommendedMount(
   work?: SeatWorkFacts | null,
   /** The house's boards, thinnest first; one typed board when the house names none. */
   choices: readonly BoardChoice[] = [],
+  /** #1103/#1207 — the recommendation's chosen numbers (the registry's fallbacks when absent). */
+  shop?: SeatShop,
 ): SetupAnswers {
   if (a.vise.source === 'saved' || a.sacrificial.under !== null) return a;
   const pool = choices.length > 0 ? choices : [{ thickness: boardMm, material: 'MDF', count: 1 }];
-  const seat = recommendSeat(a.stock, work, pool);
+  const seat = recommendSeat(a.stock, work, pool, true, shop);
   // An existing board mount returned above (the operator's board is not replaced), so a matching
   // seat is enough here.
   if (currentMount(a) === seat.mount) return a;
   return applyMount(a, seat.mount, seat.mount === 'board' ? seat.boardMm : boardMm, false);
 }
 
-/** #1103 — a cut within this of the gripped edge can be under the jaws: the largest cutter radius
- *  the wizard can expect (3 mm) plus 3 mm, one named constant, stated in the reason. */
-export const JAW_SIDE_CLEARANCE_MM = 6;
+/**
+ * #1103/#1207 — the recommendation's three CHOSEN numbers, read from the shop defaults
+ * (`vise.cutProudMarginMm`, `vise.jawSideClearanceMm`, `vise.jawTopToleranceMm`; the registry's
+ * labelled fallback when the house is not read). Never literals in the rule.
+ */
+export interface SeatShop {
+  /** The seat must stand the cut plus this proud. */
+  cutProudMarginMm: number;
+  /** A cut nearer the gripped edge than this can be under the jaws. */
+  jawSideClearanceMm: number;
+  /** A cut ending less than this above the jaw tops is treated as reaching them (conservative). */
+  jawTopToleranceMm: number;
+}
+
+export function seatShopFrom(defaults: ShopDefaults | null | undefined): SeatShop {
+  const d = defaults ?? null;
+  return {
+    cutProudMarginMm: readDefault(d, 'vise.cutProudMarginMm').value,
+    jawSideClearanceMm: readDefault(d, 'vise.jawSideClearanceMm').value,
+    jawTopToleranceMm: readDefault(d, 'vise.jawTopToleranceMm').value,
+  };
+}
 
 /** #1103 — what the work takes, as the recommended seat reads it. */
 export interface SeatWorkFacts {
@@ -283,6 +304,11 @@ export interface SeatChoice {
   reason: string | null;
   /** The vise cannot take this work — the step offers the bed first, and the board is the fallback. */
   bedSuggested: boolean;
+  /**
+   * #1103 item 6 — each vise seat the rule REFUSED for this work, with the sentence its own row
+   * shows: how far down the cut goes and how high the jaws stand above its floor on that seat.
+   */
+  refused: { mount: ViseHoldingMount; text: string }[];
 }
 
 function seatProudOf(stock: { thickness: number }, seat: ViseHoldingMount, boardMm: number): number {
@@ -290,65 +316,111 @@ function seatProudOf(stock: { thickness: number }, seat: ViseHoldingMount, board
   return stock.thickness - seatDepth(seat === 'block' ? 'floor' : 'ledge');
 }
 
+const SEAT_PREFIX = { ledge: 'on the jaw ledge', block: 'on the block seat' } as const;
+const SEAT_NOUN = { ledge: 'the ledge', board: 'the board', block: 'the block seat' } as const;
+
 /**
  * #1103 — THE SEAT IS CHOSEN FROM THE WORK (the analyst's corrected rule, 2026-11-10). A vise seat
- * is refused when the work goes THROUGH the blank, or when the cut goes below the jaw tops AND
- * comes within {@link JAW_SIDE_CLEARANCE_MM} of the gripped edge — depth alone refuses a shallow
- * engraving in the middle of a block, which is wrong. Among the seats left, the one with the
- * smallest proud height at least the cut plus 1 mm wins; when none does, the bed is suggested and
- * the board with the thickest house board is the stated fallback. With no item yet the facts are
- * null and today's thickness rule recommends, unchanged.
+ * is refused when the work goes THROUGH the blank (tested FIRST, even with no margin known), or when
+ * the cut goes below the jaw tops AND comes within `vise.jawSideClearanceMm` of the gripped edge —
+ * depth alone refuses a shallow engraving in the middle of a block, which is wrong. Among the seats
+ * left, the one with the smallest proud height at least the cut plus `vise.cutProudMarginMm` wins;
+ * the board seat takes the THINNEST house board that gets there. When none does, the bed is
+ * suggested and the board with the thickest house board is the stated fallback. With no item yet
+ * the facts are null and today's thickness rule recommends, unchanged.
  */
 export function recommendSeat(
   stock: { thickness: number },
   work: SeatWorkFacts | null | undefined,
   choices: readonly BoardChoice[],
+  /** #1104 — "tape it to the bed" is said only where the tape row is on offer ({@link bedOffered}). */
+  tapeOffered = true,
+  shop: SeatShop = seatShopFrom(null),
 ): SeatChoice {
   const floorBoard = defaultBoardMm(stock, choices);
-  if (work === null || work === undefined || work.reachesEdgeWithinMm === null) {
-    return { mount: recommendedMount(stock), boardMm: floorBoard, reason: null, bedSuggested: false };
-  }
+  const today = (): SeatChoice => ({
+    mount: recommendedMount(stock),
+    boardMm: floorBoard,
+    reason: null,
+    bedSuggested: false,
+    refused: [],
+  });
+  if (work === null || work === undefined) return today();
   const thickest = choices.length === 0 ? DEFAULT_BOARD_MM : choices[choices.length - 1]!.thickness;
   const ledgeProud = seatProudOf(stock, 'ledge', floorBoard);
   const belowLedge = Math.max(0, work.deepestCutMm - ledgeProud);
-  const fallback = (): SeatChoice => ({
+  const fallback = (refused: SeatChoice['refused'] = []): SeatChoice => ({
     mount: 'board',
     boardMm: thickest,
-    reason: `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board, a taller blank, or tape it to the bed`,
+    reason: tapeOffered
+      ? `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board, a taller blank, or tape it to the bed`
+      : `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board or a taller blank`,
     bedSuggested: true,
+    refused,
   });
+  // A through cut is never a vise seat, whether or not its margin is known.
   if (work.through) return fallback();
-  const nearJaws = work.reachesEdgeWithinMm < JAW_SIDE_CLEARANCE_MM;
-  const refused = (seat: ViseHoldingMount): boolean =>
-    nearJaws && work.deepestCutMm > seatProudOf(stock, seat, floorBoard) - 0.5;
-  const seats: ViseHoldingMount[] = ['ledge', 'board', 'block'];
+  if (work.reachesEdgeWithinMm === null) return today();
+  const edge = work.reachesEdgeWithinMm;
+  const nearJaws = edge < shop.jawSideClearanceMm;
+  const refusedAt = (proud: number): boolean => nearJaws && work.deepestCutMm > proud - shop.jawTopToleranceMm;
+  const seats: ViseHoldingMount[] = ['ledge', 'block'];
+  const refusedText = (seat: ViseHoldingMount, proud: number): { mount: ViseHoldingMount; text: string } | null => {
+    if (!refusedAt(proud)) return null;
+    const where = edge <= 0 ? 'reaches the blank’s edge' : `comes within ${fmt(edge)} mm of the blank’s edge`;
+    return {
+      mount: seat,
+      text: `The cut goes ${fmt(work.deepestCutMm)} mm down and ${where}; on this seat the jaws stand ${fmt(work.deepestCutMm - proud)} mm above its floor there.`,
+    };
+  };
+  const refused = seats
+    .map((seat) => refusedText(seat, seatProudOf(stock, seat, floorBoard)))
+    .filter((r): r is { mount: ViseHoldingMount; text: string } => r !== null);
+  const how = edge <= 0 ? 'reaches the blank’s edge' : `stays ${fmt(edge)} mm inside the blank’s edge`;
+  const sentence = (mount: ViseHoldingMount, boardMm: number, proud: number): string => {
+    const prefix = mount === 'board' ? `on a ${fmt(boardMm)} mm board` : SEAT_PREFIX[mount];
+    return `${prefix} — the cut goes ${fmt(work.deepestCutMm)} mm down and ${how}; ${SEAT_NOUN[mount]} keeps ${fmt(proud)} mm proud`;
+  };
   // No seat refused: today's thickness rule stands — the shallow cut in the middle of a plate keeps
   // the block seat (rule 2 must not turn a 0.5 mm cut into a ledge recommendation).
-  if (!seats.some(refused)) {
+  if (refused.length === 0) {
     const mount = recommendedMount(stock);
     return {
       mount,
       boardMm: floorBoard,
-      reason: `the cut goes ${fmt(work.deepestCutMm)} mm down and stays ${fmt(work.reachesEdgeWithinMm)} mm inside the blank’s edge; ${mount === 'block' ? 'the block seat' : mount === 'ledge' ? 'the jaw ledge' : 'the board'} keeps ${fmt(seatProudOf(stock, mount, floorBoard))} mm proud`,
+      reason: sentence(mount, floorBoard, seatProudOf(stock, mount, floorBoard)),
       bedSuggested: false,
+      refused: [],
     };
   }
-  const candidates = seats
-    .filter((seat) => !refused(seat))
-    .filter((seat) => seatProudOf(stock, seat, floorBoard) >= work.deepestCutMm + 1)
-    .sort((a, b) => seatProudOf(stock, a, floorBoard) - seatProudOf(stock, b, floorBoard));
-  const mount = candidates[0];
-  if (mount === undefined) return fallback();
-  const proud = seatProudOf(stock, mount, floorBoard);
-  const seatWord = mount === 'block' ? 'the block seat' : mount === 'ledge' ? 'the jaw ledge' : 'the board';
+  // The board seat takes the THINNEST house board that keeps the cut + margin proud and that the
+  // jaws do not refuse; a house with no boards has the typed default as its one choice.
+  const need = work.deepestCutMm + shop.cutProudMarginMm;
+  const boards = choices.length === 0 ? [DEFAULT_BOARD_MM] : choices.map((c) => c.thickness);
+  const boardProudAt = (b: number): number => boardSeatProud(stock.thickness, b);
+  const board = boards.find((b) => boardProudAt(b) >= need && !refusedAt(boardProudAt(b)));
+  const candidates: { mount: ViseHoldingMount; boardMm: number; proud: number }[] = [];
+  for (const mount of ['ledge', 'block'] as const) {
+    const proud = seatProudOf(stock, mount, floorBoard);
+    if (!refusedAt(proud) && proud >= need) candidates.push({ mount, boardMm: floorBoard, proud });
+  }
+  if (board !== undefined) candidates.push({ mount: 'board', boardMm: board, proud: boardProudAt(board) });
+  candidates.sort((a, b) => a.proud - b.proud);
+  const pick = candidates[0];
+  if (pick === undefined) {
+    // The fallback names the THICKEST board; state that board's own refusal, never one the
+    // recommendation kept (a board seat that passes is not also "the jaws are in its way").
+    const boardRefusal = refusedText('board', boardProudAt(thickest));
+    return fallback(boardRefusal === null ? refused : [...refused, boardRefusal]);
+  }
   return {
-    mount,
-    boardMm: mount === 'board' ? floorBoard : floorBoard,
-    reason: `the cut goes ${fmt(work.deepestCutMm)} mm down and stays ${fmt(work.reachesEdgeWithinMm)} mm inside the blank’s edge; ${seatWord} keeps ${fmt(proud)} mm proud`,
+    mount: pick.mount,
+    boardMm: pick.boardMm,
+    reason: sentence(pick.mount, pick.boardMm, pick.proud),
     bedSuggested: false,
+    refused,
   };
 }
-
 
 // ── The machine's state, in one line ────────────────────────────────────────────────────────────
 
@@ -463,18 +535,28 @@ export interface MountOptionArgs {
   tape?: TapeHold | null;
   /** #1103 — the work goes through the blank: the block seat is never offered for it. */
   through?: boolean;
+  /**
+   * #1104 — whether this build can drive a machine. A row that needs a machine change keeps its
+   * place on the web build, with its action pointing at Manage › Machines instead of the change
+   * wizard. Absent is true (the desktop build).
+   */
+  canReachMachine?: boolean;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
 
-/** "needs the vise off the pins" — the cost line, from what is on the pins now. */
+/**
+ * "put the vise on the pins" — the ACTION the row offers, from what is on the pins now (#1104
+ * items 3/4, the newer wording). A lowercase fragment like the file's other sentences: the row
+ * renderer capitalises it, so the operator reads "Put the vise on the pins".
+ */
 function costWords(current: MachineMountKind, needed: MachineMountKind): string {
-  if (needed === 'rotary') return 'needs the rotary on the pins';
+  if (needed === 'rotary') return 'put the rotary on the pins';
   if (needed === 'vise') {
-    return current === 'rotary' ? 'needs the rotary off the pins' : 'needs the vise on the pins';
+    return current === 'rotary' ? 'take the rotary off the pins' : 'put the vise on the pins';
   }
   const out = current === 'rotary' ? 'rotary' : 'vise';
-  return `needs the ${out} off the pins`;
+  return `take the ${out} off the pins`;
 }
 
 /**
@@ -503,8 +585,8 @@ export function rodViseProblem(
   const rodLength = axisFrame ? stock.length : stock.thickness;
   if (rodLength <= ROD_VISE_MAX_LENGTH_MM) return null;
   return (
-    `the vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
-    `${fmt(rodLength)} mm; hold it in the rotary chuck`
+    `The vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
+    `${fmt(rodLength)} mm; hold it in the rotary chuck.`
   );
 }
 
@@ -540,7 +622,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     // A fixture the house does not own cannot be fitted at all — no cost, no escape.
     const owned = mechanism === 'bed' ? true : accessoryFor(accessories, mechanism) !== null;
     if (!owned) {
-      out.push({ ...base, hint: null, disabled: true, reason: 'not owned', escape: null });
+      out.push({ ...base, hint: null, disabled: true, reason: 'Not in this location’s accessories', escape: null });
       continue;
     }
 
@@ -560,7 +642,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'the cut goes through the blank — the block seat’s jaws would stand in it',
+        reason: 'The cut goes through the blank — the block seat’s jaws would stand in it; use the board seat.',
         escape: null,
       });
       continue;
@@ -576,7 +658,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'a disc is cut on its face — the rotary holds a rod',
+        reason: 'A disc is cut on its face — the rotary holds a rod.',
         escape: null,
       });
       continue;
@@ -586,7 +668,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'a disc touches the bracket at two points and turns under the cutter — tape it or hold it in the vise',
+        reason: 'A disc touches the bracket at two points and turns under the cutter — tape it or hold it in the vise.',
         escape: null,
       });
       continue;
@@ -599,7 +681,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: `it would sit ${fmt(below)} mm below the jaw tops`,
+        reason: `It would sit ${fmt(below)} mm below the jaw tops — use the board seat or a thicker board.`,
         escape: null,
       });
       continue;
@@ -614,10 +696,10 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       const dims = [stock.length, stock.width, stock.thickness].sort((a, b) => a - b);
       const reason =
         args.round === true
-          ? `the stock does not fit the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm`
-          : `a ${fmt(dims[0]!)} × ${fmt(dims[1]!)} mm section turns a ⌀${fmt(
+          ? `The stock does not fit the rotary’s ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — say a shorter rod.`
+          : `A ${fmt(dims[0]!)} × ${fmt(dims[1]!)} mm section turns a ⌀${fmt(
               Math.hypot(dims[0]!, dims[1]!),
-            )} mm envelope, over the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — it stays a vise job`;
+            )} mm envelope, over the rotary’s ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — it stays a vise job.`;
       out.push({ ...base, hint: null, disabled: true, reason, escape: null });
       continue;
     }
@@ -682,7 +764,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
           ...base,
           hint: null,
           disabled: true,
-          reason: 'needs the bracket at anchor 1',
+          reason: 'Needs the bracket at anchor 1',
           escape: 'bed',
           escapeFitBracket: true,
         });
@@ -701,24 +783,45 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
 
   // #1104 — NO DEAD ENDS. An impossible seat is hidden (the block below the ledge step; tape under
   // a round stock); every disabled row carries one action in place; every refusal is a sentence.
-  return out
+  const drive = args.canReachMachine !== false;
+  const rows = out
     .filter((o) => !(o.mount === 'block' && stock.thickness < LEDGE_STEP))
     .filter((o) => !(o.mount === 'bed-tape' && args.round === true))
-    .map((o) => {
+    .map((o): MountOption => {
       if (!o.disabled) return { ...o, action: null };
-      const action =
+      const action: MountOption['action'] =
         o.escape !== null
-          ? { label: 'Change the machine…', kind: 'change-machine' as const }
-          : o.reason === 'not owned'
-            ? { label: 'Add it in Manage › Machine', kind: 'manage-link' as const }
-            : o.reason !== null && o.reason.startsWith('the rotary holds round stock')
-              ? { label: 'Say a rod in the stock step', kind: 'back-to-stock' as const }
-              : o.reason !== null
-                ? { label: 'Back to the stock step', kind: 'back-to-stock' as const }
-                : null;
+          ? drive
+            ? { label: 'Change the machine…', kind: 'change-machine' }
+            : { label: 'in Manage › Machines', kind: 'manage-link' }
+          : o.reason === 'Not in this location’s accessories'
+            ? { label: 'add it in Manage › Machines', kind: 'manage-link' }
+            : { label: 'Back to the stock step', kind: 'back-to-stock' };
       const reason = o.reason === null ? null : o.reason.charAt(0).toUpperCase() + o.reason.slice(1);
       return { ...o, reason, action };
     });
+  // "Tape it" is said only where the tape row is on offer: otherwise the sentence ends at the fact.
+  return bedOffered(rows)
+    ? rows
+    : rows.map((o) => ({
+        ...o,
+        hint: o.hint === null ? null : withoutTapeClause(o.hint),
+        reason: o.reason === null ? null : withoutTapeClause(o.reason),
+      }));
+}
+
+/**
+ * #1104 — IS TAPE ON OFFER? The tape row is present and either usable or one press away. Every
+ * "tape it" phrase in the step is said only when this is true, so no sentence names an option the
+ * state does not offer.
+ */
+export function bedOffered(rows: readonly MountOption[]): boolean {
+  return rows.some((r) => r.mount === 'bed-tape' && (!r.disabled || (r.action ?? null) !== null));
+}
+
+/** A sentence without its tape clause: "…, or tape it to the bed" and "tape it or hold it in the vise". */
+export function withoutTapeClause(text: string): string {
+  return text.replace(', or tape it to the bed', '').replace('tape it or hold it in the vise', 'hold it in the vise');
 }
 
 /**
@@ -869,7 +972,6 @@ function stockClassMatches(expr: string, stock: { thickness: number }, form: Job
       const fits = form === cls || (cls === 'sheet' && (form === 'plate' || form === 'sheet'));
       return fits && stock.thickness <= Number(bounded[2]);
     }
-    if (word === 'tube') return form === 'rod';
     return form === word;
   });
 }

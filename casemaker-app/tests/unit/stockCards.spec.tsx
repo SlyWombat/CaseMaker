@@ -10,6 +10,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import locationDoc from './fixtures/location-doc.json';
 import { StartStockStep, type PendingStock, type StartStockSeed } from '@/components/welcome/StartStockStep';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platform/houseClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineStore } from '@/store/machineStore';
@@ -93,7 +94,42 @@ describe('#1105 the Stock step blank cards', () => {
     });
     const done = last as PendingStock | null;
     if (done?.kind === 'choice') expect(done.choice.entry.kind).toBe('shelf');
+    // #1105 item 6 — the picked blank is one summary line; "edit" opens the fields on its numbers.
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('120 × 75 × 50 mm');
+    expect(screen.queryByTestId('start-wizard-make-length')).toBeNull();
+    fireEvent.click(screen.getByTestId('start-wizard-stock-summary-edit'));
     expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('120');
+  });
+
+  it('a shelf blank within 1 mm of the proposal is selected on arrival, in either orientation', async () => {
+    // The proposal is 75 × 72.7 × 20.1; this row is the same blank turned through 90°, 0.1 mm thin.
+    const FIT = { ...HARDWOOD, id: 'stock-fit', size: { length: 72.7, width: 75, thickness: 20 } };
+    fakeShelf([FIT]);
+    render(<StartStockStep onChange={vi.fn()} seed={SEED} />);
+    const card = await screen.findByTestId('start-wizard-shelf-item-stock-fit');
+    await waitFor(() => expect(card.getAttribute('aria-pressed')).toBe('true'));
+    // The picked row is the answer: its summary is on screen and the fields are behind "edit".
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('72.7 × 75 × 20 mm');
+    expect(screen.queryByTestId('start-wizard-make-length')).toBeNull();
+  });
+
+  it('picking a shelf blank shows the summary; edit shows the fields; Other size… seeds the proposal', async () => {
+    fakeShelf([HARDWOOD]);
+    render(<StartStockStep onChange={vi.fn()} seed={SEED} />);
+    fireEvent.click(await screen.findByTestId('start-wizard-shelf-item-stock-hardwood'));
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('120 × 75 × 50 mm');
+    expect(screen.queryByTestId('start-wizard-make-length')).toBeNull();
+    fireEvent.click(screen.getByTestId('start-wizard-stock-summary-edit'));
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('120');
+    // The last row: the fields, seeded from the step-2 proposal.
+    fireEvent.click(screen.getByTestId('start-wizard-stock-other-size'));
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('75');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('72.7');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('20.1');
+  });
+
+  it('#1207 — the shelf match tolerance is a shop default, not a literal', () => {
+    expect(KNOWN_DEFAULTS['stock.shelfMatchMm']?.fallback).toBe(1);
   });
 
   it('lists the vocabulary Woods first, with the boards and foams family offered', async () => {
@@ -113,6 +149,8 @@ describe('#1105 the Stock step blank cards', () => {
     fireEvent.click(screen.getByTestId('start-wizard-size-in'));
     const length = screen.getByTestId('start-wizard-make-length') as HTMLInputElement;
     fireEvent.change(length, { target: { value: '0.15' } });
+    // #1105 item 1 — the inch entry is committed on blur; the field holds the typed text until then.
+    fireEvent.blur(length);
     expect(screen.getByTestId('start-wizard-stock-size-both').textContent).toBe('0.15 in = 3.81 mm');
     // Back to mm: the same number is shown in the job's own unit.
     fireEvent.click(screen.getByTestId('start-wizard-size-mm'));

@@ -141,7 +141,7 @@ import { useMachineStopReportStore } from '@/store/machineStopReportStore';
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
 // #1202 + #1199 item 3 — the dry line view and the first-run mark.
-import { dryFlipRegistration, dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { dryFlipRegistration, dryMountTap, dryRegistration, previewHolds, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
 import { firstRunAutomationRefusal } from '@/platform/automation';
@@ -227,6 +227,13 @@ function RoutineDryPreview({
       {headless !== null && (
         <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">
           {headless}
+        </p>
+      )}
+      {/* #1202 — a dry run that could not finish shows LESS than the app would send; the card says
+          so and the press is held (a truncated preview is not a preview). */}
+      {preview.error !== null && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-error">
+          The preview could not finish — {preview.error}
         </p>
       )}
       {preview.refused && (
@@ -746,9 +753,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const previewShape = preview?.identity.shape ?? null;
   useEffect(() => setRoutineTicked(false), [previewShape]);
   const firstRun = preview !== null && !routineCompleted(machineRecord, preview.identity);
-  // The press is refused when the guard would refuse a line, and held until the operator's own
-  // statement when this exact routine has never completed on this machine (#1202 field 2).
-  const routineGate = (preview !== null && preview.refused) || (firstRun && !routineTicked);
+  // The press is refused when the guard would refuse a line or the preview could not finish, and
+  // held until the operator's own statement when this exact routine has never completed on this
+  // machine (#1202 field 2; a truncated preview is not a preview).
+  const routineGate = previewHolds(preview, firstRun, routineTicked);
   // #1202 — the FLIP registration's own preview: side 2's frame plan, through the same executor
   // the press runs, against the same live clearance. A routine of its own (its own id and shape).
   const [flipPreview, setFlipPreview] = useState<DryRoutine | null>(null);
@@ -775,7 +783,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const flipShape = flipPreview?.identity.shape ?? null;
   useEffect(() => setFlipTicked(false), [flipShape]);
   const flipFirstRun = flipPreview !== null && !routineCompleted(machineRecord, flipPreview.identity);
-  const flipGate = (flipPreview !== null && flipPreview.refused) || (flipFirstRun && !flipTicked);
+  const flipGate = previewHolds(flipPreview, flipFirstRun, flipTicked);
   // #1202 field 4 — the same refusal for the flip's own first run.
   const flipHeadlessRefusal = firstRunAutomationRefusal({ firstRun: flipFirstRun });
   // #1202 field 4 — a first run under automation against a real controller is REFUSED, in words.
