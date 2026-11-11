@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// #662/#681/#685 — step 4 of the one cutting-job wizard: "What are you cutting?".
+// #662/#681/#685 — step 4 of the one cutting-job wizard: "What are you making?".
 //
 // The picker is the SHARED grouped one (`OperationPicker`, `operationTypes.ts`): the sixteen
 // operations in the mockup's four groups, in the table's own order and words. The button that
@@ -140,7 +140,7 @@ describe('#685 — step 4, what are you cutting', () => {
     openOperationStep();
 
     expect(screen.getByTestId('start-wizard-progress').textContent).toBe(
-      'Step 2 of 4 · What are you cutting?',
+      'Step 2 of 4 · What are you making?',
     );
     // #1123 item 3 — the mockup's Engrave text is highlighted and its field is shown, but the
     // operator has PICKED nothing: the primary finishes (a re-entry has nothing to add) instead of

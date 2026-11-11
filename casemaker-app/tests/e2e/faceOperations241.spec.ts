@@ -40,7 +40,7 @@ async function toStep4(page: Page): Promise<void> {
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   // #1107 — the starter ASKS ITS QUESTION: it lands on step 2 with the rotary picker and the text
   // field waiting (the rod stock and chuck are already seeded, so the blank and hold pass through).
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 }
 
 /**
@@ -174,7 +174,7 @@ test('a mixed job with a neck cuts the map work, the face, then the neck', async
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   // #1107 — the starter lands on the question; answer it, then walk the blank and the hold.
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
   await page.getByTestId('start-wizard-op-text').fill('Zoomba');
   await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
   await page.getByTestId('start-wizard-operation-next').click();

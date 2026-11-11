@@ -35,7 +35,7 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   // with the rotary picker and the text field waiting, so the empty job is impossible from here.
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // The seeded job is a rod in the chuck — the Holding step's own default, not a starter's guess.
   const job = await page.evaluate(() =>

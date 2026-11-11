@@ -65,14 +65,6 @@ export function PresetArt({ id }: { id: PresetId }): JSX.Element {
           <path d="M18 20v10h20M46 28v-8h-8" />
         </svg>
       );
-    case 'dowel':
-      return (
-        <svg {...common}>
-          <path d="M14 20h36a4 6 0 0 1 0 12H14" />
-          <ellipse cx="14" cy="26" rx="4" ry="6" />
-          <path d="M24 22v-2M32 22v-2M40 22v-2" />
-        </svg>
-      );
     case 'rod-dowel':
       return (
         <svg {...common}>

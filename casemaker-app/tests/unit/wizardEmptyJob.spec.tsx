@@ -50,14 +50,14 @@ function openAtQuestion(): void {
   useStartWizardStore.getState().openWizard();
   render(<WizardHost />);
   fireEvent.click(screen.getByTestId('start-wizard-next')); // step 1 → step 2
-  expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+  expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
 }
 
 /** A RE-ENTRY: the wizard opened at the question, as an existing job’s step 2. */
 function openAtQuestionAsReEntry(): void {
   useStartWizardStore.getState().openWizard('operation');
   render(<WizardHost />);
-  expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+  expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
 }
 
 const primary = (): HTMLButtonElement =>
@@ -145,7 +145,7 @@ describe('#1183 — the empty job gets its own, deliberate door', () => {
     // The analyst's acceptance line: Back from Stock returns to the question with nothing
     // picked, the door still offered, and the job still empty.
     fireEvent.click(screen.getByTestId('start-wizard-back'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · What are you cutting?');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toBe('Step 2 of 4 · What are you making?');
     expect(primary().disabled).toBe(true);
     expect(primary().getAttribute('title')).toBe('Pick what to make first.');
     expect(emptyDoor().textContent).toBe('Start with an empty job');
@@ -171,7 +171,7 @@ describe('#1183 — the empty job gets its own, deliberate door', () => {
     expect(screen.queryByTestId('start-wizard-replace-confirm')).toBeNull();
     expect(JSON.stringify(useEngraveJobStore.getState().job)).toBe(before);
     expect(jobItemCount(useEngraveJobStore.getState().job)).toBe(3);
-    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you making?');
 
     // Yes: the empty job replaces it and the wizard walks on to the blank like any pick.
     fireEvent.click(emptyDoor());

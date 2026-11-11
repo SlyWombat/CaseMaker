@@ -53,7 +53,7 @@ The approved term list is on #1109 (issuecomment-6769589449) with the maintainer
 | `MachineStep.tsx` profile-only row (#1106) | (new) | *profile only — vendor defaults; connect it at Cut* | Approved with #1106 |
 | Wizard footer / Cut and Holding "Change the machine…" | "Change the machine…" (step 1 points here) | Same words; the actions open this step's change button | One phrase, one place |
 
-## 3. Step 2 — What are you cutting?
+## 3. Step 2 — What are you making?
 
 The chip labels stay; the `blurb` currently lives in a `title` only. It becomes one visible line under
 the chip (or on the preset card), through `Explain` where a term needs a gloss.

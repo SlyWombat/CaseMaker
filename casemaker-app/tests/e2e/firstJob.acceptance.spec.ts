@@ -222,7 +222,7 @@ test.describe('first job acceptance (§6)', () => {
     await tap(page, 'start-wizard-next');
 
     // Step 2 — the question, first since #897: what is being cut is what the blank is sized from.
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
     await openSignCard(page);
     await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
     await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
@@ -504,7 +504,7 @@ test.describe('first job acceptance (§6)', () => {
     await expect(page.getByTestId('start-wizard')).toBeVisible();
     await page.getByTestId('start-wizard-next').click();
     // Step 2 — the question (#897), answered with the line this rod job cuts.
-    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+    await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
     await openSignCard(page);
     await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
     await page.getByTestId('start-wizard-operation-next').click();

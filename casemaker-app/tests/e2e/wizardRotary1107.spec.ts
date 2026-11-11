@@ -114,7 +114,7 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // The house owns the rotary: the rod intents are there, before the flat picker.
   await expect(page.getByTestId('start-wizard-rotary-intents')).toBeVisible();
@@ -155,7 +155,7 @@ test('#1107 — step 2 without the rotary: no rod intents, and the step pinned',
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
   await expect(page.getByTestId('start-wizard-rotary-intents')).toHaveCount(0);

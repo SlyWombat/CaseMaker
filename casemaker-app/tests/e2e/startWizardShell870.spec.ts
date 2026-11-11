@@ -115,7 +115,7 @@ for (const vp of VIEWPORTS) {
       await page.getByTestId('start-wizard-next').click();
 
       // Step 2 — the question (#897): its primary on the screen, Back to its left.
-      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+      await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
       await expect(page.getByTestId('start-wizard-progress-strip').locator('.sw-progress__seg--on')).toHaveCount(2);
       await expectOnScreen(page, page.getByTestId('start-wizard-operation-next'), 'step 2 primary');
       await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 2 Back');
