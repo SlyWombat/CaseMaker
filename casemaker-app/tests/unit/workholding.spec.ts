@@ -17,8 +17,12 @@ import type { Setup } from '@/engine/cnc/setups';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
+import { defaultBracketHold, defaultTapeHold, jobMount, workholdingFor } from '@/engine/cnc/engrave/jobSetup';
+import { implicitSetupFor } from '@/engine/cnc/registration/implicitSetup';
+import { footprintInputFor } from '@/engine/cnc/registration/footprintJob';
 import { engraveJobDocumentSchema, parseEngraveJob } from '@/store/engraveJobSchema';
+import { ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
+import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import type { BedFence, EngraveJob, JobWorkholding } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -175,5 +179,83 @@ describe('#1102 registration with the fence', () => {
     expect(attempt.kind).toBe('refused');
     if (attempt.kind !== 'refused') return;
     expect(attempt.reason).toBe('registration on tape has not been run on this machine yet — hold the blank in the vise');
+  });
+});
+
+
+describe('#1102 one mount for a fenced job: every reader sees the bracket', () => {
+  const fencedJob = () => trayJob({ kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence: FENCE } });
+  // The same setup said from the bracket's side (hand-built: the schema refuses it, which is the point).
+  const bracketTwin = () => trayJob({ kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [], source: 'default' } });
+
+  it('the job’s mount, its derived setup and its planner hold are the bracket’s', () => {
+    expect(jobMount(fencedJob())).toBe('bracket');
+    expect(jobMount(trayJob({ kind: 'tape', tape: defaultTapeHold() }))).toBe('tape');
+    expect(implicitSetupFor(fencedJob())?.mount.kind).toBe('bracket');
+    expect(workholdingFor(fencedJob())).toEqual({ kind: 'anchor-bracket', anchor: 1, offset: [0, 0] });
+  });
+
+  it('the registration plan is the bracket twin’s, whichever mount the caller names', () => {
+    const fromTape = attemptFor(fencedJob(), 'tape');
+    const fromBracket = attemptFor(bracketTwin(), 'bracket');
+    expect(fromTape.kind).toBe('plan');
+    expect(fromBracket.kind).toBe('plan');
+    if (fromTape.kind !== 'plan' || fromBracket.kind !== 'plan') return;
+    expect(fromTape.plan).toEqual(fromBracket.plan);
+  });
+
+  it('the footprint input is the twin’s', () => {
+    const args = (job: EngraveJob, kind: 'tape' | 'bracket') => ({
+      job,
+      mount: { kind, board: true } as const,
+      calibration: CALIBRATION,
+      defaults: null,
+      probe: PROBE,
+      bracketSeat: { value: -85.788, what: 'bracket seat', measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 },
+    });
+    const a = footprintInputFor(args(fencedJob(), 'tape'));
+    const b = footprintInputFor(args(bracketTwin(), 'bracket'));
+    expect(a.ok, JSON.stringify(a)).toBe(true);
+    expect(a).toEqual(b);
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------
+// The clamp count is a shop setting (`clamps.maxCount`, #1207), not a literal in the schema.
+
+describe('#1102 the most clamps is the shop’s setting', () => {
+  const shop = (maxCount?: number): ShopDefaults => {
+    const base = (JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { defaults: Record<string, unknown> }).defaults;
+    const defaults = { ...base };
+    if (maxCount !== undefined) defaults['clamps.maxCount'] = { value: maxCount, source: 'chosen', setAt: '2026-11-11T00:00:00.000Z', unit: 'clamps' };
+    return ShopDefaultsSchema.parse(defaults);
+  };
+  const clampsJob = (n: number): EngraveJob =>
+    jobWith({
+      kind: 'bracket',
+      bracket: {
+        anchor: 1,
+        variant: 'thin',
+        clamps: Array.from({ length: n }, (_, i) => ({ edge: 'back' as const, at: 12 + i * 22 })),
+        source: 'default',
+      },
+    });
+  const findingCodes = (job: EngraveJob, d: ShopDefaults) => validateJob(job, null, { defaults: d }).map((f) => f.code);
+
+  it('the schema states no count of its own: five clamps parse', () => {
+    expect(parse(clampsJob(5)).ok).toBe(true);
+  });
+
+  it('a 5th clamp is refused by the setting (4), as a stated finding', () => {
+    const findings = validateJob(clampsJob(5), null, { defaults: shop() });
+    const f = findings.find((x) => x.code === 'too-many-clamps');
+    expect(f?.severity).toBe('error');
+    expect(f?.message).toMatch(/5 clamps.*4/);
+  });
+
+  it('four clamps are fine, and five are allowed when the setting is 5', () => {
+    expect(findingCodes(clampsJob(4), shop())).not.toContain('too-many-clamps');
+    expect(findingCodes(clampsJob(5), shop(5))).not.toContain('too-many-clamps');
   });
 });

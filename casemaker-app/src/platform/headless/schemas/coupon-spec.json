@@ -8754,7 +8754,7 @@
                       "description": "The anchor the bracket is pinned at; Makera's origin is relative to Anchor 1."
                     },
                     "clamps": {
-                      "description": "The clamp places the job was set up with, on the free edges. One to four; ZERO only when the board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).",
+                      "description": "The clamp places the job was set up with, on the free edges. At least one: a bracket with no clamps is a fence, stated as a taped hold located against the bracket. How many a job may state is the shop's clamps.maxCount, checked when the job is validated, not here.",
                       "items": {
                         "properties": {
                           "at": {
@@ -8785,7 +8785,6 @@
                         ],
                         "type": "object"
                       },
-                      "maxItems": 4,
                       "type": "array"
                     },
                     "obstacles": {

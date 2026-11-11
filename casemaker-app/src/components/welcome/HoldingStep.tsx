@@ -58,6 +58,7 @@ import { formLabel } from '@/engine/cnc/stockStart';
 import {
   bracketSettings,
   anchorFrom,
+  maxClampsOf,
   validateBracketMount,
   type BracketSettings,
   type ClampEdge,
@@ -1561,6 +1562,8 @@ export function HoldingStep({
   // a house that tapes differently says so once, and every new taped job starts from it. Declared
   // here, above the arrival effects that write a taped job.
   const tapeInsetMm = readDefault(shopDefaults ?? null, 'tape.insetMm').value;
+  // #1102 (#1207) — the most clamps a bracket job states is the SHOP's setting, not a number here.
+  const maxClamps = maxClampsOf(shopDefaults ?? null);
   // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
   const shopGrip = readDefault(shopDefaults ?? null, 'rotary.gripMm');
   // #726 W19 — a phone stacks the picture instead of placing it beside the options: at 390 px the
@@ -1885,7 +1888,7 @@ export function HoldingStep({
   }
 
   function addClamp(): void {
-    if (bracketHold.clamps.length >= 4) return;
+    if (bracketHold.clamps.length >= maxClamps) return;
     // "+ clamp adds one on the longer free edge" (§3.6), at its middle.
     const edge: ClampEdge = answers.stock.length >= answers.stock.width ? 'back' : 'right';
     const len = edge === 'back' ? answers.stock.length : answers.stock.width;
@@ -2051,6 +2054,7 @@ export function HoldingStep({
           { x: answers.stock.length, y: answers.stock.width, z: answers.stock.thickness },
           bracketHold.clamps,
           bracketRead,
+          maxClamps,
         ).filter((c) => c.code !== 'mount-unmeasured')
       : [];
   // #712's board-size refusal, at the field that causes it (§3.5): the house board must cover the
@@ -2186,7 +2190,7 @@ export function HoldingStep({
           </span>
           <span className="hint" style={{ flexBasis: '100%' }}>
             drag a clamp along the back or right edge
-            {count < 4 && (
+            {count < maxClamps && (
               <>
                 {' · '}
                 <button type="button" className="btn btn--sm" data-testid="engrave-setup-clamp-add" onClick={addClamp}>

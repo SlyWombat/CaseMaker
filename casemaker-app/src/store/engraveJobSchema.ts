@@ -1368,10 +1368,10 @@ const bracketHoldSchema = z.object({
   variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
   clamps: z
     .array(clampPlacementSchema)
-    .max(4)
     .describe(
-      'The clamp places the job was set up with, on the free edges. One to four; ZERO only when the ' +
-        'board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).',
+      'The clamp places the job was set up with, on the free edges. At least one: a bracket with no clamps is a fence, ' +
+        "stated as a taped hold located against the bracket. How many a job may state is the shop's clamps.maxCount, " +
+        'checked when the job is validated, not here.',
     ),
   obstacles: z
     .array(bracketObstacleSchema)

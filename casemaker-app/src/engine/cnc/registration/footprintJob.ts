@@ -33,7 +33,7 @@ import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import type { PlanObstacle, ProbeSpec } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { planFootprintRegistration, type FootprintBox, type FootprintInput, type FootprintPlan, type FootprintScanSettings } from '@/engine/cnc/registration/footprint';
-import { bracketPlacementOf, fixtureMountOf } from '@/engine/cnc/engrave/jobSetup';
+import { bracketPlacementOf, fixtureMountOf, jobFence } from '@/engine/cnc/engrave/jobSetup';
 import type { MountSpec } from '@/engine/cnc/setups';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 
@@ -120,7 +120,10 @@ export function mountObstaclesFor(job: EngraveJob, mount: MountSpec, sizes: Retu
 }
 
 /** The footprint plan's numbers, read off the job and the machine. */
-export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
+export function footprintInputFor(given: FootprintJobArgs): FootprintJobResult {
+  // #1102 — a fenced tape job is the bracket's footprint, whichever word the caller's setup carries.
+  const args: FootprintJobArgs =
+    given.mount.kind === 'tape' && jobFence(given.job) !== null ? { ...given, mount: { kind: 'bracket', board: given.mount.board } } : given;
   const { job, calibration, defaults } = args;
   if (job.stock.shape === 'disc') {
     return { ok: false, reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank' };
