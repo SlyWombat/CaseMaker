@@ -29,6 +29,13 @@ body, html, #root {
      `.app-main`, whose three-column grid then shifted the sidebar, canvas and context panel
      one cell along; it is a shell row now, so it cannot touch that grid at all. */
   grid-template-rows: 48px auto 1fr 28px;
+  /* #134 (2026-11-10) — ONE COLUMN, AND ITS ITEMS MAY SHRINK. A grid item's default
+     `min-width: auto` floors the column at the item's min-content: the header's toolbar row
+     (six controls at phone width) measured 409 px and the whole shell's rows stretched to it
+     — the Manage surface's pane reported 409 against a 390 px window, and the ⋯ toggle's right
+     edge 393. `minmax(0, 1fr)` plus the items' own `min-width: 0` below lets the column be the
+     window; what must then fit inside it is each row's own content. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
 }
 
@@ -42,6 +49,8 @@ body, html, #root {
   padding: 0 var(--cm-space-4);
   background: var(--cm-color-surface-container);
   border-bottom: var(--cm-border-1);
+  /* #134 — see `.app-shell`: the row is the window's width, not its content's. */
+  min-width: 0;
 }
 /* Tablets (#134): the header must never be a scroll container. `overflow-x:
    auto` computes `overflow-y: auto` as well, and the settings popover (267px)
@@ -69,6 +78,9 @@ body, html, #root {
 .app-main {
   grid-row: 3;
   display: grid;
+  /* #134 — the workspace row may shrink to the window like the header (see `.app-shell`): the
+     Manage surface's min-content must not stretch every row of the shell past the device. */
+  min-width: 0;
   /* Issue #93 Phase 4a — three-panel layout: left domain rail, center canvas, right
      context rail. Below 1024 px (#355) the right rail collapses to a drawer (handled in JS
      via a media query) so the grid drops back to two columns. 1024 is where sharing stops
@@ -101,6 +113,11 @@ body, html, #root {
      the collapsed ⋯ toolbar; below 640px the two together would push the ⋯
      menu off-screen, so the wordmark goes. */
   .app-header__logo { display: none; }
+  /* #1123-48 + #134 (2026-11-10) — Home stays ONE TAP away on a phone, but its word does not:
+     the six labelled controls measured 377 px in the bar's 358, and its min-content stretched
+     the whole shell to 409. The icon carries the control, as the laptop band's icon controls
+     already drop their words. */
+  .toolbar-buttons > button[data-testid='home'] .btn-label { display: none; }
   /* The 360px drawer plus its padding is 393px wide — 3px past a 390px screen.
      At phone width it should just fill the screen (the doubled class beats the
      base rule, which is declared later in this file). */
