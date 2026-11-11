@@ -52,6 +52,7 @@ import {
   type ToolpathIR,
 } from '../ir';
 import { PlanMetadataInconsistentError } from './planMeta';
+import { memTrace, memTraceEnabled } from '@/engine/cnc/memTrace';
 import { bitChangePriceSeconds, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { pickAmongEquals, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM } from './pickAmongEquals';
 
@@ -1143,6 +1144,22 @@ export function chooseSequence(
     const coverage = price === null || opts.coverage === undefined ? null : opts.coverage(price.steps);
     return { sequence, priced: price, coverage };
   });
+  // planner v3 C1 — trace-only: what the real planner priced, per cutter, for every chain. With
+  // no trace file this block does not run.
+  if (memTraceEnabled()) {
+    for (const p of priced) {
+      if (p.priced === null) continue;
+      const round = (x: number): number => Math.round(x * 1000) / 1000;
+      memTrace('chain:price', {
+        signature: p.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
+        totalSeconds: round(p.priced.cost.totalSeconds),
+        estimateSeconds: round(p.priced.cost.estimateSeconds),
+        changeSeconds: round(p.priced.cost.changeSeconds),
+        toolChanges: p.priced.cost.toolChanges,
+        entries: JSON.stringify(p.priced.cost.entries.map((e) => [e.cutterKey, round(e.estimateSeconds), round(e.changeSeconds)])),
+      });
+    }
+  }
   // No local threshold between the two freeing-cut options: both are priced on the real steps
   // (the return change included) and the cheaper wins. plan v2's 3× stop rule is a package-vs-
   // vendor line on the reference card, not a per-profile gate here.

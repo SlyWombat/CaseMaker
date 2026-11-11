@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { flatReach, polygonsArea } from '@/engine/cnc/cam/fields/flatReach';
+import { flatReach, polygonsArea, polygonsPerimeter } from '@/engine/cnc/cam/fields/flatReach';
 
 const offset = makeClipperOffset(tl);
 
@@ -89,5 +89,13 @@ describe('#1215 — flat reach', () => {
       expect(step.areaMm2).toBe(0);
       expect(step.reach).toEqual([]);
     }
+  });
+});
+
+describe('#1225 polygonsPerimeter', () => {
+  it('an outline’s own length', () => {
+    expect(polygonsPerimeter(RECT)).toBe(60);
+    expect(polygonsPerimeter(DUMBBELL)).toBe(88);
+    expect(polygonsPerimeter([])).toBe(0);
   });
 });
