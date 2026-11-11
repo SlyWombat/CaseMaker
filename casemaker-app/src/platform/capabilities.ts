@@ -98,8 +98,9 @@ export const canRunLocalServer: boolean = __BUILD_TARGET__ !== 'web' && isTauriW
  * surfaces say why instead of offering a check that could only ever answer "unavailable". Every
  * machine-carrying page — the desktop window and the LAN browser it serves — never renders this.
  */
+// #1106 — the positive sentence: what this page CAN do, then where the machine is run.
 export const NO_MACHINE_RELAY_SENTENCE =
-  'This page was served without the machine relay, so it cannot drive a machine — open Case Maker from the desktop app or from a local install.';
+  'This page can write, check and simulate; to run the machine, open the desktop app.';
 
 /**
  * The dynamic-import boundary, carried by the one desktop-only module that exists ahead of its real
