@@ -9,15 +9,13 @@
  *
  * - The location's machine is the step's machine: its name and address are on screen and the check
  *   runs when the step opens (E4 — never connected automatically though the location knows it).
- * - ONE line of state, in the machine strip's words, plus `homed` when the `?` frame itself says
- *   so: the controller is Idle with MPos at the Z1's homed rest (#693's `readMachineRest`, the
- *   bench-verified reading). The check still sends no `$H`; when the frame does not say it, the
- *   word is absent rather than guessed.
+ * - #1106 — STEP 1 IS A PICKER: every CNC record is a row (last used first, profile-only rows a full
+ *   citizen), each row draws its bed, the selected row is the job's machine, and the last row opens
+ *   Manage › Machines. The old single-machine header and the "another machine…" address fold are
+ *   gone; the recorded rows are all probed in parallel, and Add a machine… is the one action that
+ *   adds one.
  * - Next is never gated: a job can be written, verified and simulated with no machine, and the
  *   offline line says so where the operator is looking.
- * - The address field and Connect live under `another machine…` — the one fold, for a machine whose
- *   broadcast does not reach this computer. The two explanatory paragraphs are gone (A3), and the
- *   address has no placeholder: a real-looking example reads as a value the app already filled in.
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
@@ -25,13 +23,14 @@ import { MILL_MODELS } from '@/engine/cnc/machine';
 import { formatStamp } from '@/components/manage/display';
 import { stateColour, stateWord } from '@/components/viewport/machineWords';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
-import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords } from '@/platform/machineChange';
+import { MACHINE_MOUNT_WORDS, activeMountOf, activeProfileOf, surfaceWords, type MachineMountKind } from '@/platform/machineChange';
 import { bedNeverMeasured } from '@/engine/cnc/bed/binding';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import { readMachineRest } from '@/platform/machineChangeRun';
 import type { MachineObservation, MachineProbeRoute } from '@/platform/machineProbe';
 import type { MachineRecord } from '@/platform/locationClient';
 import type { MachineCheckOutcome } from '@/store/machineStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const NOTE: CSSProperties = { ...MUTED, borderLeft: '2px solid #3a5a7a', paddingLeft: 6 };
@@ -57,27 +56,58 @@ const STATE: CSSProperties = {
 /** #1106 — what a row says where nothing can be checked (the web build) or the record has no address. */
 const PROFILE_ONLY_WORDS = 'profile only — vendor defaults; connect it at Cut';
 const MUTED_INLINE: CSSProperties = { color: '#8a97a5' };
-const FOLD: CSSProperties = {
-  display: 'block',
-  margin: '8px 0 0',
-  padding: 0,
-  border: 'none',
-  background: 'none',
-  color: '#8fb4ff',
-  fontSize: 11,
-  cursor: 'pointer',
-};
+/** #1106 item 3 — the row's offline words, with the job line under them. */
+const OFFLINE_WORDS = 'Offline — no answer on the network';
+const JOB_WORDS = 'The job can be written, checked and simulated now; the machine is needed at Cut.';
+
+/**
+ * #1106 item 8 — EACH ROW DRAWS ITS BED, 96 px at the row's left, in the same jaws/bed/chuck
+ * vocabulary the machine-change wizard's pictures use. (That wizard has no exported bed drawing at
+ * this base; this is the row-scale picture of the mount {@link activeMountOf} reports.)
+ */
+function MountThumbnail({ mount }: { mount: MachineMountKind }): JSX.Element {
+  const common = {
+    width: 96,
+    height: 48,
+    viewBox: '0 0 96 48',
+    fill: 'none',
+    stroke: '#8a97a5',
+    strokeWidth: 1.6,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (mount === 'vise') {
+    return (
+      <svg {...common}>
+        <path d="M14 34V14h16v20M82 34V14H66v20" />
+        <path d="M30 24h10M66 24H56" />
+        <path d="M8 40h80" />
+      </svg>
+    );
+  }
+  if (mount === 'rotary') {
+    return (
+      <svg {...common}>
+        <circle cx="48" cy="24" r="13" />
+        <path d="M48 11v6M48 31v6M35 24h6M55 24h6M48 19v10M44 24h8" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <rect x="18" y="10" width="60" height="28" rx="2" />
+      <path d="M30 10v28M66 10v28" />
+      <circle cx="30" cy="14" r="1.6" />
+      <circle cx="66" cy="14" r="1.6" />
+    </svg>
+  );
+}
 
 /** The location's machine: the one with an address, else the first, else none. */
 function houseMachine(machines: readonly MachineRecord[] | null): MachineRecord | null {
   if (machines === null || machines.length === 0) return null;
   return machines.find((m) => m.address !== null) ?? machines[0] ?? null;
-}
-
-/** The location record for an address, when the machine that answered is one the location knows. */
-function recordAt(machines: readonly MachineRecord[] | null, host: string | null): MachineRecord | null {
-  if (machines === null || host === null) return null;
-  return machines.find((m) => m.address?.host === host) ?? null;
 }
 
 /**
@@ -116,10 +146,8 @@ export interface MachineStepProps {
   route: MachineProbeRoute | null;
   machine: MachineObservation | null;
   reason: string | null;
-  address: string;
-  onAddress: (value: string) => void;
-  /** THE check. With no host it searches; with one it connects to that address (the fold). */
-  onCheck: (host?: string) => void;
+  /** THE check. The recorded rows are probed with it (the step no longer carries an address). */
+  onCheck: () => void;
   /** #1106 — the machine the job carries (the row that is selected). */
   selectedMachineId?: string | null;
   /** #1106 — the machine last used, first in the list and pre-selected on a new job. */
@@ -137,32 +165,35 @@ export function MachineStep({
   route,
   machine,
   reason,
-  address,
-  onAddress,
   onCheck,
   selectedMachineId = null,
   lastMachineId = null,
   onSelectMachine,
   onChangeBed,
 }: MachineStepProps): JSX.Element {
-  const [another, setAnother] = useState(false);
   // #1106 — the selected machine is the header's, not merely the first record: step 1 is a picker.
   const selectedRecord =
     selectedMachineId === null || machines === null ? null : (machines.find((m) => m.id === selectedMachineId) || null);
   const house = selectedRecord ?? houseMachine(machines);
   const houseHost = house?.address?.host ?? null;
 
-  // THE CHECK ON OPEN (#682, E4). One per arrival at the step; Back remounts the body, so going
-  // back to the machine checks again. The shell's probe is the one check the app has.
-  const opened = useRef(false);
+  // THE CHECK ON OPEN (#682, E4). One probe per arrival at the step, and again when the location's
+  // rows arrive — the recorded addresses are what the batch probes, and on the desktop bundle the
+  // location can still be loading when the wizard opens. Back remounts the body, so going back to
+  // the machine checks again.
+  const checkedKey = useRef<string | null>(null);
   const [checkStarted, setCheckStarted] = useState(false);
   useEffect(() => {
-    if (opened.current) return;
-    opened.current = true;
+    if (!canReachMachine) {
+      setCheckStarted(true);
+      return;
+    }
+    const key = machines === null ? 'none' : machines.map((m) => m.id).join(',');
+    if (checkedKey.current === key) return;
+    checkedKey.current = key;
     setCheckStarted(true);
-    if (!canReachMachine) return;
     onCheck();
-  }, [onCheck]);
+  }, [machines, onCheck]);
 
   // The last machine the app REACHED, captured before a check can clear it (the store forgets a
   // machine when nothing answers). That observation is what "last seen" means; a failed check has no
@@ -171,9 +202,9 @@ export function MachineStep({
   const [lastReached, setLastReached] = useState<MachineObservation | null>(machine);
 
   /** A check the operator asked for: keep what the app last reached before the store can forget it. */
-  function requestCheck(host?: string): void {
+  function requestCheck(): void {
     if (machine !== null) setLastReached(machine);
-    onCheck(host);
+    onCheck();
   }
 
   // #1106 item 2 — "checking" only where a check can run. The web build never calls `onCheck`, so
@@ -181,20 +212,6 @@ export function MachineStep({
   const checking = canReachMachine && (busy || !checkStarted || outcome === null);
   const found = !checking && outcome === 'found' && machine !== null;
   const line = machine?.statusLine ?? (machine?.status ? readStatusLine(machine.status) : null);
-
-  // Which machine the two-line header names: the house's while there is no better answer, the one
-  // that actually answered when the search found a different controller (it is evidence, not a
-  // substitute — but saying nothing about it would hide the machine the check reached).
-  const houseMatch = house !== null && machine !== null && machine.host === houseHost;
-  const showHouse = house !== null && (checking || !found || houseMatch);
-  const showObserved = found && !showHouse;
-  const foundRecord = showObserved ? recordAt(machines, machine.host) : null;
-  const name = showHouse
-    ? displayName(house, machine?.profileId ?? null, machine?.name ?? null)
-    : showObserved
-      ? displayName(foundRecord, machine.profileId, machine.name)
-      : null;
-  const host = showHouse ? houseHost : showObserved ? machine.host : null;
 
   // The strip's own word, and the dot's colour, so two surfaces cannot describe one machine
   // differently. "Online ·" is the reachability the found check established; the word after it is
@@ -254,38 +271,59 @@ export function MachineStep({
           {orderedMachines.map((record) => {
             const selected = record.id === (selectedMachineId ?? house?.id ?? null);
             const profile = activeProfileOf(record);
-            const bed = profile === null ? null : `${MACHINE_MOUNT_WORDS[activeMountOf(record)]} · ${surfaceWords(profile.surface)}`;
+            const mount = activeMountOf(record);
+            const bed = profile === null ? null : `${MACHINE_MOUNT_WORDS[mount]} · ${surfaceWords(profile.surface)}`;
+            // #1106 item 3 — the row words are #1109's table: a lower-case state, and the offline
+            // line alone on top with the job line under it.
             const state = !canReachMachine
               ? PROFILE_ONLY_WORDS
-              : selected
-              ? checking
+              : selected && checking
                 ? 'Checking…'
-                : found
-                  ? `Online · ${wordBase}`
-                  : 'Offline — you can still write, check and simulate; the machine is needed at Cut'
-              : record.address === null
-                ? PROFILE_ONLY_WORDS
-                : 'Offline — you can still write, check and simulate; the machine is needed at Cut';
+                : selected && found
+                  ? `Online · ${wordBase.toLowerCase()}${homed ? ' · knows where it is' : ''}`
+                  : OFFLINE_WORDS;
             return (
               <button
                 key={record.id}
                 type="button"
                 className="sw-btn"
                 data-testid={`start-wizard-machine-row-${record.id}`}
-                data-mount={activeMountOf(record)}
+                data-mount={mount}
                 aria-pressed={selected}
                 disabled={onSelectMachine === undefined}
                 onClick={() => onSelectMachine?.(record.id)}
-                style={{ width: '100%', textAlign: 'left', padding: 5, border: selected ? '1px solid #5a8abf' : undefined }}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: 5,
+                  border: selected ? '1px solid #5a8abf' : undefined,
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                }}
               >
-                <span style={{ display: 'block', fontSize: 12, color: '#cfe' }}>
-                  {displayName(record, null, null)}
-                  {bed === null ? '' : ` · ${bed}`}
+                {/* #1106 item 8 — the row draws its bed, 96 px at the left. */}
+                <span
+                  aria-hidden="true"
+                  data-testid={`start-wizard-machine-bed-${record.id}`}
+                  data-mount={mount}
+                  style={{ flex: 'none', width: 96 }}
+                >
+                  <MountThumbnail mount={mount} />
                 </span>
-                <span style={{ display: 'block', ...MUTED, margin: 0 }}>{state}</span>
-                {record.profileId === null && (
-                  <span style={{ display: 'block', ...MUTED, margin: 0 }}>no profile — set it in Manage › Machines</span>
-                )}
+                <span style={{ display: 'block', minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 12, color: '#cfe' }}>
+                    {displayName(record, null, null)}
+                    {bed === null ? '' : ` · ${bed}`}
+                  </span>
+                  <span style={{ display: 'block', ...MUTED, margin: 0 }}>{state}</span>
+                  {state === OFFLINE_WORDS && (
+                    <span style={{ display: 'block', ...MUTED, margin: 0 }}>{JOB_WORDS}</span>
+                  )}
+                  {record.profileId === null && (
+                    <span style={{ display: 'block', ...MUTED, margin: 0 }}>no profile — set it in Manage › Machines</span>
+                  )}
+                </span>
               </button>
             );
           })}
@@ -294,20 +332,16 @@ export function MachineStep({
               Change what’s on the bed…
             </button>
           )}
-        </div>
-      )}
-      {(name !== null || host !== null) && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-          {name !== null && (
-            <b data-testid="start-wizard-machine-name" style={{ fontSize: 13 }}>
-              {name}
-            </b>
-          )}
-          {host !== null && (
-            <span data-testid="start-wizard-machine-address" style={MONO}>
-              {host}
-            </span>
-          )}
+          {/* #1106 item 6 — the last row of the list: the one action that adds a machine. */}
+          <button
+            type="button"
+            className="sw-btn"
+            data-testid="start-wizard-add-machine"
+            onClick={() => useManageModeStore.getState().openManage('machines')}
+            style={{ textAlign: 'left' }}
+          >
+            Add a machine…
+          </button>
         </div>
       )}
 
@@ -375,7 +409,7 @@ export function MachineStep({
           {found && route !== null && (
             <p style={NOTE} data-testid="start-wizard-machine-route">
               {route === 'recorded'
-                ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                ? 'Found at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
                 : route === 'network'
                   ? 'Found on the network.'
                   : 'Reached at the address you gave.'}
@@ -396,55 +430,8 @@ export function MachineStep({
             </p>
           )}
 
-          {/* THE ONE FOLD. The address and Connect are not a second way to ask the question; they
-              are the manual route for a machine the search cannot hear. A fold toggle is not an
-              action: `data-fold` keeps it out of the component-set gate. */}
-          <button
-            type="button"
-            data-testid="start-wizard-machine-another"
-            data-fold="true"
-            aria-expanded={another}
-            style={FOLD}
-            onClick={() => setAnother((open) => !open)}
-          >
-            <span aria-hidden="true">{another ? '▾' : '▸'}</span> another machine…
-          </button>
-
-          {another && (
-            <>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
-                <label style={{ ...MUTED, display: 'flex', gap: 4, alignItems: 'center' }}>
-                  Address
-                  <input
-                    type="text"
-                    // #875 — a hostname (`zoomba.local`) is letters: the phone's keypad must offer
-                    // them, and nothing here should be auto-capitalized or spell-checked.
-                    inputMode="url"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-testid="start-wizard-address"
-                    aria-label="Machine address"
-                    style={{ width: 120 }}
-                    value={address}
-                    onChange={(e) => onAddress(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="sw-btn"
-                  data-testid="start-wizard-connect-address"
-                  disabled={busy || address.trim().length === 0}
-                  onClick={() => requestCheck(address.trim())}
-                >
-                  Connect
-                </button>
-              </div>
-              {/* #875 — Connect is disabled while the field is empty, and that IS the unblock: the
-                  sentence that repeated it appeared the instant the fold opened, before anything
-                  was wrong, so it is gone. */}
-            </>
-          )}
+          {/* #1106 item 7 — the "another machine…" fold is GONE. The rows are the picker, the
+              address lives on the machine's record, and Add a machine… opens Manage. */}
         </>
       )}
 

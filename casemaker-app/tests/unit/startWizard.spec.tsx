@@ -194,13 +194,14 @@ describe('#280/#682 — step 1, the machine check', () => {
     );
   }
 
-  it('checks on open, names the machine, and saves its own frame (#279, #682)', async () => {
+  it('checks on open, states the machine’s line, and saves its own frame (#279, #682)', async () => {
     useClient(foundClient());
     render(<StartWizard />);
 
     await waitForState('found');
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('Makera Z1');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('192.168.10.43');
+    // #1106 item 7 — the single-machine header is gone; the state line is the step's machine line.
+    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-machine-address')).toBeNull();
     expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
     // The removed essay (A3): the frame is still saved, it is no longer printed on step 1.
     expect(screen.queryByTestId('start-wizard-machine-frame')).toBeNull();
@@ -227,7 +228,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     expect(useSettingsStore.getState().machineCalibration).toBeUndefined();
   });
 
-  it('an unknown machine is named honestly and given no profile numbers', async () => {
+  it('an unknown machine is given no profile numbers, and the step prints no invented name', async () => {
     useClient(
       fakeClient({
         discover: async () => [{ name: 'SomeLaser_9000', host: '10.0.0.5', port: 2222, busy: false }],
@@ -237,9 +238,9 @@ describe('#280/#682 — step 1, the machine check', () => {
 
     await waitForState('found');
     // The broadcast name is the only identity this machine gave; the profile table did not match,
-    // so MACHINES supplied no name and no number.
-    expect(screen.getByTestId('start-wizard-machine-name').textContent).toBe('SomeLaser_9000');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('10.0.0.5');
+    // so MACHINES supplied no name and no number — and with no location record there is no row.
+    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-machine-list')).toBeNull();
     expect(screen.queryByTestId('start-wizard-machine-profile')).toBeNull();
     expect(screen.queryByText(/13000 rpm/)).toBeNull();
   });
@@ -276,8 +277,8 @@ describe('#280/#682 — step 1, the machine check', () => {
       expect(screen.queryByTestId('start-wizard-back')).toBeNull();
       // …and nothing was checked: the step did not pretend to open a socket.
       expect(useMachineStore.getState().outcome).toBeNull();
-      // Continue is the advancing button, and it says what it does.
-      expect(screen.getByTestId('start-wizard-next').textContent).toBe('Continue without a machine');
+      // #1106 item 9 — ONE advancing label on both builds: never "without a machine".
+      expect(screen.getByTestId('start-wizard-next').textContent).toBe('Next: what are you making');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
       // #897 — the work comes before the blank: step 2 is the question.
       expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
@@ -319,21 +320,8 @@ describe('#280/#682 — step 1, the machine check', () => {
     expect(reason.match(/search failed/gi)).toHaveLength(1);
   });
 
-  it('connects to a typed address under the fold, and admits it knows no model', async () => {
-    useClient(fakeClient());
-    render(<StartWizard />);
-    await waitForState('not-found'); // the automatic check heard nothing
+  // #1106 item 7 — the typed-address fold is gone; a machine is selected from its location record.
 
-    fireEvent.click(screen.getByTestId('start-wizard-machine-another'));
-    fireEvent.change(screen.getByTestId('start-wizard-address'), { target: { value: '10.0.0.7' } });
-    fireEvent.click(screen.getByTestId('start-wizard-connect-address'));
-
-    await waitForState('found');
-    expect(screen.getByTestId('start-wizard-machine-address').textContent).toBe('10.0.0.7');
-    // A typed address announced no name, so no model is claimed for it.
-    expect(screen.queryByTestId('start-wizard-machine-name')).toBeNull();
-    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Online · Idle');
-  });
 });
 
 describe('#280 — step 2, the stock', () => {
