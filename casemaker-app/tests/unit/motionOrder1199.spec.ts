@@ -230,6 +230,19 @@ describe('#1199 field 7 — the plan’s descent region', () => {
     expect(region(true, -181.55 + 40, -184.8 + 38.1)).toBe(false);
   });
 
+  it('a bracket plan (the tray) carries no mount tap, so its region has no tap clause', () => {
+    // #1133/#1199 (analyst field 7 (e)) — a bracket plan has no mountTap, so the shipped tap
+    // clause cannot fire on it: the morning tray build is unaffected by removing it.
+    const region = jobDescentRegion(
+      planAt({
+        mount: 'bracket',
+        bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor 1', offsetMeasured: true },
+        mountTap: null,
+      }),
+    );
+    expect(region(true, -186.2, -180)).toBe(false);
+  });
+
   it('allows the plan’s own mount tap where it stands, in MACHINE XY (a vise jaw is outside the blank)', () => {
     const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
     const region = jobDescentRegion(planAt({ mountTap: tap }));
