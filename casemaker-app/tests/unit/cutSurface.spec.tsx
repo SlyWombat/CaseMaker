@@ -23,6 +23,7 @@ import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { freezePackage, type FrozenPackage } from '@/engine/cnc/engrave/package';
 import { frozenReleaseSources } from '@/engine/cnc/engrave/release';
+import { cardStartBlocker } from '@/components/panels/cutCardGate';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import { ROTARY_UNMEASURED_REFUSAL } from '@/store/engraveRunGate';
@@ -2492,5 +2493,47 @@ describe('#1191 — a started blank is never offered a re-plan', () => {
     } finally {
       setEngraveRunClientLoader(null);
     }
+  });
+});
+
+
+// #1123 item 8 — WHICH GATE THE CARD'S ONE START CARRIES. The card is the multi-program path, so
+// `uploadBlocker`'s "the app plays one" (true of the single-file uploader by construction) must
+// never be its fallback: that refused every multi-program job at the Start.
+describe('#1123 item 8 the card start gate', () => {
+  const NONE = {
+    step1Blocker: null,
+    programBlocker: null,
+    ackBlocker: null,
+    releaseBlocker: null,
+    uploadBlocker: null,
+    missingReportBlocker: null,
+    surfaceGate: null,
+    domeG32Blocker: null,
+    cutterChecklistBlocker: null,
+  };
+  const COUNT = 'this job is 2 programs; the app plays one';
+
+  it('a multi-program job takes the RELEASE gate, never the single-file count refusal', () => {
+    expect(cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: null })).toBeNull();
+    expect(cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'the registration first' })).toBe(
+      'the registration first',
+    );
+    // The release gate's own refusal still shows, with the count sentence still absent.
+    expect(
+      cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'release gate' }),
+    ).not.toContain('the app plays one');
+  });
+
+  it('a single program still takes the upload gate', () => {
+    expect(cardStartBlocker({ ...NONE, multiProgram: false, uploadBlocker: 'upload gate', releaseBlocker: 'release gate' })).toBe(
+      'upload gate',
+    );
+  });
+
+  it('the reasons before the run gates still come first', () => {
+    expect(cardStartBlocker({ ...NONE, multiProgram: true, step1Blocker: 'Clear step 1 first.', uploadBlocker: COUNT })).toBe(
+      'Clear step 1 first.',
+    );
   });
 });
