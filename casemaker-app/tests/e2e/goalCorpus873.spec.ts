@@ -167,12 +167,14 @@ test.describe('the goal corpus, desktop', () => {
     await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
       'Covers 88.41 % of the design’s top surface (the pass line is 95 %)',
     );
-    // #964 — the raw reading beside the judged one, and it is the wall that moves: the deepest RAW
-    // cell is a wall column 10 mm below the goal at (44.8, 26.8) — un-adjudicable under #1003's
-    // exact bound — while the judged cut-into is 0. Measured 2026-11-06 on 966-collapse; the
-    // pre-#1003 spec pinned 0.023 mm at (65, 43.7), which is no longer the raw maximum.
+    // #964 — the raw reading beside the judged one. Its deepest cell was a wall column 10 mm below
+    // the goal at (44.8, 26.8) until the tray-top group: #1227's wall pass (rings one posted step
+    // closer) and #1223's nested lobe order no longer leave that wall column as the raw maximum —
+    // it is now 0.953 mm at (45.3, 44.8), with the judged cut-into still 0. Measured 2026-11-11 at
+    // 608e90eb6; the pre-#1003 spec pinned 0.023 mm at (65, 43.7), and 966-collapse pinned the
+    // 10 mm wall column.
     await expect(page.getByTestId('engrave-cut-goal-raw')).toHaveText(
-      'raw, before exclusions: 0 % cut-into, max 10 mm at 44.8, 26.8',
+      'raw, before exclusions: 0 % cut-into, max 0.953 mm at 45.3, 44.8',
     );
     await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
       /^Top-surface coverage: [\d.]+ % \(the pass line is 95 %\)$/,
