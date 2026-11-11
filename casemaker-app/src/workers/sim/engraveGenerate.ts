@@ -5851,6 +5851,9 @@ export async function postModelPlan(
         dialect: postKey(mill),
         depthLimit: depthLimits[plan.setupIndex] ?? limit,
         minRapidZ: ir.hopZ,
+        // #1235 stage 2 — the blank's footprint, so a cutting feed far outside it is refused here
+        // as everywhere (an operator item is not the model engine's case: no `itemProgram`).
+        stock: { length: job.stock.length, width: job.stock.width },
         ...mountCtx(shop.mount, job.jawClearance),
       });
       const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
@@ -9011,6 +9014,11 @@ async function generateOneProgram(
       dialect: postKey(mill),
       depthLimit: limit,
       minRapidZ,
+      // #1235 stage 2 — the footprint rule's own facts: this sub-job's blank rectangle, and
+      // whether any of its items was drawn past the blank's inset (the `item-outside-stock`
+      // warning `engraveRegions` measured above — such a program keeps a warning, not an error).
+      stock: { length: job.stock.length, width: job.stock.width },
+      itemProgram: findings.some((f) => f.code === 'item-outside-stock'),
       ...(limitReasonAt ? { limitReasonAt } : {}),
       ...(rotaryMap === null
         ? mountCtx(shop.mount, job.jawClearance, liftOverStock)

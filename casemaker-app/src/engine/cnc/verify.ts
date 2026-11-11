@@ -39,6 +39,7 @@ import { applyEvent, buildTimeline, initialState, type MachineState } from './em
 import { holderOf, rotaryOf, type Mill } from './machine';
 import { FIRMWARE_A_MAX_DEG_PER_MIN, FIRMWARE_ROTARY_PERIMETER_EXTRA_MM, rotaryRate } from './rotaryClock';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
+import { FACING_EDGE_CLEARANCE_MM } from './cam/facing';
 import type { Setup } from './setup';
 // inPath only (types from bracket): the verifier runs in workers and must not pull in the defaults client.
 import { mountInPath, type PathSegment } from './mounts/inPath';
@@ -80,6 +81,20 @@ export interface VerifyContext {
   depthLimit: DepthLimit;
   /** Z at or above which XY rapids are allowed, work frame. The IR's hopZ. */
   minRapidZ: number;
+  /**
+   * #1235 stage 2 — THE STOCK'S FOOTPRINT, work frame: the rectangle `[0, length] × [0, width]`.
+   * The `cut-outside-footprint` rule measures how far a cutting feed's end lies outside it.
+   * OPTIONAL: absent means the caller states no footprint, and the rule does not run.
+   */
+  stock?: { length: number; width: number };
+  /**
+   * #1235 stage 2 — THIS PROGRAM'S MOVES ARE AN OPERATOR-PLACED ITEM'S. An engrave item the
+   * operator drew partly off the blank is legitimate (`item-outside-stock`, a warning, and
+   * Generate cuts it as drawn), so `cut-outside-footprint` reports at WARNING for such a program
+   * and at ERROR for every other. The CALLER states it — from the item's own measurement — as the
+   * verifier cannot tell an item program from a planned-model one by reading the text.
+   */
+  itemProgram?: boolean;
   /**
    * WHY the limit is what it is at (x, y), as the tail of the `cut-too-deep` sentence — `— the
    * magnet pocket's ceiling`, say (#285, #345). A plane the cutter must stay clear of and the
@@ -124,6 +139,12 @@ export interface VerifyFinding {
   code: string;
   line: number | null;
   message: string;
+  /**
+   * #1235 stage 2 — FOR A RULE THAT REPORTS ONCE PER PROGRAM: what it aggregated — how many
+   * offending moves, the largest distance (mm) and the XY of the furthest. Optional; absent on
+   * findings about a single line.
+   */
+  aggregate?: { count: number; largestMm: number; x: number; y: number };
 }
 
 export interface VerifyReport {
@@ -399,8 +420,14 @@ const known3 = (p: Pos): p is [number, number, number] => p[0] !== null && p[1] 
  */
 export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
   const findings: VerifyFinding[] = [];
-  const push = (code: string, line: number | null, message: string, severity: 'error' | 'warning' = 'error'): void => {
-    findings.push({ severity, code, line, message });
+  const push = (
+    code: string,
+    line: number | null,
+    message: string,
+    severity: 'error' | 'warning' = 'error',
+    aggregate?: VerifyFinding['aggregate'],
+  ): void => {
+    findings.push({ severity, code, line, message, ...(aggregate === undefined ? {} : { aggregate }) });
   };
 
   // #845 — THE FILE IS READ AS ITS POST'S DIALECT. A GRBL file carries `M0` (the pause) and
@@ -563,6 +590,10 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
 
     let state: MachineState = initialState(ctx.setup);
     let seenCut = false;
+    // #1235 stage 2 — the footprint rule reports ONCE for the program: how many offending moves,
+    // and the worst of them (its distance, the radius that judged it, and where it ended).
+    let footprintCount = 0;
+    let footprintWorst: { d: number; radius: number; x: number; y: number; line: number } | null = null;
     const toolNumbers = new Set<number>();
     // #396 follow-up — A MACRO THE RUNNER COULD NOT RULE OUT IS NOT Z EVIDENCE. `T1 M6` with an
     // unstated starting tool is expanded because it cannot be ruled out; if the tool is already
@@ -744,6 +775,26 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             m.line,
             `the ${fmt(outside.radius)} mm-radius cutter edge reaches (${fmt(outside.x)}, ${fmt(outside.y)}), outside the stock`,
           );
+        }
+
+        // ---- 6. cut-outside-footprint (#1235 stage 2). A cutting feed's END point, further
+        // outside the blank's own rectangle than the cutter's radius plus the facing's edge
+        // clearance: one allowance admits today's legitimate overruns (a freeing contour round a
+        // part whose outline is the stock's, a finishing pass's deliberate overrun) and nothing
+        // further. The footprint is the same stock the depth limit is built from; a caller that
+        // states none gets no rule. Rotary programs have no flat footprint and are not judged.
+        if (rotary === null && ctx.stock !== undefined && known3(toW) && toW[2] < 0) {
+          const { length, width } = ctx.stock;
+          const excessX = toW[0] < 0 ? -toW[0] : toW[0] > length ? toW[0] - length : 0;
+          const excessY = toW[1] < 0 ? -toW[1] : toW[1] > width ? toW[1] - width : 0;
+          const d = Math.hypot(excessX, excessY);
+          const radius = toolRadiusOf(ctx.tool, Math.max(0, -toW[2]));
+          if (d > radius + FACING_EDGE_CLEARANCE_MM + 1e-9) {
+            footprintCount += 1;
+            if (footprintWorst === null || d > footprintWorst.d) {
+              footprintWorst = { d, radius, x: toW[0], y: toW[1], line: m.line };
+            }
+          }
         }
 
         // ---- #240 slice 2 — the ROTARY frame's cutting refusals, design §3.9/§4 and /Rotary.md
@@ -1038,6 +1089,22 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           }
         }
       }
+    }
+
+    // #1235 stage 2 — ONE finding for the program: the worst move states the sentence; the
+    // aggregate carries how many moves there were and where the furthest one is. An operator-drawn
+    // item program keeps its warning (Generate cuts the item as drawn); anything else is an error.
+    if (footprintWorst !== null) {
+      const { d, radius, x, y, line } = footprintWorst;
+      push(
+        'cut-outside-footprint',
+        line,
+        `The cutter travels ${d.toFixed(2)} mm outside the blank while cutting, on line ${line}. ` +
+          `A pass may run past the blank's edge by the cutter's own radius (${radius.toFixed(2)} mm) and no further. ` +
+          'This is a planning fault, not something to fix on the machine: report it with this file.',
+        ctx.itemProgram === true ? 'warning' : 'error',
+        { count: footprintCount, largestMm: d, x, y },
+      );
     }
 
     if (toolNumbers.size > 1) {
