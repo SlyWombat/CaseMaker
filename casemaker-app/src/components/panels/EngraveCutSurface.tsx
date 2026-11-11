@@ -694,13 +694,20 @@ export function EngraveCutSurface({
   const releaseRecord = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
   const releaseFinished =
     releaseRecord === undefined || releaseRecord.files.length === 0 || releasePending(releaseRecord.files).length === 0;
-  const runOver =
+  /**
+   * #819 — THIS JOB'S MACHINE RUN HAS ENDED. The end card's condition (`runOver`) also asks
+   * whether the RELEASE record has no programs left, because a multi-program job keeps the steps
+   * and the next program's press. A PRESS must not wait for that bookkeeping: once this job's run
+   * has ended, the one-screen confirm's Go is the press that would start the finished program
+   * again, and it goes even while the release record still calls the program pending.
+   */
+  const runEnded =
     machineRun !== null &&
     !machineRun.running &&
     machineRun.end !== null &&
     machineRun.end.kind !== 'nothing' &&
-    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id) &&
-    releaseFinished;
+    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id);
+  const runOver = runEnded && releaseFinished;
   // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
@@ -1912,29 +1919,35 @@ export function EngraveCutSurface({
                 statement and ONE Cut press that uploads, prepares and starts. */}
             {oneScreen && machine !== null && target !== null && singleSource !== undefined && (
               <>
-                <EngraveCutConfirm
-                  job={job}
-                  machine={machine}
-                  source={singleSource}
-                  filename={releaseFileName(job.name, 1, 1, false)}
-                  oracle={runOracle}
-                  blocker={
-                    step1Blocker ??
-                    programBlocker ??
-                    ackBlocker ??
-                    uploadBlocker ??
-                    missingReportBlocker ??
-                    surfaceGate ??
-                    // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
-                    // until every row of the checklist is located or replaced.
-                    cutterChecklistBlocker
-                  }
-                  dome={domeProps}
-                  domeBlocker={domeG32Blocker}
-                  runContext={runContextWithDry}
-                  surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
-                  onLiveStatus={onLiveStatus}
-                />
+                {/* #819 — THE RUN-OVER RULE APPLIES HERE TOO. The one-screen confirm's Go press is
+                    the expert step's Cut press in the ordinary path; once THIS JOB's run has ended
+                    it would start the program again. The steps stay above the end card (#1123 item
+                    39) — the press does not. While the flip is due the card owns the step too. */}
+                {flipPending || runEnded ? null : (
+                  <EngraveCutConfirm
+                    job={job}
+                    machine={machine}
+                    source={singleSource}
+                    filename={releaseFileName(job.name, 1, 1, false)}
+                    oracle={runOracle}
+                    blocker={
+                      step1Blocker ??
+                      programBlocker ??
+                      ackBlocker ??
+                      uploadBlocker ??
+                      missingReportBlocker ??
+                      surfaceGate ??
+                      // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
+                      // until every row of the checklist is located or replaced.
+                      cutterChecklistBlocker
+                    }
+                    dome={domeProps}
+                    domeBlocker={domeG32Blocker}
+                    runContext={runContextWithDry}
+                    surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
+                    onLiveStatus={onLiveStatus}
+                  />
+                )}
                 <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
               </>
             )}

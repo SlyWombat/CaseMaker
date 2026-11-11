@@ -146,8 +146,11 @@ test('#890 — a new job dismisses the previous session’s crash prompt', async
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  page.once('dialog', (dialog) => void dialog.accept());
+  // #1123 item 48 — NEW IS THE APP'S OWN DIALOG, NOT A window.confirm. The walk used to accept a
+  // browser dialog the app no longer opens; the press now opens `new-project-confirm`, and its Yes
+  // is what runs doNew() (and with it the session's crash-prompt dismissal).
   await page.getByTestId('new-project').click();
+  await page.getByTestId('new-project-confirm-yes').click();
 
   await expect(page.getByTestId('crash-banner')).toHaveCount(0);
 });

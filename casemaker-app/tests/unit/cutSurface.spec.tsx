@@ -1622,6 +1622,19 @@ describe('#819 the finished screen', () => {
     expect(screen.queryByTestId('engrave-cut-end-card')).toBeNull();
   });
 
+  it('#1191 review — a finished run for this job leaves no Go press; the steps stay', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    // #819 — THE RUN-OVER RULE APPLIES TO THE ONE-SCREEN CONFIRM TOO. Its Go press is the expert
+    // step's press in the ordinary path; on a finished job it would start the same program again.
+    // The steps themselves stay above the end card (#1123 item 39); the press does not.
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
+    expect(screen.getByTestId('engrave-cut-end-card')).toBeTruthy();
+  });
+
   // #1123 item 39 — THE DONE CARD IS FOR A FINISHED JOB, NOT A FINISHED PROGRAM. At the bench a
   // 20-program release ended program 1 and the done card owned the whole Cut screen; only a new
   // run's prepare clears the entry's end, and that press lived in the steps the card replaced, so
