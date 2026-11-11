@@ -1795,6 +1795,9 @@ export const millProfileSchema = z.object({
     // field may not make (a machine that states none omits it, or writes null).
     spinUpSeconds: finite.positive().nullable().optional(),
     spinUpSource: z.string().min(1).optional(),
+    // #1218 — the A axis's ceiling, degrees per minute: optional and positive when stated (a
+    // machine with no rotary omits it), the same rule as the spindle ramp.
+    aMaxDegPerMin: finite.positive().optional(),
   }),
   // #927 — the same number on the profile itself; see the interface field. Optional: a profile that
   // has never timed its spindle states neither, and the estimate then prices no ramp.
@@ -1918,6 +1921,9 @@ export const millModelSchema = z.object({
     // field may not make (a machine that states none omits it, or writes null).
     spinUpSeconds: finite.positive().nullable().optional(),
     spinUpSource: z.string().min(1).optional(),
+    // #1218 — the A axis's ceiling, degrees per minute: optional and positive when stated (a
+    // machine with no rotary omits it), the same rule as the spindle ramp.
+    aMaxDegPerMin: finite.positive().optional(),
   }),
   // #927 — the same number on the profile itself; see the interface field. Optional: a profile that
   // has never timed its spindle states neither, and the estimate then prices no ramp.
