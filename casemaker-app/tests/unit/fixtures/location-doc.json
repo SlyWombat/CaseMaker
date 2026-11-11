@@ -1003,6 +1003,27 @@
       "unit": "mm",
       "note": "chosen, not measured: the tape strips stop this far in from every edge of the stock"
     },
+    "tape.stripCount": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "strips",
+      "note": "chosen, not measured: how many strips of tape go under a blank"
+    },
+    "tape.stripWidthMm": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the width of one strip \u2014 the house roll is Makera's 20 mm double-sided tape"
+    },
+    "clamps.maxCount": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "clamps",
+      "note": "chosen, not measured: the most clamps one bracket job states \u2014 the bracket's two free edges take four comfortably"
+    },
     "rotary.gripMm": {
       "value": 15.0,
       "source": "seeded",

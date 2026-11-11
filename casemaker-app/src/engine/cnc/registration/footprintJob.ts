@@ -33,7 +33,7 @@ import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import type { PlanObstacle, ProbeSpec } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { planFootprintRegistration, type FootprintBox, type FootprintInput, type FootprintPlan, type FootprintScanSettings } from '@/engine/cnc/registration/footprint';
-import { jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { bracketPlacementOf, fixtureMountOf, jobFence } from '@/engine/cnc/engrave/jobSetup';
 import type { MountSpec } from '@/engine/cnc/setups';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 
@@ -120,7 +120,10 @@ export function mountObstaclesFor(job: EngraveJob, mount: MountSpec, sizes: Retu
 }
 
 /** The footprint plan's numbers, read off the job and the machine. */
-export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
+export function footprintInputFor(given: FootprintJobArgs): FootprintJobResult {
+  // #1102 — a fenced tape job is the bracket's footprint, whichever word the caller's setup carries.
+  const args: FootprintJobArgs =
+    given.mount.kind === 'tape' && jobFence(given.job) !== null ? { ...given, mount: { kind: 'bracket', board: given.mount.board } } : given;
   const { job, calibration, defaults } = args;
   if (job.stock.shape === 'disc') {
     return { ok: false, reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank' };
@@ -133,7 +136,7 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
   // #1070 (C8) — the seed is the ANCHOR for an anchored bracket and the BED PROFILE'S PLACEMENT
   // for a placed one (the same rule the Cut step plans by; one seam, no second derivation). A
   // placed job whose profile states no position cannot be seeded.
-  const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
+  const placed = bracketPlacementOf(job) === 'placed';
   let datum: { x: number; y: number; from: string; offsetMeasured: boolean };
   if (placed) {
     const seed = args.placedSeed ?? null;
@@ -399,7 +402,7 @@ export function sheetRegistrationPlan(args: {
   placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
 }): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
   const { job, calibration, defaults, probe, bracketSeat, placedSeed } = args;
-  if (jobMount(job) !== 'bracket') return {};
+  if (fixtureMountOf(job) !== 'bracket') return {};
   const mount: MountSpec = { kind: 'bracket', board: job.sacrificial.under !== null };
   const input = footprintInputFor({ job, mount, calibration, defaults, probe, bracketSeat, placedSeed });
   if (input.ok) {

@@ -8,6 +8,7 @@ import { FACING_DEPTH_MAX_MM, boxProblem } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
 import { MAX_LINE_POINTS, MAX_SLOT_WIDTH_MM, type EngraveJob } from '@/types/engraveJob';
+import { defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import { newId } from '@/utils/id';
 
 /**
@@ -1275,31 +1276,6 @@ const clampPlacementSchema = z.object({
 });
 
 /**
- * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4). The board
- * UNDER the stock is `sacrificial.under`, not a field here — one record of one board.
- */
-const tapeHoldSchema = z.object({
-  width: z.number().finite().positive().describe('The tape roll width in millimetres.'),
-  thickness: z.number().finite().positive().describe("The tape's thickness under the stock, in millimetres."),
-  inset: z
-    .number()
-    .finite()
-    .nonnegative()
-    .describe('How far in from every edge the tape strips stop, in millimetres.'),
-  where: z
-    .object({
-      x: z.number().finite().describe("Machine X of the stock's expected front-left corner, in millimetres."),
-      y: z.number().finite().describe("Machine Y of the stock's expected front-left corner, in millimetres."),
-    })
-    .nullable()
-    .describe('Where on the surface the stock is expected, in machine X/Y, or null for the middle of the surface.'),
-  squareTo: z.literal('front').describe("What the tape keeps square: the bed's front edge. The program is never rotated."),
-  source: z
-    .enum(['default', 'saved', 'measured'])
-    .describe('Where these tape numbers came from: a default, a saved setup, or a measurement.'),
-});
-
-/**
  * #1068 — a box the program must not sweep through, stated by the job: a hole already in the
  * blank (screwed down) that the mount's own obstacles cannot describe. Work frame, Z0 on the
  * stock's top.
@@ -1333,6 +1309,53 @@ const bracketObstacleSchema = z
     }
   });
 
+/**
+ * #1102 — the bracket as a FENCE: it locates the taped blank, it does not hold it. Only the corner
+ * (the blank touches both arms) exists; a one-arm fence needs an edge find on tape, which is not
+ * proven on the machine. 
+ */
+const bedFenceSchema = z.object({
+  kind: z.literal('bracket').describe('What the fence is: the bracket of the Makera kit.'),
+  anchor: z.union([z.literal(1), z.literal(2)]).describe('The anchor the bracket is pinned at.'),
+  placement: z.enum(['anchored', 'placed']).optional().describe("As the bracket hold's placement: absent = 'anchored'."),
+  variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
+  edges: z.literal('corner').describe('Which arms the blank touches: the corner, both of them.'),
+  obstacles: z.array(bracketObstacleSchema).optional().describe('Boxes the mount cannot know, as the bracket hold states them.'),
+});
+
+/**
+ * A job held on the bed under tape (#707 BM-1, `docs/design/bed-mounts-flow.md` §3.4). The board
+ * UNDER the stock is `sacrificial.under`, not a field here — one record of one board.
+ */
+const tapeHoldSchema = z.object({
+  width: z.number().finite().positive().describe('The tape roll width in millimetres.'),
+  thickness: z.number().finite().positive().describe("The tape's thickness under the stock, in millimetres."),
+  inset: z
+    .number()
+    .finite()
+    .nonnegative()
+    .describe('How far in from every edge the tape strips stop, in millimetres.'),
+  where: z
+    .object({
+      x: z.number().finite().describe("Machine X of the stock's expected front-left corner, in millimetres."),
+      y: z.number().finite().describe("Machine Y of the stock's expected front-left corner, in millimetres."),
+    })
+    .nullable()
+    .describe('Where on the surface the stock is expected, in machine X/Y, or null for the middle of the surface.'),
+  squareTo: z
+    .enum(['front', 'fence'])
+    .describe("What the tape keeps square: the bed's front edge, or the bracket's fence when one is stated. The program is never rotated."),
+  fence: bedFenceSchema
+    .nullable()
+    .optional()
+    .describe(
+      "The bracket as a fence: what LOCATES the taped blank (the tape holds it). Absent or null = no fence; the blank is squared to the bed's front edge. With a fence, where is null and squareTo is 'fence'.",
+    ),
+  source: z
+    .enum(['default', 'saved', 'measured'])
+    .describe('Where these tape numbers came from: a default, a saved setup, or a measurement.'),
+});
+
 /** A job pushed into the bracket's corner and clamped (#707 BM-1, §3.6). */
 const bracketHoldSchema = z.object({
   anchor: z.union([z.literal(1), z.literal(2)]).describe('The anchor the bracket is pinned at; Makera\'s origin is relative to Anchor 1.'),
@@ -1345,10 +1368,10 @@ const bracketHoldSchema = z.object({
   variant: z.string().min(1).describe("The bracket fitted, as its fixture record names it — 'thin' is the Makera kit's L-bracket."),
   clamps: z
     .array(clampPlacementSchema)
-    .max(4)
     .describe(
-      'The clamp places the job was set up with, on the free edges. One to four; ZERO only when the ' +
-        'board under the blank is taped (the vendor tray’s side-2 hold — the bracket is then only the fence).',
+      'The clamp places the job was set up with, on the free edges. At least one: a bracket with no clamps is a fence, ' +
+        "stated as a taped hold located against the bracket. How many a job may state is the shop's clamps.maxCount, " +
+        'checked when the job is validated, not here.',
     ),
   obstacles: z
     .array(bracketObstacleSchema)
@@ -3047,22 +3070,48 @@ const engraveJobV3Schema = engraveJobV2Schema
         message: 'a tube states its wall, in mm',
       });
     }
-    // #943 (10) — A BRACKET WITH NO CLAMPS IS A HOLD ONLY WHEN THE PART IS TAPED DOWN. #709 keeps
-    // refusing every other 'none': the machine cannot hold a bracket job with neither clamps nor
-    // tape. The vendor tray's side 2 is the tape case — the bracket is the fence, the tape holds.
-    if (
-      job.workholding.kind === 'bracket' &&
-      job.workholding.bracket.clamps.length === 0 &&
-      job.sacrificial.under?.attach !== 'tape'
-    ) {
+    // #1102 — A BRACKET WITH NO CLAMPS IS A FENCE, NOT A HOLD. The machine cannot hold a bracket
+    // job with no clamps; "the bracket as the fence, the tape holds" is `tape` + `fence`, said once.
+    // (A stored document of the old shape — zero clamps under a taped board — is rewritten before
+    // it reaches here: `migrateLegacyFenceHold`.)
+    if (job.workholding.kind === 'bracket' && job.workholding.bracket.clamps.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['workholding', 'bracket', 'clamps'],
-        message:
-          "a bracket job with no clamps is held by tape: state sacrificial.under.attach 'tape', or fit one to four clamps",
+        message: BRACKET_NO_CLAMPS_MESSAGE,
       });
     }
   });
+
+/** #1102 — the sentence for a bracket hold that states no clamps. */
+export const BRACKET_NO_CLAMPS_MESSAGE = "a bracket with no clamps is a fence — say 'taped, located against the bracket'";
+
+/**
+ * #1102 — THE ONE MIGRATION OF THE BRACKET-WITH-NO-CLAMPS HOLD. Before this build a bracket with
+ * zero clamps was allowed when the board under the blank was taped (`sacrificial.under.attach`
+ * 'tape' — the vendor tray's side 2: the bracket is the fence, the tape holds). That is `tape` +
+ * `fence`, and a stored document of that shape is rewritten to it BEFORE the schema reads it.
+ * Anything else with zero clamps is not migrated: the schema refuses it with its own sentence.
+ * Every other field is left exactly as stored, so the job's bytes change only here.
+ */
+export function migrateLegacyFenceHold(json: unknown): unknown {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return json;
+  const doc = json as { workholding?: unknown; sacrificial?: unknown };
+  const hold = doc.workholding;
+  if (hold === null || typeof hold !== 'object') return json;
+  const { kind, bracket } = hold as { kind?: unknown; bracket?: unknown };
+  if (kind !== 'bracket' || bracket === null || typeof bracket !== 'object') return json;
+  const b = bracket as { anchor?: unknown; placement?: unknown; variant?: unknown; clamps?: unknown; obstacles?: unknown };
+  if (!Array.isArray(b.clamps) || b.clamps.length !== 0) return json;
+  const under = (doc.sacrificial as { under?: { attach?: unknown } | null } | undefined)?.under;
+  if (under?.attach !== 'tape') return json;
+  const fence: Record<string, unknown> = { kind: 'bracket', anchor: b.anchor };
+  if (b.placement !== undefined) fence.placement = b.placement;
+  fence.variant = b.variant;
+  fence.edges = 'corner';
+  if (b.obstacles !== undefined) fence.obstacles = b.obstacles;
+  return { ...doc, workholding: { kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence } } };
+}
 
 /**
  * The CURRENT engrave-job document, exactly as this build writes it (#480). `engraveJobSchema`
@@ -3152,7 +3201,8 @@ function formatPath(path: readonly PropertyKey[]): string {
 }
 
 /** Validate an unknown payload as an `EngraveJob`, collecting every issue as a readable line. */
-export function parseEngraveJob(json: unknown): ParseEngraveJobResult {
+export function parseEngraveJob(input: unknown): ParseEngraveJobResult {
+  const json = migrateLegacyFenceHold(input);
   // A newer build's document is refused by NAME, before the union reduces it to "invalid literal".
   // The Open surface shows `newerJobVersionMessage`; hydration parks the payload and keeps the
   // sentence in the error list. Never parse a version this build does not know (#425).

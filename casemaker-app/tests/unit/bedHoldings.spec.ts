@@ -127,13 +127,12 @@ describe('#709 BM-1 the bed arms in the document', () => {
     expect(errors({ where: { x: 1 } as unknown as TapeHold['where'] }).length).toBeGreaterThan(0);
   });
 
-  it('the schema refuses the clamp shapes the machine cannot hold: none, five, or a left edge', () => {
+  it('the schema refuses the clamp shapes the machine cannot hold: none or a left edge (the count is the shop’s clamps.maxCount, #1102)', () => {
     const errors = (clamps: unknown): string[] => {
       const parsed = parse(bracketJob(undefined, { workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: clamps as ClampPlacement[], source: 'default' } } }));
       return parsed.ok ? [] : parsed.errors;
     };
     expect(errors([]).length).toBeGreaterThan(0);
-    expect(errors([1, 2, 3, 4, 5].map((at) => ({ edge: 'back', at }))).length).toBeGreaterThan(0);
     expect(errors([{ edge: 'left', at: 10 }]).length).toBeGreaterThan(0);
     expect(errors([{ edge: 'right', at: -1 }]).length).toBeGreaterThan(0);
   });

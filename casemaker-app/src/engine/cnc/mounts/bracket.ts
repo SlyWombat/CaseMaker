@@ -600,15 +600,36 @@ export function bracketMount(
 // The mount's own checks.
 
 export interface MountFinding {
-  code: 'clamp-off-stock' | 'clamps-overlap' | 'stock-past-arm' | 'mount-unmeasured';
+  code: 'clamp-off-stock' | 'clamps-overlap' | 'stock-past-arm' | 'mount-unmeasured' | 'too-many-clamps';
   severity: 'error' | 'warning' | 'info';
   text: string;
 }
 
-/** What is wrong with this bracket + clamps mount before any toolpath is looked at. */
-export function validateBracketMount(stock: StockSize, placements: ClampPlacement[], b: BracketSettingsRead): MountFinding[] {
+/** #1102 (#1207) — the most clamps one bracket job states: the shop's `clamps.maxCount`. */
+export function maxClampsOf(map: ShopDefaults | null): number {
+  return readDefault(map, 'clamps.maxCount').value;
+}
+
+/**
+ * What is wrong with this bracket + clamps mount before any toolpath is looked at. `maxClamps`
+ * (the shop's `clamps.maxCount`, see {@link maxClampsOf}) bounds the count; a caller that passes
+ * none states no bound.
+ */
+export function validateBracketMount(
+  stock: StockSize,
+  placements: ClampPlacement[],
+  b: BracketSettingsRead,
+  maxClamps?: number,
+): MountFinding[] {
   const s = b.settings;
   const out: MountFinding[] = [];
+  if (maxClamps !== undefined && placements.length > maxClamps) {
+    out.push({
+      code: 'too-many-clamps',
+      severity: 'error',
+      text: `this job states ${placements.length} clamps and the shop allows ${maxClamps} (Manage › Defaults › most clamps on one bracket job) — remove ${placements.length - maxClamps}, or raise the setting`,
+    });
+  }
   const obstacles = clampObstacles(stock, placements, s);
   placements.forEach((p, i) => {
     const len = p.edge === 'back' ? stock.x : stock.y;

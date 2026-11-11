@@ -31,7 +31,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, softEndstopOf } from '@/engine/cnc/machine';
 import { jobVise } from '@/engine/cnc/fixture';
 import { bracketMount } from '@/engine/cnc/mounts/bracket';
-import { clampPlacementsFor, jobMount } from './jobSetup';
+import { clampPlacementsFor, fixtureMountOf, jobMount } from './jobSetup';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -73,7 +73,7 @@ export function laserSurfaceBound(
   } else {
     const mount = bracketMount(
       { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
-      jobMount(job, setupIndex),
+      fixtureMountOf(job, setupIndex),
       defaults,
       job.sacrificial.under?.thickness ?? 0,
       // #707 BM-1 — the job's own clamp places (per-setup clamp places are not modelled; the job
