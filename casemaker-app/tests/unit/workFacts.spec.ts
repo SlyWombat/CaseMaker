@@ -32,6 +32,26 @@ describe('#1103 the work facts', () => {
     });
   });
 
+  it('item 1 — a cutout is through and states its margin', () => {
+    const blank = { ...BLANK, length: 80, width: 60, thickness: 6 } as StockProposal;
+    const choice = { type: 'cutout', length: 60, width: 40 } as unknown as OperationChoice;
+    expect(workFactsOf(choice, blank, { kind: 'cutout', length: 60, width: 40 })).toEqual({
+      deepestCutMm: 6,
+      through: true,
+      reachesEdgeWithinMm: 10,
+    });
+  });
+
+  it('item 1 — a preset pocket states its depth and margin', () => {
+    const blank = { ...BLANK, length: 80, width: 60, thickness: 12 } as StockProposal;
+    const choice = { type: 'pocket', length: 60, width: 40, depth: 5 } as unknown as OperationChoice;
+    expect(workFactsOf(choice, blank, { kind: 'pocket', length: 60, width: 40, depth: 5 })).toEqual({
+      deepestCutMm: 5,
+      through: false,
+      reachesEdgeWithinMm: 10,
+    });
+  });
+
   it('no choice is no work', () => {
     expect(workFactsOf(null, BLANK)).toEqual({ deepestCutMm: 0, through: false, reachesEdgeWithinMm: null });
   });

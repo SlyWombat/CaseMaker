@@ -519,6 +519,11 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // not a setting.
     ("vise.uncertaintyMm", 0.5, "mm", "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"),
     ("vise.defaultStockProudMm", 4.0, "mm", "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"),
+    // #1103/#1207 — the recommended seat's chosen numbers: how much proud height the cut keeps in
+    // hand, how near the gripped edge a cut can be under the jaws, and the tolerance at the jaw tops.
+    ("vise.cutProudMarginMm", 1.0, "mm", "chosen, not measured: the seat recommendation wants the seat's proud height at least the cut plus this, so the cutter's flute is not in the jaws at the bottom of the cut"),
+    ("vise.jawSideClearanceMm", 6.0, "mm", "chosen, not measured: a cut within this of the gripped edge can be under the jaws — the largest cutter radius the wizard expects (3 mm) plus 3 mm"),
+    ("vise.jawTopToleranceMm", 0.5, "mm", "chosen, not measured: a cut no more than this deeper than the seat's proud height is not called below the jaw tops (the model's own uncertainty)"),
     ("vise.minCoverageFraction", 0.5, "x", "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"),
     ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
@@ -835,6 +840,18 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "vise.defaultStockProudMm" => Some(need(
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20 mm",
+        )),
+        "vise.cutProudMarginMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
+        )),
+        "vise.jawSideClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=30.0).contains(&v)),
+            "0 to 30 mm",
+        )),
+        "vise.jawTopToleranceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "0 to 5 mm",
         )),
         "vise.minCoverageFraction" => Some(need(
             n.is_some_and(|v| (0.05..=1.0).contains(&v)),

@@ -178,6 +178,26 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(20),
     fallback: VISE_DEFAULT_STOCK_PROUD_FALLBACK,
   },
+  // #1103/#1207 — THE RECOMMENDED SEAT's three chosen numbers (the Holding step's arrival seat reads
+  // the work). Each fallback is the number the code compiled before it was a setting.
+  'vise.cutProudMarginMm': {
+    label: 'seat recommendation: the cut must stand this far below the seat’s proud height (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(10),
+    fallback: 1,
+  },
+  'vise.jawSideClearanceMm': {
+    label: 'seat recommendation: a cut this near the gripped edge can be under the jaws (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(30),
+    fallback: 6,
+  },
+  'vise.jawTopToleranceMm': {
+    label: 'seat recommendation: a cut within this of the jaw tops is not called below them (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(5),
+    fallback: 0.5,
+  },
   'vise.minCoverageFraction': {
     label: 'vise jaw Y coverage before a short-jaw warning (chosen)',
     unit: 'x',

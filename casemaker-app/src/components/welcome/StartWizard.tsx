@@ -50,8 +50,8 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { openMachineChange } from '@/components/machine-change';
-import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
-import { accessoryFor } from '@/platform/machineChange';
+import { boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
+import { accessoryFor, activeProfileOf } from '@/platform/machineChange';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
@@ -669,6 +669,11 @@ export function StartWizard(): JSX.Element {
         seeded.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
         viseOnPins,
+        // #1103 item 7 — the seat judged is the one the Holding step arrives in: the same work facts,
+        // the house's boards and the recommendation's own shop numbers.
+        workFactsOf(operationChoice, proposal, work),
+        boardChoices(activeProfileOf(selectedMachine)),
+        seatShopFrom(useShopDefaultsStore.getState().defaults),
       );
       // The empty design: a stock pick brings no lines. (A design file brings its own items.)
       store.replace({
@@ -778,6 +783,11 @@ export function StartWizard(): JSX.Element {
         after.stock,
         facingShopFrom(useShopDefaultsStore.getState().defaults),
         viseOnPins,
+        // #1103 item 7 — the seat judged is the one the Holding step arrives in: the same work facts,
+        // the house's boards and the recommendation's own shop numbers.
+        workFactsOf(operationChoice, proposal, work),
+        boardChoices(activeProfileOf(selectedMachine)),
+        seatShopFrom(useShopDefaultsStore.getState().defaults),
       );
       store.replace({ ...after, stockEntry: p.choice.entry, facing });
       settled();

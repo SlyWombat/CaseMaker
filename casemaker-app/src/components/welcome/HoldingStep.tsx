@@ -113,6 +113,7 @@ import {
   machineNow,
   mechanismOf,
   mountOptions,
+  seatShopFrom,
   seatedProud,
   centredStockRect,
   stockRectFor,
@@ -1667,9 +1668,11 @@ export function HoldingStep({
   const houseBoards = useMemo(() => boardChoices(profile), [profile]);
   // #1104 — "tape it" is said only where the tape row is on offer.
   const tapeOffered = bedOffered(options);
+  // #1103/#1207 — the recommendation's chosen numbers are shop defaults, not literals.
+  const seatShop = useMemo(() => seatShopFrom(shopDefaults ?? null), [shopDefaults]);
   const seatChoice = useMemo(
-    () => recommendSeat(answers.stock, work ?? null, houseBoards, tapeOffered),
-    [answers.stock, work, houseBoards, tapeOffered],
+    () => recommendSeat(answers.stock, work ?? null, houseBoards, tapeOffered, seatShop),
+    [answers.stock, work, houseBoards, tapeOffered, seatShop],
   );
 
   // #240/#715 — the mount the job is IN: the job's own workholding first (a rotary, or one of the
@@ -1733,7 +1736,7 @@ export function HoldingStep({
     if (job.workholding.kind !== 'vise') return;
     // With the bed or the rotary on the pins, their own effects decide (#715, #714).
     if (now !== null && now.mount !== 'vise') return;
-    const next = applyRecommendedMount(answers, boardMm, work, boardChoices(profile));
+    const next = applyRecommendedMount(answers, boardMm, work, boardChoices(profile), seatShop);
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2604,6 +2607,10 @@ export function HoldingStep({
                 onChoose={() => choose(option.mount)}
                 onOpenManage={onOpenManage}
                 onBackToStock={onBackToStock}
+                // #1103 — the recommendation's reason sits under the recommended row, and a seat the
+                // rule refused says why on its own row.
+                recommendation={seatChoice.reason !== null && option.mount === seatChoice.mount ? seatChoice.reason : null}
+                refusal={seatChoice.refused.find((r) => r.mount === option.mount)?.text ?? null}
                 onMachineChange={() => {
                   if (option.escape !== null) {
                     changeMachine(
@@ -2649,11 +2656,6 @@ export function HoldingStep({
             ))}
           </div>
 
-          {seatChoice.reason !== null && (
-            <p style={MUTED} data-testid="engrave-setup-recommendation-reason">
-              Recommended: {seatChoice.reason}.
-            </p>
-          )}
 
           {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
               on every vise job; now it is one line under the radios, and `vise-default` speaks
@@ -2864,6 +2866,8 @@ function MountRow({
   onChoose,
   onOpenManage,
   onBackToStock,
+  recommendation = null,
+  refusal = null,
   onMachineChange,
   boardControl,
   details = null,
@@ -2871,6 +2875,10 @@ function MountRow({
   option: MountOption;
   checked: boolean;
   onChoose: () => void;
+  /** #1103 — why this seat is the recommended one, under its row. */
+  recommendation?: string | null;
+  /** #1103 — why the rule refused this vise seat for the work, under its row. */
+  refusal?: string | null;
   /** #1104 — the row's in-place actions that leave the step. */
   onOpenManage?: () => void;
   onBackToStock?: () => void;
@@ -2909,6 +2917,16 @@ function MountRow({
           )}
         </span>
       </label>
+      {refusal !== null && !option.disabled && (
+        <p style={{ ...MUTED, margin: '2px 0 0 22px' }} data-testid={`engrave-setup-refused-${option.mount}`}>
+          {refusal}
+        </p>
+      )}
+      {recommendation !== null && (
+        <p style={{ ...MUTED, margin: '2px 0 0 22px' }} data-testid="engrave-setup-recommendation-reason">
+          Recommended: {recommendation}.
+        </p>
+      )}
       {option.mount === 'ledge' && (
         <div style={{ marginLeft: 22 }} data-testid="engrave-setup-ledge-gloss">
           <Explain term="jaw-ledge" />
