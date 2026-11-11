@@ -33,6 +33,11 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { cleanWalkPlanSeconds, cleanWalkPlanWords } from '@/engine/cnc/engrave/cleanWalkPlan';
+// #1202 field 5 — the walks are motion routines: their identity, mark and statement gate the Start.
+import { walkRoutineIdentity } from '@/engine/cnc/engrave/walkIdentity';
+import { routineCompleted } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
+import { useLocationStore } from '@/store/locationStore';
 // #1123-42 — the running program's percent, time left and next cutter, from the run watch's own
 // status line and the release list's cut order.
 import { nextBitChange, runClockSeconds, runningProgramWords } from '@/engine/cnc/engrave/runProgress';
@@ -43,6 +48,8 @@ import { stopIsReportable } from '@/platform/machineStopReport';
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
 const OK = '#9fd19b';
+const WARN = '#e0c07a';
+const BAD = '#f0b4ad';
 
 export interface EngraveReleaseStepProps {
   /** Where the machine was last reached, or null. The step cannot do anything without one. */
@@ -256,6 +263,33 @@ export function EngraveReleaseStep({
   const runClock = useMachineRunStore((s) => (target === null ? null : (s.runs[machineKey(target)] ?? null)));
   const toolItems = useToolRegistryStore((s) => s.items);
 
+  // #1202 field 5 — THE WALKS ARE ROUTINES. Their identity is the generator's step sequence (never
+  // the posted bytes: every job's file differs in its geometry), checked against this machine's
+  // completed set. ONE statement names the walks that are new and gates the single Start; a walk
+  // already run here is listed without the mark.
+  const machineRecord = useLocationStore((s) =>
+    target === null
+      ? null
+      : s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
+  );
+  const walkRoutines = (record === undefined ? [] : [record.walks.airwalk, record.walks.clean])
+    .filter((walk): walk is ReleaseWalk => walk !== null)
+    .map((walk) => {
+      const identity = walkRoutineIdentity(walk.mode === 'airwalk' ? 'air-walk' : 'clean-walk', walk.steps);
+      return { walk, identity, fresh: !routineCompleted(machineRecord, identity) };
+    });
+  const newWalkRoutines = walkRoutines.filter((w) => w.fresh);
+  const newWalkShapes = newWalkRoutines.map((w) => `${w.identity.routine}:${w.identity.shape}`).join(',');
+  const [walkTicked, setWalkTicked] = useState(false);
+  // A fresh statement per routine set: the tick that satisfied the last plan is not this one's.
+  useEffect(() => setWalkTicked(false), [newWalkShapes]);
+  const walkHeadless = firstRunAutomationRefusal({ firstRun: newWalkRoutines.length > 0 });
+  const walkNamesOf = (walks: typeof walkRoutines): string => {
+    const names = walks.map((w) => (w.walk.mode === 'airwalk' ? 'the air walk' : 'the cleaning pass'));
+    if (names.length <= 1) return names[0] ?? '';
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  };
+
   useEffect(() => {
     if (host !== undefined && port !== undefined && blocker === null) plan({ host, port }, job, programs);
   }, [host, port, job, programs, blocker, plan]);
@@ -342,7 +376,11 @@ export function EngraveReleaseStep({
     uploadsReady &&
     !record.spanClosing &&
     facingGate === null &&
-    hiddenRetouch === null;
+    hiddenRetouch === null &&
+    // #1202 field 5 — a walk that is new on this machine needs the operator's own statement, and
+    // an automated instance may not start it at all.
+    (newWalkRoutines.length === 0 || walkTicked) &&
+    walkHeadless === null;
   const finished = record.files.filter((f) => f.done).length;
   const showUpload = (record.phase === 'idle' || record.phase === 'stopped' || record.phase === 'failed') && uploadsIncomplete;
 
@@ -408,6 +446,33 @@ export function EngraveReleaseStep({
           <FileRow key={f.index} file={f} />
         ))}
       </ul>
+      {/* #1202 field 5 — the walks' own files, as routines: name, line count and the full posted
+          text. "New on this machine" is what the Start's one statement answers; a walk already
+          completed is listed without the mark. */}
+      {walkRoutines.length > 0 && (
+        <div data-testid="engrave-release-walks">
+          {walkRoutines.map(({ walk, identity, fresh }) => (
+            <details
+              key={walk.mode}
+              data-testid={`engrave-release-walk-${walk.mode}`}
+              data-shape={identity.shape}
+              data-first-run={fresh ? 'true' : undefined}
+              style={{ ...MUTED, marginTop: 4 }}
+            >
+              <summary>
+                {walk.mode === 'airwalk' ? 'The air walk' : 'The cleaning pass'} — {walk.filename} (
+                {walk.nc.split('\n').length} lines){fresh ? ' — new on this machine' : ''}
+              </summary>
+              <pre
+                data-testid={`engrave-release-walk-${walk.mode}-text`}
+                style={{ ...MUTED, whiteSpace: 'pre-wrap', margin: '4px 0 0', maxHeight: 220, overflow: 'auto' }}
+              >
+                {walk.nc}
+              </pre>
+            </details>
+          ))}
+        </div>
+      )}
       {/* #1197 — the failed upload's report: the console's sentence, the release's notes, and the
           record's job facts. One action, under the list it belongs to. */}
       {uploadFailure !== null && failedUpload !== null && (
@@ -495,6 +560,31 @@ export function EngraveReleaseStep({
                   I am at the machine, with the head clear and the stock clamped — asked for each program, and
                   again after a stop.
                 </label>
+                {/* #1202 field 5 — ONE statement for the walks this machine has never run: it names
+                    each of them and gates the single Start (the walks are part of this press). */}
+                {newWalkRoutines.length > 0 && (
+                  <p style={{ ...MUTED, color: WARN }} data-testid="engrave-release-first-run">
+                    First run on this machine: {walkNamesOf(newWalkRoutines)} — stay at the Stop.
+                  </p>
+                )}
+                {newWalkRoutines.length > 0 && (
+                  <label style={MUTED} data-testid="engrave-release-first-run-statement">
+                    <input
+                      type="checkbox"
+                      checked={walkTicked}
+                      data-testid="engrave-release-first-run-tick"
+                      onChange={(e) => setWalkTicked(e.target.checked)}
+                    />{' '}
+                    I am at the machine —{' '}
+                    {newWalkRoutines.length === 1 ? 'the walk’s path is clear' : 'the walks’ paths are clear'}, and I
+                    will stay at the Stop.
+                  </label>
+                )}
+                {walkHeadless !== null && (
+                  <p style={{ ...MUTED, color: BAD }} data-testid="engrave-release-first-run-headless">
+                    {walkHeadless}
+                  </p>
+                )}
                 <button
                   type="button"
                   data-testid="engrave-release-start"

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
-import { dryMountTap, recordingConsole, reviewLines, scriptedReply } from '@/engine/cnc/registration/dryRun';
+import { dryFlipRegistration, dryMountTap, recordingConsole, reviewLines, scriptedReply } from '@/engine/cnc/registration/dryRun';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS: ShopDefaults = ShopDefaultsSchema.parse(
@@ -115,4 +115,15 @@ describe('#1202 — the mount tap’s stored jaw top', () => {
     expect(dry.refused).toBe(false);
     expect(dry.identity.routine).toBe('mount-tap');
   }, 120_000);
+});
+// #1202 — THE CLEARANCE IS REQUIRED, the same rule the tool-change preview follows (D's #1199):
+// an unknown clearance is not 0. The flip registration's dry run must refuse rather than review
+// its lines against an invented height, and the card's gate (previewHolds) then holds the press.
+describe('#1202 — a preview with no clearance refuses', () => {
+  it('the flip registration is not reviewed against an invented clearance', async () => {
+    const dry = await dryFlipRegistration({ plan: {} as never, ctx: {} as never, z0: null }, {});
+    expect(dry.refused).toBe(true);
+    expect(dry.error).toContain('clearance unknown');
+    expect(dry.lines).toEqual([]);
+  });
 });

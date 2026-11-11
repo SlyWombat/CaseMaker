@@ -28,7 +28,7 @@ import { postFor, postKey, postOriginFor } from '../post';
 import { programHash } from '../programHash';
 import { flatEndMill, type Tool } from '../tool';
 import { verifyProgram, type VerifyReport } from '../verify';
-import { cleanWalkFile, type CleanWalkMode, type CleanWalkSettings } from './cleanWalk';
+import { cleanWalkFile, type CleanWalkMode, type CleanWalkSettings, type CleanWalkStep } from './cleanWalk';
 import { jobMountObstacles, jobTool, toSetup } from './jobSetup';
 import { releaseStem } from './runSheet';
 import { key8Of } from './packageFiles';
@@ -47,6 +47,8 @@ export interface PlannedCleanWalk {
   rows: number;
   /** The file's own cycle estimate, seconds — the term the plan line folds in (#1146 follow-up). */
   estimatedSeconds: number;
+  /** #1202 field 5 — the routine's structural sequence; the identity is this, never the bytes. */
+  steps: readonly CleanWalkStep[];
 }
 
 export interface CleanWalksPlan {
@@ -163,6 +165,7 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
       sweepZ: made.sweepZ,
       rows: made.rows,
       estimatedSeconds: made.estimatedSeconds,
+      steps: made.steps,
     };
   }
   return plan;

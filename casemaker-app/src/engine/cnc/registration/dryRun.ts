@@ -17,9 +17,12 @@
 import { motionOrderGuard } from './motionOrder';
 import { routineIdentityOf, type MotionRoutineId, type NamedHeights, type RoutineIdentity } from './routineIdentity';
 import {
+  runCentreFind,
   runFlipRegistration,
   runMountTap,
   runRegistration,
+  type CentreFindOptions,
+  type CentreRunResult,
   type ExecDeps,
   type FlipRunResult,
   type MountTapResult,
@@ -62,6 +65,13 @@ export interface DryRoutine {
 export function previewHolds(preview: DryRoutine | null, firstRun: boolean, ticked: boolean): boolean {
   return (preview !== null && (preview.refused || preview.error !== null)) || (firstRun && !ticked);
 }
+
+/**
+ * #1202 — WHAT A PREVIEW SAYS WHEN THE MACHINE'S CLEARANCE IS UNKNOWN. D's #1199 makes the live
+ * clearance REQUIRED: a routine cannot be reviewed against a height nobody read, so the preview
+ * refuses instead of inventing one (the tool change and the flip registration share the sentence).
+ */
+export const CLEARANCE_UNKNOWN = 'clearance unknown — the line can’t be reviewed';
 
 /**
  * THE SCRIPTED MACHINE'S OWN STATE — the head's Z and G90/G91. A `G38.3` answers from where the
@@ -202,6 +212,22 @@ export function recordingConsole(
       replies.push(text);
       return { kind: 'sent', line, text, frames: 1, elapsedMs: 0 };
     },
+  };
+}
+
+/**
+ * The centre find's scripted machine (#827): the top touch is the FIRST `G38.3` Z probe and must
+ * trigger (it finds the surface); every later Z probe is a descent to the side touch's depth, which
+ * must MISS — a bore's centre is open air, a boss's start is beyond its wall. X/Y probes trigger.
+ */
+export function centreFindReply(): (line: string) => string {
+  let zProbes = 0;
+  return (line) => {
+    if (/^G38\.3\s+Z[-+]?[\d.]+/i.test(line.trim())) {
+      zProbes += 1;
+      if (zProbes > 1) return '[PRB:0,0,-80.000:0]\r\nok';
+    }
+    return dryReply(line);
   };
 }
 
@@ -350,6 +376,24 @@ export async function dryMountTap(
 }
 
 /**
+ * The centre find's dry lines (#1202 field 5) — the bore/boss/round-part routine through the SAME
+ * executor the Find press runs. `seekFromMachineZ` is the machine's travel height; the press uses
+ * it as the session's live clearance, so the preview reviews against the same number.
+ */
+export async function dryCentreFind(opts: CentreFindOptions): Promise<DryRoutine> {
+  const console_ = recordingConsole(centreFindReply());
+  const clearanceZ = opts.seekFromMachineZ;
+  let error: string | null = null;
+  try {
+    const result: CentreRunResult = await runCentreFind(opts, depsFor(console_, clearanceZ));
+    if (!result.ok) error = result.reason;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  return finish('centre-find', console_, clearanceZ, { clearance: clearanceZ }, error);
+}
+
+/**
  * The flip registration's dry lines — side 2's frame plan (the front pair, the seed, each bore's
  * four touches) through the SAME executor the press runs. `attempt` is the card's own FlipAttempt:
  * the plan, its context and the carried Z0.
@@ -358,12 +402,22 @@ export async function dryFlipRegistration(
   attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
   opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
 ): Promise<DryRoutine> {
-  // No tapZ here: the flip run never taps the mount (`runFlipRegistration` reads the ctx for
-  // its stock, settings and probe only), so seeding it would misplace its first Z probe.
+  const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? null;
+  // #1202 — UNKNOWN MEANS REFUSED, never reviewed against an invented 0 (the tool-change rule):
+  // the card shows the sentence and `previewHolds` keeps the press held.
+  if (clearanceZ === null || !Number.isFinite(clearanceZ)) {
+    return {
+      lines: [],
+      identity: routineIdentityOf('flip-registration', [], {}),
+      refused: true,
+      error: CLEARANCE_UNKNOWN,
+    };
+  }
+  // No tapZ here: the flip run never taps the mount (`runFlipRegistration` reads the ctx for its
+  // stock, settings and probe only), so seeding it would misplace its first Z probe.
   const console_ = recordingConsole(
     scriptedReply({ band: attempt.ctx.seek.band, m491Z: attempt.ctx.probeRefZ ?? null }),
   );
-  const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
   let error: string | null = null;
   try {
     const result: FlipRunResult = await runFlipRegistration(

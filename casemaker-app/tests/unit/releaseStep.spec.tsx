@@ -54,6 +54,7 @@ import {
   useEngraveRegistrationStore,
 } from '@/store/engraveRegistrationStore';
 import { clearStoredBaseline, resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { walkRoutineIdentity } from '@/engine/cnc/engrave/walkIdentity';
 import { facingRegistrationBlocker, releaseBlocker, uploadBlocker } from '@/store/engraveRunGate';
 import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
@@ -1451,4 +1452,189 @@ describe('#1197 — the release upload’s stop report', () => {
     await startUpload();
     expect(screen.queryByTestId('stop-report-action')).toBeNull();
   });
+});
+
+// #1202 field 5 — THE WALKS ARE ROUTINES. The release card's single Start is their press, so one
+// statement names every walk in this job's set that is new on this machine and holds that press.
+describe('#1202 the walks’ first run', () => {
+  it('names each new walk, shows its file, and holds the Start until the statement is ticked', async () => {
+    useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
+    renderStep(defaultEngraveJob());
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await advanceUntil(() => screen.getByTestId('engrave-release-start'));
+
+    // Both walks are planned and both are new here (this window holds no machine record): each is
+    // listed with its own posted text and marked.
+    expect(screen.getByTestId('engrave-release-walk-airwalk').getAttribute('data-first-run')).toBe('true');
+    expect(screen.getByTestId('engrave-release-walk-clean').getAttribute('data-first-run')).toBe('true');
+    expect(screen.getByTestId('engrave-release-walk-airwalk-text').textContent).toContain('G0');
+    expect(screen.getByTestId('engrave-release-walk-clean-text').textContent).toContain('M811');
+    expect(screen.getByTestId('engrave-release-first-run').textContent).toBe(
+      'First run on this machine: the air walk and the cleaning pass — stay at the Stop.',
+    );
+
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    const start = (): HTMLButtonElement => screen.getByTestId('engrave-release-start') as HTMLButtonElement;
+    expect(start().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-release-first-run-tick'));
+    expect(start().disabled).toBe(false);
+  });
+
+  it('does not mark a walk set this machine has already completed', async () => {
+    useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
+    // The record carries both walks' shapes, computed from the same generator (no geometry in them).
+    const job = defaultEngraveJob();
+    const machineRecord = MachineRecordSchema.parse({
+      id: 'm-1',
+      address: { host: TARGET.host, port: TARGET.port },
+      updatedAt: '2026-11-11T09:00:00.000Z',
+      completedRoutines: [],
+    });
+    const view = {
+      kind: 'casemaker-location',
+      schemaVersion: 1,
+      id: 'loc-1',
+      name: 'QA',
+      createdAt: '2026-11-11T00:00:00.000Z',
+      machines: [machineRecord],
+      accessories: [],
+    };
+    useLocationStore.setState({ status: 'present', etag: '"e1"', reason: null, location: view as never });
+    renderStep(job);
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await advanceUntil(() => screen.getByTestId('engrave-release-start'));
+    // The record's completed set is filled AFTER planning (the shapes come from the planned files):
+    // seed both and the card must drop the mark and the statement on the next render.
+    const planned = record()!.walks;
+    const shapes = [planned.airwalk, planned.clean]
+      .filter((w): w is NonNullable<typeof w> => w !== null)
+      .map((w) => ({
+        routine: (w.mode === 'airwalk' ? 'air-walk' : 'clean-walk') as 'air-walk' | 'clean-walk',
+        w,
+      }));
+    act(() => {
+      useLocationStore.setState({
+        location: {
+          ...view,
+          machines: [
+            {
+              ...machineRecord,
+              completedRoutines: shapes.map(({ routine, w }) => ({
+                routine,
+                shape: walkRoutineIdentity(routine, w.steps).shape,
+                at: '2026-11-11T09:00:00.000Z',
+                build: { version: '1.0.0', commit: null },
+              })),
+            },
+          ],
+        } as never,
+      });
+    });
+    expect(screen.queryByTestId('engrave-release-first-run')).toBeNull();
+    expect(screen.getByTestId('engrave-release-walk-airwalk').getAttribute('data-first-run')).toBeNull();
+    expect(screen.getByTestId('engrave-release-walk-clean').getAttribute('data-first-run')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    expect((screen.getByTestId('engrave-release-start') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  /** A house whose single machine is TARGET, recording every machine PUT body. */
+  function recordingHouse(writes: Record<string, unknown>[]): HouseClient {
+    const machine = MachineRecordSchema.parse({
+      id: 'm-1',
+      address: TARGET,
+      updatedAt: '2026-11-11T00:00:00.000Z',
+    });
+    return {
+      probe: async () => ({
+        kind: 'present',
+        base: '',
+        health: {
+          ok: true,
+          schemaVersion: HOUSE_SCHEMA_VERSION,
+          build: 'v-test',
+          hasCatalogue: false,
+          feedRows: 0,
+          materialSpecRows: 0,
+          catalogueSyncedAt: null,
+          lastSync: null,
+          problems: [],
+          warnings: [],
+        },
+      }),
+      tools: async () => ({ kind: 'ok', etag: '"t"', entries: [] }),
+      feeds: async () => ({ kind: 'absent', reason: 'none' }),
+      inventory: async () => ({ kind: 'ok', etag: '"i"', items: [] }),
+      call: async (method, path, body) => {
+        if (method === 'GET' && path === '/location') {
+          return {
+            kind: 'ok',
+            text: JSON.stringify({
+              kind: 'casemaker-location',
+              schemaVersion: 1,
+              id: 'loc-test',
+              name: 'My shop',
+              createdAt: '2026-11-15T00:00:00.000Z',
+              migratedFrom: null,
+              machines: [machine],
+            }),
+            etag: `"loc-${writes.length + 1}"`,
+          };
+        }
+        if (method === 'PUT' && path === '/location/machines/m-1') {
+          writes.push(body as Record<string, unknown>);
+          return { kind: 'ok', text: '{}', etag: `"loc-${writes.length + 1}"` };
+        }
+        return { kind: 'refused', status: 404, message: `${method} ${path} is not served here` };
+      },
+    };
+  }
+
+  const completedWrites = (writes: Record<string, unknown>[]): { routine?: string; shape?: string }[] =>
+    writes.flatMap((w) => (w.completedRoutines ?? []) as { routine?: string; shape?: string }[]);
+
+  it('records the walk’s shape when its file finishes cleanly', async () => {
+    const writes: Record<string, unknown>[] = [];
+    setHouseClientLoader(async () => recordingHouse(writes));
+    await useLocationStore.getState().refresh();
+    useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
+    renderStep(defaultEngraveJob());
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await advanceUntil(() => screen.getByTestId('engrave-release-start'));
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-release-first-run-tick'));
+    fireEvent.click(screen.getByTestId('engrave-release-start'));
+
+    // The air walk plays first and finishes: its shape lands on the machine before program 1.
+    await advanceUntil(
+      () => expect(completedWrites(writes).some((c) => c.routine === 'air-walk')).toBe(true),
+      { timeoutMs: 15000 },
+    );
+  }, 30000);
+
+  it('records nothing for a walk that was stopped', async () => {
+    const writes: Record<string, unknown>[] = [];
+    setHouseClientLoader(async () => recordingHouse(writes));
+    await useLocationStore.getState().refresh();
+    setMachineConsoleLoader(async () => controller(50)); // the walk keeps running until stopped
+    useShopDefaultsStore.setState({ status: 'present', defaults: WALKS_ON });
+    renderStep(defaultEngraveJob());
+    await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload'));
+    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
+    await advanceUntil(() => screen.getByTestId('engrave-release-start'));
+    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    fireEvent.click(screen.getByTestId('engrave-release-first-run-tick'));
+    fireEvent.click(screen.getByTestId('engrave-release-start'));
+
+    await advanceUntil(() => expect(record()?.phase).toBe('airwalk'), { timeoutMs: 10000 });
+    fireEvent.click(screen.getByTestId('engrave-release-stop'));
+    await advanceUntil(() => expect(record()?.phase).toBe('stopped'), { timeoutMs: 15000 });
+    expect(completedWrites(writes)).toEqual([]);
+  }, 30000);
 });
