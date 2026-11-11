@@ -173,5 +173,21 @@ test('#500 — the notes live in the possession detail, not the list', async ({ 
   await expect(page.getByTestId('manage-item-notes')).toHaveValue(NOTE);
 
   await page.setViewportSize({ width: 1500, height: 850 });
+  // #1172A + #500 — WITH THE DETAIL PANEL OPEN the whole table fits its card: the scroll container
+  // must not scroll horizontally and no column (the From badge last) may be clipped at its edge.
+  const fit = await page.getByTestId('manage-tools-table').evaluate((table) => {
+    const scroller = table.closest('.mscroll') as HTMLElement;
+    const cols = [...table.querySelectorAll('thead th')].map((th) => ({
+      label: (th as HTMLElement).innerText.trim().replace(/\s+/g, ' '),
+      width: Math.round((th as HTMLElement).getBoundingClientRect().width),
+    }));
+    return {
+      scrollWidth: scroller.scrollWidth,
+      clientWidth: scroller.clientWidth,
+      table: Math.round(table.getBoundingClientRect().width),
+      cols,
+    };
+  });
+  expect(fit.scrollWidth, JSON.stringify(fit)).toBeLessThanOrEqual(fit.clientWidth);
   await expect(page.getByTestId('manage-tools-table')).toHaveScreenshot('tools-list-codes.png');
 });
