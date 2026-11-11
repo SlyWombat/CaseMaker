@@ -2017,6 +2017,7 @@ what a machine on a bench has been trammed to:
 | `clamp-unchecked` | error | — | Part of the toolpath could not be checked against the clamps and the bracket. There are three cases: the tool has no stated diameter; a move starts from a position the program never set, below the clamps' tops; or the collet nut comes down below a clamp's top and the nut's size is not recorded. | State the cutter's diameter. Lift to a known height before moving sideways. Record the collet nut's size, or use a longer stick-out. |
 | `clamp-off-stock` | error | Do | A clamp — top or side — hangs past the end of the edge it is on, so it would not hold the stock. | Move the clamp in along the edge. |
 | `clamps-overlap` | error | Do | Two clamps are placed on top of each other. | Move one of them along the edge. |
+| `too-many-clamps` | error | Do | The job states more clamps than the shop allows (`clamps.maxCount`, 4 until you change it on Manage). | Remove a clamp, or raise the setting if the bracket really takes more. |
 | `stock-past-arm` | warning | — | The stock's edge is longer than the bracket arm it sits against, so only the part along the arm is squared, and the bracket's fit error grows toward the far end. | Accept it for a rough part, or check the far end before cutting. |
 | `mount-unmeasured` | info | — | The bracket and clamp sizes are the shop's defaults, not measurements, so the clearances are only as good as those defaults. | Measure the bracket and clamps with calipers and save the values in the shop defaults. |
 
