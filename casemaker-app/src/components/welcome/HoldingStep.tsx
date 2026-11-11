@@ -121,6 +121,8 @@ import {
   tapeStripRects,
   tapeWhereAtPointer,
   tapeWhereWords,
+  tapeLocatedAgainst,
+  locateTape,
   underFieldWords,
   underWords,
   type BedMount,
@@ -255,8 +257,14 @@ export function HoldingPicture({
         return `Top view. The fixed jaw is on the left; the ${formWord} sits on ${boardName} between the jaws${rim}.${discGrip}`;
       case 'block':
         return `Top view. The fixed jaw is on the left; the ${formWord} is gripped as a block, its sides free.${discGrip}`;
-      case 'bed-tape':
-        return `Top view. The ${formWord} is taped to the bed; the bed's front edge is nearest you.`;
+      case 'bed-tape': {
+        // #1102 item 7 — with a fence the blank is pushed into the bracket's corner, not squared
+        // to the bed's front edge by eye.
+        const fence = bed?.tape?.fence ?? null;
+        return fence === null
+          ? `Top view. The ${formWord} is taped to the bed; the bed's front edge is nearest you.`
+          : `Top view. The ${formWord} is taped to the bed, pushed into the bracket’s corner at anchor ${fence.anchor}.`;
+      }
       case 'bed-bracket':
         return `Top view. The ${formWord} sits in the bed's corner bracket, clamped.`;
       case 'rotary':
@@ -1105,6 +1113,30 @@ function BedTopView({
                 fill={BOARD_FILL}
                 stroke={BOARD_EDGE}
               />
+            )}
+            {/* #1102 item 7 — THE FENCE: the bracket's two arms in grey beside the taped blank,
+                the same boxes the bracket row draws. Tape holds; the corner locates. */}
+            {tape?.fence != null && (
+              <>
+                <rect
+                  data-testid="engrave-setup-holding-picture-fence-arm"
+                  x={stockRect.x - armPx}
+                  y={stockRect.y}
+                  width={armPx}
+                  height={stockRect.h + armPx}
+                  fill={FIXTURE_FILL}
+                  stroke={FIXTURE_EDGE}
+                />
+                <rect
+                  data-testid="engrave-setup-holding-picture-fence-arm"
+                  x={stockRect.x - armPx}
+                  y={stockRect.y + stockRect.h}
+                  width={stockRect.w + armPx}
+                  height={armPx}
+                  fill={FIXTURE_FILL}
+                  stroke={FIXTURE_EDGE}
+                />
+              </>
             )}
             {round ? (
               <ellipse
@@ -2205,17 +2237,100 @@ export function HoldingStep({
     );
 
     if (mount === 'bed-tape') {
+      // #1102 items 7 — WHAT HOLDS (the tape, on the blank or on a board under it) and WHAT
+      // LOCATES (the bed's front edge, or the bracket's corner at an anchor). With a fence the
+      // position is derived from the corner, so the Where row is not asked.
+      const located = tapeLocatedAgainst(tape);
+      const anchor = bedAnchor(profile);
+      const tapeOnBoard = answers.sacrificial.under !== null;
+      const locatedChoice = (value: 'front' | 1 | 2, label: string): JSX.Element => {
+        const needsBracket = value !== 'front' && anchor === null;
+        return (
+          <label style={FIELD_LABEL}>
+            <input
+              type="radio"
+              name="tape-located-against"
+              checked={located === value}
+              disabled={needsBracket}
+              data-testid={`engrave-setup-tape-located-${value === 'front' ? 'front' : `corner-${value}`}`}
+              onChange={() => onBedHold(locateTape(tape, value), answers)}
+            />
+            <span>{label}</span>
+          </label>
+        );
+      };
       return (
         <div data-testid="engrave-setup-bed-fields-bed-tape" style={BED_FIELDS}>
-          <FieldRow label="Under it">{underFieldWords(profile) ?? 'the bed'}</FieldRow>
-          {boardRow}
-          <FieldRow label="Where">
-            <span data-testid="engrave-setup-tape-where">{tapeWhereWords(tape)}</span>
-            {footprintOf(profile?.surface ?? null) !== null && (
-              <span className="hint">(drag on the picture)</span>
+          <FieldRow label="Located against">
+            <div
+              role="radiogroup"
+              aria-label="Located against"
+              data-testid="engrave-setup-tape-located"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}
+            >
+              {locatedChoice('front', 'The bed’s front edge')}
+              {locatedChoice(1, 'The bracket’s corner at anchor 1')}
+              {locatedChoice(2, 'The bracket’s corner at anchor 2')}
+            </div>
+            {anchor === null && (
+              <span className="hint" style={{ flexBasis: '100%' }} data-testid="engrave-setup-tape-located-needs-bracket">
+                The bracket is not on the pins —{' '}
+                <button
+                  type="button"
+                  className="sw-btn sw-btn--sm"
+                  data-testid="engrave-setup-tape-located-change"
+                  onClick={() => changeMachine('bed', HOLDING_MOUNT_WORDS['bed-tape'], 'bed-tape', true)}
+                >
+                  Change the machine…
+                </button>
+              </span>
             )}
           </FieldRow>
-          <FieldRow label="Square to">the front edge of the bed</FieldRow>
+          {/* #1102 item 7 — the tape holds the blank itself, or a board under it (the board is
+              `sacrificial.under`, the existing record: two records of one board could disagree). */}
+          {boardFieldShown && (
+            <FieldRow label="Tape goes on">
+              <div
+                role="radiogroup"
+                aria-label="Tape goes on"
+                data-testid="engrave-setup-tape-on"
+                style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}
+              >
+                <label style={FIELD_LABEL}>
+                  <input
+                    type="radio"
+                    name="tape-goes-on"
+                    checked={!tapeOnBoard}
+                    data-testid="engrave-setup-tape-on-blank"
+                    onChange={() => onAnswers(withBedSacrificial(answers, null))}
+                  />
+                  <span>the blank</span>
+                </label>
+                <label style={FIELD_LABEL}>
+                  <input
+                    type="radio"
+                    name="tape-goes-on"
+                    checked={tapeOnBoard}
+                    data-testid="engrave-setup-tape-on-board"
+                    onChange={() =>
+                      onAnswers(withBedSacrificial(answers, defaultBedBoardMm(profile, job.breakthrough + 1) ?? 2))
+                    }
+                  />
+                  <span>a board under it</span>
+                </label>
+              </div>
+            </FieldRow>
+          )}
+          <FieldRow label="Under it">{underFieldWords(profile) ?? 'the bed'}</FieldRow>
+          {boardRow}
+          {located === 'front' && (
+            <FieldRow label="Where">
+              <span data-testid="engrave-setup-tape-where">{tapeWhereWords(tape)}</span>
+              {footprintOf(profile?.surface ?? null) !== null && (
+                <span className="hint">(drag on the picture)</span>
+              )}
+            </FieldRow>
+          )}
           {scarUnder !== null && profile !== null && (
             <p style={BED_WARNING} data-testid="engrave-setup-tape-scar">
               The blank sits over {scarUnder.length === 1 ? 'a scar' : `${scarUnder.length} scars`} on{' '}
@@ -2253,6 +2368,11 @@ export function HoldingStep({
     return (
       <div data-testid="engrave-setup-bed-fields-bed-bracket" style={BED_FIELDS}>
         <FieldRow label="Bracket">thin, at anchor {bracketHold.anchor}</FieldRow>
+        {/* #1102 item 7 — the bracket's datum is a FACT, not a question: the clamp answer already
+            decided it, and the corner is where the blank is pushed. */}
+        <FieldRow label="Located against">
+          <span data-testid="engrave-setup-bracket-located">the bracket’s corner at anchor {bracketHold.anchor}</span>
+        </FieldRow>
         <FieldRow label="Clamps">
           <span data-testid="engrave-setup-clamp-count">
             {count} top clamp{count === 1 ? '' : 's'} · {fmt(bracketRead.settings.clamp.height)} mm tall
