@@ -438,6 +438,26 @@ The general model of §4A is built in this order. Each line is a slice of its ow
 | 7c | Turning: the profile chart, spiral roughing and finishing, grooves and part-off | 2b, 3b |
 | 7d | Rotary limits from records (§4A.6) | 7a |
 
+### The sequence (analyst's choice; maintainer, 2026-11-11: "you choose what to sequence for success. There will be no bench time until the software is done.")
+
+The first shadow run (#1216) set the order. It showed that coverage can be decided from the fields, that the time estimate is not yet good enough to decide alone, that the leftover tolerance is worth 1.8 h on the tray by itself, and that the first pocket step's own time, not the choice between chains, is what keeps us above the vendor.
+
+Five tracks. Within a track the issues run in order; the tracks run side by side on different lines.
+
+| Track | Purpose | Issues, in order |
+|---|---|---|
+| **A. Time now** | Take the hours out of today's plans with small, separate changes | A1 leftover tolerance in the chain rank (#1217) · A2 the same tolerance in the finishing-ball rank · A3 whatever the pocket-step comparison with Makera's program finds (feed row, step-down, step-over, the first cutter) |
+| **B. Foundations** | The general model's parts, as new code nothing calls yet | B1 charts (2b) · B2 one stock from many charts (2c) · B3 one clock (3b) · B4 rotary limits as records (7d) |
+| **C. The selector** | Replace candidate pricing by real planning | C1 estimate v2: contour priced, rest steps corrected, time from the one clock · C2 shadow v2 on every reference part, with the agreement table · C3 the selector decides, over the pose list (4) · C4 one setup record (4b) |
+| **D. The proof** | One simulator, whole surface | D1 verdict on the column engine, `SIMULATOR_VERSION` 9 (5) · D2 whole-surface check across poses |
+| **E. Capabilities** | Each as an instance of §4A | E1 2.5D items and indexed faces as poses (7a) · E2 rotation relief through the pipeline (7b) · E3 turning (7c) |
+
+Gates between them:
+- C3 does not start until C2's table shows the selector's pick equal to or better than the real planner's on the reference set.
+- D1 follows C3, so the gate moves once, on plans that have stopped changing.
+- E2 needs B1, B3 and C3. E3 needs B1 and B3 only, so turning can land before rotation relief.
+- The baseline comparison (#1212) is re-run after A, after C3, and at the end.
+
 Slices 0–3 as posted (#1213–#1216) are unchanged by §4A: the fields module's planar functions become the planar chart's, and the shadow selector prices one pose. Slice 4 is where the pose list matters, and it is not written until 2c and 3b exist.
 
 Slices 0–3 change no decision. Slice 1 may move a posted feed word or a last digit, as its issue states. Slice 4 changes picks and therefore programs, so Set B and the cycle pins are re-pinned with reasons. Slice 5 changes the frozen gate and needs the maintainer's explicit yes.
