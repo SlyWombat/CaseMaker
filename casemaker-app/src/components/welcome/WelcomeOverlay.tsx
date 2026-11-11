@@ -12,7 +12,8 @@ import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useRecentJobsStore } from '@/store/recentJobsStore';
 import { useViewportStore } from '@/store/viewportStore';
-import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveJobStore, engraveJobChangedAt } from '@/store/engraveJobStore';
+import { continueLine } from './continueLine';
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { hasWorkedOn } from '@/store/homeSession';
 import { ConfirmDialog } from '@/components/layout/ConfirmDialog';
@@ -425,17 +426,23 @@ export function WelcomeOverlay() {
    * stores, so Continue is just the workspace again — and the row names what waits, what it is and
    * when it last changed. A first visit has nothing worked on, so there is no row at all.
    */
-  const continueInfo = ((): { name: string; what: string; when: string } | null => {
+  const continueInfo = ((): string | null => {
     if (!hasWorkedOn()) return null;
+    const now = Date.now();
     const section = useViewportStore.getState().activeSidebarSection;
     if (section !== null && section.startsWith('cnc-')) {
       const file = useEngraveJobFileStore.getState();
       const job = useEngraveJobStore.getState().job;
-      const when = file.savedAt !== null ? new Date(file.savedAt) : null;
-      return { name: job.name, what: 'a CNC job', when: when === null ? 'not saved to a file yet' : when.toLocaleString() };
+      return continueLine({
+        name: job.name,
+        what: 'a CNC job',
+        changedAt: engraveJobChangedAt(),
+        savedToFile: file.savedAt !== null,
+        now,
+      });
     }
     const project = useProjectStore.getState().project;
-    return { name: project.name, what: 'a project', when: new Date(project.modifiedAt).toLocaleString() };
+    return continueLine({ name: project.name, what: 'a project', changedAt: Date.parse(project.modifiedAt), savedToFile: null, now });
   })();
   const selectedTpl = selected ? findTemplateByBoardAcrossSources(selected.board.id) : undefined;
   const selectedTemplates = selected
@@ -470,7 +477,7 @@ export function WelcomeOverlay() {
               Continue
             </button>
             <span style={{ fontSize: 12, opacity: 0.78 }} data-testid="welcome-continue-what">
-              {continueInfo.name} · {continueInfo.what} · {continueInfo.when}
+              {continueInfo}
             </span>
           </div>
         )}

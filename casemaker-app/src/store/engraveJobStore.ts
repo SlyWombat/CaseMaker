@@ -317,6 +317,24 @@ export const ENGRAVE_JOB_KEY = 'casemaker.engraveJob.v3';
 export const ENGRAVE_JOB_LEGACY_KEY = 'casemaker.engraveJob.v1';
 /** Where a payload that failed validation is parked so it is not silently lost. */
 export const ENGRAVE_JOB_REJECTED_KEY = `${ENGRAVE_JOB_KEY}.rejected`;
+/**
+ * #1123-48 — WHEN THE JOB WAS LAST CHANGED: the persistence write's own timestamp (epoch ms),
+ * stored beside the job so a reload keeps it. The Home page's Continue line reads it. It is
+ * display state: never in the job, the fingerprint or a package.
+ */
+export const ENGRAVE_JOB_CHANGED_KEY = `${ENGRAVE_JOB_KEY}.changedAt`;
+
+/** The last persisted change of the job, or null when none was recorded. */
+export function engraveJobChangedAt(): number | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(ENGRAVE_JOB_CHANGED_KEY);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * #720 — the localStorage copy never carries target-mesh bytes. They live in the mesh blob store
@@ -334,6 +352,7 @@ function persist(job: EngraveJob): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(ENGRAVE_JOB_KEY, JSON.stringify(withoutMeshData(job)));
+    localStorage.setItem(ENGRAVE_JOB_CHANGED_KEY, String(Date.now()));
   } catch {
     // ignore quota / private-mode errors
   }
