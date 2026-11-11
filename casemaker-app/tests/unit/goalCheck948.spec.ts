@@ -659,7 +659,10 @@ describe('#948 the live session’s swept top', () => {
       expect(report.goalCutInto?.adjudicatedFraction).toBe(0);
       expect(report.goalCutInto?.adjudicatedMaxMm).toBe(0);
       expect(report.goalCutInto?.adjudicatedMaxAt).toBeNull();
-      expect(report.goalCutInto?.wallNotScoredFraction).toBeCloseTo(4 / 120701, 12);
+      // #1227 (analyst, 2026-11-11) — samples on wall lines change side: the cutter is 0.001 mm
+      // further over, the mirror of the strip #1227 fixed; 600 wall cells are excused instead of
+      // 4. The excusal band is unchanged, and the adjudicated maximum is still exactly 0 above.
+      expect(report.goalCutInto?.wallNotScoredFraction).toBeCloseTo(600 / 120701, 12);
       expect(report.goalCutInto?.maxCutIntoMm).toBe(3);
       // #948/#1007 — the leftover read is the page's own point rule, cell for cell. On the OLD
       // engine's program `goal_check.py` left 824 of 120701 cells more than 0.1 mm above the goal

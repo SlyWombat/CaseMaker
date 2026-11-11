@@ -38,7 +38,7 @@
   {
    "key": "cycle",
    "rule": "≤ 2× the vendor’s (goal 1.25×) on our #927 estimator over both files, plus bit changes at 91.4 s each (#943)",
-   "oursValue": 205.038930313386,
+   "oursValue": 205.12883547600106,
    "vendorValue": null,
    "ours": "3.4 min",
    "vendor": null,
@@ -50,7 +50,7 @@
   {
    "key": "air",
    "rule": "≤ vendor + 10 points",
-   "oursValue": 0.13392667230161526,
+   "oursValue": 0.13386263423372394,
    "vendorValue": null,
    "ours": "13.39 %",
    "vendor": null,
@@ -61,7 +61,7 @@
   {
    "key": "rapids",
    "rule": "≤ 2× the vendor's rapid time",
-   "oursValue": 27.460181629154576,
+   "oursValue": 27.459086274113663,
    "vendorValue": null,
    "ours": "27.5 s",
    "vendor": null,
