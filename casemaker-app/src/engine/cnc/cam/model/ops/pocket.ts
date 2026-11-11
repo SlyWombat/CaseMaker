@@ -32,6 +32,7 @@ import type { RapidEstimate, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { estimateCycleSeconds } from '@/engine/cnc/cam/ir';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import { pocketLoops, type OffsetFn, type Polygons } from '@/engine/cnc/cam/pocket';
+import { FACING_EDGE_CLEARANCE_MM } from '@/engine/cnc/cam/facing';
 import { tourNearest } from '@/engine/cnc/cam/tour';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
@@ -362,6 +363,17 @@ function clearedToDepth(open: Polygons, region: Polygons, offset: OffsetFn, dept
   return [...open, ...uncut.map((ring) => [...ring].reverse())];
 }
 
+/**
+ * How far in from the region's edge the pocket's first pass runs, mm. One posted step less than
+ * the cutter's radius: the program rounds the centre to the machine's decimal grid, and a centre
+ * rounded half a step away from the wall leaves a strip the checks read as standing material
+ * (#1227). A region already in cutter-centre space is not inset at all.
+ */
+export function pocketRingInsetMm(toolRadiusMm: number, centreSpace: boolean): number {
+  if (centreSpace) return 0;
+  return toolRadiusMm - FACING_EDGE_CLEARANCE_MM;
+}
+
 export function pocket(opts: PocketOpOptions): OpOutcome {
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
@@ -681,7 +693,7 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     // `floorZ` and `mouthZ` is still correctly cut down to it, then excluded from every level past
     // that, never cut deeper than its own real obstruction allows.
     const levelRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(z));
-    const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset, undefined, loopInset);
+    const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset, undefined, pocketRingInsetMm(toolRadius, opts.centreSpace === true));
     for (const [stepIndex, step] of steps.entries()) {
       const loops = orderedRings(step, comingFrom());
       for (const loop of loops) {
