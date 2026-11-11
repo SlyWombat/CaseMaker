@@ -12,13 +12,14 @@
  * exists. "End the job here" was approved 2026-11-10 as: dismiss the card only, leave the run
  * record/finishedPrograms untouched, no new store field.
  */
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 
 import { attachConsole } from '@/platform/machineConsole';
 import type { MachineObservation } from '@/platform/machineProbe';
 import { unlockMachine } from '@/platform/machineUnlock';
 import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { stoppedPhase, useCutRescueStore } from './cutRescue';
 
 const MUTED = { color: '#9aa4b0' } as const;
 const OK = '#5fc27f';
@@ -36,9 +37,15 @@ export function CutStoppedCard({ machine, target, originWritten, onRegisterAgain
   const release = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
   const runEntry = useMachineRunStore((s) => (target === null ? undefined : s.runs[machineKey(target)]));
   const [recovered, setRecovered] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
   const [busy, setBusy] = useState<'unlock' | null>(null);
-  const stopped = release !== undefined && (release.phase === 'failed' || release.phase === 'stopped');
+  // #1123 items 9/10 — the dismissal is UI state shared with the run card and the status strip
+  // (they must know the card is down); the run record itself is untouched, as approved.
+  const dismissed = useCutRescueStore((s) => (target === null ? false : s.dismissedStopped[machineKey(target)] === true));
+  const stopped = stoppedPhase(release);
+  // A NEW stop on a recovered machine is a new card: the old dismissal does not carry over.
+  useEffect(() => {
+    if (target !== null && !stopped) useCutRescueStore.getState().clearDismissed(machineKey(target));
+  }, [target, stopped]);
   if (machine === null || target === null || !stopped || dismissed) return null;
   const rec = release!;
   const active = rec.active;
@@ -188,9 +195,9 @@ export function CutStoppedCard({ machine, target, originWritten, onRegisterAgain
           'Probe in, one touch on top. If it moved after side 2 began, the two bores.',
           onRegisterAgain,
         )}
-        {choice('engrave-cut-recovery-end', 'End the job here', `Keeps the record: ${rec.files.filter((f) => f.done).length} of ${total} cut. You can open it later and continue.`, () =>
-          setDismissed(true),
-        )}
+        {choice('engrave-cut-recovery-end', 'End the job here', `Keeps the record: ${rec.files.filter((f) => f.done).length} of ${total} cut. You can open it later and continue.`, () => {
+          if (target !== null) useCutRescueStore.getState().dismissStopped(machineKey(target));
+        })}
       </div>
       <span style={{ fontSize: 12, ...MUTED }}>
         This card appears wherever the stop happens — registering, measuring a bit, cutting or cleaning — and names that step. Cleaning never starts

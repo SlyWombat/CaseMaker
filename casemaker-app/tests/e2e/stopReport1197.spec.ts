@@ -34,9 +34,9 @@ test('#1197 — a Home press on a dead link offers its own report, and the repor
   await prepareFakeRun(page);
 
   const runPanel = page.getByTestId('engrave-run').first();
-  await expect(runPanel).toBeVisible();
-  await runPanel.getByTestId('engrave-run-start').click();
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  await page.getByTestId('engrave-cut-card-start').click();
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
+  await expect(runPanel).toBeVisible({ timeout: 30_000 });
 
   // Stop is CONFIRMED by the fake (abort answered, Idle seen), so Home is offered — and it is the
   // operator's press that sends `$H`.
@@ -66,10 +66,12 @@ test('#1197 — a Home press on a dead link offers its own report, and the repor
   // THAT press's failure sentence, not the panel's "home it by hand" note.
   expect(String(report['error'])).toContain('read failed: Connection reset by peer (os error 104)');
   // THIS run's conversation, not the dock's display strings (#1208): the play line is the app's,
-  // with the controller's answer beside it, and every status poll is a real `?` line.
+  // with the controller's answer beside it, and every status poll is a real `?` line. The file is
+  // the release's own name (the cut card's ONE Start, #1123 item 8), so the path is pinned and the
+  // file name is not.
   const transcript = report['transcript'] as { line: string; reply: string }[];
   expect(transcript.length).toBeGreaterThan(0);
-  expect(transcript.some((entry) => entry.line === 'play /sd/gcodes/job.nc')).toBe(true);
+  expect(transcript.some((entry) => entry.line.startsWith('play /sd/gcodes/'))).toBe(true);
   expect(transcript.every((entry) => entry.line !== '')).toBe(true);
   expect(transcript.some((entry) => entry.line === '?')).toBe(true);
   // The machine and the job the entry names.

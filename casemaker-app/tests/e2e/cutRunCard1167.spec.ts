@@ -136,26 +136,8 @@ async function openCutStep3(page: Page): Promise<void> {
   await expect(page.getByTestId('engrave-cut-card')).toBeVisible();
 }
 
-test('#1167 — a 20-program two-sided job is one card: every program, the flip, a fixed control row', async ({ cm, page }) => {
+test('#1167 — a 20-program two-sided job is one card: every program, the flip, and ONE Start', async ({ cm, page }) => {
   await fakeHouse(page);
-  // Each state is seeded BEFORE the Cut surface mounts: the app's run watch owns a machine-run
-  // entry once it is live, and mutating one underneath it starts the watch (a React update loop in
-  // the e2e bundle). A fresh boot per state is the honest way to compare the control row's place.
-  const measure = async (state: { count: number; phase: string; active: number | null; paused?: boolean }) => {
-    await page.goto('/');
-    await cm.ready();
-    await page.evaluate(async () => {
-      await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
-      window.__caseMaker!.engraveReset();
-    });
-    await rememberMachine(page);
-    await seed(page, state);
-    await openCutStep3(page);
-    const card = await page.getByTestId('engrave-cut-card').boundingBox();
-    const controls = await page.getByTestId('engrave-cut-card-controls').boundingBox();
-    if (card === null || controls === null) throw new Error(`the card is not laid out while ${state.phase}`);
-    return { dx: controls.x - card.x, dy: controls.y - card.y, width: controls.width };
-  };
 
   // THE RUNNING STATE, with the list and the running row.
   await page.goto('/');
@@ -186,15 +168,31 @@ test('#1167 — a 20-program two-sided job is one card: every program, the flip,
   await page.getByTestId('engrave-cut-card').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(OUT, 'cut-card-20.png') });
 
-  // THE CONTROL ROW DOES NOT MOVE between idle, running, bit-change and waiting.
-  const running = await measure({ count: 20, phase: 'running', active: 2 });
-  const paused = await measure({ count: 20, phase: 'running', active: 2, paused: true });
-  const idle = await measure({ count: 20, phase: 'ready', active: null });
-  const bitChange = await measure({ count: 20, phase: 'bit-change', active: null });
-  const waiting = await measure({ count: 20, phase: 'closing', active: null });
-  for (const [at, box] of [['paused', paused], ['idle', idle], ['bit-change', bitChange], ['waiting', waiting]] as const) {
-    expect(box, `the control row while ${at}`).toEqual(running);
-  }
+  // #1123 item 8 — RUNNING: the Start is gone and the card's controls are Pause/Stop.
+  await expect(page.getByTestId('engrave-cut-card-controls')).toBeVisible();
+  await expect(page.getByTestId('engrave-cut-card-start')).toHaveCount(0);
+
+  // #1123 item 8 — READY: ONE Start with the ready line, and NO Pause/Stop; the old step-3 block
+  // ("Cut <job>" / "Run <file>.nc") is not rendered while the card is present.
+  await page.goto('/');
+  await cm.ready();
+  await page.evaluate(async () => {
+    await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
+    window.__caseMaker!.engraveReset();
+  });
+  await rememberMachine(page);
+  await seed(page, { count: 20, phase: 'ready', active: null });
+  await openCutStep3(page);
+  // The seed's program 1 is already done, so READY names program 2 and the bit it needs.
+  await expect(page.getByTestId('engrave-cut-card-ready')).toContainText('Ready · program 2 of 20 · next: ');
+  await expect(page.getByTestId('engrave-cut-card-start')).toContainText('Start program 2 of 20');
+  await expect(page.getByTestId('engrave-cut-card-pause')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-card-stop')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-card-running-slot')).toHaveCount(0);
+  // The 150 px reserved block is gone; the card's height is its content.
+  await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-run-start')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-release-start')).toHaveCount(0);
 });
 
 test('#1167 — a one-program job is one row and no flip row', async ({ cm, page }) => {
@@ -210,5 +208,7 @@ test('#1167 — a one-program job is one row and no flip row', async ({ cm, page
   await expect(page.getByTestId('engrave-cut-card-row-1')).toBeAttached();
   await expect(page.getByTestId('engrave-cut-card-row-2')).toHaveCount(0);
   await expect(page.getByTestId('engrave-cut-card-flip')).toHaveCount(0);
-  await expect(page.getByTestId('engrave-cut-card-controls')).toBeVisible();
+  // #1123 item 8 — the one-program job's card is the ONE Start, not a control row.
+  await expect(page.getByTestId('engrave-cut-card-start')).toContainText('Start program 1 of 1');
+  await expect(page.getByTestId('engrave-cut-card-controls')).toHaveCount(0);
 });

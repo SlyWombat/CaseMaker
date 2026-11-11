@@ -547,6 +547,22 @@ describe('#655 the tool-change stop', () => {
     await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeoutMs: 8000 });
     expect(screen.queryByTestId('engrave-run-tool-prompt')).toBeNull();
   }, 30000);
+
+  // #1123 item 9 — ON THE CUT STEP the waiting card owns Continue and Stop, so its `startless` run
+  // panel folds its own prompt and controls (the card carries A's #1202 preview; asserted in
+  // `cutRecoveryCard1169.spec.tsx` and the Cut e2e). The upload screen above has no card — its
+  // prompt stays, because a safety preview never disappears.
+  it('draws no prompt, Continue, Pause or Stop in the Cut step’s startless panel', () => {
+    const key = machineKey(TARGET);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', { nc: 'M02\n', toolKey: 'flat-1.0' });
+    const entry = useMachineRunStore.getState().runs[key]!;
+    useMachineRunStore.setState({ runs: { [key]: { ...entry, running: true, toolWaiting: { awaited: 1 } } } });
+    render(<EngraveMachineRun target={TARGET} startless />);
+    expect(screen.queryByTestId('engrave-run-tool-prompt')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-tool-continue')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-pause')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-stop')).toBeNull();
+  });
 });
 
 // #1202 — THE CLEARANCE THE PREVIEW REVIEWS AGAINST. Without a reading the guard's verdict is

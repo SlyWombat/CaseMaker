@@ -8,6 +8,11 @@
  * actions: Continue (the run's `M490.2` path, or a direct send when no run of ours owns the
  * machine) and Stop.
  *
+ * #1123 item 9 + manager ruling (2026-11-11): the card OWNS the recovery, so A's #1202 preview
+ * lives HERE when the panel's prompt folds away on the Cut step — the same dry line, first-run
+ * mark, statement, headless refusal, hold rule and sender (`requestToolContinue`). A safety
+ * preview may not disappear because the controls moved.
+ *
  * Display + the EXISTING run actions: `toolContinuePlan` is the strip's own decision, and Stop is
  * `useEngraveReleaseStore.stop` — the same handlers the strip and the release step call.
  */
@@ -20,6 +25,9 @@ import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { toolContinuePlan } from '@/components/viewport/machineStripActions';
+import { TOOL_CHANGE_NOTE } from '@/platform/toolChangeDry';
+import { RoutineDryPreview } from './RoutineDryPreview';
+import { TOOL_CHANGE_STATEMENT, toolContinueHeld, useToolChangePreview } from './toolChangePreview';
 
 const MUTED = { color: '#9aa4b0' } as const;
 
@@ -32,8 +40,12 @@ export function CutRecoveryCard({
 }): JSX.Element | null {
   const entry = useMachineRunStore((s) => (target === null ? undefined : s.runs[machineKey(target)]));
   const release = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
-  if (machine === null || target === null || entry?.running !== true || entry.toolWaiting == null) return null;
-  const awaited = entry.toolWaiting.awaited;
+  const waiting = entry?.running === true && entry.toolWaiting != null;
+  // #1202 — the preview is derived on every render (hooks before the early return); it only
+  // matters while the wait is up, which is exactly when the card draws.
+  const preview = useToolChangePreview(target, waiting);
+  if (machine === null || target === null || !waiting) return null;
+  const awaited = entry.toolWaiting?.awaited ?? null;
   const cutter = awaited === null ? null : (getTools().find((e) => e.tool.number === awaited) ?? null);
   const cutterName = cutter === null ? null : toolDisplayName(cutter.tool).split(' · ')[0]!;
   const program = release?.active ?? null;
@@ -72,11 +84,28 @@ export function CutRecoveryCard({
       <p style={{ margin: '6px 0 0', fontSize: 13, ...MUTED }}>
         If the {cutterName ?? 'cutter'} is already in, just continue: the machine will measure it and carry on. Otherwise fit it first.
       </p>
+      {/* #1202 carried onto the card (#1123 item 9): the exact line the Continue sends, this
+          machine's record of the shape, the guard's refusal and the operator's statement. */}
+      <RoutineDryPreview
+        preview={preview.dry}
+        firstRun={preview.firstRun}
+        ticked={preview.ticked}
+        onTick={preview.setTicked}
+        headless={preview.headless}
+        note={TOOL_CHANGE_NOTE}
+        statement={TOOL_CHANGE_STATEMENT}
+      />
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button
           type="button"
           data-testid="engrave-cut-recovery-continue"
-          disabled={entry.stopAsked === true}
+          disabled={toolContinueHeld({
+            stopAsked: entry.stopAsked === true,
+            firstRun: preview.firstRun,
+            refused: preview.dry.refused,
+            ticked: preview.ticked,
+            headless: preview.headless,
+          })}
           style={{ flex: '1 1 auto', padding: 11, borderRadius: 8, border: 0, background: '#4f8ef7', color: '#0b1220', font: 'inherit', fontWeight: 600 }}
           onClick={() => void continuePress()}
         >

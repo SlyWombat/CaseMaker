@@ -79,6 +79,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
 import { CutRunCard } from './CutRunCard';
+import { EngraveMachineRun } from './EngraveMachineRun';
 import { CutFlipCard, flipDue } from './CutFlipCard';
 import { CutEndCard } from './CutEndCard';
 import { CutBitChangeCard } from './CutBitChangeCard';
@@ -134,11 +135,11 @@ import type { CutterChecklistEntry } from '@/types/engraveJob';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { CutRecoveryCard } from './CutRecoveryCard';
 import { CutStoppedCard } from './CutStoppedCard';
+import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
 import { EngraveCutConfirm, DomeChoice, type DomeChoiceProps } from './EngraveCutConfirm';
-import { EngraveMachineRun } from './EngraveMachineRun';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const WARN: CSSProperties = { ...MUTED, color: '#f0b8a8' };
@@ -708,6 +709,25 @@ export function EngraveCutSurface({
     machineRun.end.kind !== 'nothing' &&
     (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id);
   const runOver = runEnded && releaseFinished;
+  // #1123 items 9/10 — THE RESCUE CARDS SIT AT THE TOP OF STEP 3. While one is up it owns the
+  // recovery: the card's own Start/Pause/Stop are not rendered, and the status strip shows the
+  // state in words with no buttons. Each card is scrolled into view ONCE, when it appears.
+  const dismissedStopped = useCutRescueStore((s) => (target === null ? false : s.dismissedStopped[machineKey(target)] === true));
+  const waitingUp = waitingCardUp(machineRun);
+  const stoppedUp = stoppedPhase(releaseRecord) && !dismissedStopped;
+  const rescueUp = waitingUp || stoppedUp;
+  const rescueRef = useRef<HTMLDivElement | null>(null);
+  const rescueWasUp = useRef(false);
+  useEffect(() => {
+    if (rescueUp && !rescueWasUp.current) {
+      window.requestAnimationFrame(() => {
+        const el = rescueRef.current;
+        // jsdom (the unit suites) has no layout; the scroll is the browser's own affordance.
+        if (el !== null && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+    rescueWasUp.current = rescueUp;
+  }, [rescueUp]);
   // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
@@ -1464,20 +1484,6 @@ export function EngraveCutSurface({
           {restart.sentence}
         </p>
       )}
-      {/* #1169 — THE MACHINE'S WAITING PROMPT, above the steps so it is seen whatever step is open. */}
-      <CutRecoveryCard machine={machine} target={target} />
-      {/* #1169 — THE MACHINE STOPPED, at whichever step it happened: recovery first, then the
-          four choices. "End the job here" only dismisses this card (record untouched). */}
-      <CutStoppedCard
-        machine={machine}
-        target={target}
-        originWritten={firstRegistration === null ? null : true}
-        onRegisterAgain={() => {
-          const step2 = document.querySelector<HTMLDetailsElement>('[data-testid="engrave-cut-step-2"]');
-          if (step2 !== null) step2.open = true;
-          document.querySelector<HTMLElement>('[data-testid="engrave-registration"]')?.scrollIntoView({ block: 'center' });
-        }}
-      />
       {/* #1191 — THIS BUILD PLANS THE JOB DIFFERENTLY, AND THAT IS THE OPERATOR'S CALL. Identical
           plans say nothing; a different one is an offer, never a forced re-plan. Keeping is the
           default: the restored programs stay on the blank until the operator presses. */}
@@ -1825,7 +1831,36 @@ export function EngraveCutSurface({
         )}
       </Step>
 
-      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary} forceOpen={flipPending}>
+      {/* #1123 item 10 (manager's review) — A RESCUE CARD IS SEEN FROM ANY STEP. The waiting and
+          stopped cards live at the top of step 3, which is a fold: a stop during registration would
+          leave the card in the DOM but invisible. While one is up, step 3 is current and open. */}
+      <Step
+        number={3}
+        title="Start cut"
+        done={ran}
+        current={currentStep === 3 || rescueUp}
+        summary={step3Summary}
+        forceOpen={flipPending || rescueUp}
+      >
+        {/* #1123 items 9/10 — THE RESCUE CARDS AT THE TOP OF STEP 3, above the program list, and
+            scrolled into view once when they appear. While one is up it is the step's ONE control
+            surface: the run card below offers no Start/Pause/Stop, and the status strip carries
+            the state in words only. */}
+        {rescueUp && (
+          <div ref={rescueRef}>
+            <CutRecoveryCard machine={machine} target={target} />
+            <CutStoppedCard
+              machine={machine}
+              target={target}
+              originWritten={firstRegistration === null ? null : true}
+              onRegisterAgain={() => {
+                const step2 = document.querySelector<HTMLDetailsElement>('[data-testid="engrave-cut-step-2"]');
+                if (step2 !== null) step2.open = true;
+                document.querySelector<HTMLElement>('[data-testid="engrave-registration"]')?.scrollIntoView({ block: 'center' });
+              }}
+            />
+          </div>
+        )}
         {/* #1168 — THE BIT CHANGE, ON THE STEP (mockup 7). Shown for as long as the release is
             paused between programs, never inside a fold: the operator is at the machine and the
             one press they need must be where they are looking. The card calls the same release
@@ -1840,7 +1875,37 @@ export function EngraveCutSurface({
             run order (the running row, the bit-change marks, the flip), the fixed Pause/Stop row,
             and the footnote. Display only — the release step below still runs the job. */}
         {plan !== null && pkg !== null && (
-          <CutRunCard job={job} pkg={pkg} plan={plan} finishedHashes={finishedHashes} target={target} />
+          <CutRunCard
+            job={job}
+            pkg={pkg}
+            plan={plan}
+            finishedHashes={finishedHashes}
+            target={target}
+            programs={releaseSources}
+            // #819 — once THIS job's run has ended, the card draws no Start; the bit-change card
+            // (programs left) or the end card (job over) owns the next press.
+            noStart={runEnded}
+            blocker={
+              step1Blocker ??
+              programBlocker ??
+              ackBlocker ??
+              // #1123 item 8 — a multi-program job states the RELEASE's own gate (the file that
+              // may not be played); a single program states the upload's. The card has one Start,
+              // so it carries the gate of the path that would actually run.
+              (releaseSources.length > 1 ? releaseBlocker : uploadBlocker) ??
+              (releaseSources.length > 1 ? uploadBlocker : null) ??
+              missingReportBlocker ??
+              surfaceGate ??
+              domeG32Blocker ??
+              cutterChecklistBlocker
+            }
+          />
+        )}
+        {/* #1123 item 8 — THE LIVE RUN, BESIDE THE CARD: progress, the log, the end lines and the
+            post-stop Home. It draws NO start of its own (`startless`): the card above is the step's
+            ONE Start. With no prepared run it renders nothing at all. */}
+        {target !== null && (
+          <EngraveMachineRun target={target} startless onProgramLine={onProgramLine} />
         )}
         {/* #1170 — THE TURN. The operator is at the flip: the blank is turned and the corner seated
             before side 2 can register. The one press opens Register; the card stays until side 2 is
@@ -1948,9 +2013,10 @@ export function EngraveCutSurface({
                     runContext={runContextWithDry}
                     surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
                     onLiveStatus={onLiveStatus}
+                    // #1123 item 8 — the card above carries the step's ONE Start.
+                    press={false}
                   />
                 )}
-                <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
               </>
             )}
             {/* #656 — THE EXPERT PATH, unchanged behind a disclosure: the plan, the dry-run
@@ -2005,7 +2071,11 @@ export function EngraveCutSurface({
                     )}
                   </div>
 
-                  {releaseSources.length > 1 ? (
+                  {/* #1123 item 8 — WHILE THE RUN CARD IS UP THE OLD STEP-3 BLOCK IS NOT
+                      RENDERED. The card's ONE Start uploads and runs the release; the old
+                      release step / upload panel and their "Run job.nc" button are gone from
+                      this step. A plan with no package keeps the old block as the fallback. */}
+                  {pkg === null && (releaseSources.length > 1 ? (
                     <>
                     {/* #1123 item 39 — THE ENDED RUN IS A LINE HERE, while programs remain: the
                         done card would take the screen and its next-program press with it. */}
@@ -2074,7 +2144,7 @@ export function EngraveCutSurface({
                       jobEdgeMarginMm={job.edgeMargin}
                       onProgramLine={onProgramLine}
                     />
-                  )}
+                  ))}
                 </section>
               )}
             </details>

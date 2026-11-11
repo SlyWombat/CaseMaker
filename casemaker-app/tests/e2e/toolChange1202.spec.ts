@@ -40,32 +40,33 @@ test('#1202 — the tool-change card shows its line, marks the first run, and th
   await cm.ready();
   await prepareFakeRun(page);
 
-  const runPanel = page.getByTestId('engrave-run').first();
-  await runPanel.getByTestId('engrave-run-start').click();
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  // #1123 item 8 — the Cut step's ONE Start is the run card's; the panel beside it is `startless`.
+  await page.getByTestId('engrave-cut-card-start').click();
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
 
-  // THE STOP: the run is waiting for the tool, and the card is above the Continue.
-  const prompt = runPanel.getByTestId('engrave-run-tool-prompt');
-  await expect(prompt).toBeVisible({ timeout: 120_000 });
-  const routine = runPanel.getByTestId('engrave-registration-routine');
+  // THE STOP: the run is waiting for the tool, and the WAITING CARD carries the preview — #1123
+  // item 9 moved the recovery (and A's #1202 preview with it) onto the card, where the operator is.
+  const card = page.getByTestId('engrave-cut-recovery-waiting');
+  await expect(card).toBeVisible({ timeout: 120_000 });
+  const routine = card.getByTestId('engrave-registration-routine');
   await expect(routine).toHaveAttribute('data-routine', 'tool-change');
   const shape = await routine.getAttribute('data-shape');
   expect(shape).toMatch(/^[0-9a-f]{8}$/);
   // This machine has never continued a tool change: marked, with its own statement gate.
-  await expect(runPanel.getByTestId('engrave-registration-first-run')).toContainText(
+  await expect(card.getByTestId('engrave-registration-first-run')).toContainText(
     'has not run on this machine before',
   );
-  const continueButton = runPanel.getByTestId('engrave-run-tool-continue');
+  const continueButton = card.getByTestId('engrave-cut-recovery-continue');
   await expect(continueButton).toBeDisabled();
 
   // THE SHOWN LIST: exactly the line the Continue will send, and the card says what it is.
-  const shown = await runPanel.evaluate((el) =>
+  const shown = await card.evaluate((el) =>
     [...el.querySelectorAll('[data-testid^="engrave-registration-dry-line-"]')].map((line) =>
       ((line.querySelector('code')?.textContent ?? '') as string).trim(),
     ),
   );
   expect(shown).toEqual(['M490.2']);
-  await expect(runPanel.getByTestId('engrave-registration-dry-note')).toContainText('M490.2 macro');
+  await expect(card.getByTestId('engrave-registration-dry-note')).toContainText('M490.2 macro');
 
   // Keep the proof: the marked card, above the press it holds. Taken here — the card is gone once
   // the run carries on, and a screenshot after the press waits for an element that no longer is.
@@ -73,7 +74,7 @@ test('#1202 — the tool-change card shows its line, marks the first run, and th
   await routine.screenshot({ path: path.join(OUT, 'tool-change-marked.png') });
 
   // THE STATEMENT, then the press.
-  await runPanel.getByTestId('engrave-registration-first-run-tick').check();
+  await card.getByTestId('engrave-registration-first-run-tick').check();
   await expect(continueButton).toBeEnabled();
   await continueButton.click();
 

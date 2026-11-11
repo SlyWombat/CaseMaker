@@ -41,7 +41,11 @@ export async function generateOnce(page: Page, opts: { tool?: string } = {}): Pr
 
 /**
  * The job both run specs share: a generated program, Cut open with its ONE statement given
- * (#797), and the machine's run entry prepared through the store seam an upload ends on.
+ * (#797), the cutters settled, and the release's files marked ON THE CARD — the state the card's
+ * ONE Start (#1123 item 8) needs. The START is the caller's: it presses `engrave-cut-card-start`.
+ *
+ * The files are marked uploaded because the fake console deliberately serves no upload protocol;
+ * the START's bytes are the release action's, which the specs then observe on the wire.
  */
 export async function prepareFakeRun(page: Page): Promise<void> {
   await generateOnce(page, { tool: 'flat-1.0' });
@@ -60,8 +64,51 @@ export async function prepareFakeRun(page: Page): Promise<void> {
   }
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
-  const prepared = await page.evaluate(() =>
-    window.__caseMaker!.machineRunPrepare('192.0.2.10', 2222, 'job.nc', 'M03\nM05\n'),
-  );
-  expect(prepared, 'the machine run entry is prepared').toBe(true);
+  // #1127 — a program is not uploaded until every cutter row is settled; the card's Start carries
+  // the same gate the one-screen press did. The rows' UI is exercised by cutConfirm.spec; here the
+  // entries are written through the job's own action (the same write a tick makes), because a UI
+  // tick rewrites the job and a re-freeze in flight can replace the package under the checklist.
+  await expect(page.getByTestId('engrave-cutter-row').first()).toBeVisible({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    const s = (await import('/src/store/engraveJobStore.ts' as string)) as {
+      useEngraveJobStore: {
+        getState: () => {
+          job: { package?: { hash: string; programs: { toolKey: string }[] } };
+          setCutterChecklistEntry: (hash: string, key: string, entry: { state: 'located'; at: string }) => void;
+        };
+      };
+    };
+    const job = s.useEngraveJobStore.getState().job;
+    const pkg = job.package;
+    if (pkg === undefined) return;
+    for (const key of [...new Set(pkg.programs.map((p) => p.toolKey))]) {
+      s.useEngraveJobStore.getState().setCutterChecklistEntry(pkg.hash, key, { state: 'located', at: new Date().toISOString() });
+    }
+  });
+  // The card plans the release; its Start is enabled once the plan is in hand. Mark every file
+  // uploaded (and the release ready) so the press goes straight to the SAME release action.
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    const m = await import('/src/store/engraveReleaseStore.ts' as string);
+    const state = m.useEngraveReleaseStore.getState();
+    const key = '192.0.2.10:2222';
+    const rec = state.records[key];
+    if (rec === undefined) return;
+    // These specs are about a program's run states, not the cleaning pass or the air walk: the
+    // release is given no walks, so the run ends where the specs look for it to end.
+    const walk = (_w: unknown) => null;
+    m.useEngraveReleaseStore.setState({
+      records: {
+        ...state.records,
+        [key]: {
+          ...rec,
+          phase: rec.phase === 'idle' ? 'ready' : rec.phase,
+          files: rec.files.map((f: { upload: string }) => ({ ...f, upload: 'uploaded' as const })),
+          walks: { airwalk: walk(rec.walks.airwalk), clean: walk(rec.walks.clean) },
+        },
+      },
+    } as never);
+  });
+  // The patch itself re-renders the card; the caller's next press must land on an enabled Start.
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 30_000 });
 }

@@ -20,13 +20,15 @@
  * release step calls; it changes nothing the run sends. The release step below keeps its own
  * controls until #1169 consolidates the run-control path.
  */
-import type { JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 
-import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { useEngraveReleaseStore, type ReleaseRecord } from '@/store/engraveReleaseStore';
+import type { ReleaseSource } from '@/engine/cnc/engrave/release';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
+import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
 import { nextBitChange, remainingSeconds, runClockSeconds } from '@/engine/cnc/engrave/runProgress';
 import type { RunPlan } from '@/engine/cnc/plan';
 import { formatDuration } from '@/engine/cnc/plan/format';
@@ -172,11 +174,55 @@ export interface CutRunCardProps {
   plan: RunPlan;
   finishedHashes: readonly string[];
   target: { host: string; port: number } | null;
+  /**
+   * #1123 item 8 — the release's frozen sources. The old step-3 block is not rendered while this
+   * card is up, so the card plans the release its ONE Start plays. Empty (a display-only caller):
+   * the card reads whatever record the release step already planned, and never re-plans it.
+   */
+  programs?: readonly ReleaseSource[];
+  /** The step-3 gate the old block read; the Start states it as its visible reason. */
+  blocker?: string | null;
+  /**
+   * #819/#1123 item 39 — THIS JOB'S RUN HAS ENDED. On a finished job the press would start the
+   * same program again; with programs left the bit-change card owns the next one. Either way this
+   * card draws no Start.
+   */
+  noStart?: boolean;
 }
 
-export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCardProps): JSX.Element {
+/** Every program and walk file is on the machine (or already ran). */
+function uploadsDone(record: ReleaseRecord): boolean {
+  const files = record.files.every((f) => f.done || f.upload === 'uploaded' || f.upload === 'present');
+  const walks = [record.walks.airwalk, record.walks.clean]
+    .filter((w): w is NonNullable<typeof w> => w !== null)
+    .every((w) => w.upload === 'uploaded' || w.upload === 'present');
+  return files && walks;
+}
+
+export function CutRunCard({
+  job,
+  pkg,
+  plan,
+  finishedHashes,
+  target,
+  programs = [],
+  blocker = null,
+  noStart = false,
+}: CutRunCardProps): JSX.Element {
+  const releasePlan = useEngraveReleaseStore((s) => s.plan);
   const release = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
+  const dismissedStopped = useCutRescueStore((s) => (target === null ? false : s.dismissedStopped[machineKey(target)] === true));
   const runEntry = useMachineRunStore((s) => (target === null ? undefined : s.runs[machineKey(target)]));
+  const [pressing, setPressing] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  // #1123 item 8 — THE CARD PLANS THE RELEASE, as the old block did: while it is up that block is
+  // not rendered, and the record is what the ONE Start plays.
+  useEffect(() => {
+    if (target === null || blocker !== null || programs.length === 0) return;
+    releasePlan({ host: target.host, port: target.port }, job, programs);
+    // The host and port are the machine's identity; a new object with the same address is no change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the address pair, not the object
+  }, [target?.host, target?.port, job, programs, blocker, releasePlan]);
   const progress = runEntry?.progress ?? null;
   const paused = runEntry?.paused === true;
   const runningIndex = release !== undefined && release.phase === 'running' && release.active !== null ? release.active : null;
@@ -193,12 +239,63 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
           )?.bit ?? null);
   const dockKey = target === null ? null : machineKey(target);
   const left = remainingSeconds(progress?.percent ?? null, runClockSeconds(runEntry ?? null, Date.now()));
-  const canControl = dockKey !== null && runningIndex !== null;
-  // #1180/A's acceptance rule — A DISABLED CONTROL SAYS WHY. The fixed row is on the card in every
-  // state, so with no live run both buttons are disabled and each carries the same plain reason a
-  // person needs; Stop adds the machine, which it cannot act on without one.
-  const pauseReason = canControl ? null : 'Nothing is running yet';
-  const stopReason = target === null ? 'Choose the machine first' : canControl ? null : 'Nothing is running yet';
+  // #1123 items 9/10 — WHILE A RESCUE CARD IS UP IT OWNS THE CONTROLS. The waiting card carries the
+  // one Continue and Stop; the stopped card owns its recovery; this card offers neither a Start nor
+  // a Pause/Stop of its own.
+  const waiting = waitingCardUp(runEntry);
+  const stoppedUp = stoppedPhase(release) && !dismissedStopped;
+  const rescueUp = waiting || stoppedUp;
+  // READY: no program running, no rescue card up, and the release is not inside a transition.
+  const phasesWithoutStart = new Set(['running', 'starting', 'uploading', 'retouch', 'airwalk', 'cleaning', 'closing', 'bit-change']);
+  const readyUp = !rescueUp && !noStart && runningIndex === null && (release === undefined || !phasesWithoutStart.has(release.phase));
+  const files = release?.files ?? [];
+  const total = files.length > 0 ? files.length : model.total;
+  const nextIndex = files.length > 0 ? (release?.next ?? files.find((f) => !f.done)?.index ?? null) : 1;
+  const nextFile = nextIndex === null ? null : (files.find((f) => f.index === nextIndex) ?? null);
+  const nextToolKey = nextFile?.toolKey ?? pkg.programs[(nextIndex ?? 1) - 1]?.toolKey ?? null;
+  const nextBit = nextToolKey === null ? null : bitOf(nextToolKey);
+  // "the bit in the spindle": the previous program used the same cutter, or the last prepared run
+  // did — the operator has no change to make.
+  const previousFile = nextIndex === null ? null : [...files].reverse().find((f) => f.index < nextIndex && f.done) ?? null;
+  const spindleKey = runEntry?.context?.toolKey ?? previousFile?.toolKey ?? null;
+  const inSpindle = nextToolKey !== null && spindleKey === nextToolKey;
+  const startReason =
+    startError ??
+    blocker ??
+    (target === null
+      ? 'Choose the machine first'
+      : release === undefined
+        ? 'Planning the release…'
+        : release.phase === 'closing'
+          ? 'Stopping — the vacuum is switching off before anything starts'
+          : null);
+  const pressStart = async (): Promise<void> => {
+    if (target === null || pressing || startReason !== null) return;
+    setPressing(true);
+    setStartError(null);
+    try {
+      // #1123 item 8 — THE ONE START IS THE WHOLE PRESS: it states the operator is at the machine
+      // (the tick the old block asked for), uploads whatever is not on the machine, then runs the
+      // SAME release action the old block's button ran.
+      useEngraveReleaseStore.getState().setAtMachine(target, true);
+      const recordNow = (): ReleaseRecord | undefined => useEngraveReleaseStore.getState().records[machineKey(target)];
+      const before = recordNow();
+      if (before !== undefined && !uploadsDone(before)) await useEngraveReleaseStore.getState().uploadAll(target);
+      const after = recordNow();
+      const failed = after?.files.find((f) => f.upload === 'failed') ?? null;
+      if (failed !== null) {
+        setStartError(failed.uploadNote ?? 'the program was not uploaded — check the machine, then start again');
+        return;
+      }
+      if (after !== undefined && !uploadsDone(after)) {
+        setStartError('the programs are not on the machine yet — start again once the upload finishes');
+        return;
+      }
+      useEngraveReleaseStore.getState().startRelease(target);
+    } finally {
+      setPressing(false);
+    }
+  };
   const vacuum = release?.vacuum ?? 'unknown';
   const airOn = release?.job.blowWithVacuum === true && release?.phase === 'running';
 
@@ -230,9 +327,8 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
         </span>
       </div>
 
-      {/* THE RUNNING ROW — in a FIXED-HEIGHT slot, empty when nothing runs, so the fixed control
-          row below does not move between idle, running, paused and bit-change states. */}
-      <div data-testid="engrave-cut-card-running-slot" style={{ height: 150, marginTop: 8 }}>
+      {/* #1123 item 10 — NO RESERVED BLOCK. The card's height is its content: the running row is
+          here when a program runs and absent when it does not. */}
       {runningRow !== null && (
         <div
           data-testid="engrave-cut-card-running"
@@ -270,7 +366,6 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
           </div>
         </div>
       )}
-      </div>
 
       {/* THE LIST */}
       <div data-testid="engrave-cut-card-list" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 13, maxHeight: 300, overflowY: 'auto' }}>
@@ -318,41 +413,83 @@ export function CutRunCard({ job, pkg, plan, finishedHashes, target }: CutRunCar
         ⇄ a bit change, confirmed by you · after every program a cleaning pass · before the first cut an air walk of the outline
       </p>
 
-      {/* FIXED CONTROL ROW */}
-      <div
-        data-testid="engrave-cut-card-controls"
-        style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #222c38', display: 'flex', gap: 8, alignItems: 'center' }}
-      >
-        <button
-          type="button"
-          data-testid="engrave-cut-card-pause"
-          disabled={!canControl}
-          {...(pauseReason === null ? {} : { title: pauseReason, 'aria-description': pauseReason })}
-          style={{ flex: '1 1 auto', padding: 10, borderRadius: 8, border: '1px solid #3a4a5e', background: '#1b2531', color: '#e6edf1', font: 'inherit', fontWeight: 600 }}
-          onClick={() => {
-            if (dockKey === null) return;
-            if (paused) useMachineRunStore.getState().requestResume(dockKey);
-            else useMachineRunStore.getState().requestPause(dockKey);
-          }}
-        >
-          {paused ? 'Resume' : '❚❚ Pause after this move'}
-        </button>
-        <button
-          type="button"
-          data-testid="engrave-cut-card-stop"
-          disabled={!canControl || target === null}
-          {...(stopReason === null ? {} : { title: stopReason, 'aria-description': stopReason })}
-          style={{ width: 120, padding: 10, borderRadius: 8, border: '1px solid #b3261e', background: '#2a1715', color: '#f08a83', font: 'inherit', fontWeight: 600 }}
-          onClick={() => {
-            if (target !== null) useEngraveReleaseStore.getState().stop(target);
-          }}
-        >
-          ■ Stop
-        </button>
-      </div>
-      <p style={{ ...MUTED, fontSize: 11, margin: '6px 0 0' }}>
-        The red button on the machine is the emergency stop. Stop here finishes the move, switches the vacuum off and homes.
-      </p>
+      {/* #1123 item 8 — READY: the ONE Start, with the line that says which program and bit are
+          next. No Pause, no Stop: nothing is running, and the old block's start control is not
+          rendered while this card is up. */}
+      {readyUp && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #222c38' }}>
+          <p data-testid="engrave-cut-card-ready" style={{ fontSize: 13, color: '#c9d4e2', margin: '0 0 6px' }}>
+            <b>Ready</b> · program {nextIndex ?? 1} of {total} · next: {inSpindle ? 'the bit in the spindle' : (nextBit ?? '—')}
+          </p>
+          <button
+            type="button"
+            data-testid="engrave-cut-card-start"
+            disabled={startReason !== null || pressing}
+            style={{
+              width: '100%',
+              padding: 10,
+              borderRadius: 8,
+              border: 0,
+              background: startReason === null && !pressing ? '#4f8ef7' : '#2a3542',
+              color: startReason === null && !pressing ? '#0b1220' : '#9aa4b0',
+              font: 'inherit',
+              fontWeight: 600,
+            }}
+            onClick={() => void pressStart()}
+          >
+            {pressing
+              ? 'Starting…'
+              : release?.phase === 'stopped'
+                ? `Resume — program ${nextIndex ?? 1} of ${total}`
+                : release?.phase === 'failed'
+                  ? `Try again — program ${nextIndex ?? 1} of ${total}`
+                  : `Start program ${nextIndex ?? 1} of ${total}`}
+          </button>
+          {startReason !== null && (
+            <p data-testid="engrave-cut-card-start-reason" style={{ ...MUTED, fontSize: 12, margin: '4px 0 0' }}>
+              {startReason}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* #1123 item 8 — PAUSE/STOP APPEAR WHEN A PROGRAM RUNS, and only then. The waiting card owns
+          the recovery while the machine is parked. */}
+      {runningRow !== null && !waiting && (
+        <>
+          <div
+            data-testid="engrave-cut-card-controls"
+            style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #222c38', display: 'flex', gap: 8, alignItems: 'center' }}
+          >
+            <button
+              type="button"
+              data-testid="engrave-cut-card-pause"
+              style={{ flex: '1 1 auto', padding: 10, borderRadius: 8, border: '1px solid #3a4a5e', background: '#1b2531', color: '#e6edf1', font: 'inherit', fontWeight: 600 }}
+              onClick={() => {
+                if (dockKey === null) return;
+                if (paused) useMachineRunStore.getState().requestResume(dockKey);
+                else useMachineRunStore.getState().requestPause(dockKey);
+              }}
+            >
+              {paused ? 'Resume' : '❚❚ Pause after this move'}
+            </button>
+            <button
+              type="button"
+              data-testid="engrave-cut-card-stop"
+              disabled={target === null}
+              style={{ width: 120, padding: 10, borderRadius: 8, border: '1px solid #b3261e', background: '#2a1715', color: '#f08a83', font: 'inherit', fontWeight: 600 }}
+              onClick={() => {
+                if (target !== null) useEngraveReleaseStore.getState().stop(target);
+              }}
+            >
+              ■ Stop
+            </button>
+          </div>
+          <p style={{ ...MUTED, fontSize: 11, margin: '6px 0 0' }}>
+            The red button on the machine is the emergency stop. Stop here finishes the move, switches the vacuum off and homes.
+          </p>
+        </>
+      )}
     </section>
   );
 }

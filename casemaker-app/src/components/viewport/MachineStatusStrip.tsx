@@ -10,6 +10,7 @@ import { attachConsole } from '@/platform/machineConsole';
 import { unlockMachine } from '@/platform/machineUnlock';
 import { toolNumberFor } from '@/engine/cnc/cam/ir';
 import { toolContinuePlan } from './machineStripActions';
+import { stoppedPhase, useCutRescueStore, waitingCardUp } from '@/components/panels/cutRescue';
 import { accessoriesFor, machineRecordByAddress, machineRecordByProfile } from '@/store/locationStore';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName } from '@/platform/locationClient';
@@ -302,6 +303,12 @@ export function MachineStatusStrip(): JSX.Element | null {
     };
   }, [monitorOpen]);
   const target = machine === null ? null : machineKey(machine);
+  // #1123 items 9/10 — WHILE A RESCUE CARD IS UP THE STRIP CARRIES NO BUTTONS. The waiting card
+  // owns Continue and Stop; the stopped card owns Unlock, home and the recovery choices. The strip
+  // keeps stating the machine's state in words, which is the ruling's own division.
+  const cutRelease = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[target]));
+  const dismissedStopped = useCutRescueStore((s) => (target === null ? false : s.dismissedStopped[target] === true));
+  const cutRescueUp = waitingCardUp(prepared) || (stoppedPhase(cutRelease) && !dismissedStopped);
   // #652 — A RELEASE'S OWN VACUUM WORDS EXPIRE THE MANUAL ONES. The accessory store keeps what a
   // press concluded per target and nothing clears it, so a manual press before a run masked the
   // record of what the program then sent (M331 on, icon off). When the release's record moves it is
@@ -733,7 +740,7 @@ export function MachineStatusStrip(): JSX.Element | null {
         </span>
       )}
       {/* #1123 items 32/33 — the two recoveries, where their words are. */}
-      {line?.state === 'Tool' && (
+      {line?.state === 'Tool' && !cutRescueUp && (
         <button
           type="button"
           data-testid="machine-status-tool-continue"
@@ -744,7 +751,7 @@ export function MachineStatusStrip(): JSX.Element | null {
           Continue (M490.2)
         </button>
       )}
-      {state === 'Alarm' && (
+      {state === 'Alarm' && !cutRescueUp && (
         <span style={{ display: 'inline-flex', gap: 4, flex: 'none' }}>
           <button
             type="button"
@@ -834,7 +841,7 @@ export function MachineStatusStrip(): JSX.Element | null {
           )}
         </span>
       )}
-      {!idle && (
+      {!idle && !cutRescueUp && (
         <button
           type="button"
           data-testid="machine-status-stop"

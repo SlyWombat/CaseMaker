@@ -29,8 +29,8 @@ test('#618 — pause, resume from the paused line, and Stop while paused', async
   await cm.ready();
   await prepareFakeRun(page);
   const runPanel = page.getByTestId('engrave-run').first();
-  await runPanel.getByTestId('engrave-run-start').click();
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  await page.getByTestId('engrave-cut-card-start').click();
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
   await expect.poll(() => fake.lines().filter((l) => l === '?').length, { timeout: 20_000 }).toBeGreaterThan(2);
 
   // ── PAUSED: `suspend` goes out; the strip reads Paused; the card is Resume + Stop; the

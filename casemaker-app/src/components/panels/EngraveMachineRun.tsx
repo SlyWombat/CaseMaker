@@ -18,7 +18,7 @@
  * machine CONFIRMED (Idle, vacuum off).
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
 import { describeEndLine, programOwnsVacuum, runSettings } from '@/platform/machineRun';
 import { machineKey, runTranscriptFor, useMachineRunStore } from '@/store/machineRunStore';
@@ -30,16 +30,13 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { formatDuration } from '@/engine/cnc/plan';
 import { useCncModeStore } from '@/store/cncModeStore';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
-import { dryToolChange, TOOL_CHANGE_NOTE } from '@/platform/toolChangeDry';
+import { TOOL_CHANGE_NOTE } from '@/platform/toolChangeDry';
 import { RoutineDryPreview } from './RoutineDryPreview';
-import { routineCompleted } from '@/platform/routineRecord';
-import { firstRunAutomationRefusal } from '@/platform/automation';
-import { useLocationStore } from '@/store/locationStore';
-import { useSettingsStore } from '@/store/settingsStore';
-import { jobMachine } from '@/engine/cnc/calibration';
-import { clearanceZOf } from '@/engine/cnc/machine';
+import { TOOL_CHANGE_STATEMENT, toolContinueHeld, useToolChangePreview } from './toolChangePreview';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 /** #655 — the waiting prompt's box: the same frame the panel's other notices use. */
@@ -61,10 +58,21 @@ export interface EngraveMachineRunProps {
    * whichever component started it.
    */
   controlled?: boolean;
+  /**
+   * #1123 item 8 — THE RUN CARD CARRIES THE STEP'S ONE START. `startless` draws the live run, the
+   * log, the end lines and the recoveries, but never a start of its own (nor the vacuum sentence
+   * that belongs to it). The operator's start is the run card above.
+   */
+  startless?: boolean;
 }
 
 /** The run panel for a machine, or nothing when no program has been prepared for it. */
-export function EngraveMachineRun({ target, onProgramLine, controlled = false }: EngraveMachineRunProps): JSX.Element | null {
+export function EngraveMachineRun({
+  target,
+  onProgramLine,
+  controlled = false,
+  startless = false,
+}: EngraveMachineRunProps): JSX.Element | null {
   const machine = machineKey(target);
   const entry = useMachineRunStore((s) => s.runs[machine]);
   const key = runKey(target, entry?.programHash ?? '');
@@ -106,31 +114,20 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     setRunTranscript(lines.length > 0 ? lines.join('\n') : null);
   }, [entry?.lines, setRunTranscript]);
   // #1202 — THE TOOL CHANGE'S OWN PREVIEW. The firmware's `Tool` stop is a motion routine of its
-  // own: the card shows the exact line the Continue sends, marks a shape this machine has never
-  // completed, and holds the press for the operator's own statement. The completion is recorded by
-  // the run store when the controller leaves `Tool` after OUR line (the watch's tool-done event).
-  const locationMachine = useLocationStore(
-    (s) => s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
-  );
-  const calibration = useSettingsStore((s) => s.machineCalibration);
-  // D's #1199 — the clearance is REQUIRED, never defaulted. An unknown machine is an unknown
-  // clearance: with no record for this host:port there is no frame to read, and inventing one (a
-  // Z1 the app assumed) would review the line against numbers this machine never stated. An
-  // unread frame cannot answer either; the preview's refusal speaks in both cases.
-  const toolClearanceZ = useMemo(() => {
-    if (locationMachine?.profileId == null) return null;
-    try {
-      return clearanceZOf(jobMachine({ machineId: locationMachine.profileId }, calibration));
-    } catch {
-      return null;
-    }
-  }, [locationMachine?.profileId, calibration]);
-  const toolDry = useMemo(() => dryToolChange(toolClearanceZ), [toolClearanceZ]);
-  const [toolTicked, setToolTicked] = useState(false);
-  const toolWaiting = entry?.toolWaiting != null;
-  useEffect(() => setToolTicked(false), [toolWaiting]);
-  const toolFirstRun = toolWaiting && !routineCompleted(locationMachine, toolDry.identity);
-  const toolHeadless = firstRunAutomationRefusal({ firstRun: toolFirstRun });
+  // own: the surface shows the exact line the Continue sends, marks a shape this machine has never
+  // completed, and holds the press for the operator's own statement. The derivation is shared with
+  // the Cut step's waiting card (#1123 item 9), which carries the same preview when this panel's
+  // prompt folds away there — see `toolChangePreview.ts`.
+  const toolPreview = useToolChangePreview(target, entry?.toolWaiting != null);
+  const { dry: toolDry, firstRun: toolFirstRun, ticked: toolTicked, setTicked: setToolTicked, headless: toolHeadless } = toolPreview;
+  // #1123 item 9 — EXACTLY ONE CONTINUE AND ONE STOP. On the CUT STEP (the `startless` instance —
+  // the only screen that renders the rescue cards) the panel's own prompt and Pause/Stop fold away
+  // while a card is up; the card carries them, #1202's tool-change preview included. Elsewhere (the
+  // upload screen) no card exists, so the prompt stays: a safety preview never disappears because
+  // controls moved.
+  const cutRelease = useEngraveReleaseStore((s) => s.records[machine]);
+  const dismissedStopped = useCutRescueStore((s) => s.dismissedStopped[machine] === true);
+  const cutRescueUp = startless && (waitingCardUp(entry) || (stoppedPhase(cutRelease) && !dismissedStopped));
   if (!entry) return null;
   // #655 — the firmware's `Tool` stop, in our words: the tool it waits for, named by the run's own
   // cutter (its context key) so the operator reads the same name the strip and the sheet use.
@@ -231,7 +228,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
       {/* #819 — once a run has ENDED there is nothing left to start from here: the card's action is
           the next step, and a second Start beside it would be a second primary. A fresh upload
           resets the entry (end null), so the button returns for the next program. */}
-      {!controlled && entry.end === null && (
+      {!controlled && !startless && entry.end === null && (
         <button
           type="button"
           data-testid="engrave-run-start"
@@ -245,13 +242,13 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           {running ? 'Running…' : `Run ${entry.filename}`}
         </button>
       )}
-      {!controlled && entry.end === null && (
+      {!controlled && !startless && entry.end === null && (
         <p style={MUTED} data-testid="engrave-run-vacuum">
           {vacuumLine}
         </p>
       )}
 
-      {!controlled && running && (
+      {!controlled && running && !cutRescueUp && (
         <>
           {entry.toolWaiting != null && (
             <div data-testid="engrave-run-tool-prompt" style={{ ...BOX, borderColor: '#5a6b7f' }}>
@@ -266,16 +263,18 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
                 onTick={setToolTicked}
                 headless={toolHeadless}
                 note={TOOL_CHANGE_NOTE}
-                statement="I am at the machine — the bit is fitted in the spindle, the head is clear, and I will stay at the Stop."
+                statement={TOOL_CHANGE_STATEMENT}
               />
               <button
                 type="button"
                 data-testid="engrave-run-tool-continue"
-                disabled={
-                  // A refused line holds a FIRST-RUN press; on a proved shape the refusal stays
-                  // visible but never takes away the only way on from a mid-job tool stop.
-                  entry.stopAsked || (toolFirstRun && (toolDry.refused || !toolTicked)) || toolHeadless !== null
-                }
+                disabled={toolContinueHeld({
+                  stopAsked: entry.stopAsked,
+                  firstRun: toolFirstRun,
+                  refused: toolDry.refused,
+                  ticked: toolTicked,
+                  headless: toolHeadless,
+                })}
                 style={{ width: '100%', padding: 7, marginTop: 4 }}
                 onClick={() => requestToolContinue(machine)}
               >
