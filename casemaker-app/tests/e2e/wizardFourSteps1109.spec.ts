@@ -13,6 +13,9 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
 
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  // #1100's preset grid is the step's face: the engine's chip list (and so the pocket chip) sits
+  // behind Something else…, which is where the walk's pick lives now.
+  await page.getByTestId('start-wizard-preset-something-else').click();
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.screenshot({ path: 'test-results/1109-step2-operation.png' });
 
