@@ -104,10 +104,13 @@ async function fakeHouse(page: Page): Promise<{
   // #1179 — the machine write is real in this walk: the "This is a new blank" press PUTs the
   // machine record and the next read serves it back, so `currentBlank` genuinely moves.
   let machineOverride: Record<string, unknown> | null = null;
-  // #1179 — the ETag moves when the machine is written. The location store refuses a read whose
-  // validator it already holds ("the same read without churn"), so a fixed ETag would leave the
-  // card reading the pre-mint record and the walk would prove nothing about `currentBlank`.
+  // #1179 — the ETag moves on EVERY machine write, as the service's does: its ETag is computed
+  // over the served bytes (`src-tauri/src/etag.rs`), so two writes are two validators. The
+  // location store refuses a read whose validator it already holds ("the same read without
+  // churn"); a one-step ETag left the card reading the pre-mint record once #1202's completion
+  // write made the mint the SECOND machine PUT of this walk.
   let etag = '"e1"';
+  let writes = 0;
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
     const p = url.pathname.replace(/^.*\/api\/v1/, '');
@@ -125,7 +128,8 @@ async function fakeHouse(page: Page): Promise<{
     }
     if (route.request().method() === 'PUT' && /^\/location\/machines\/[^/]+$/.test(p)) {
       machineOverride = route.request().postDataJSON() as Record<string, unknown>;
-      etag = '"e2"';
+      writes += 1;
+      etag = `"e${writes + 1}"`;
       return route.fulfill({ status: 200, contentType: 'application/json', headers: { etag }, body: '{}' });
     }
     if (p === '/location') return json(locationView(machineOverride));
