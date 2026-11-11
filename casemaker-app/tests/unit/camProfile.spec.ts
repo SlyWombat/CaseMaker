@@ -358,6 +358,31 @@ describe('placeTabs mid-side (#1206)', () => {
     for (const gap of gaps(placement.spans, 2 * (300 + 60))) expect(gap).toBeLessThanOrEqual(40 + 1e-6);
   });
 
+  it('a short 15–25 mm edge keeps one centred tab even with the shop’s 6 mm tabs (#1206)', () => {
+    // The regression the base-samples diff caught: relief perimeters are 15–25 mm edges, and
+    // 2 x 6 mm of margin at each end would empty every one — the part would post with no tabs and
+    // no finding. The capped margin keeps one centred tab on any edge that fits a span.
+    const placement = placeTabs(rect(22, 18)[0]!, 4, 6, R);
+    expect(placement.unplaceable).toBe(0);
+    expect(placement.added).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    const mids: [number, number][] = [
+      [11, 0],
+      [22, 9],
+      [11, 18],
+      [0, 9],
+    ];
+    for (const [mx, my] of mids) {
+      expect(
+        placement.spans.some((span) => {
+          const [cx, cy] = centreOf(span);
+          return Math.hypot(cx - mx, cy - my) <= 0.01;
+        }),
+        `a span is centred at (${mx}, ${my})`,
+      ).toBe(true);
+    }
+  });
+
   it('a limit the corner margins cannot meet still fills every edge, and the margin wins', () => {
     // A 20 x 12 part with a 7 mm limit: each side holds one centred tab (the capped margin keeps
     // a tab as far from the corners as the edge allows), so the span limit adds one to each 12 mm
