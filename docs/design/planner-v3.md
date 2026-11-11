@@ -475,6 +475,7 @@ Asked one by one; these replace the open list below.
 5. **Cycle basis: our estimator. Already settled on the bench.** The 2026-11-05 air run of Makera's tray program took 4,576 s on the controller's clock; our estimator read 4,542.5 s (+0.7 %); Makera's header, 2,854.5 s, is 1.6× short. The header is printed as a fact only. The earlier documents that call this test "still owed" are stale, and so was this document's first draft.
 6. **The oracle is retired now.** Until #924's independent design check covers them, chamfers and cut-outs are checked by the verifier only; the receipt says so for those items.
 7. **Leftover tolerance: yes, 0.5 points of coverage.** Registry entry `plan.leftoverEquivalencePct`. Chains within it are equal on leftover, and time and bit changes decide. The receipt states when it decided a pick.
+   **Amended by the analyst, 2026-11-11, on evidence (#1219, #1224):** the tolerance never forgives *tall* leftover. On the tray it let the pick drop a rest pass that had been removing 1,530 cells standing 5.77 mm (0.11 points by count, a fin by height). With the tolerance on, fewer cells standing more than `plan.leftoverTallMm` (1.0 mm) always ranks first, and the 0.5 points apply only between chains with the same tall count. Reported to the maintainer as a refinement of his ruling.
 
 ## 11. Open decisions as first put (superseded by 11a)
 
