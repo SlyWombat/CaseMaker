@@ -3561,6 +3561,23 @@ export function pocketStepOverMm(diameterMm: number, rowStepOverMm: number | nul
   return Math.min(rowStepOverMm, diameterMm / 2);
 }
 
+/**
+ * #1232 (planner v3 A6) — THE TALL-GUARD SHEET LINE, in one place so the sheet and its test
+ * cannot drift. `tallMm` is the shop's `plan.leftoverTallMm`; the caller reads it, never this
+ * function, so the sentence states the value the rule actually used.
+ */
+export function tallGuardSentence(
+  guard: NonNullable<SequenceChoice['tallGuard']>,
+  tallMm: number,
+): string {
+  const extraMm2 = Math.round(guard.extraTallCells * guard.cellAreaMm2 * 10) / 10;
+  const minutes = Math.max(1, Math.round(guard.givenUpSeconds / 60));
+  return (
+    `A set of cutters about ${minutes} min faster was passed over: it would leave ${extraMm2} mm² more standing over ${tallMm} mm tall. ` +
+    `Material that tall is never traded for time (a shop setting).`
+  );
+}
+
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
   // #1018 — ONE Z DATUM, by construction: `zPasses`, SAFE_Z/HOP_Z (ir.ts) and the post's own
   // `probed-top-face` convention all assume IR Z 0 is the STOCK top, and `tree` already is —
@@ -4700,13 +4717,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
   // #1232 (planner v3 A6) — the tall rule kept a slower set: say what was passed over and why.
   if (choice.tallGuard !== undefined) {
-    const g = choice.tallGuard;
-    const extraMm2 = Math.round(g.extraTallCells * g.cellAreaMm2 * 10) / 10;
-    const minutes = Math.max(1, Math.round(g.givenUpSeconds / 60));
     const tallMm = opts.leftoverTallMm ?? readDefault(null, 'plan.leftoverTallMm').value;
-    const text =
-      `A set of cutters about ${minutes} min faster was passed over: it would leave ${extraMm2} mm² more standing over ${tallMm} mm tall. ` +
-      `Material that tall is never traded for time (a shop setting).`;
+    const text = tallGuardSentence(choice.tallGuard, tallMm);
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }

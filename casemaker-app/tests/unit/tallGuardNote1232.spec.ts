@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { tallGuardSentence } from '@/engine/cnc/cam/model/plan';
 import { tallGuardOf } from '@/engine/cnc/cam/model/sequence';
 
 describe('#1232 the tall-guard note', () => {
@@ -34,5 +35,12 @@ describe('#1232 the tall-guard note', () => {
       extraTallCells: 3,
       givenUpSeconds: 1,
     });
+  });
+
+  it('the sheet sentence — 48 cells at 0.01 mm² and 225 s, over a 1 mm tall limit', () => {
+    expect(tallGuardSentence({ extraTallCells: 48, cellAreaMm2: 0.01, givenUpSeconds: 225 }, 1)).toBe(
+      'A set of cutters about 4 min faster was passed over: it would leave 0.5 mm² more standing over 1 mm tall. ' +
+        'Material that tall is never traded for time (a shop setting).',
+    );
   });
 });
