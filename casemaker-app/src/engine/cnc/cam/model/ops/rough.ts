@@ -32,6 +32,7 @@ import type { RemainderRegion } from '../features';
 import type { ClSurface } from '../clsurface';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 import { maskLoopsFromPredicate } from './rasterMask';
+import { isPlunge } from '../../printedZ';
 
 export interface RoughOpOptions {
   cutter: Tool;
@@ -556,7 +557,8 @@ export function rough(opts: RoughOpOptions): OpOutcome {
         // it on for the ball fallback only; the flat's own joins are proven now too).
         pathClClear(from, to, (x, y) => opts.clSurface.dropCutter(x, y), Math.max(pitch / 4, 0.05), opts.clSurface.toleranceMm);
       if (rides) {
-        const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+        // #1214's ruling (b) — a descent on the POSTED grid, the one rule every op shares.
+        const f = isPlunge(from.z, to.z) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
         moves.push({ kind: 'feed', x: to.x, y: to.y, z: to.z, f });
       } else {
         // THE DIP CLASS: follow the skim's own target where the chord would dip below it — the

@@ -23,6 +23,7 @@
 
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
 import { dropRow, type DroppedPoint } from './rowDropper';
+import { isPlunge } from '../printedZ';
 
 export interface RidePoint {
   x: number;
@@ -116,7 +117,7 @@ export function followCutSurface(
     const a = points[i - 1]!;
     const b = points[i]!;
     const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    const f = isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
     followSeconds += (d / f) * 60;
     moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
   }
@@ -199,7 +200,7 @@ export function followShortJoin(
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f: b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin });
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f: isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin });
   }
   return moves;
 }
@@ -241,7 +242,7 @@ export function followLinearCutSurface(
     const a = points[i - 1]!;
     const b = points[i]!;
     const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const f = b.z < a.z - 1e-9 ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    const f = isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
     followSeconds += (d / f) * 60;
     moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
   }

@@ -37,6 +37,7 @@ import { dropRow, type DroppedPoint } from '../rowDropper';
 import { cutterKeyOf } from '../sequence';
 import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
 import { ballScallopStepOver } from '../../../ballScallop';
+import { isPlunge } from '../../printedZ';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 
 export type FinishKind = 'flat-raster' | 'ball-scallop';
@@ -582,7 +583,9 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       joinCounts.ride++;
       // A DESCENDING LINK IS A CUT INTO LOWER GROUND: it runs at the plunge rate, the same rule
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
-      const f = to.z < from.z - 1e-9 ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+      // #1214's ruling (b) — a descent is decided on the POSTED grid: a move that changes no
+      // printed digit is not a descent (`cam/printedZ.ts`).
+      const f = isPlunge(from.z, to.z) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
       return [{ kind: 'feed', x: to.x, y: to.y, z: to.z, f }];
     }
     // #1030 (the manager's ruling) — A SHORT JOIN REFUSED ONLY BY THE CREASE IS FOLLOWED, not
@@ -820,8 +823,16 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       if (prevExit === null) {
         // The run's own FIRST feed is a PLUNGE (straight down from the hop height into material),
         // never at the cutting feed — the same bug 9e976f0b fixed in `ops/pocket.ts`.
+        // #1214's ruling (b) — the same posted-grid test as every other descent; the feed's own
+        // start Z is the hop the rapid just reached.
         moves.push({ kind: 'rapid', x: entryPoint.x, y: entryPoint.y, z: opts.hopZMm });
-        moves.push({ kind: 'feed', x: entryPoint.x, y: entryPoint.y, z: entryPoint.z, f: opts.feeds.plungeFeedMmPerMin });
+        moves.push({
+          kind: 'feed',
+          x: entryPoint.x,
+          y: entryPoint.y,
+          z: entryPoint.z,
+          f: isPlunge(opts.hopZMm, entryPoint.z) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin,
+        });
       } else {
         const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };
         moves.push(...joinMoves(from, entryPoint, prevLevelZ ?? prevExit.z));
