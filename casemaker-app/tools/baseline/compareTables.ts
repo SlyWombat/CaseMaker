@@ -423,6 +423,13 @@ export function mdTable(headers: string[], rows: string[][]): string {
 
 const short = (sha: string): string => sha.slice(0, 9);
 
+/** A section one folder never ran (a rerun with --only) is said so, not shown as a table of zeros and removals. */
+function missingSide(label: string, nBefore: number, nAfter: number): string | null {
+  if (nBefore > 0 && nAfter === 0) return `${label}: the after folder holds none (that section was not run there).`;
+  if (nAfter > 0 && nBefore === 0) return `${label}: the before folder holds none (that section was not run there).`;
+  return null;
+}
+
 export function buildComparison(i: ComparisonInput): string {
   const out: string[] = [];
   const b = i.before;
@@ -455,45 +462,67 @@ export function buildComparison(i: ComparisonInput): string {
 
   out.push('## 3. Reference parts against Makera\n');
   const refs = referenceRows(i.references.before, i.references.after);
-  if (refs.highlighted.length > 0) {
+  const refGap = missingSide('Reference parts', i.references.before.length, i.references.after.length);
+  if (refGap) {
+    out.push(refGap + '\n');
+  } else if (refs.highlighted.length > 0) {
     out.push('**Refused on one side only:**\n');
     for (const h of refs.highlighted) out.push(`- ${h.text}`);
     out.push('');
   }
-  out.push(mdTable(REF_HEADERS, refs.rows));
+  if (!refGap) out.push(mdTable(REF_HEADERS, refs.rows));
   out.push('');
 
   out.push('## 4. Cut-into, like for like\n');
   out.push('Makera\'s figure and ours are counted at the same floor and on the same side of the allowances in each table; the floor is in the heading. A figure the saved files do not hold at that floor reads "not recorded at this floor" and no other floor is substituted.\n');
   for (const t of i.cutInto) {
     out.push(`### ${t.title}\n`);
-    out.push(mdTable(['part', 'Makera', 'ours before', 'ours after', 'change'], cutIntoRows(t.parts, t.floor)));
+    const gap = missingSide('Cut-into', t.parts.filter((p) => p.before !== null).length, t.parts.filter((p) => p.after !== null).length);
+    out.push(gap ? gap + '\n' : mdTable(['part', 'Makera', 'ours before', 'ours after', 'change'], cutIntoRows(t.parts, t.floor)));
     out.push('');
   }
 
   out.push('## 5. Samples\n');
   const s = statusTables(i.samples.before, i.samples.after);
-  out.push(mdTable(['import/plan/check', 'before', 'after'], s.counts));
-  out.push('\nSamples whose status changed:\n');
-  out.push(s.changed.length === 0 ? 'none.' : mdTable(['sample', 'before', 'after'], s.changed));
-  out.push('\nTen largest changes in wall seconds:\n');
-  out.push(s.largest.length === 0 ? 'none recorded.' : mdTable(['sample', 'before (s)', 'after (s)', 'change'], s.largest));
-  out.push('');
+  const sampleGap = missingSide('Samples', i.samples.before.length, i.samples.after.length);
+  if (sampleGap) {
+    out.push(sampleGap + '\n');
+  } else {
+    out.push(mdTable(['import/plan/check', 'before', 'after'], s.counts));
+    out.push('\nSamples whose status changed:\n');
+    out.push(s.changed.length === 0 ? 'none.' : mdTable(['sample', 'before', 'after'], s.changed));
+    out.push('\nTen largest changes in wall seconds:\n');
+    out.push(s.largest.length === 0 ? 'none recorded.' : mdTable(['sample', 'before (s)', 'after (s)', 'change'], s.largest));
+    out.push('');
+  }
 
   out.push('## 6. Demo cards\n');
   const c = statusTables(i.cards.before, i.cards.after);
-  out.push(mdTable(['verdict', 'before', 'after'], c.counts));
-  out.push('\nCards whose verdict changed:\n');
-  out.push(c.changed.length === 0 ? 'none.' : mdTable(['card', 'before', 'after'], c.changed));
-  out.push('\nTen largest changes in compute seconds:\n');
-  out.push(c.largest.length === 0 ? 'none recorded.' : mdTable(['card', 'before (s)', 'after (s)', 'change'], c.largest));
-  out.push('');
+  const cardGap = missingSide('Demo cards', i.cards.before.length, i.cards.after.length);
+  if (cardGap) {
+    out.push(cardGap + '\n');
+  } else {
+    out.push(mdTable(['verdict', 'before', 'after'], c.counts));
+    out.push('\nCards whose verdict changed:\n');
+    out.push(c.changed.length === 0 ? 'none.' : mdTable(['card', 'before', 'after'], c.changed));
+    out.push('\nTen largest changes in compute seconds:\n');
+    out.push(c.largest.length === 0 ? 'none recorded.' : mdTable(['card', 'before (s)', 'after (s)', 'change'], c.largest));
+    out.push('');
+  }
 
   out.push('## 7. Programs\n');
   if (i.programs.length === 0) out.push('No program lists were saved on both sides.\n');
   for (const g of i.programs) {
     const count = (st: ProgramStatus): number => g.rows.filter((r) => r.status === st).length;
     out.push(`### ${g.group}\n`);
+    if (g.rows.length > 0 && (count('removed') === g.rows.length || count('added') === g.rows.length)) {
+      out.push(`Programs exist in the ${count('removed') === g.rows.length ? 'before' : 'after'} folder only (${g.rows.length}); the other run did not produce this part.\n`);
+      continue;
+    }
+    if (g.rows.length === 0) {
+      out.push('No programs on either side.\n');
+      continue;
+    }
     out.push(`${count('identical')} identical, ${count('changed')} changed, ${count('added')} added, ${count('removed')} removed.\n`);
     const moved = g.rows.filter((r) => r.status !== 'identical');
     if (moved.length > 0) out.push(mdTable(['program', 'status', 'md5 before', 'md5 after'], moved.map((r) => [r.name, r.status, r.before ?? MISSING, r.after ?? MISSING])));

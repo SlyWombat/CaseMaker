@@ -164,4 +164,22 @@ describe('#1233 baseline comparison tables', () => {
     expect(doc).toContain('c2dd27afa');
     expect(doc).toContain('mesh flag');
   });
+
+  it('10. a section the after folder never ran is said so, not shown as zeros and removals', () => {
+    const doc = buildComparison({
+      before: { sha: 'a'.repeat(40), tag: 'v0.2', harnessPatches: [] },
+      after: { sha: 'b'.repeat(40), tag: null, harnessPatches: [] },
+      headline: { before: head(8005, 100), after: head(8005, 100) },
+      references: { before: [{ part: 'organizer', verdict: 'match' }], after: [] },
+      cutInto: [],
+      samples: { before: [{ id: 's', status: 'pass/pass/pass' }], after: [] },
+      cards: { before: [{ id: 'j01', status: 'match' }], after: [] },
+      programs: [{ group: 'reference organizer', rows: programRows({ 'p1.nc': 'x' }, {}) }],
+      pictures: [{ label: 'organizer', beforeRel: 'pictures/b.png', afterRel: null }],
+    });
+    expect(doc).toContain('the after folder holds none');
+    expect(doc).toContain('Programs exist in the before folder only');
+    expect(doc).toContain('no picture in this run');
+    expect(doc).not.toMatch(/\| fail \| 1 \| 0 \|/);
+  });
 });

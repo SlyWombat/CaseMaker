@@ -176,6 +176,7 @@ RC=$?
 [ "$DRY" = 1 ] && exit "$RC"
 
 # ---------------------------------------------------------------- the new folder's manifest
+if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true; fi
 python3 - "$MANIFEST" "$TMP/manifest.json" "$OUT" "$SHA_REF" "$STARTED" "$ONLY" "$RC" <<'PY'
 import glob, json, os, platform, re, subprocess, sys
 src, replayed, out, ref, started, only, rc = sys.argv[1:8]
