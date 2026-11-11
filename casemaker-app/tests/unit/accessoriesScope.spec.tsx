@@ -315,6 +315,44 @@ describe('#601 — the detail rail edits the label and retires', () => {
   });
 });
 
+// #1200 — THE OPERATOR'S TOUCH RESTRICTION, on the probe's own rail: "Use for top touches only",
+// with the reason and the date it changed. A mount has no such control.
+describe('#1200 — the probe rail restricts a unit to top touches', () => {
+  let calls: Array<{ method: string; path: string; body: unknown }>;
+
+  beforeEach(() => {
+    calls = [];
+    setHouseClientLoader(async () => fakeClient((method, path, body) => calls.push({ method, path, body })));
+  });
+
+  it('the toggle and its reason save onto the probe record, dated', async () => {
+    seed();
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-probe-1'));
+    const toggle = screen.getByTestId('manage-acc-touches-zonly') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByTestId('manage-acc-touches-reason'), {
+      target: { value: 'the ball tip may not be 100% straight down' },
+    });
+    fireEvent.click(screen.getByTestId('manage-acc-save'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const sent = calls[0]!.body as FixtureRecord;
+    expect(sent.touches).toBe('z-only');
+    expect(sent.touchesReason).toBe('the ball tip may not be 100% straight down');
+    expect(typeof sent.touchesSince).toBe('string');
+    // The measured record rides along untouched.
+    expect(sent.unit).toMatchObject({ tipDiameterMm: 2 });
+  });
+
+  it('a mount has no touch control', () => {
+    seed();
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-vise-1'));
+    expect(q('manage-acc-touches-zonly')).toBeNull();
+  });
+});
+
 describe('#595 — the records the detail rail states', () => {
   it('names the probe’s last M491 and its M119 rest, dated', () => {
     const probe: FixtureRecord = {

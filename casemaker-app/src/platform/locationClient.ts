@@ -271,6 +271,16 @@ export const FixtureRecordSchema = z
     constants: z.record(z.string(), z.unknown()).default({}),
     unit: z.record(z.string(), z.unknown()).default({}),
     provenance: bedProvenance.default({}),
+    /**
+     * #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT: `z-only` never plans a sideways
+     * `G38.3`, `all` keeps its instrument's own capability. Absent means the unit's default —
+     * `all` for a 3D variant, `z-only` for the wired V2 (`probeFor` derives it). The reason and
+     * date are the operator's record of the decision; all three are optional so every record
+     * written before #1200 stays valid.
+     */
+    touches: z.enum(['z-only', 'all']).optional(),
+    touchesReason: bedText.optional(),
+    touchesSince: bedText.optional(),
     // #597 — the house owns every accessory; a unit is in the box or checked out to one machine.
     whereabouts: AccessoryWhereSchema.default({ kind: 'box' }),
     history: z

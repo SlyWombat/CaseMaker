@@ -2568,6 +2568,18 @@
                                 "default": null,
                                 "description": "The probe tip values that resolved the settings, or null when unmeasured."
                               },
+                              "tipLateralUncertaintyMm": {
+                                "description": "The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.",
+                                "type": "number"
+                              },
+                              "touches": {
+                                "description": "The probe unit’s touch restriction: z-only (top touches only) or all.",
+                                "enum": [
+                                  "z-only",
+                                  "all"
+                                ],
+                                "type": "string"
+                              },
                               "variant": {
                                 "anyOf": [
                                   {
@@ -4564,6 +4576,18 @@
                             ],
                             "default": null,
                             "description": "The probe tip values that resolved the settings, or null when unmeasured."
+                          },
+                          "tipLateralUncertaintyMm": {
+                            "description": "The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.",
+                            "type": "number"
+                          },
+                          "touches": {
+                            "description": "The probe unit’s touch restriction: z-only (top touches only) or all.",
+                            "enum": [
+                              "z-only",
+                              "all"
+                            ],
+                            "type": "string"
                           },
                           "variant": {
                             "anyOf": [

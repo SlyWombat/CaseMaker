@@ -280,6 +280,20 @@ export interface ProbeBody {
   tipRadiusMm: number;
   tipLengthMm?: number | null;
   bodyDiameterMm?: number | null;
+  /**
+   * #1200 — the unit's stated lateral uncertainty of the tip, mm. A TOP touch keeps this plus the
+   * tip radius clear of every edge: near an edge the ball can meet the roll-off and read low.
+   */
+  tipLateralUncertaintyMm?: number | null;
+}
+
+/**
+ * #1200 — the closest a top touch may sit to an edge: the operator's stated lateral uncertainty
+ * plus the tip radius, never below the historical 3 mm margin. The 10 mm PREFERENCE is unchanged
+ * (it chooses among acceptable points); this is the floor.
+ */
+export function topTouchEdgeMarginMm(probe: ProbeBody): number {
+  return Math.max(CUT_BLANK_EDGE_MARGIN_MM, probe.tipRadiusMm + (probe.tipLateralUncertaintyMm ?? 0));
 }
 
 /**
@@ -337,7 +351,9 @@ export function cutBlankCandidatesFromMap(input: {
   const levels = decodeRuns(map.depth.data, count);
   const flatBits = decodeRuns(map.flat.data, count);
   if (levels === null || flatBits === null) return null;
-  const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
+  // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
+  // radius); an explicitly passed margin still wins.
+  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
   const tipLengthKnown = input.probe.tipLengthMm !== null && input.probe.tipLengthMm !== undefined;
   const bodyKnown =
     input.probe.bodyDiameterMm !== null && input.probe.bodyDiameterMm !== undefined && input.probe.bodyDiameterMm > 0;
@@ -472,7 +488,9 @@ export function cutBlankCandidates(input: {
   edgeMarginMm?: number;
 }): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const { raster, programs, obstacles } = input;
-  const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
+  // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
+  // radius); an explicitly passed margin still wins.
+  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
   const earlierCutsKnown = input.earlierCutsUnknown !== true && programs.some((program) => program.finished);
   const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
   // #1179 B (analyst) — a floor deeper than the tip's length is entered by the probe's BODY: it is

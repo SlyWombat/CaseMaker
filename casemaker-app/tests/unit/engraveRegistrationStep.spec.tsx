@@ -1192,6 +1192,38 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     });
   }
 
+  // #1200 — a unit the operator restricted to top touches says so on the card, before the press.
+  it('#1200 — the proposal line states a top-touches-only unit', async () => {
+    proposalLocation();
+    const location = useLocationStore.getState().location!;
+    useLocationStore.setState({
+      location: {
+        ...location,
+        accessories: (location.accessories ?? []).map((a) =>
+          a.id === 'fx-probe-1'
+            ? {
+                ...a,
+                product: 'Makera 3D Wired Probe',
+                variant: '3d',
+                unit: { tipDiameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05, tipLateralUncertaintyMm: 1 },
+                touches: 'z-only',
+                touchesReason: 'the ball tip may not be 100% straight down',
+                touchesSince: '2026-11-10T20:15:00.000Z',
+              }
+            : a,
+        ),
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    const base = defaultEngraveJob();
+    const setup0 = jobSetups(base)[0]!;
+    const job: EngraveJob = { ...base, setups: [{ ...setup0, mount: { kind: 'vise' } }] };
+    useEngraveJobStore.setState({ job });
+    useEngraveRunStore.setState({ acknowledged: false, acknowledgedFor: null });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const line = await screen.findByTestId('engrave-registration-proposal-line');
+    expect(line.textContent).toContain('3D probe · top touches only');
+  }, 120_000);
+
   it('shows the planner’s one-line proposal, and one Register press approves it and starts', async () => {
     // The default blank on the vise: a blank whose top stands proud of the jaws, which is the
     // configuration the planner can bracket. (The badge fixture's thin laminate sits flush.)

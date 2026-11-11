@@ -100,10 +100,18 @@ export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
   // entered by the body, and only then is it a candidate for a cut blank's check.
   const tipLengthMm = mountNum(acc.unit.tipLengthMm);
   const bodyDiameterMm = mountNum(acc.unit.bodyDiameterMm);
+  // #1200 — the operator's touch restriction, and the tip's stated lateral uncertainty. The
+  // DEFAULT is the unit's own: `all` for the 3D variant, `z-only` for the wired V2 (the issue's
+  // ruling); an explicit stored value wins. The uncertainty rides the open `unit` map (no schema
+  // change; 0 when unstated, which keeps today's inset rule exactly).
+  const touches = acc.touches ?? (probeInstrument(variant) === 'xyz' ? 'all' : 'z-only');
+  const tipLateralUncertaintyMm = mountNum(acc.unit.tipLateralUncertaintyMm) ?? 0;
   return {
     id: acc.id,
     variant,
     instrument: probeInstrument(variant),
+    touches,
+    tipLateralUncertaintyMm,
     tip,
     ...(tipLengthMm === null ? {} : { tipLengthMm }),
     ...(bodyDiameterMm === null ? {} : { bodyDiameterMm }),

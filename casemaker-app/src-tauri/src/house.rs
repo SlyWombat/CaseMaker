@@ -2433,6 +2433,10 @@ mod tests {
                 at: "2026-10-23T00:00:00.000Z".into(),
                 what: "owned; not yet tested".into(),
             }],
+            // #1200 — the touch restriction is optional; absent on this record.
+            touches: None,
+            touches_reason: None,
+            touches_since: None,
         };
         store.put_accessory(probe, Some("*")).await.unwrap();
 
@@ -2459,6 +2463,9 @@ mod tests {
                         since: "2026-10-23T00:00:00.000Z".into(),
                     },
                     history: vec![],
+                    touches: None,
+                    touches_reason: None,
+                    touches_since: None,
                 },
                 Some("*"),
             )

@@ -84,7 +84,7 @@ export interface FootprintInput {
   /** The resolved machine's travel height, machine Z (the seek starts here). */
   seekFromMachineZ: number;
   /** The checked-out probe: the wired V2 only (a Z-only trigger). */
-  probe: { instrument: 'z-only' | 'xyz'; tipRadiusMm: number };
+  probe: { instrument: 'z-only' | 'xyz'; tipRadiusMm: number; touches?: 'z-only' | 'all' };
   settings: FootprintScanSettings;
   /** What is in the way, in work XY — the clamps and the bracket's arms as the job places them. */
   obstacles?: readonly FootprintObstacle[];
@@ -176,10 +176,13 @@ function scanAt(
 
 export function planFootprintRegistration(input: FootprintInput): FootprintResult {
   const { stock, region, marginMm, settings } = input;
-  if (input.probe.instrument !== 'z-only') {
+  // #1200 — a 3D unit restricted to top touches plans the Z-only footprint routine and is
+  // accepted; an unrestricted one keeps the refusal (the side-touch branch is unrun).
+  if (input.probe.instrument !== 'z-only' && input.probe.touches !== 'z-only') {
     return {
       ok: false,
-      reason: 'the 3D probe is not a registration instrument on this machine yet — fit the wired V2 probe and register again',
+      reason:
+        'the 3D probe is not a registration instrument on this machine yet — restrict it to top touches in Manage › Accessories, or fit the wired V2 probe and register again',
     };
   }
   if (!(settings.scanInsideMm > 0) || !(settings.scanReachMm > 0) || !(settings.coarseStepMm > 0) || !(settings.fineStepMm > 0)) {

@@ -148,6 +148,16 @@ pub struct FixtureRecord {
     pub whereabouts: AccessoryWhereabouts,
     #[serde(default)]
     pub history: Vec<AccessoryHistory>,
+    /// #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT: `z-only` never plans a sideways
+    /// `G38.3`, `all` keeps its instrument's own capability. Absent = the unit's default (`all`
+    /// for a 3D variant, `z-only` for the wired V2), derived by the client's `probeFor`; the
+    /// reason and date are the operator's record of the decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches_since: Option<String>,
 }
 
 /// A datum measured ON this bed (§1). There is no "typed" constructor: `validate` refuses
@@ -435,6 +445,15 @@ impl FixtureRecord {
             if variant.trim().is_empty() {
                 return Err(HouseError::BadEntry(format!(
                     "machine {machine}'s fixture {} names an empty variant",
+                    self.id
+                )));
+            }
+        }
+        // #1200 — the restriction is one of exactly two words; a typo must not read as "all".
+        if let Some(touches) = &self.touches {
+            if touches != "z-only" && touches != "all" {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s fixture {} states touches: {touches} — the words are z-only or all",
                     self.id
                 )));
             }
@@ -1393,6 +1412,10 @@ mod tests {
             provenance: [("jawBarWidth".to_string(), "measured:2026-10-13".to_string())].into(),
             whereabouts: AccessoryWhereabouts::Box {},
             history: Vec::new(),
+            // #1200 — no restriction on this test fixture.
+            touches: None,
+            touches_reason: None,
+            touches_since: None,
         }
     }
 
@@ -1842,6 +1865,42 @@ mod tests {
         assert_eq!(v["accessories"][1]["kind"], serde_json::json!("probe"));
         let back: LocationDoc = serde_json::from_value(v).unwrap();
         assert_eq!(back, loc);
+    }
+
+    #[test]
+    fn a_probe_units_touch_restriction_validates_and_round_trips() {
+        // #1200 — the operator's restriction on the unit (top touches only) is optional, round-trips
+        // with its reason and date, and a word outside the two is refused.
+        let mut loc = LocationDoc::fresh();
+        let mut probe = a_bed_fixture();
+        probe.id = "fx-probe-3d".into();
+        probe.kind = "probe".into();
+        probe.variant = Some("3d".into());
+        probe.touches = Some("z-only".into());
+        probe.touches_reason = Some("the ball tip may not be 100% straight down".into());
+        probe.touches_since = Some("2026-11-10T20:15:00.000Z".into());
+        // The bed profile places the vise, so the machine must own it (the fixture's own rule).
+        loc.accessories = vec![a_bed_fixture(), probe.clone()];
+        loc.machines.push(a_machine_with_a_bed());
+        loc.validate().unwrap();
+        let v = serde_json::to_value(&loc).unwrap();
+        assert_eq!(v["accessories"][1]["touches"], serde_json::json!("z-only"));
+        assert_eq!(v["accessories"][1]["touchesReason"], serde_json::json!("the ball tip may not be 100% straight down"));
+        let back: LocationDoc = serde_json::from_value(v).unwrap();
+        assert_eq!(back, loc);
+
+        // Absent fields must not be written back (a document written before #1200 keeps its shape).
+        let plain = a_bed_fixture();
+        let pv = serde_json::to_value(&plain).unwrap();
+        assert!(pv.get("touches").is_none(), "touches was written: {pv}");
+
+        // One of exactly two words.
+        let mut bad = probe;
+        bad.touches = Some("sideways".into());
+        let mut loc_bad = LocationDoc::fresh();
+        loc_bad.accessories = vec![a_bed_fixture(), bad];
+        loc_bad.machines.push(a_machine_with_a_bed());
+        assert!(matches!(loc_bad.validate(), Err(HouseError::BadEntry(_))));
     }
 
     #[test]
