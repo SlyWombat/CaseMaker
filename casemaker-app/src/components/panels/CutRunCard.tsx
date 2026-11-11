@@ -29,7 +29,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
 import { cutterIdentity } from '@/engine/cnc/engrave/cutterCaseLine';
 import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
-import { nextBitChange, remainingSeconds, runClockSeconds } from '@/engine/cnc/engrave/runProgress';
+import { nextBitChange, remainingSeconds, runClockSeconds, runRemainingSeconds } from '@/engine/cnc/engrave/runProgress';
 import type { RunPlan } from '@/engine/cnc/plan';
 import { formatDuration } from '@/engine/cnc/plan/format';
 import type { EngraveJob, FrozenPackage } from '@/types/engraveJob';
@@ -188,6 +188,13 @@ export interface CutRunCardProps {
    * card draws no Start.
    */
   noStart?: boolean;
+  /**
+   * #1145 × #1123 item 42 — THE RUN'S OWN TOTAL over every program (#1193, the surface's
+   * `runCycleSeconds`), seconds. While a multi-program job runs, the time-left line states the
+   * WHOLE RUN's remaining from it; absent (a result that states no total), the line falls back to
+   * our clock plus the programs not started, and says which figure it is showing.
+   */
+  runTotalSeconds?: number | null;
 }
 
 /** Every program and walk file is on the machine (or already ran). */
@@ -208,6 +215,7 @@ export function CutRunCard({
   programs = [],
   blocker = null,
   noStart = false,
+  runTotalSeconds = null,
 }: CutRunCardProps): JSX.Element {
   const releasePlan = useEngraveReleaseStore((s) => s.plan);
   const release = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
@@ -238,7 +246,45 @@ export function CutRunCard({
             (r): r is CutCardProgramRow => r.kind === 'program' && r.index > runningRow.index && r.toolKey !== runningRow.toolKey,
           )?.bit ?? null);
   const dockKey = target === null ? null : machineKey(target);
-  const left = remainingSeconds(progress?.percent ?? null, runClockSeconds(runEntry ?? null, Date.now()));
+  const clock = runClockSeconds(runEntry ?? null, Date.now());
+  const left = remainingSeconds(progress?.percent ?? null, clock);
+  // #1145 × #1123 item 42 — A MULTI-PROGRAM JOB'S LINE STATES THE WHOLE RUN. The operator waits for
+  // the job, not the program in hand: the basis is the run's own total (#1193), less the finished
+  // programs' own times and OUR clock. No total (or an unmeasured finished program): the honest sum
+  // over what is left — this program's remaining plus every program not started. The words say
+  // which figure the line shows.
+  const doneSeconds = (() => {
+    const done = model.rows.filter((r): r is CutCardProgramRow => r.kind === 'program' && r.done);
+    return done.every((r) => r.measuredSeconds !== null || r.estimateSeconds !== null)
+      ? done.reduce((n, r) => n + (r.measuredSeconds ?? r.estimateSeconds ?? 0), 0)
+      : null;
+  })();
+  const queuedSeconds = (() => {
+    const queued = model.rows.filter((r): r is CutCardProgramRow => r.kind === 'program' && !r.done && !r.running);
+    return queued.every((r) => r.estimateSeconds !== null)
+      ? queued.reduce((n, r) => n + (r.estimateSeconds ?? 0), 0)
+      : null;
+  })();
+  const jobLeft =
+    model.total > 1
+      ? runRemainingSeconds({
+          runTotalS: runTotalSeconds,
+          doneS: doneSeconds,
+          elapsedS: clock,
+          programLeftS: left,
+          queuedS: queuedSeconds,
+        })
+      : left;
+  const leftWords =
+    model.total > 1
+      ? jobLeft !== null
+        ? `${formatDuration(jobLeft)} left in the job`
+        : left !== null
+          ? `${formatDuration(left)} left in this program`
+          : null
+      : left !== null
+        ? `${formatDuration(left)} left`
+        : null;
   // #1123 items 9/10 — WHILE A RESCUE CARD IS UP IT OWNS THE CONTROLS. The waiting card carries the
   // one Continue and Stop; the stopped card owns its recovery; this card offers neither a Start nor
   // a Pause/Stop of its own.
@@ -345,7 +391,7 @@ export function CutRunCard({
             </span>
             <span style={{ fontVariantNumeric: 'tabular-nums', color: '#c9d4e2', whiteSpace: 'nowrap' }}>
               {progress?.percent === null || progress?.percent === undefined ? '— %' : `${Math.round(progress.percent)} %`}
-              {left === null ? '' : ` · ${formatDuration(left)} left`}
+              {leftWords === null ? '' : ` · ${leftWords}`}
             </span>
           </div>
           <div

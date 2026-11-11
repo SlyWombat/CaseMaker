@@ -9,6 +9,7 @@ import {
   MIN_ELAPSED_FOR_ESTIMATE_S,
   remainingSeconds,
   runClockSeconds,
+  runRemainingSeconds,
   runningProgramWords,
   type RunClock,
 } from '@/engine/cnc/engrave/runProgress';
@@ -96,5 +97,44 @@ describe('#1145 — the time left comes from our clock, never from P: field 3', 
     expect(runningProgramWords({ active: 2, total: 5, percent: 20, elapsedS: 5, paused: true })).toBe(
       'Program 2 of 5 is paused at 20 %.',
     );
+  });
+});
+
+
+// #1145 × #1123 item 42 — THE WHOLE RUN'S TIME LEFT for a multi-program job: the run's own total
+// (#1193) less what has run, or — with no total — our clock plus the programs not started.
+describe('#1145 — the whole run’s time left', () => {
+  it('takes the run total, less the finished programs and OUR clock', () => {
+    expect(
+      runRemainingSeconds({ runTotalS: 3600, doneS: 600, elapsedS: 120, programLeftS: 480, queuedS: 1080 }),
+    ).toBe(2880);
+  });
+
+  it('falls back to what is left when no total (or no finished time) is stated', () => {
+    expect(
+      runRemainingSeconds({ runTotalS: null, doneS: 600, elapsedS: 120, programLeftS: 480, queuedS: 1080 }),
+    ).toBe(1560);
+    expect(
+      runRemainingSeconds({ runTotalS: 3600, doneS: null, elapsedS: 120, programLeftS: 480, queuedS: 1080 }),
+    ).toBe(1560);
+    expect(
+      runRemainingSeconds({ runTotalS: 3600, doneS: 600, elapsedS: null, programLeftS: 480, queuedS: 1080 }),
+    ).toBe(1560);
+  });
+
+  it('a total the run has already passed is spent, not a negative time', () => {
+    expect(
+      runRemainingSeconds({ runTotalS: 600, doneS: 600, elapsedS: 120, programLeftS: 480, queuedS: 1080 }),
+    ).toBe(1560);
+  });
+
+  it('says nothing when neither basis can be stated', () => {
+    expect(
+      runRemainingSeconds({ runTotalS: null, doneS: null, elapsedS: null, programLeftS: null, queuedS: null }),
+    ).toBeNull();
+    // The program playing has no clock yet: showing only the later programs would omit it.
+    expect(
+      runRemainingSeconds({ runTotalS: null, doneS: null, elapsedS: null, programLeftS: null, queuedS: 1080 }),
+    ).toBeNull();
   });
 });
