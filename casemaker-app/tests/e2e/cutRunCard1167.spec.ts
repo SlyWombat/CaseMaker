@@ -124,6 +124,70 @@ async function seed(page: Page, input: { count: number; phase: string; active: n
   }, { ...input, machine: MACHINE });
 }
 
+/**
+ * #1123 item 8 follow-up — the run store's half of a PRESSABLE card: this package is the design's
+ * (the input stamps match), every program carries a passing report, and the statement is given.
+ * The READY seed alone leaves `programBlocker`/the release gate refusing (no reports, no stamps),
+ * which is how a permanently disabled multi-program Start once slipped past a text-only assertion.
+ */
+async function seedVerifiedRun(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const runStore = await import('/src/store/engraveRunStore.ts' as string);
+    const jobStore = await import('/src/store/engraveJobStore.ts' as string);
+    const job = jobStore.useEngraveJobStore.getState().job as {
+      package?: { hash: string; programs: { setupIndex: number; setupId: string; toolKey: string; nc: string; hash: string }[] };
+    };
+    const pkg = job.package;
+    if (pkg === undefined) throw new Error('the seed did not freeze a package');
+    const VERIFY = { ok: true, findings: [], stats: { lines: 3, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, -0], max: [1, 1, 0] } } };
+    const generated = {
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: pkg.programs[0]?.nc ?? null,
+      verify: VERIFY,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      facingCam: null,
+      predicted: [],
+      errors: [],
+      programs: pkg.programs.map((p) => ({
+        setupIndex: p.setupIndex,
+        setupId: p.setupId,
+        toolKey: p.toolKey,
+        nc: p.nc,
+        verify: VERIFY,
+        frameNc: null,
+        frameVerify: null,
+        programHash: p.hash,
+        cam: null,
+      })),
+    };
+    runStore.useEngraveRunStore.setState({
+      generated,
+      inputs: runStore.currentRunInputStamps(),
+      shopSignature: runStore.runShopSignature(),
+      phase: 'ready',
+      acknowledged: true,
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } },
+      simStatus: 'ready',
+      simDiagnostics: [],
+    } as never);
+    // #1127 — every cutter row settled, through the job's own action (the same write a tick makes).
+    for (const key of [...new Set(pkg.programs.map((p) => p.toolKey))]) {
+      jobStore.useEngraveJobStore.getState().setCutterChecklistEntry(pkg.hash, key, { state: 'located', at: new Date().toISOString() });
+    }
+  });
+}
+
 async function openCutStep3(page: Page): Promise<void> {
   await page.getByTestId('sidebar-button-cnc-engrave').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
@@ -182,10 +246,27 @@ test('#1167 — a 20-program two-sided job is one card: every program, the flip,
   });
   await rememberMachine(page);
   await seed(page, { count: 20, phase: 'ready', active: null });
+  await seedVerifiedRun(page);
   await openCutStep3(page);
+  // #1123 item 8 follow-up — THE STATEMENT, given in step 1 where it lives, so the card below is
+  // in its PRESSABLE state: the only remaining gate would be a real refusal.
+  const step1 = page.getByTestId('engrave-cut-step-1');
+  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-1-summary').click();
+  }
+  const ack = page.getByTestId('engrave-ack');
+  if (!(await ack.isChecked())) {
+    await page.evaluate(() => document.querySelector<HTMLInputElement>('[data-testid="engrave-ack"]')?.click());
+  }
+  await expect(ack).toBeChecked();
   // The seed's program 1 is already done, so READY names program 2 and the bit it needs.
   await expect(page.getByTestId('engrave-cut-card-ready')).toContainText('Ready · program 2 of 20 · next: ');
   await expect(page.getByTestId('engrave-cut-card-start')).toContainText('Start program 2 of 20');
+  // #1123 item 8 — AND IT IS PRESSABLE. The count sentence this card used to carry ("this job is
+  // 20 programs; the app plays one") was a permanently disabled Start on the card's own flow; a
+  // text-only pin let it through. The release gate is the card's, and it passes here.
+  await expect(page.getByTestId('engrave-cut-card-start-reason')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled();
   await expect(page.getByTestId('engrave-cut-card-pause')).toHaveCount(0);
   await expect(page.getByTestId('engrave-cut-card-stop')).toHaveCount(0);
   await expect(page.getByTestId('engrave-cut-card-running-slot')).toHaveCount(0);
