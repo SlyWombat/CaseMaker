@@ -627,13 +627,21 @@ interface SideEdge {
  * `L/(n + 1) ≥ margin + width/2`. (The cutter's centre-path span reaches a radius further, but
  * that part is the cutter lifted over the tab — it is air, not the corner-cantilever risk the
  * margin protects against.)
+ *
+ * THE MARGIN IS CAPPED SO IT CAN NEVER EMPTY AN EDGE THAT FITS A TAB. The rule's own sentence —
+ * "an edge too short for that takes none" — is about an edge too short to hold a tab at all. A
+ * real relief perimeter is made of 15–25 mm edges; `2 × tab width` (12 mm for the shop's 6 mm
+ * tabs) at each end would leave no room on every one of them and the part would be cut free with
+ * no tabs and no finding (the model plan's contour reports none). Capped at `(L − width)/2`, an
+ * edge that is at least one centre-path span long always keeps its centred tab, as far from the
+ * corners as the edge allows; long edges keep the full margin.
  */
 function sideEdges(edges: readonly Edge[], widthMm: number, spanLength: number): SideEdge[] {
   const out: SideEdge[] = [];
   for (const edge of edges) {
     const length = edge.end - edge.start;
     if (!(length > 0)) continue;
-    const margin = Math.max(2 * widthMm, 0.1 * length);
+    const margin = Math.min(Math.max(2 * widthMm, 0.1 * length), (length - widthMm) / 2);
     // `spanLength` still gates the edge: a span longer than the edge cannot sit on it at all.
     if (length < spanLength - 1e-9) continue;
     const maxTabs = Math.floor(length / (margin + widthMm / 2) + 1e-9) - 1;

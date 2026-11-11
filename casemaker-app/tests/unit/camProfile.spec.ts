@@ -359,14 +359,14 @@ describe('placeTabs mid-side (#1206)', () => {
   });
 
   it('a limit the corner margins cannot meet still fills every edge, and the margin wins', () => {
-    // A 20 x 12 part with a 7 mm limit: the long side holds one centred tab (its kept material is
-    // exactly 8 mm from each corner), the 12 mm sides hold none — so two tabs is the most the
-    // margins allow and the outline's shortest spans stay longer than the limit. The margin is the
-    // hard rule; the planner places what it can and `added` says how many it added.
+    // A 20 x 12 part with a 7 mm limit: each side holds one centred tab (the capped margin keeps
+    // a tab as far from the corners as the edge allows), so the span limit adds one to each 12 mm
+    // side. Four tabs is every edge's capacity; the corner stretches are 12 mm and stay longer
+    // than the limit — the margins are the hard rule and the planner places what it can.
     const placement = placeTabs(rect(20, 12)[0]!, 2, 4, R, { maxSpanMm: 7 });
     expect(placement.unplaceable).toBe(0);
-    expect(placement.spans).toHaveLength(2);
-    expect(placement.added).toBe(0);
+    expect(placement.spans).toHaveLength(4);
+    expect(placement.added).toBe(2);
     const worst = Math.max(...gaps(placement.spans, 2 * (20 + 12)));
     expect(worst).toBeGreaterThan(7);
   });
