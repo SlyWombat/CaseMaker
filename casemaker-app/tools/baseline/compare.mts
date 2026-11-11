@@ -83,10 +83,22 @@ function loadHeader(dir: string): RunHeader {
   const patches = (Array.isArray(m.harnessPatches) ? m.harnessPatches : []).map((p: unknown) =>
     typeof p === 'string' ? p : String(((p as Json).what as string | undefined) ?? JSON.stringify(p)),
   );
-  return { sha: String(m.sha ?? 'unknown'), tag: typeof m.tag === 'string' ? m.tag : null, startedAt: m.startedAt, machine, harnessPatches: patches };
+  const busyRuns = Array.isArray(m.busyRuns) ? (m.busyRuns as unknown[]).map(String) : undefined;
+  return { sha: String(m.sha ?? 'unknown'), tag: typeof m.tag === 'string' ? m.tag : null, startedAt: m.startedAt, machine, harnessPatches: patches, busyRuns };
 }
 
 // -------------------------------------------------------------------------------------- tray + suites
+
+/** The first run's wall plus every repeat-k/tray/<run>/timev.json that rerun.sh --repeat wrote. */
+function repeatWalls(dir: string, run: string, first: number | null): number[] {
+  const out: number[] = first === null ? [] : [first];
+  for (const r of dirs(dir).filter((d) => /^repeat-\d+$/.test(d)).sort((a, b) => Number(a.slice(7)) - Number(b.slice(7)))) {
+    const t = readJson(join(dir, r, 'tray', run, 'timev.json'));
+    const w = t ? num(t.wallSeconds) : null;
+    if (w !== null) out.push(w);
+  }
+  return out;
+}
 
 function loadTray(dir: string): Record<string, TrayRunFacts> {
   const out: Record<string, TrayRunFacts> = {};
@@ -105,6 +117,7 @@ function loadTray(dir: string): Record<string, TrayRunFacts> {
       cellsOver1mmPct: num(lo[2]) === null ? null : (lo[2] as number) * 100,
       adjudicated: num(facts.adjudicatedFraction),
       wall: num(timing.totalWallSeconds),
+      walls: repeatWalls(dir, run, num(timing.totalWallSeconds)),
       peakRssMiB: num(timing.peakRssMiB),
     };
   }

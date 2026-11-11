@@ -182,4 +182,34 @@ describe('#1233 baseline comparison tables', () => {
     expect(doc).toContain('no picture in this run');
     expect(doc).not.toMatch(/\| fail \| 1 \| 0 \|/);
   });
+
+  it('11. repeats print min / median and the change is median against median; one run says so', () => {
+    const mk = (walls: number[] | undefined, wall: number): HeadlineInput => ({ tray: { 'app-top': { wall, walls } }, suites: {} });
+    const rows = headlineRows(mk(undefined, 79.2), mk([83.4, 76.3, 76.8], 83.4));
+    const row = rows.find((r) => r.label === 'app-top: Generate wall (s)')!;
+    expect(row.before).toBe('79.2 (one run)');
+    expect(row.after).toBe('min 76.3 / median 76.8 (3 runs)');
+    // 79.2 → 76.8 is −3.0 %: inside the noise, so not a change
+    expect(row.change).toContain('within noise');
+    const both = headlineRows(mk([79.2, 77.0, 76.2], 79.2), mk([100, 101, 99], 100)).find((r) => r.label === 'app-top: Generate wall (s)')!;
+    expect(both.before).toBe('min 76.2 / median 77.0 (3 runs)');
+    expect(both.change).toContain('+29.9 %');
+  });
+
+  it('12. a run whose load went above the guard at any point is named busy in the header', () => {
+    const base = { sha: 'a'.repeat(40), tag: null, harnessPatches: [] as string[] };
+    const doc = buildComparison({
+      before: { ...base, busyRuns: undefined },
+      after: { ...base, sha: 'b'.repeat(40), busyRuns: ['tray-timed_2'] },
+      headline: { before: head(1), after: head(1) },
+      references: { before: [], after: [] },
+      cutInto: [],
+      samples: { before: [], after: [] },
+      cards: { before: [], after: [] },
+      programs: [],
+      pictures: [],
+    });
+    expect(doc).toContain('load not recorded');
+    expect(doc).toContain('BUSY: tray-timed_2');
+  });
 });

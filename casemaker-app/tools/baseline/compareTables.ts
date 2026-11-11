@@ -72,8 +72,10 @@ export interface TrayRunFacts {
   cellsOver1mmPct?: Maybe;
   /** Adjudicated cut-into, as the receipt's fraction. */
   adjudicated?: Maybe;
-  /** Generate wall seconds. */
+  /** Generate wall seconds of the first (or only) run. */
   wall?: Maybe;
+  /** Every timed run's wall seconds, the first included, when the folder holds repeats (rerun.sh --repeat). */
+  walls?: number[];
   peakRssMiB?: Maybe;
 }
 
@@ -106,6 +108,31 @@ export interface Row {
 /** The tray runs the baseline saved, in the order the document lists them. */
 export const TRAY_RUNS = ['plain-top', 'plain-bottom', 'app-top', 'app-bottom', 'live-house/app-top', 'live-house/app-bottom'];
 
+export function median(xs: number[]): number | null {
+  if (xs.length === 0) return null;
+  const v = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 === 1 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
+}
+
+/** The wall seconds a side stands for: the median of its repeats, or its one run. */
+function wallValue(f: TrayRunFacts): number | null {
+  const ws = (f.walls ?? []).filter(finite);
+  return ws.length > 0 ? median(ws) : finite(f.wall) ? f.wall : null;
+}
+
+function wallText(f: TrayRunFacts): string {
+  const ws = (f.walls ?? []).filter(finite);
+  if (ws.length >= 2) return `min ${Math.min(...ws).toFixed(1)} / median ${fmtNumber(median(ws), 1)} (${ws.length} runs)`;
+  const one = wallValue(f);
+  return one === null ? MISSING : `${fmtNumber(one, 1)} (one run)`;
+}
+
+/** Generate wall: min / median over the repeats where there are some, "(one run)" where there is one; the change is median against median. */
+function wallRow(label: string, b: TrayRunFacts, a: TrayRunFacts): Row {
+  return { label, before: wallText(b), after: wallText(a), change: changeText(wallValue(b), wallValue(a), { digits: 1, noise: true }) };
+}
+
 function pairRow(label: string, b: Maybe, a: Maybe, digits: number, o: ChangeOptions = {}): Row {
   return { label, before: fmtNumber(b, digits), after: fmtNumber(a, digits), change: changeText(b, a, { digits: o.digits ?? digits, ...o }) };
 }
@@ -130,7 +157,7 @@ export function headlineRows(before: HeadlineInput, after: HeadlineInput): Row[]
       rows.push(over);
       rows.push(pairRow(`${run}: adjudicated cut-into (fraction)`, b.adjudicated, a.adjudicated, 4));
     }
-    rows.push(pairRow(`${run}: Generate wall (s)`, b.wall, a.wall, 0, { noise: true }));
+    rows.push(wallRow(`${run}: Generate wall (s)`, b, a));
     rows.push(pairRow(`${run}: peak memory (MiB)`, b.peakRssMiB, a.peakRssMiB, 0));
   }
   for (const [name, key] of [['vitest', 'vitest'], ['cargo test --lib', 'cargo'], ['Playwright e2e', 'e2e']] as const) {
@@ -383,6 +410,8 @@ export interface RunHeader {
   startedAt?: string;
   machine?: string;
   harnessPatches: string[];
+  /** Timed commands whose load went above the guard at any point (rerun.sh); undefined when the folder did not record load. */
+  busyRuns?: string[];
 }
 
 export interface CutTable {
@@ -423,6 +452,11 @@ export function mdTable(headers: string[], rows: string[][]): string {
 
 const short = (sha: string): string => sha.slice(0, 9);
 
+function busyText(h: RunHeader): string {
+  if (h.busyRuns === undefined) return 'load not recorded';
+  return h.busyRuns.length === 0 ? 'none' : `BUSY: ${h.busyRuns.join(', ')}`;
+}
+
 /** A section one folder never ran (a rerun with --only) is said so, not shown as a table of zeros and removals. */
 function missingSide(label: string, nBefore: number, nAfter: number): string | null {
   if (nBefore > 0 && nAfter === 0) return `${label}: the after folder holds none (that section was not run there).`;
@@ -446,6 +480,7 @@ export function buildComparison(i: ComparisonInput): string {
         ['tag', b.tag ?? MISSING, a.tag ?? MISSING],
         ['started', b.startedAt ?? MISSING, a.startedAt ?? MISSING],
         ['machine', b.machine ?? MISSING, a.machine ?? MISSING],
+        ['busy timed runs', busyText(b), busyText(a)],
       ],
     ),
   );
