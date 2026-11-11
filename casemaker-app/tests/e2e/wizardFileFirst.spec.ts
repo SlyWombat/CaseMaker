@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, readJob } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -89,10 +89,13 @@ test('#1098 — an STL dropped on step 2 reaches Holding in two clicks', async (
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
-  // The drop sets the operation from the format; no chip to find.
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-empty.png');
+  // The drop sets the operation from the format; no chip to find — and never changes the blank's kind.
+  const stockKindBefore = (await readJob(page)).stockEntry?.kind;
   await page.getByTestId('start-wizard-drop-input').setInputFiles(STL);
   await expect(page.getByTestId('start-wizard-op-surface-name')).toHaveText('thin-wall-box.stl');
-  await page.screenshot({ path: 'test-results/1098-question-after-stl.png' });
+  expect((await readJob(page)).stockEntry?.kind).toBe(stockKindBefore);
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-after-stl.png');
 
   // Click 2 — the blank the mesh proposed, never the mesh AS the blank.
   await page.getByTestId('start-wizard-operation-next').click();
@@ -110,16 +113,18 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
+  const stockKindBeforeSvg = (await readJob(page)).stockEntry?.kind;
   await page.getByTestId('start-wizard-drop-input').setInputFiles(COASTER);
   await expect(page.getByTestId('start-wizard-op-outline-field')).toBeVisible();
+  expect((await readJob(page)).stockEntry?.kind).toBe(stockKindBeforeSvg);
   await expect(page.getByTestId('start-wizard-op-outline-fact')).toContainText('60');
   await expect(page.getByTestId('start-wizard-op-outline-cut')).toBeChecked();
-  await page.screenshot({ path: 'test-results/1098-question-after-svg.png' });
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-after-svg.png');
 
   // The drawing sizes the blank: 60 × 60 plus 5 mm each side.
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('Sized from the outline: 60');
+  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('From your shelf: aluminium-6061 plate, 100 × 100 × 5 mm.');
   await page.screenshot({ path: 'test-results/1098-stock-from-svg.png' });
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');

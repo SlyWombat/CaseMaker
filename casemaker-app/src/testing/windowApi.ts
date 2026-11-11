@@ -37,6 +37,7 @@ import { programHash } from '@/engine/cnc/programHash';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import type { EngraveJob } from '@/types/engraveJob';
 import { useSimSetupStore, buildSimSetup } from '@/store/simSetupStore';
 import { checkpointAtStep } from '@/components/viewport/simGeometry';
 import { getTools, resolveTool, setRegistry } from '@/engine/cnc/toolRegistry';
@@ -166,6 +167,8 @@ export interface CaseMakerTestApi {
    * the first Generate recommended any other way. Null until a package is frozen.
    */
   getFrozenProgram(): { filename: string; toolKey: string; cutterName: string } | null;
+  /** #1098 — the engrave job as the store holds it now (a read-only copy for the e2e). */
+  getEngraveJob(): EngraveJob;
   /**
    * #723 R-4 e2e — THE PROGRAM TEXT the run produced, exactly the bytes Save would write. A rotary
    * job's Save is refused by the bench line (#545/#240: simulate-only), so an e2e that wants to
@@ -537,6 +540,9 @@ export function installCaseMakerTestApi(): void {
       // heartbeat would have read — the strip's monitor rows come from `S:` on that line.
       useMachineStore.getState().setProbeResult({ kind: 'found', observation, calibration: null, route: 'manual' });
       if (statusLine !== undefined) useMachineStore.getState().noteLiveStatusLine(statusLine);
+    },
+    getEngraveJob() {
+      return JSON.parse(JSON.stringify(useEngraveJobStore.getState().job)) as EngraveJob;
     },
     getFrozenProgram() {
       const job = useEngraveJobStore.getState().job;

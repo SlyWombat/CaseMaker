@@ -139,3 +139,18 @@ describe('#1098 — the zone and its follow-ups say what they do', () => {
     expect(screen.queryByTestId('start-wizard-op-surface-make-mold')).toBeNull();
   });
 });
+
+describe('#1098 — Carve it says which cutter carves', () => {
+  it('selecting Carve it (V) shows the cutter note; the other uses do not', async () => {
+    renderStep();
+    drop('coaster-60.svg', readFileSync(COASTER), 'image/svg+xml');
+    await waitFor(() => expect(screen.getByTestId('start-wizard-op-outline-carve')).toBeTruthy());
+    expect(screen.queryByTestId('start-wizard-op-outline-carve-note')).toBeNull();
+    fireEvent.click(screen.getByTestId('start-wizard-op-outline-carve'));
+    expect(screen.getByTestId('start-wizard-op-outline-carve-note').textContent).toBe(
+      "Carved with the job's cutter — choose a V bit in Cutters after Create.",
+    );
+    fireEvent.click(screen.getByTestId('start-wizard-op-outline-cut'));
+    expect(screen.queryByTestId('start-wizard-op-outline-carve-note')).toBeNull();
+  });
+});

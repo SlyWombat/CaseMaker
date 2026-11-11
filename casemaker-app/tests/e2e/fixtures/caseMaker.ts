@@ -41,6 +41,12 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
 
 export { expect } from '@playwright/test';
 
+/** #1098 — the engrave job as the app's store holds it right now (a copy; read-only). */
+export async function readJob(page: Page): Promise<import('../../../src/types/engraveJob').EngraveJob> {
+  return page.evaluate(() => window.__caseMaker!.getEngraveJob());
+}
+
+
 /**
  * #1100 — THE QUESTION STEP OPENS ON THE EIGHT PRESET CARDS. A flow that wants one of the sixteen
  * engine chips opens *Something else…* first; a text job starts on the sign card, whose text field

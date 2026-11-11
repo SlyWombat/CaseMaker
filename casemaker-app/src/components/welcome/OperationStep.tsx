@@ -831,6 +831,11 @@ export function OperationStep({
               <span>Carve it (V)</span>
             </label>
           </div>
+          {outlineUse === 'v-carve' && (
+            <p style={MUTED} data-testid="start-wizard-op-outline-carve-note">
+              Carved with the job's cutter — choose a V bit in Cutters after Create.
+            </p>
+          )}
           {outlineUse === 'pocket' && (
             <label style={FIELD_LABEL}>
               <span>Depth</span>
