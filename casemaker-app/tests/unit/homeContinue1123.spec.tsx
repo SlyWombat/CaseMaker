@@ -15,7 +15,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useViewportStore } from '@/store/viewportStore';
 import { useMachineRunStore } from '@/store/machineRunStore';
-import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveJobStore, ENGRAVE_JOB_CHANGED_KEY } from '@/store/engraveJobStore';
 import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
 import { markWorkedOn, clearWorkedOn } from '@/store/homeSession';
 
@@ -97,6 +97,25 @@ describe('#1123-48 Home keeps the work', () => {
     expect(row.textContent).toContain('a CNC job');
     fireEvent.click(screen.getByTestId('welcome-continue-open'));
     expect(useProjectStore.getState().welcomeMode, 'Continue returns to the workspace').toBe(false);
+  });
+
+  it('the Continue line reads "<name> · <what> · changed <when>" and says a never-saved job is not saved to a file', () => {
+    markWorkedOn();
+    useViewportStore.setState({ activeSidebarSection: 'cnc-engrave' });
+    useEngraveJobStore.setState({ job: { ...useEngraveJobStore.getState().job, name: 'Untitled job' } });
+    useEngraveJobFileStore.setState({ savedAt: null });
+    localStorage.setItem(ENGRAVE_JOB_CHANGED_KEY, String(Date.now() - 12 * 60_000));
+    useProjectStore.setState({ welcomeMode: true });
+    render(<WelcomeOverlay />);
+    expect(screen.getByTestId('welcome-continue-what').textContent).toBe(
+      'Untitled job · a CNC job · changed 12 min ago · not saved to a file yet',
+    );
+    cleanup();
+    // Saved to a file: the clause goes.
+    useEngraveJobFileStore.setState({ savedAt: Date.now() });
+    render(<WelcomeOverlay />);
+    expect(screen.getByTestId('welcome-continue-what').textContent).toBe('Untitled job · a CNC job · changed 12 min ago');
+    localStorage.removeItem(ENGRAVE_JOB_CHANGED_KEY);
   });
 
   it('a first visit has no Continue row', () => {

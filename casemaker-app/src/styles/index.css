@@ -1454,6 +1454,41 @@ body, html, #root {
 .wb-cap--racks { --cap-accent: var(--cm-color-secondary); --cap-accent-strong: var(--cm-color-secondary); }
 .wb-cap--toolboxes { --cap-accent: var(--cm-color-tertiary); --cap-accent-strong: var(--cm-color-tertiary); }
 .wb-cap--cnc { --cap-accent: #e9a0ff; --cap-accent-strong: #c86bff; }
+.wb-continue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cm-space-4);
+  margin: var(--cm-space-4) 0;
+  padding: var(--cm-space-4);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cm-color-primary) 9%, transparent), transparent 55%),
+    var(--cm-color-surface-container-low);
+  border: 1px solid color-mix(in srgb, var(--cm-color-primary) 28%, var(--cm-color-outline-variant));
+  border-radius: 14px;
+  box-shadow: var(--wb-shadow);
+}
+.wb-continue__text { min-width: 0; display: flex; flex-direction: column; gap: var(--cm-space-1); }
+.wb-continue h2 {
+  margin: 0;
+  font-family: var(--cm-font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--cm-color-on-surface);
+}
+.wb-continue p {
+  margin: 0;
+  color: var(--cm-color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.wb-continue__action { flex: 0 0 auto; }
+/* The button goes under the text on a phone, full width like the other tiles' actions. */
+@media (max-width: 640px) {
+  .wb-continue { flex-direction: column; align-items: stretch; }
+}
 .wb-cap h2 {
   margin: 0;
   font-family: var(--cm-font-display);
