@@ -76,6 +76,7 @@ const build = (pitchMm: number, finishScallopMm?: number) =>
     toolNumber: 1,
     spindleRpm: 12000,
     air: true,
+    axisPrecision: 3,
     feeds: FEEDS,
     rapid: RAPID,
     stockToLeaveMm: 0.2,

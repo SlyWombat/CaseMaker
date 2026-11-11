@@ -70,7 +70,7 @@ describe('#959 review item 6, refined — finish() links rapid above material, f
   it('on a flat region swept over several rows: every rapid lands at or above topAt(x,y) + hopZMm; a feed never starts above it', () => {
     const out = finish({
       cutter: ball6, region, regionRef, clSurface: flatSurface, kind: 'ball-scallop', scallopMm: 0.1, stepDownMm: 100,
-      feeds: FEEDS, safeZMm: 10, hopZMm: HOP_Z_MM, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
+      feeds: FEEDS, safeZMm: 10, hopZMm: HOP_Z_MM, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
     });
     const moves = out.ir.operations[0]!.moves;
     expect(out.passes.length, 'the fixture must actually sweep more than one row for this to mean anything').toBeGreaterThan(2);

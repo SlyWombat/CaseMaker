@@ -66,6 +66,7 @@ function roughing() {
     toolNumber: 1,
     spindleRpm: 12000,
     air: true,
+    axisPrecision: 3,
     feeds: { feed: 500, plungeFeed: 200, stepDown: 1, roughStepOver: 0.9, finishStepOver: 0.9 },
     rapid: { xyMmPerMin: 3000, zMmPerMin: 1500, accelMmPerS2: 500, source: 'the spec' },
     stockToLeaveMm: ALLOWANCE,

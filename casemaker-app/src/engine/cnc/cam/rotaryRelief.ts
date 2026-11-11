@@ -144,6 +144,12 @@ export interface RotaryReliefArgs {
   toolNumber: number;
   spindleRpm: number;
   air: boolean;
+  /**
+   * #1214's ruling (b) — the post's printed axis precision (decimal places), from the mill this
+   * relief is posted for: the grid the finish's feed words are decided on. Never a remembered
+   * three.
+   */
+  axisPrecision: number;
   feeds: SurfaceFeeds;
   rapid: RapidEstimate;
   /** Roughing allowance, mm; absent → {@link DEFAULT_STOCK_TO_LEAVE_MM}. */
@@ -328,6 +334,7 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     hf.pitch,
     SAFE_Z,
     HOP_Z,
+    args.axisPrecision,
     undefined,
     undefined,
     undefined,

@@ -180,6 +180,7 @@ describe('#777 the relief roughs from the section, not the envelope', () => {
       toolNumber: 1,
       spindleRpm: 12000,
       air: true,
+      axisPrecision: 3,
       feeds: { feed: 500, plungeFeed: 200, stepDown: 1, roughStepOver: 1.2, finishStepOver: 0.3 },
       rapid: { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test' },
     });

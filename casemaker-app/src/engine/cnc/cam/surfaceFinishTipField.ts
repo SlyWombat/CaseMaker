@@ -18,6 +18,7 @@
 import { MoveStore } from './moveStore';
 import type { CamMove } from './ir';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { isPlunge } from './printedZ';
 
 // #1092 (0f's land14 ruling) — the drop-cutter tip primitive now lives in the neutral
 // `cam/dropTip.ts`; this module keeps its name and public surface and re-exports it. The fast
@@ -129,10 +130,15 @@ function staircaseCorner(
   x: number,
   y: number,
   z: number,
+  /** #1214 ruling (b) — the post's printed axis precision, the grid the descent test reads. */
+  zDecimals: number,
 ): { x: number; y: number; z: number } | null {
   const lateral = Math.hypot(x - prevX, y - prevY);
   if (!(lateral > 0) || Math.abs(z - prevZ) <= lateral) return null;
-  return z <= prevZ ? { x, y, z: prevZ } : { x: prevX, y: prevY, z };
+  // #1214's ruling (b) — the descent test is the posted-grid one: a Z change that alters no
+  // printed digit is not a descent. Both branches post the same corner Z there; the corner
+  // squared is the only difference.
+  return isPlunge(prevZ, z, zDecimals) ? { x, y, z: prevZ } : { x: prevX, y: prevY, z };
 }
 
 /**
@@ -147,6 +153,8 @@ export function finishingMoves(
   alongStep: number,
   safeZ: number,
   hopZ: number,
+  /** #1214 ruling (b) — the post's printed axis precision, threaded to `staircaseCorner`. */
+  zDecimals: number,
   /** #785 — called once per scan line, before it is cut (`done` counts from 1). */
   onRow?: (done: number, total: number) => void,
   /**
@@ -202,7 +210,7 @@ export function finishingMoves(
             moves.feed(x, y, z, feeds.feed);
           }
         } else {
-          const corner = staircaseCorner(prevX, prevY, prevZ, x, y, z);
+          const corner = staircaseCorner(prevX, prevY, prevZ, x, y, z, zDecimals);
           if (corner !== null) moves.feed(corner.x, corner.y, corner.z, feeds.feed);
           moves.feed(x, y, z, feeds.feed);
         }

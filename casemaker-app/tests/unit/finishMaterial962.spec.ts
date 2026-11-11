@@ -74,7 +74,7 @@ function plan(clSurface: ClSurface, region: RemainderRegion): CamMove[] {
   const out = finish({
     cutter: ball6, region, regionRef: regionRef(region.zTop, region.zBottom), clSurface,
     kind: 'ball-scallop', scallopMm: 0.1, stepDownMm: 100,
-    feeds: FEEDS, safeZMm: 20, hopZMm: 5, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
+    feeds: FEEDS, safeZMm: 20, hopZMm: 5, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid: RAPID,
   });
   return out.ir.operations[0]!.moves;
 }

@@ -72,7 +72,7 @@ function run(moveCap: number) {
   return finishModule.finish({
     cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
     scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
-    safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid, moveCap,
+    safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid, moveCap,
   });
 }
 
