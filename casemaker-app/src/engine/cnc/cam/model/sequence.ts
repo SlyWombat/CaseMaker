@@ -247,6 +247,8 @@ export interface SequenceOptions {
     coveredCells: number;
     /** The goal field's own cell area, mm² — the unit the rest price is stated in. */
     cellAreaMm2: number;
+    /** planner v3 A1b — cells standing above the shop's tall height; absent counts as 0. */
+    tallCells?: number;
   } | null;
   /**
    * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
@@ -1001,6 +1003,8 @@ interface RankedSequence {
   coverage: number | null;
   /** The goal's covered cell count the caller reported with `coverage`; null with no goal. */
   coveredCells: number | null;
+  /** Cells standing more than the shop's tall height above the goal; null with no goal. */
+  tallCells: number | null;
   /** The goal field's cell area, mm² — with `coverage`, the leftover expressed in mm². */
   cellAreaMm2: number | null;
   /** #961 — what this candidate's coverage rests buy and cost against the chain without them. */
@@ -1039,15 +1043,19 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): re
   // chain (the caller's simulated outcome), not the pocket count. A candidate the caller could
   // not simulate ranks after every simulated one; with no goal at all every key is +∞ and the
   // old order (leftBehind first) stands unchanged.
-  // planner v3 A1 — a leftover at or under the floor (the best chain's leftover plus the shop's
-  // tolerance) ranks AS the floor: chains that close together are equal here, and the later keys
-  // (time, bit changes) decide between them.
-  const leftover =
+  // planner v3 A1 + A1b — with the tolerance on: fewer TALL cells always ranks first (the factor
+  // makes one tall cell outweigh any leftover count), and a leftover at or under the floor ranks AS
+  // the floor. With the tolerance off (`leftoverFloor` null) this is the plain leftover, as before.
+  const floored =
     ranked.coverage === null
       ? Number.POSITIVE_INFINITY
       : leftoverFloor !== null && ranked.coverage <= leftoverFloor
         ? leftoverFloor
         : ranked.coverage;
+  const leftover =
+    leftoverFloor === null || ranked.coverage === null
+      ? floored
+      : (ranked.tallCells ?? 0) * 2 * ((ranked.coveredCells ?? 0) + 1) + floored;
   const demoted = ranked.eligible ? 0 : 1;
   // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
   // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
@@ -1197,7 +1205,7 @@ export function chooseSequence(
     demand.features.filter((f) => f.kind === 'pocket' || f.kind === 'contour').map((f) => f.id),
   );
   const feasible: RankedSequence[] = priced
-    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null } => p.priced !== null)
+    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null } => p.priced !== null)
     .map(({ sequence, priced: price, coverage }) => {
       const failedFeatures = new Set(
         price.failures.flatMap((f) => f.regionIds).filter((id) => demandFeatureIds.has(id)),
@@ -1210,6 +1218,7 @@ export function chooseSequence(
         leftBehind: sequence.leftBehind + failedFeatures.size,
         coverage: coverage === null ? null : coverage.leftoverCells,
         coveredCells: coverage === null ? null : coverage.coveredCells,
+        tallCells: coverage === null ? null : (coverage.tallCells ?? 0),
         cellAreaMm2: coverage === null ? null : coverage.cellAreaMm2,
         restPrice: null,
         eligible: true,
@@ -1257,7 +1266,9 @@ export function chooseSequence(
   let leftoverFloor: number | null = null;
   let bestLeftover: number | null = null;
   if (tolerancePct > 0 && measured.length > 0) {
-    bestLeftover = Math.min(...measured.map((r) => r.coverage!));
+    const fewestTall = Math.min(...measured.map((r) => r.tallCells ?? 0));
+    const cleanest = measured.filter((r) => (r.tallCells ?? 0) === fewestTall);
+    bestLeftover = Math.min(...cleanest.map((r) => r.coverage!));
     const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
     leftoverFloor = bestLeftover + (tolerancePct / 100) * coveredCells;
   }

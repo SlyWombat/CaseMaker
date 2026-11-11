@@ -991,6 +991,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const defaults = liveShopDefaults();
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
+  const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -1219,7 +1220,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const goalCoverage =
     coverageGoal === undefined
       ? undefined
-      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number; leftoverAboveMm: number } | null => {
+      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number; leftoverAboveMm: number; tallCells: number } | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir);
@@ -1230,6 +1231,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           if (acc === null) return null;
           let covered = 0;
           let leftover = 0;
+          let tall = 0;
           // #1028 — THE DEEPEST OVER-BAND STANDING, the same 0.1 mm band the share counts: the
           // ladder's "takes it" test and its "would reduce it to X mm" sentence both read it.
           let leftoverAboveMm = 0;
@@ -1238,9 +1240,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             covered++;
             const over = acc[k]! - (coverageGoal.z[k] as number);
             if (over > 0.1) leftover++;
+            if (over > leftoverTallMm) tall++;
             if (over > leftoverAboveMm) leftoverAboveMm = over;
           }
-          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm };
+          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm, tallCells: tall };
         };
   const perSetup: SetupPlan[] = [];
   // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
@@ -3431,7 +3434,7 @@ export interface PlanPocketsOptions {
    * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
    * picker keeps its pocket-count completeness.
    */
-  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null;
+  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null;
   /**
    * #961 — a COVERAGE rest's region, from the caller's own simulated field: the cells the chain so
    * far leaves above the band, as polygons in the plan's XY (the caller owns the goal and the

@@ -58,6 +58,18 @@ const choose = (pct: number | undefined) =>
     ...(pct === undefined ? {} : { leftoverEquivalencePct: pct }),
   });
 
+const chooseTall = (pct: number, tallWithoutRest: number, tallWithRest: number) =>
+  chooseSequence(DEMAND, { house: HOUSE, catalogue: [] }, {
+    rapid: RAPID,
+    toolChangeSeconds: 91.4,
+    planStep: (step) => ir(step.cutter.tool, WORK[`${step.kind}:${step.cutter.key}`] ?? 50),
+    coverage: (steps) => {
+      const rest = sig(steps).includes('rest:');
+      return { leftoverCells: rest ? 700 : 1000, coveredCells: 100000, cellAreaMm2: 0.01, tallCells: rest ? tallWithRest : tallWithoutRest };
+    },
+    leftoverEquivalencePct: pct,
+  });
+
 describe('#1217 the leftover tolerance', () => {
   it('with no tolerance the least leftover wins, as today', () => {
     const choice = choose(undefined);
@@ -95,8 +107,35 @@ describe('#1217 the leftover tolerance', () => {
   });
 });
 
+describe('#1224 the tall-cell rule', () => {
+  it('tall leftover is never forgiven', () => {
+    expect(sig(chooseTall(0.5, 50, 0).steps)).toBe('pocket:t6+rest:t3');
+  });
+
+  it('equal tall leftover: time decides', () => {
+    expect(sig(chooseTall(0.5, 50, 50).steps)).toBe('pocket:t6');
+  });
+
+  it('no tall leftover anywhere is the #1217 case', () => {
+    expect(sig(chooseTall(0.5, 0, 0).steps)).toBe('pocket:t6');
+  });
+
+  it('fewer tall cells wins even with more leftover', () => {
+    expect(sig(chooseTall(0.5, 0, 50).steps)).toBe('pocket:t6');
+  });
+
+  it('with the tolerance off, tall cells change nothing', () => {
+    expect(sig(chooseTall(0, 50, 0).steps)).toBe('pocket:t6+rest:t3');
+    expect(sig(chooseTall(0, 0, 50).steps)).toBe('pocket:t6+rest:t3');
+  });
+});
+
 describe('#1217 the setting', () => {
   it('the tolerance is 0.5 % by default', () => {
     expect(readDefault(null, 'plan.leftoverEquivalencePct').value).toBe(0.5);
+  });
+
+  it('the tall height is 1.0 mm by default', () => {
+    expect(readDefault(null, 'plan.leftoverTallMm').value).toBe(1);
   });
 });
