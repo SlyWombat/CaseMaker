@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // #723 P2-3 — the WIZARD'S SIDES SURFACE. A job cut from more than one saved setup shows its sides
-// on the "What are you cutting?" step, and the mesh picked there is written to the CHOSEN side
+// on the "What are you making?" step, and the mesh picked there is written to the CHOSEN side
 // (`withSideGoal`), not over the job's single target. A one-side job keeps today's form.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';

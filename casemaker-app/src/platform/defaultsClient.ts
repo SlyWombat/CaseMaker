@@ -349,6 +349,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tape.insetMm': { label: 'tape inset from every edge (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 2 },
   // #1098 — the plate a drawing is worked on when the shelf holds none that fits (#1207).
   'stock.defaultPlateThicknessMm': { label: 'default plate thickness for a drawing (chosen)', unit: 'mm', rule: z.number().min(1).max(100), fallback: 12 },
+  'stock.signMarginMm': {
+    label: 'the margin around a sign’s line (chosen)',
+    unit: 'mm',
+    rule: z.number().min(1).max(50),
+    fallback: 10,
+  },
   // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
   'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
   'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },

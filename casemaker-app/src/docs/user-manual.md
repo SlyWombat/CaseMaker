@@ -216,9 +216,9 @@ Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.
 ### Worked example: a first cutting job
 
 1. On the welcome page, click **Cut it on the CNC**. This opens a four-step wizard: **Machine**,
-   **What are you cutting?**, **Stock**, **Holding**.
+   **What are you making?**, **Stock**, **Holding**.
 2. On **Machine**, pick a connected machine or continue without one.
-3. On **What are you cutting?**, pick an operation — or, with nothing picked, move on: a fresh job
+3. On **What are you making?**, pick an operation — or, with nothing picked, move on: a fresh job
    already carries three lines of engraved text on a 100 × 60 × 12 mm hardwood block, ready to cut
    with no setup at all. A few quick starters are also offered here — **Name badge**, **Bare
    blank**, **Name on a dowel** — each a different starting recipe.

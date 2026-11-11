@@ -3,8 +3,8 @@
  *
  * The maintainer's words: "as an end user do I know the difference between a flute and a prism."
  * So the question becomes intents — a sign, a design from a file, a cut-out, a pocket, a part from
- * a 3D model, a circuit board, a name on a dowel, something else — and each card asks only its own
- * questions. The sixteen engine chips stay available under *Something else…*: they are the panel's
+ * a 3D model, a circuit board, something else — and each card asks only its own questions. (The
+ * rod's cards are #1107's own group; the old dowel card was dead once that landed.) The sixteen engine chips stay available under *Something else…*: they are the panel's
  * vocabulary, not the first-job door's.
  *
  * The answers are one flat record, because the cards are one form: a selected card shows its
@@ -23,7 +23,6 @@ export type PresetId =
   | 'pocket'
   | 'part-3d'
   | 'pcb'
-  | 'dowel'
   | 'something-else'
   /** #1107 — the rod intents, folded into the card list when the house owns a rotary. */
   | 'rod-dowel'
@@ -47,7 +46,6 @@ export const WIZARD_PRESETS: readonly PresetDef[] = [
   { id: 'pocket', title: 'A pocket or tray', blurb: 'A flat-floored recess' },
   { id: 'design-file', title: 'A design from a file', blurb: 'SVG, DXF or a picture, cut or carved' },
   { id: 'pcb', title: 'A circuit board', blurb: 'Copper, holes and outline from Gerbers' },
-  { id: 'dowel', title: 'Name on a dowel', blurb: 'Text around or along a rod · rotary', rotaryOnly: true },
   { id: 'something-else', title: 'Something else…', blurb: 'Every operation the panel knows' },
 ];
 
@@ -97,6 +95,14 @@ export function letterSizeMm(id: LetterSizeId): number {
 }
 
 /**
+ * #1100 item 2 — the size id a stored line's cap height came from, for a Back: the exact match
+ * when the number is one of the card's, else the card's default (the line was not the card's own).
+ */
+export function letterSizeIdFor(mm: number | undefined): LetterSizeId {
+  return LETTER_SIZES.find((s) => s.mm === mm)?.id ?? 'medium';
+}
+
+/**
  * The choice a card's answers make, or null where the card is a door to a file flow rather than an
  * answer of its own (the design file, the 3D part and the board are read by their fields).
  */
@@ -137,7 +143,7 @@ export function presetWorkShape(id: PresetId, answers: PresetAnswers): WorkShape
       // face is loaded (the wizard's `workShapeFor` owns that). A card's own estimate keeps the
       // blank this preset promises, not a different one.
       const length = Math.max(1, answers.text.length * size * 0.62);
-      return { kind: 'text', size: { length, width: size }, depth: 0.5 };
+      return { kind: 'text', size: { length, width: size }, depth: 0.5, sign: true };
     }
     case 'cutout':
       return {

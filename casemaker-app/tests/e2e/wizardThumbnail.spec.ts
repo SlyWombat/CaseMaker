@@ -16,7 +16,7 @@ test('#1099 — the mesh is drawn on the question, the blank and the hold', asyn
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // Step 2 — #1100's cards open the step; the mesh chip lives behind *Something else…*.
   await openSomethingElse(page);

@@ -1102,7 +1102,10 @@ export interface EngraveJobState {
    * placeholder's placement (or `addLabel`'s centre): the findings report the blank honestly
    * rather than the action throwing.
    */
-  addEngraveText: (text: string, opts: { depth: number; font: string; reads?: 'along' | 'around' }) => string;
+  addEngraveText: (
+      text: string,
+      opts: { depth: number; font: string; reads?: 'along' | 'around'; sizeMm?: number },
+    ) => string;
   updateLabel: (id: string, patch: Partial<EngraveLabel>) => void;
   removeLabel: (id: string) => void;
   /** Set the cutter and stamp its source (#254). Defaults to `'user'`. */
@@ -1892,11 +1895,15 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
           : fit;
       // Nothing at 1 mm fits, or the text is empty: keep the placeholder's own placement (or the
       // generic centre placement when there was none); the job's findings say why it is refused.
-      const label =
+      const fitted =
         placed ??
         (placeholder !== null
           ? { ...placeholder, text, font: opts.font, depth: opts.depth }
           : { ...newLabel(job, opts.depth), text, font: opts.font });
+      // #1100 item 3a — a card that STATES its letter size (the sign) lays the line at that cap
+      // height; the seed above fits the band, and the position is the ink's centre, so the size
+      // changes around it. No other caller states one.
+      const label = opts.sizeMm === undefined ? fitted : { ...fitted, size: opts.sizeMm };
       // The wizard's former `addLabel` + `updateLabel` pair stamped the text and its layout as the
       // person's; this write keeps that (the operator typed the text and pressed Create), and the
       // placeholder stamp is gone because the line is no longer a placeholder.

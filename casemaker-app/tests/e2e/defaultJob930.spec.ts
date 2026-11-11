@@ -102,7 +102,7 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
 
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
   // #1100 — a text job comes from the sign card; the engine chips live under Something else….
   if (kind === 'engrave') {
     await openSignCard(page);

@@ -318,6 +318,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "strips",
         "chosen, not measured: how many strips of tape go under a blank",
     ),
+    // #1100 — the margin the sign preset's proposed plate leaves around its line.
+    (
+        "stock.signMarginMm",
+        10.0,
+        "mm",
+        "chosen, not measured: the margin the sign preset's proposed plate leaves on every side of its line",
+    ),
     (
         "tape.stripWidthMm",
         20.0,
@@ -1143,6 +1150,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
         "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
+        "stock.signMarginMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
         "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
         "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
         "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),

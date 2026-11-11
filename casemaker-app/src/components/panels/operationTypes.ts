@@ -400,7 +400,7 @@ export function addOperationOfType(type: Exclude<OperationTypeId, 'surface' | 'p
 }
 
 /**
- * Whether the job carries any operation yet. The wizard asks "What are you cutting?" only when
+ * Whether the job carries any operation yet. The wizard asks "What are you making?" only when
  * there is nothing to cut: an established job opens straight on its setup questions, and
  * "Edit setup" never re-asks what the work is.
  */

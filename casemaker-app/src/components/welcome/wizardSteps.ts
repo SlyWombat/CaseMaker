@@ -29,7 +29,7 @@ export interface WizardStepDef {
  */
 export const WIZARD_STEPS: readonly WizardStepDef[] = [
   { id: 'machine', name: 'Machine', nextLabel: 'Next: what are you making' },
-  { id: 'operation', name: 'What are you cutting?', nextLabel: 'Next: stock' },
+  { id: 'operation', name: 'What are you making?', nextLabel: 'Next: stock' },
   // #1105 — the press that leaves Stock CREATES the job (startFromStock), and now says so.
   { id: 'stock', name: 'Stock', nextLabel: 'Next: holding — starts the job' },
   { id: 'holding', name: 'Holding', nextLabel: 'Create the job' },

@@ -89,7 +89,7 @@ test('#1098 — an STL dropped on step 2 reaches Holding in two clicks', async (
 
   // Click 1 — the machine question to the file question.
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-empty.png');
   // The drop sets the operation from the format; no chip to find — and never changes the blank's kind.
@@ -113,7 +113,7 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   const stockKindBeforeSvg = (await readJob(page)).stockEntry?.kind;
   await page.getByTestId('start-wizard-drop-input').setInputFiles(COASTER);

@@ -39,6 +39,8 @@ export interface ProposalContext {
   shelf?: readonly StockItem[];
   jobMaterial?: StockMaterial | null;
   plateThicknessMm?: number;
+  /** #1100 item 3 — the margin a sign's proposed plate leaves around its line, mm. */
+  signMarginMm?: number;
 }
 
 /**
@@ -96,7 +98,13 @@ export type WorkShape =
    * proposal states the blank the board is on rather than inventing a tighter one.
    */
   | { kind: 'pcb'; outline: { length: number; width: number }; laidOn?: { length: number; width: number } }
-  | { kind: 'text'; size: { length: number; width: number }; depth: number }
+  | {
+      kind: 'text';
+      size: { length: number; width: number };
+      depth: number;
+      /** #1100 item 3 — the SIGN preset's line: it sizes its own plate, by the sign's margin. */
+      sign?: boolean;
+    }
   /**
    * #1098 — a vector outline (SVG/DXF) the question step read. `through` is the Cut it out
    * choice (a profile needs a plate the cut can free); Pocket it and Carve it leave it false.
@@ -203,7 +211,9 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
       };
     }
     case 'text': {
-      const m = WORK_STOCK_MARGIN_MM;
+      // #1100 item 3 — a SIGN's line sizes its own plate with the sign margin (the shop's number);
+      // any other text keeps the historical 5 mm proposal, and the stock step opens the house stick.
+      const m = work.sign === true ? (ctx.signMarginMm ?? WORK_STOCK_MARGIN_MM) : WORK_STOCK_MARGIN_MM;
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,

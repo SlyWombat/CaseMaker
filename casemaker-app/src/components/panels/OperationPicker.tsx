@@ -1,7 +1,7 @@
 /**
  * #662/#685 — the operation picker: the one place a person says WHICH operation to add.
  *
- * It is used twice — the wizard's last step ("What are you cutting?") and the panel's
+ * It is used twice — the wizard's last step ("What are you making?") and the panel's
  * "+ Add operation" — so the words, the order, the groups and the set are one table
  * (`operationTypes.ts`). The caller owns what a pick DOES: the wizard selects the operation and
  * asks for its one field (#685, `OperationStep`); the panel adds it and opens its row.
