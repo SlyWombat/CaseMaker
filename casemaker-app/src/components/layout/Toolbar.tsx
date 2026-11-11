@@ -297,6 +297,9 @@ export function Toolbar() {
       onClick={onHome}
       disabled={machineRunning}
       aria-disabled={machineRunning}
+      // #134 (2026-11-10) — on a phone the word drops and the icon stays (index.css), so the
+      // control needs a name of its own: a screen reader would otherwise read only the emoji.
+      aria-label="Home"
       title={machineRunning ? 'a program is running — Home is available when it ends' : 'The main page — nothing is discarded, and Continue brings you back here'}
     >
       🏠 <span className="btn-label">Home</span>
