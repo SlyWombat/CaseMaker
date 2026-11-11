@@ -903,6 +903,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         { ctx: attempt.attempt.ctx, z0: attempt.attempt.z0 },
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1199 item 2 — the LIVE machine's clearance, so the plan is proven against the machine
+          // as it is now, not only against the value it was planned with.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop is checked before every line, exactly as side 1's run.
           stopRequested: () => stopRef.current,
           // The Cut step-1 statement already names the probe, so the fit-probe ask is answered by it.
@@ -1035,6 +1038,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1199 item 2 — the LIVE machine's clearance at run time.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop: checked before every line, and the flag outlives the
           // prompt it may also decline.
           stopRequested: () => stopRef.current,

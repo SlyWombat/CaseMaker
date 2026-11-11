@@ -235,6 +235,26 @@ export interface ExecDeps {
    * separated from the probe's seating and is not used across a fitting.
    */
   lastRecordedTopProbeRefZ?: number | null;
+  /**
+   * #1199 item 2 — THE LIVE MACHINE'S CLEARANCE at RUN time (`toolChange.clearanceZ` of the
+   * resolved machine/profile), read by the caller when the run starts. The executor refuses when
+   * the plan's travel height or its recorded clearance sits below this, and builds the safe-Z
+   * guard from it. Absent (a caller that has not wired it yet): the plan's own recorded field is
+   * the fallback, which is why every caller that can should pass this.
+   */
+  liveClearanceZ?: number;
+}
+
+/**
+ * #1199 item 2 — the clearance a plan may run under, proven against the LIVE machine when the
+ * caller supplies it. Returns the value to build the guard from, or the refusal sentence.
+ */
+function liveClearanceFor(plan: RegistrationPlan, deps: ExecDeps): { clearanceZ: number; problem: string | null } {
+  const live = Number.isFinite(deps.liveClearanceZ as number) ? (deps.liveClearanceZ as number) : (plan.machineClearanceZ ?? Number.NaN);
+  const problem =
+    planTravelProblem(plan.seek.fromMachineZ, live, 'plan’s travel height') ??
+    planTravelProblem(plan.machineClearanceZ ?? Number.NaN, live, 'plan’s recorded clearance');
+  return { clearanceZ: live, problem };
 }
 
 export interface Transcript {
@@ -2084,12 +2104,10 @@ export async function runRegistration(
   deps: ExecDeps,
   spreadPlan?: SurfaceSpreadPlan,
 ): Promise<RunResult> {
-  // #1199 — the MACHINE's clearance, never the plan's seek start; absent on an old record, which
-  // must refuse rather than guess.
-  const machineClearanceZ = plan.machineClearanceZ ?? Number.NaN;
-  const travelProblem = planTravelProblem(plan.seek.fromMachineZ, machineClearanceZ, 'plan’s travel height');
-  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
-  const io = session(deps, machineClearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
+  const cleared = liveClearanceFor(plan, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -2605,12 +2623,10 @@ export async function retouchSurface(
       transcript: [],
     };
   }
-  // #1199 — the MACHINE's clearance, never the plan's seek start; absent on an old record, which
-  // must refuse rather than guess.
-  const machineClearanceZ = plan.machineClearanceZ ?? Number.NaN;
-  const travelProblem = planTravelProblem(plan.seek.fromMachineZ, machineClearanceZ, 'plan’s travel height');
-  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
-  const io = session(deps, machineClearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
+  const cleared = liveClearanceFor(plan, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
@@ -2907,10 +2923,9 @@ export async function runFlipRegistration(
   // whose G38.5 release follows the reading, so a Stop (or a refused line) between the trigger and
   // the release leaves the ball deflected whatever probe make it is; the epilogue's release is a
   // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
-  const machineClearanceZ = ctx.machineClearanceZ ?? Number.NaN;
-  const travelProblem = planTravelProblem(ctx.seek.fromMachineZ, machineClearanceZ, 'side-2 plan’s travel height');
-  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
-  const io = session(deps, machineClearanceZ, s.idlePollLimit, true);
+  const cleared = liveClearanceFor(ctx, deps);
+  if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
+  const io = session(deps, cleared.clearanceZ, s.idlePollLimit, true);
   let powered = false;
   try {
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
