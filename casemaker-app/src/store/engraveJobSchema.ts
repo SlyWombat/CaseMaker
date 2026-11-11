@@ -2244,6 +2244,13 @@ const registrationPlanSchema = z.object({
   seatRemeasure: z.enum(['probe-refit']).optional().describe('A seat-seek plan run because the stored seat predates the probe’s last fitting.'),
   probeRefLabel: z.string().nullable().optional().describe('The datum’s words in the seating-correction sentence.'),
   floorProbeRefZ: z.number().finite().nullable().optional().describe('The probe reference of the seek floor’s own datum, when it differs.'),
+  machineClearanceZ: z
+    .number()
+    .finite()
+    .optional()
+    .describe(
+      'The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.',
+    ),
   seek: z
     .object({
       fromMachineZ: z.number().finite().describe('Machine Z the seek starts from, in millimetres.'),

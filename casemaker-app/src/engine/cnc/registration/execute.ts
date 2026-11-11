@@ -105,7 +105,7 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, shiftedRecordedTopMachineZ } from './probeShift';
-import { motionOrderGuard } from './motionOrder';
+import { motionOrderGuard, planTravelProblem } from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -305,6 +305,12 @@ function session(
    * the stylus still deflected must release it before the epilogue's home, or that rapid alarms.
    */
   releaseProbeOnStop = false,
+  /**
+   * #1199 field 7 — WHERE A DESCENT BELOW THE CLEARANCE MAY HAPPEN for this session (the plan's
+   * stock box, its edge-find windows and its tap target). Absent: the clearance/order rules apply
+   * without a footprint check.
+   */
+  descentAllowed?: (machine: boolean, x: number, y: number) => boolean,
 ) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
@@ -327,7 +333,7 @@ function session(
    * line sent from below it — so a routine that lifts to a band height and traverses is stopped
    * before the line reaches the wire, and a descent is only ever taken at the point to be probed.
    */
-  const motion = motionOrderGuard(seekFromMachineZ);
+  const motion = motionOrderGuard(seekFromMachineZ, descentAllowed === undefined ? {} : { descentAllowed });
 
   /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
   function stoppedByOperator(): boolean {
@@ -1669,6 +1675,7 @@ export async function runCentreFind(opts: CentreFindOptions, deps: ExecDeps): Pr
     ];
     const outcome: RegistrationOutcome = {
       edges: [],
+      machineClearanceZ: opts.seekFromMachineZ,
       offset: { x: r3(centreWork.x - plan.at.x), y: r3(centreWork.y - plan.at.y) },
       measured: { x: true, y: true },
       centre: centreWork,
@@ -2042,7 +2049,12 @@ export async function runRegistration(
   deps: ExecDeps,
   spreadPlan?: SurfaceSpreadPlan,
 ): Promise<RunResult> {
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the MACHINE's clearance, never the plan's seek start; absent on an old record, which
+  // must refuse rather than guess.
+  const machineClearanceZ = plan.machineClearanceZ ?? Number.NaN;
+  const travelProblem = planTravelProblem(plan.seek.fromMachineZ, machineClearanceZ, 'plan’s travel height');
+  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
+  const io = session(deps, machineClearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -2554,7 +2566,12 @@ export async function retouchSurface(
       transcript: [],
     };
   }
-  const io = session(deps, plan.seek.fromMachineZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  // #1199 — the MACHINE's clearance, never the plan's seek start; absent on an old record, which
+  // must refuse rather than guess.
+  const machineClearanceZ = plan.machineClearanceZ ?? Number.NaN;
+  const travelProblem = planTravelProblem(plan.seek.fromMachineZ, machineClearanceZ, 'plan’s travel height');
+  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
+  const io = session(deps, machineClearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
@@ -2851,7 +2868,10 @@ export async function runFlipRegistration(
   // whose G38.5 release follows the reading, so a Stop (or a refused line) between the trigger and
   // the release leaves the ball deflected whatever probe make it is; the epilogue's release is a
   // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
-  const io = session(deps, ctx.seek.fromMachineZ, s.idlePollLimit, true);
+  const machineClearanceZ = ctx.machineClearanceZ ?? Number.NaN;
+  const travelProblem = planTravelProblem(ctx.seek.fromMachineZ, machineClearanceZ, 'side-2 plan’s travel height');
+  if (travelProblem !== null) return { ok: false, reason: `nothing was sent: ${travelProblem}`, transcript: [] };
+  const io = session(deps, machineClearanceZ, s.idlePollLimit, true);
   let powered = false;
   try {
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
@@ -3097,6 +3117,7 @@ export async function runFlipRegistration(
     const problems: string[] = [];
     const outcome: RegistrationOutcome = {
       edges: [...frontRecs, seedRec].map((rec) => edgeFrom(rec, s.tipRadiusMm)),
+      machineClearanceZ: ctx.machineClearanceZ,
       offset: { x: r3(correctedG54.x - g54.x), y: r3(correctedG54.y - g54.y) },
       measured: { x: true, y: true },
       centre: { ...origin },

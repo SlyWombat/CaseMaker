@@ -396,6 +396,14 @@ export interface RegistrationPlan {
    * choice; the run's note carries the sentence.
    */
   surfaceChecksProbeNote?: string;
+  /**
+   * #1199 — THE MACHINE'S OWN TRAVEL HEIGHT this plan was built against (`toolChange.clearanceZ`),
+   * carried SEPARATELY from {@link RegistrationPlan.seek}: the executor's guard is built from THIS,
+   * never from the seek's start, so a plan (or a caller) that states a band approach as its travel
+   * height cannot hand a probing run a floor of −81.25. Absent on persisted plans from before the
+   * field: the executor refuses to run them rather than guess (`planTravelProblem`).
+   */
+  machineClearanceZ?: number;
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
   /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */
@@ -611,7 +619,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
           x: r3((input.region.min[0] + input.region.max[0]) / 2),
           y: r3((input.region.min[1] + input.region.max[1]) / 2),
         },
-        seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+        machineClearanceZ: seekFromMachineZ,
+      seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
         mountDatum,
         probe,
         mountTap,
@@ -834,6 +843,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
       ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
       surfacePoint,
+      machineClearanceZ: seekFromMachineZ,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
       mountDatum,
       probe,
