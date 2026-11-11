@@ -1786,6 +1786,20 @@
       "setAt": null,
       "unit": "mm",
       "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
+    },
+    "registration.guardedFloorMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far above the bed\u2019s known floor a guarded top seek may accept contact; it only stops a seek over a missing blank"
+    },
+    "registration.minTouchInsetMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the least inset of a guarded touch point from the stock\u2019s edge; the point must stand on the blank"
     }
   },
   "accessories": [
