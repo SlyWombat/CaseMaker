@@ -1363,29 +1363,36 @@ export function OperationStep({
               </p>
             )}
           </WizardFileField>
-          {/* Part or mould is a question about a MESH: asked once one is read, never for a picture. */}
-          {surface !== null && surface.format !== 'png' && (
+          {/* Part or mould is a question about a MESH: a picture has only the part, and says why. */}
+          {surface !== null && (
             <div style={FIELDS} role="radiogroup" aria-label="What to make">
               <label style={FIELD_LABEL}>
                 <input
                   type="radio"
                   name="start-wizard-op-surface-make"
-                  checked={!makeMold}
+                  checked={surface.format === 'png' || !makeMold}
                   data-testid="start-wizard-op-surface-make-part"
                   onChange={() => setMakeMold(false)}
                 />
                 <span>Make the part</span>
               </label>
-              <label style={FIELD_LABEL}>
-                <input
-                  type="radio"
-                  name="start-wizard-op-surface-make"
-                  checked={makeMold}
-                  data-testid="start-wizard-op-surface-make-mold"
-                  onChange={() => setMakeMold(true)}
-                />
-                <span>Make a mould of it</span>
-              </label>
+              {surface.format !== 'png' && (
+                <label style={FIELD_LABEL}>
+                  <input
+                    type="radio"
+                    name="start-wizard-op-surface-make"
+                    checked={makeMold}
+                    data-testid="start-wizard-op-surface-make-mold"
+                    onChange={() => setMakeMold(true)}
+                  />
+                  <span>Make a mould of it</span>
+                </label>
+              )}
+              {surface.format === 'png' && (
+                <p style={MUTED} data-testid="start-wizard-op-surface-picture-note">
+                  a picture has one side
+                </p>
+              )}
             </div>
           )}
           {makeMold && surface !== null && surface.format !== 'png' && (

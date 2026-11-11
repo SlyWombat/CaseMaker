@@ -99,3 +99,43 @@ describe('#1098 — the question step opens with the file', () => {
     expect(lastChoice(onChoice)).toBeNull();
   });
 });
+
+
+// ---------------------------------------------------------------------------------------------------
+// The remaining items of the analyst's 2026-11-11 audit.
+
+// A 1 × 1 PNG: enough for the relief reader to call it a picture.
+const PNG_1X1 = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  (c) => c.charCodeAt(0),
+);
+
+describe('#1098 — the zone and its follow-ups say what they do', () => {
+  it('the zone says "or choose what to make below"', () => {
+    renderStep();
+    expect(screen.getByTestId('start-wizard-drop-zone').textContent).toContain('or choose what to make below');
+  });
+
+  it('several .gbr/.drl chosen in the zone are read as one board: the zone’s input takes many files', () => {
+    renderStep();
+    expect((screen.getByTestId('start-wizard-drop-input') as HTMLInputElement).multiple).toBe(true);
+  });
+
+  it('a .jpg is refused with the kinds sentence (no new importer)', () => {
+    const onChoice = renderStep();
+    drop('photo.jpg', 'x', 'image/jpeg');
+    expect(screen.getByTestId('start-wizard-drop-error').textContent).toContain(
+      'Case Maker reads STL, 3MF, STEP, OBJ, SVG, DXF, PNG and Gerber files — this is a .jpg.',
+    );
+    expect(lastChoice(onChoice)).toBeNull();
+  });
+
+  it('a PNG offers Make the part only and says a picture has one side', async () => {
+    renderStep();
+    drop('relief.png', PNG_1X1, 'image/png');
+    await waitFor(() => expect(screen.getByTestId('start-wizard-op-surface-picture-note')).toBeTruthy());
+    expect(screen.getByTestId('start-wizard-op-surface-picture-note').textContent).toContain('a picture has one side');
+    expect((screen.getByTestId('start-wizard-op-surface-make-part') as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByTestId('start-wizard-op-surface-make-mold')).toBeNull();
+  });
+});

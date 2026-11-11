@@ -57,6 +57,7 @@ export function WizardDropZone(props: WizardDropZoneProps): JSX.Element {
         ref={input}
         type="file"
         hidden
+        multiple
         accept={props.accept}
         data-testid={props.inputTestId}
         aria-label="The file to make"
@@ -69,6 +70,7 @@ export function WizardDropZone(props: WizardDropZoneProps): JSX.Element {
       />
       <p className="sw-file__drop-title">Drop your file here</p>
       <p className="sw-file__kinds">{props.kinds}</p>
+      <p className="sw-file__kinds">or choose what to make below</p>
       <button
         type="button"
         className="sw-btn sw-file__choose"
