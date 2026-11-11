@@ -2022,6 +2022,10 @@ body, html, #root {
   font-size: var(--cm-text-mono-size);
   color: var(--cm-color-on-surface-variant);
   line-height: 1.4;
+  /* #1109 item 11 follow-up — the card is a `sw-btn`, whose nowrap is inherited into the
+     description and turns the four-line clamp into one clipped line. Scoped here, the buttons
+     keep their nowrap and the description wraps and clamps again (#504). */
+  white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
