@@ -30,7 +30,7 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 
@@ -284,7 +284,9 @@ export function planRegistrationAttempt(args: {
           : args.surfaceTopZ !== null
             ? args.surfaceTopZ.value
             : jobMachine(job, calibration).envelope.z.min;
-      const marginMm = 1;
+      // #1207 — a chosen figure, not a literal: the shop default's recommendation bounds a seek
+      // that misses the blank; the probe still stops on the blank above it.
+      const marginMm = readDefault(defaults, 'registration.guardedFloorMarginMm').value;
       const clearance = clearanceZOf(jobMachine(job, calibration)) ?? 0;
       const floorMin = r3(floorDatum + marginMm);
       const ceiling = r3(clearance - args.settings.parkAboveSurfaceMm);
@@ -302,6 +304,8 @@ export function planRegistrationAttempt(args: {
       // area's centre. The area is the cut region when the job states one, else the blank.
       const region = cutRegionOf(job);
       const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
+      // #1207 — the 1 mm floor here is D's shared `topTouchEdgeMarginMm` (the footprint slice); it
+      // is not a second local default.
       const inset = Math.max(1, args.settings.tipRadiusMm + job.edgeMargin);
       const ix = Math.min(inset, Math.max(0.001, (area.maxX - area.minX) / 2));
       const iy = Math.min(inset, Math.max(0.001, (area.maxY - area.minY) / 2));

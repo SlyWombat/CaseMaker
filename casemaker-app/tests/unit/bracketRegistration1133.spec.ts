@@ -29,11 +29,13 @@ import { planRegistrationAttempt } from '@/components/panels/registrationAttempt
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 import type { Setup } from '@/engine/cnc/setups';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCATION = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
   machines: { calibration: MachineCalibration }[];
+  defaults: ShopDefaults;
 };
 const CALIBRATION = LOCATION.machines[0]!.calibration;
 
@@ -349,6 +351,25 @@ describe('#1201 a bracket hold with no trusted seat measures the top on the blan
     expect(plan.guarded!.floorMachineZ).toBeCloseTo(floor, 3);
     expect(plan.seek.band.min).toBeCloseTo(floor + plan.guarded!.marginMm, 3);
     expect(plan.seek.band.max).toBeCloseTo(plan.seek.fromMachineZ - SETTINGS.parkAboveSurfaceMm, 3);
+  });
+
+  // #1207 — the guarded seek's floor margin is a REGISTRY value, read at the call site: a location
+  // that raises it moves the band's floor. Before the registry change it was the literal `1`, and
+  // this test fails against it. (The check points' edge inset is D's shared `topTouchEdgeMarginMm`,
+  // not a second default here.)
+  it('reads the floor margin from the shop defaults (#1207)', () => {
+    const job = bracketJob();
+    const tuned: ShopDefaults = {
+      ...LOCATION.defaults,
+      'registration.guardedFloorMarginMm': { ...LOCATION.defaults['registration.guardedFloorMarginMm']!, value: 2.5 },
+    };
+    const attempt = attemptFor(job, null, { defaults: tuned });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    const plan = attempt.plan;
+    const floor = jobMachine(job, CALIBRATION).envelope.z.min;
+    expect(plan.guarded!.marginMm).toBeCloseTo(2.5, 3);
+    expect(plan.seek.band.min).toBeCloseTo(floor + 2.5, 3);
   });
 
   it('with a LEGACY seat: still guarded, and the seat is stated as not used', () => {

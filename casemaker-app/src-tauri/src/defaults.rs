@@ -421,6 +421,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("registration.idlePollLimit", 30.0, "polls", "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"),
     ("registration.scanMissMarginMm", 1.0, "mm", "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"),
     ("registration.readingResolutionMm", 0.05, "mm", "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"),
+    // #1201/#1207 — the guarded top seek's floor margin (a job whose seat is not trusted measures
+    // the top ON the blank, like the vendor). Chosen, not measured. The check points' edge inset is
+    // D's shared `topTouchEdgeMarginMm` (the footprint slice), not a second default here.
+    ("registration.guardedFloorMarginMm", 1.0, "mm", "chosen, not measured: how far above the bed's known floor a guarded top seek may accept contact; it only stops a seek over a missing blank, and the probe still stops on the blank above it"),
     // ── #451 probe residuals (begin) — what a touch leaves and what each fixture already holds.
     // The 3D probe's 0.02 is still an assumption; the chuck and jaw figures are provisional stubs
     // (#208), and the wired probe's measured Z figure is in MEASURED_SEEDS.
@@ -777,6 +781,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.cutBlankAboveBandMm" => Some(need(
             n.is_some_and(|v| (0.5..=50.0).contains(&v)),
             "0.5 to 50 mm",
+        )),
+        // #1201/#1207 — the guarded top seek's chosen floor margin.
+        "registration.guardedFloorMarginMm" => Some(need(
+            n.is_some_and(|v| (0.1..=5.0).contains(&v)),
+            "0.1 to 5 mm",
         )),
         "registration.thicknessNoteMm" => Some(need(
             n.is_some_and(|v| (0.01..=2.0).contains(&v)),
