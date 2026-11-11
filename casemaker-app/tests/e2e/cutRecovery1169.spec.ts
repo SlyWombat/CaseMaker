@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
+import { houseHealth, locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { lanServerPort } from '../../scripts/e2ePort';
 import type { Page } from '@playwright/test';
 
@@ -169,6 +170,19 @@ async function seedFailedRelease(page: Page): Promise<void> {
 }
 
 test('#1169 — the Tool wait shows the card; Continue sends M490.2 once and the card clears', async ({ cm, page }) => {
+  // #1202 × #1123 item 9 — the card carries the tool-change preview, and the preview's clearance
+  // comes from the house's machine record (the fixture machine at this host:port, profile Z1);
+  // the completion write after OUR line goes to the same record.
+  await serveHouse(page, {
+    location: locationDocument(),
+    health: houseHealth(),
+    defaults: locationDocument().defaults,
+    movingEtag: true,
+    writes: 'applied',
+  });
+  await page.route('**/api/v1/defaults/**', async (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }),
+  );
   const fake = await installFakeConsole(page, { steps: 20, toolWaitAtLine: 2 });
   await cm.ready();
   await prepareFakeRun(page);
@@ -179,9 +193,22 @@ test('#1169 — the Tool wait shows the card; Continue sends M490.2 once and the
   await expect(card).toContainText('The machine is waiting for you');
   await expect(card).toContainText('asked for tool');
   await expect(card).toContainText('waiting for a tool change to be confirmed');
+
+  // A'S #1202 PREVIEW, CARRIED BY THE CARD (#1123 item 9): the exact line the Continue sends, a
+  // shape this machine has never completed marked as a first run, and the press held for the
+  // operator's own statement. The Z1 record gives the guard a frame to review against.
+  const routine = card.getByTestId('engrave-registration-routine');
+  await expect(routine).toHaveAttribute('data-routine', 'tool-change');
+  await expect(card.getByTestId('engrave-registration-dry-line-0')).toContainText('M490.2');
+  await expect(card.getByTestId('engrave-registration-dry-note')).toContainText('M490.2 macro');
+  await expect(card.getByTestId('engrave-registration-first-run')).toContainText('has not run on this machine before');
+  await expect(page.getByTestId('engrave-cut-recovery-continue')).toBeDisabled();
+
   fs.mkdirSync(OUT, { recursive: true });
   await card.screenshot({ path: path.join(OUT, 'machine-waiting.png') });
 
+  await card.getByTestId('engrave-registration-first-run-tick').check();
+  await expect(page.getByTestId('engrave-cut-recovery-continue')).toBeEnabled();
   await page.getByTestId('engrave-cut-recovery-continue').click();
   await expect.poll(() => fake.lines().filter((l) => l === 'M490.2').length, { timeout: 30_000 }).toBe(1);
   // The controller leaves `Tool` on the next poll; the card clears with it.
