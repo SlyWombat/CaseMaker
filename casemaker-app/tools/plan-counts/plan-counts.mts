@@ -3,17 +3,19 @@
  *
  * NOT A SPEC — a bench tool, like `tools/samples/run-gdrive-samples.mts`. Measurement only.
  *
- *   npx tsx tools/plan-counts/plan-counts.mts <trace.jsonl> [--json <out.json>]
+ *   npx tsx tools/plan-counts/plan-counts.mts <trace.jsonl> [--json <out.json>] \
+ *     [--shadow-csv <out.csv>]
  *
  * Reads the JSONL the CLI writes with `--mem-trace <file>`, counts the pipeline rows
  * (`summarize.ts` has the exact rules) and prints them. `--json` also writes the `PlanCounts`
- * object. A missing argument or an unreadable file is one sentence on stderr and exit code 2.
+ * object; `--shadow-csv` writes one line per `shadow:candidate` row, for the analyst's agreement
+ * table. A missing argument or an unreadable file is one sentence on stderr and exit code 2.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import { parseTrace, summarizeTrace } from './summarize';
+import { parseTrace, summarizeTrace, type TraceRow } from './summarize';
 
-const USAGE = 'usage: plan-counts <trace.jsonl> [--json <out.json>]';
+const USAGE = 'usage: plan-counts <trace.jsonl> [--json <out.json>] [--shadow-csv <out.csv>]';
 
 const fail = (why: string): never => {
   console.error(why);
@@ -23,12 +25,18 @@ const fail = (why: string): never => {
 const argv = process.argv.slice(2);
 let file: string | undefined;
 let jsonOut: string | undefined;
+let shadowCsv: string | undefined;
 for (let i = 0; i < argv.length; i += 1) {
   const arg = argv[i]!;
   if (arg === '--json') {
     const value = argv[i + 1];
     if (value === undefined) fail(USAGE);
     jsonOut = value;
+    i += 1;
+  } else if (arg === '--shadow-csv') {
+    const value = argv[i + 1];
+    if (value === undefined) fail(USAGE);
+    shadowCsv = value;
     i += 1;
   } else if (arg.startsWith('--')) {
     fail(`plan-counts: unknown flag "${arg}" — ${USAGE}`);
@@ -54,6 +62,38 @@ if (jsonOut !== undefined) {
   writeFileSync(jsonOut, `${JSON.stringify(counts, null, 2)}\n`, 'utf8');
 }
 
+/** The analyst's agreement table: one line per shadow candidate, in trace order. */
+const SHADOW_COLUMNS = [
+  'signature',
+  'estSeconds',
+  'estCutSeconds',
+  'estChanges',
+  'estLeftoverMm2',
+  'unpriced',
+  'realSeconds',
+  'realEstimateSeconds',
+  'realLeftoverCells',
+  'realRank',
+] as const;
+
+function writeShadowCsv(path: string, rows: readonly TraceRow[]): void {
+  const lines = [SHADOW_COLUMNS.join(',')];
+  for (const row of rows) {
+    if (row.stage !== 'shadow:candidate') continue;
+    lines.push(
+      SHADOW_COLUMNS.map((column) => {
+        const value = row[column];
+        if (value === undefined) return '';
+        if (column === 'signature') return `"${String(value).replace(/"/g, '""')}"`;
+        return String(value);
+      }).join(','),
+    );
+  }
+  writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
+}
+
+if (shadowCsv !== undefined) writeShadowCsv(shadowCsv, rows);
+
 const seconds = (ms: number): string => (ms / 1000).toFixed(1);
 const lines = [
   `trace rows ${rows.length}`,
@@ -68,6 +108,7 @@ const lines = [
   `stamps: computed ${counts.stamps.computed} cached ${counts.stamps.cached} failed ${counts.stamps.failed}`,
   `sweeps ${counts.sweeps}`,
   `goal fields ${counts.goalFields}`,
+  `shadow: choices ${counts.shadow.choices} agree ${counts.shadow.agree} candidates ${counts.shadow.candidates} errors ${counts.shadow.errors} field s ${seconds(counts.shadow.fieldMs)} estimate s ${seconds(counts.shadow.estimateMs)}`,
   `incomplete ${counts.incomplete ? 'yes' : 'no'}`,
 ];
 for (const line of lines) console.log(line);

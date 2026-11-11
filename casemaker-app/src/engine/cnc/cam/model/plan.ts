@@ -26,7 +26,7 @@ import { cuttingDiameter, flatEndMill, type Tool, isCuttingRecord } from '@/engi
 import { PLAN_MATERIALITY } from './tradeoff';
 import { coneHeight, isVShape, vCone, type VCone } from '@/engine/cnc/vProfile';
 import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
-import { memTrace } from '@/engine/cnc/memTrace';
+import { memTrace, memTraceEnabled } from '@/engine/cnc/memTrace';
 import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
@@ -47,6 +47,7 @@ import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
+import { traceShadowSelection } from '../fields/shadowSelector';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -4155,6 +4156,33 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           },
         }),
   });
+
+  // planner v3 slice 3 — THE SELECTOR IN SHADOW. Trace-only: with no trace file this block does
+  // not run, and it never changes `choice`. A failure here is one trace row, never a failed plan.
+  if (memTraceEnabled() && demand.features.length > 0) {
+    try {
+      const shadowRegions = new Map<string, Polygons>();
+      for (const node of pocketNodes) shadowRegions.set(node.id, node.region);
+      for (const node of throughNodes) shadowRegions.set(node.id, node.region);
+      const shadowRule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds);
+      traceShadowSelection({
+        demand,
+        cutters,
+        candidateOpts: {
+          maxCutters: opts.maxCutters,
+          ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
+        },
+        regions: shadowRegions,
+        offset: opts.offset,
+        paramsFor: opts.paramsFor,
+        changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
+        considered: choice.considered,
+        chosenSignature: choice.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
+      });
+    } catch (err) {
+      memTrace('shadow:error', { message: err instanceof Error ? err.message.slice(0, 200) : 'unknown' });
+    }
+  }
 
   // #975 — THE V FLOOR (the maintainer's 2026-11-05 ruling). A pocket the chosen chain leaves
   // UNREACHABLE is not refused while a V bit in the set can do the job: the NARROWEST V whose tip

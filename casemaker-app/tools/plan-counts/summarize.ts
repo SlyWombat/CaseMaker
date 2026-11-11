@@ -25,6 +25,7 @@ export interface PlanCounts {
   stamps: { computed: number; cached: number; failed: number };
   sweeps: number;
   goalFields: number;
+  shadow: { choices: number; agree: number; candidates: number; errors: number; fieldMs: number; estimateMs: number };
   /** Largest `rss` seen, bytes; 0 when no row has one. */
   peakRssBytes: number;
   /** last row's t minus first row's t; 0 for fewer than two rows. */
@@ -57,6 +58,12 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
   let stampsFailed = 0;
   let sweeps = 0;
   let goalFields = 0;
+  let shadowChoices = 0;
+  let shadowAgree = 0;
+  let shadowCandidates = 0;
+  let shadowErrors = 0;
+  let shadowFieldMs = 0;
+  let shadowEstimateMs = 0;
   let peakRssBytes = 0;
 
   const stacks: Record<Family, number[]> = { pick: [], plan: [], rank: [], chain: [] };
@@ -132,6 +139,18 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
       case 'goal-field':
         goalFields += 1;
         break;
+      case 'shadow:choice':
+        shadowChoices += 1;
+        if (row.agree === 1) shadowAgree += 1;
+        if (typeof row.fieldMs === 'number') shadowFieldMs += row.fieldMs;
+        if (typeof row.estimateMs === 'number') shadowEstimateMs += row.estimateMs;
+        break;
+      case 'shadow:candidate':
+        shadowCandidates += 1;
+        break;
+      case 'shadow:error':
+        shadowErrors += 1;
+        break;
       default:
         // Any other stage is ignored.
         break;
@@ -159,6 +178,14 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
     stamps: { computed: stampsComputed, cached: stampsCached, failed: stampsFailed },
     sweeps,
     goalFields,
+    shadow: {
+      choices: shadowChoices,
+      agree: shadowAgree,
+      candidates: shadowCandidates,
+      errors: shadowErrors,
+      fieldMs: shadowFieldMs,
+      estimateMs: shadowEstimateMs,
+    },
     peakRssBytes,
     wallMs: rows.length < 2 ? 0 : Math.round(rows[rows.length - 1]!.t - rows[0]!.t),
     incomplete,
