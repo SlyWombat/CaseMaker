@@ -18,6 +18,7 @@ import {
   cylSurface,
   cylTipExact,
   cylTipLower,
+  cylTipUpper,
   turnedAboutX,
   turningProfile,
 } from '@/engine/cnc/cam/fields/cylindricalField';
@@ -177,4 +178,79 @@ describe('#1220 the cylindrical chart', () => {
       }
     }
   });
+});
+
+
+// #1236 — THE ROD CHART'S GUARANTEED UPPER TIP VALUE (planner v3 B1b). Nothing calls it yet; the
+// first two tests are the contract (an upper bound in `tipBounds`' own sense), the rest are a box
+// worked by hand — reported, never fitted.
+describe('cylTipUpper (#1236)', () => {
+  // A square 10 x 10 bar along X, centred on the axis: x 0..20, y and z each -5..5.
+  const mesh = boxMesh(0, 20, -5, 5, -5, 5);
+  const grid = cylGridOver(0, 20, 0.5, 15); // 41 cells along, 24 around
+  const FLAT15: CutterProfile = { radiusMm: 1.5, flatRadiusMm: 1.5, kind: 'flat' };
+  const cutters: readonly CutterProfile[] = [FLAT15, BALL15];
+
+  it('never below the exact value', () => {
+    for (const profile of cutters) {
+      const upper = cylTipUpper(mesh, grid, profile);
+      for (let j = 0; j < grid.nTheta; j++) {
+        for (let i = 10; i <= 30; i++) {
+          const x = grid.x0 + i * grid.dx;
+          const theta = j * grid.dThetaDeg;
+          const exact = cylTipExact(mesh, profile, x, theta);
+          if (exact === null) continue;
+          expect(upper[j * grid.nx + i]!, `${profile.kind} cell ${i},${j}`).toBeGreaterThanOrEqual(exact - 1e-9);
+        }
+      }
+    }
+  }, 600_000);
+
+  it('and the lower value is never above it', () => {
+    const surface = cylSurface(mesh, grid);
+    for (const profile of cutters) {
+      const lower = cylTipLower(surface, profile);
+      const upper = cylTipUpper(mesh, grid, profile);
+      let checked = 0;
+      for (let j = 0; j < grid.nTheta; j++) {
+        for (let i = 10; i <= 30; i++) {
+          const at = j * grid.nx + i;
+          if (!Number.isFinite(lower[at]!)) continue;
+          checked += 1;
+          expect(lower[at]!, `${profile.kind} cell ${i},${j}`).toBeLessThanOrEqual(upper[at]! + 1e-9);
+        }
+      }
+      expect(checked, `${profile.kind}: finite lower cells checked`).toBeGreaterThan(0);
+    }
+  }, 600_000);
+
+  it('on a flat face it is the face', () => {
+    const at20 = (profile: CutterProfile): number => {
+      const upper = cylTipUpper(mesh, grid, profile);
+      return upper[0 * grid.nx + 20]!;
+    };
+    for (const profile of cutters) expect(at20(profile), profile.kind).toBeCloseTo(5, 6);
+  }, 600_000);
+
+  it('it is close to the truth on an edge', () => {
+    for (const profile of cutters) {
+      const upper = cylTipUpper(mesh, grid, profile);
+      const exact = cylTipExact(mesh, profile, grid.x0 + 20 * grid.dx, 3 * grid.dThetaDeg);
+      expect(exact, `${profile.kind}: the edge is under the line`).not.toBeNull();
+      expect(exact!, profile.kind).toBeCloseTo(7.0711, 3);
+      const slack = upper[3 * grid.nx + 20]! - exact!;
+      expect(slack, `${profile.kind}: upper - exact`).toBeGreaterThanOrEqual(-1e-9);
+      expect(slack, `${profile.kind}: upper - exact`).toBeLessThanOrEqual(1.0);
+    }
+  }, 600_000);
+
+  it('it does not depend on where the box starts around', () => {
+    for (const profile of cutters) {
+      const upper = cylTipUpper(mesh, grid, profile);
+      const base = upper[20]!; // i = 20, j = 0
+      for (const j of [6, 12, 18]) {
+        expect(upper[j * grid.nx + 20]!, `${profile.kind} j=${j}`).toBeCloseTo(base, 6);
+      }
+    }
+  }, 600_000);
 });
