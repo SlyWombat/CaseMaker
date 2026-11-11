@@ -667,6 +667,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0).max(1),
     fallback: 0.95,
   },
+  'plan.leftoverEquivalencePct': {
+    label: 'leftover two cutter chains may differ by and still count as equal',
+    unit: '%',
+    rule: z.number().min(0).max(5),
+    fallback: 0.5,
+  },
   // ── #948 (end)
   // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
   // over the stock at a clearance above the job's own fixtures, and the air walk before the first

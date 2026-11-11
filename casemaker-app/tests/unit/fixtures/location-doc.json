@@ -1626,6 +1626,13 @@
       "unit": "cells",
       "note": "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"
     },
+    "plan.leftoverEquivalencePct": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "%",
+      "note": "chosen, not measured: two cutter chains whose leftover differs by less than this share of the goal's surface count as equal on leftover, so time and bit changes decide between them"
+    },
     "adaptive.residualShare": {
       "value": 0.005,
       "source": "seeded",

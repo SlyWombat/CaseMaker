@@ -990,6 +990,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
   const defaults = liveShopDefaults();
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
+  const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -2373,6 +2374,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         feeds,
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
+        leftoverEquivalencePct,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
         bitChange,
         reachMarginMm,
@@ -3371,6 +3373,8 @@ export interface PlanPocketsOptions {
   rapid: RapidEstimate;
   /** The shop's `toolChange.seconds` (#858) — #961's own per-change allowance, not a default here. */
   toolChangeSeconds: number;
+  /** planner v3 A1 — the shop's leftover tolerance, % of the goal's covered cells. */
+  leftoverEquivalencePct?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -4119,6 +4123,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     : chooseSequence(demand, cutters, {
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
+    leftoverEquivalencePct: opts.leftoverEquivalencePct,
     // #1114 — the sequence's priced changes and its same-diameter tie rule.
     ...(opts.bitChange === undefined ? {} : { bitChange: opts.bitChange }),
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
@@ -4611,6 +4616,16 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (choice.pickNote !== undefined && choice.pickNote !== null) {
     notes.push(choice.pickNote);
     statements.push({ severity: 'sheet', code: 'plan-run', text: choice.pickNote, count: 1 });
+  }
+  if (choice.leftoverTolerance !== undefined) {
+    const t = choice.leftoverTolerance;
+    const extraMm2 = Math.round((t.chosenLeftoverCells - t.bestLeftoverCells) * t.cellAreaMm2 * 10) / 10;
+    const minutes = Math.round(t.savedSeconds / 60);
+    const text =
+      `The cutters chosen leave ${extraMm2} mm² more than the most thorough set would, and save about ${minutes} min. ` +
+      `Sets within ${t.tolerancePct} % of the surface of each other are chosen by time (a shop setting).`;
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
