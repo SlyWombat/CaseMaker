@@ -80,7 +80,10 @@ import {
 import { otherPackageFilesFor, packageKeyOf } from '@/engine/cnc/engrave/packageFiles';
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { registrationKey, useEngraveRegistrationStore } from './engraveRegistrationStore';
-import { finishedProgramsFor, localMachine } from './locationStore';
+import { finishedProgramsFor, localMachine, machineAt, saveMachineWithRetry } from './locationStore';
+// #1202 field 5 — a walk that finishes cleanly records its routine shape on the machine.
+import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
+import { walkRoutineIdentity } from '@/engine/cnc/engrave/walkIdentity';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf } from '@/engine/cnc/machine';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
@@ -760,6 +763,21 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     );
 
     if (outcome.kind === 'finished') {
+      // #1202 field 5 — THE WALK COMPLETED (no stop): record its routine shape on the machine,
+      // through the guarded PUT. A refused write only means the next Start marks it again.
+      const finishedWalk = rec.walks[mode];
+      const recordMachine = machineAt({ host: rec.target.host, port: rec.target.port });
+      if (finishedWalk !== null && recordMachine !== null) {
+        const identity = walkRoutineIdentity(mode === 'airwalk' ? 'air-walk' : 'clean-walk', finishedWalk.steps);
+        void saveMachineWithRetry(recordMachine, (current) =>
+          withRoutineCompletion(current, {
+            routine: identity.routine,
+            shape: identity.shape,
+            at: new Date().toISOString(),
+            build: buildStamp(),
+          }),
+        );
+      }
       const whole =
         mode === 'clean' && (after.kind === 'clean-now' || (after.kind === 'after-program' && after.next === null));
       // #1123 item 41 — the run's own words first: a span's end switched the vacuum off itself; a

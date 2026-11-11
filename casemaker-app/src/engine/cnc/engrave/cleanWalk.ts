@@ -58,8 +58,23 @@ export interface CleanWalkInput {
 
 export type CleanWalkMode = 'clean' | 'airwalk';
 
+/**
+ * #1202 field 5 — the walk's STRUCTURAL steps, in order. The generator's own vocabulary, so a
+ * routine's identity is the sequence and never the geometry: a raster over any blank is one
+ * `raster` step, and the cleaning pass's direct-air pair is stated as the words the file carries.
+ */
+export type CleanWalkStep = 'M811' | 'raster' | 'M812' | 'outline';
+
 export type CleanWalkResult =
-  | { ok: true; ir: ToolpathIR; sweepZ: number; rows: number; estimatedSeconds: number }
+  | {
+      ok: true;
+      ir: ToolpathIR;
+      sweepZ: number;
+      rows: number;
+      estimatedSeconds: number;
+      /** #1202 — the routine's structural sequence, the identity's only input. */
+      steps: readonly CleanWalkStep[];
+    }
   | { ok: false; reason: string };
 
 /** THE SWEEP'S Z: the highest fixture (or the stock top) plus the shop's clearance. */
@@ -130,5 +145,9 @@ export function cleanWalkFile(input: CleanWalkInput, mode: CleanWalkMode): Clean
       },
     ],
   };
-  return { ok: true, ir, sweepZ, rows, estimatedSeconds: ir.operations[0]!.estimatedSeconds };
+  // #1202 — the routine's shape, in the generator's own step vocabulary. The cleaning pass's
+  // direct-air pair is part of the sequence (the FILE carries M811/M812); the air walk is the one
+  // closed outline. Geometry (rows, footprint, sweep Z) is deliberately absent.
+  const steps: readonly CleanWalkStep[] = mode === 'clean' ? ['M811', 'raster', 'M812'] : ['outline'];
+  return { ok: true, ir, sweepZ, rows, estimatedSeconds: ir.operations[0]!.estimatedSeconds, steps };
 }
