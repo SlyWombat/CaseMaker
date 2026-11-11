@@ -5,7 +5,7 @@
 // longer than the assertion needs, which is what makes the Cancel deterministic: the progress line
 // is visible while the worker is busy, and the press must return the panel to where it was.
 import { fileURLToPath } from 'node:url';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
@@ -17,7 +17,7 @@ test('#785 Generate shows its stage, and Cancel returns the panel to its pre-Gen
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // An empty job, so Surface a mesh is offered (the shipped job starts with three demo labels).

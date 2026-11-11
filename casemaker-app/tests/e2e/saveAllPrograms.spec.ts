@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 
 import { unzipSync } from 'fflate';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { downloadToBuffer } from './fixtures/parsers';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -125,7 +125,7 @@ test('#1093 — Save all writes every program of the run, byte-identical to set 
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   const jobPath = testInfo.outputPath(`${JOB_NAME}.cutjob.json`);

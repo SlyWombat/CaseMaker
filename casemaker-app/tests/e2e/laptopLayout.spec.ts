@@ -13,7 +13,7 @@
 //   npx playwright test tests/e2e/laptopLayout.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 /** Header height this layout must hold: `.app-shell`'s first grid row. */
 const HEADER_MAX_H = 48;
@@ -56,8 +56,7 @@ async function openEngrave(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  const btn = page.getByTestId('sidebar-button-cnc-engrave');
-  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  await enterCnc(page);
   await page.waitForSelector('[data-testid="engrave-preview-legend"]', { timeout: 60_000 });
   // #400 — the 500 ms sleep that used to sit here was a bet on two things that had not settled.
   // (a) The fonts are `font-display: swap` from `public/fonts/`, and the toolbar's row height and

@@ -19,7 +19,7 @@ import type { Page } from '@playwright/test';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(900_000);
 
@@ -130,7 +130,7 @@ async function openReliefJob(page: Page, job: EngraveJob, stem: string): Promise
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   const menu = page.getByTestId('engrave-file-menu');
   if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();
@@ -422,7 +422,7 @@ test('the relief draws on the map and the rod, and cuts to the program the sheet
   // button stays disabled while it loads. Reset the run (the panel's own door then owns the
   // session), which is what a person does by leaving the job.
   await page.evaluate(() => window.__caseMaker!.engraveReset());
-  await page.getByTestId('sidebar-button-cnc-sim').click();
+  await enterCnc(page, 'cnc-sim');
   await expect(page.getByTestId('sim-panel')).toBeVisible();
   const [ncChooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('sim-open').click()]);
   await ncChooser.setFiles(ncFile);

@@ -15,7 +15,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(600_000);
 
@@ -81,7 +81,7 @@ test.beforeEach(async ({ cm, page }) => {
     window.__caseMaker!.seedCutters(entries, []);
     window.__caseMaker!.engraveReset();
   }, [M8, UNC]);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 });
 

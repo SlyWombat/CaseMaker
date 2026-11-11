@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -34,7 +34,7 @@ test('#840 — an imported path with a slot width wider than the cutter is pocke
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // A clean job: the shipped job's three demo labels out.

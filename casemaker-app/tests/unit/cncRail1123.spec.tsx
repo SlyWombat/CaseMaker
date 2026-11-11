@@ -9,7 +9,7 @@
 // machine pin, Job and Simulate alone; the workspace is the app's state, entered by the CNC card,
 // by opening a cutting job and by the reload restore; Home is the way to the other workspaces.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 
 vi.mock('@/platform/features', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/platform/features')>();
@@ -89,11 +89,15 @@ describe('#1123-59 the rail follows the workspace', () => {
     expect(screen.queryByTestId('sidebar-button-export')).toBeNull();
   });
 
-  it('a case project keeps its own rail, and opening the job switches the rail to the CNC list', () => {
+  it('a case project keeps its own rail; entering CNC (the door, or "Cut this on the CNC") switches the rail to the CNC list', () => {
+    // #1123-59 row 6 — a board case has no Job entry in its design rail; the workspace is entered
+    // from the door (or a cuttable project's own "Cut this on the CNC").
     render(<Sidebar />);
     expect(screen.getByTestId('sidebar-button-board')).toBeDefined();
-    // The Job entry is the way in from the case workspace.
-    fireEvent.click(screen.getByTestId('sidebar-button-cnc-engrave'));
+    expect(screen.queryByTestId('sidebar-button-cnc-engrave')).toBeNull();
+    act(() => {
+      useViewportStore.getState().setActiveSidebarSection('cnc-engrave');
+    });
     expect(useViewportStore.getState().workspace).toBe('cnc');
     expect(screen.queryByTestId('sidebar-button-board')).toBeNull();
     expect(screen.getByTestId('sidebar-button-cnc-engrave')).toBeDefined();

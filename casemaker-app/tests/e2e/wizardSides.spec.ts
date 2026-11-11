@@ -9,7 +9,7 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
 test.setTimeout(180_000);
@@ -24,7 +24,7 @@ test('#723 P2-3 — the wizard names the sides of a two-side job, and the operat
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   const jobPath = testInfo.outputPath('mouse-shell-two-sides.cutjob.json');

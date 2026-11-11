@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/caseMaker';
+import { test, expect, enterCnc } from '../fixtures/caseMaker';
 
 /**
  * Issue #134 — the workspace at phone width. The section rail must leave the
@@ -192,7 +192,7 @@ test('a label’s text field keeps a usable width at phone width (#350)', async 
   // The rail is off-canvas at phone width; bring it in the same way #134's test does.
   const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
   if (sideX < 0) await page.getByTestId('sidebar-handle').click();
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   // #411 — the field lives in the row's body, behind the chevron.
   await page.getByTestId('engrave-label-expand-0').click();
@@ -243,7 +243,7 @@ test('the remove control on an item line is a real touch target at phone width (
   });
   const sideX = await page.getByTestId('sidebar').evaluate((el) => el.getBoundingClientRect().x);
   if (sideX < 0) await page.getByTestId('sidebar-handle').click();
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // The row is FOLDED, which is the state the report was about and the state a phone opens on.

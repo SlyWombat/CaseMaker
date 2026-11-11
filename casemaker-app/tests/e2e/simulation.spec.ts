@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Page, TestInfo } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 /** 472.097 mm³: `capsuleArea(40, 1.5875, segmentsForRadius(1.5875)) × (0.5 + 1 + 2)`. */
 const EXPECTED_REMOVED_MM3 = 472.097;
@@ -32,7 +32,7 @@ async function openSimPanel(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-sim').click();
+  await enterCnc(page, 'cnc-sim');
   await expect(page.getByTestId('sim-panel')).toBeVisible();
 }
 

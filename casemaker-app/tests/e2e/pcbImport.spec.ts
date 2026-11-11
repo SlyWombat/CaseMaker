@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 const FIXTURES = path.resolve(process.cwd(), 'tests', 'unit', 'fixtures', 'pcb');
 const ROOT = path.resolve(process.cwd(), '..');
@@ -27,7 +27,7 @@ test('a Gerber set becomes the job’s board, stated and drawn', async ({ cm, pa
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
 

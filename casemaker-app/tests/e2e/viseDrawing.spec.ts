@@ -11,7 +11,7 @@
 // Run (Windows, Playwright starts its own dev server):
 //   npx playwright test tests/e2e/viseDrawing.spec.ts
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import type { Page, TestInfo } from '@playwright/test';
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -23,8 +23,7 @@ async function openEngrave(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  const btn = page.getByTestId('sidebar-button-cnc-engrave');
-  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(700);
 }

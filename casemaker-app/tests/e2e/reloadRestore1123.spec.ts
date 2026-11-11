@@ -4,7 +4,7 @@
 // Item 10: a job open in the CNC workspace comes back on the Job panel, not the door.
 // Item 11: a generated run (programs, checks, simulation verdicts) is in durable storage keyed by
 // (job sha, build, shop signature); the reload restores it, so Generate reads Cut… without a press.
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -14,7 +14,7 @@ async function openCncWithJob(cm: { ready(): Promise<void> }, page: import('@pla
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   // Choose the built-in flat first: the bench jobs name their cutter, and an empty toolKey makes
   // the panel run the measured pick, whose job write lands during Generate (a stale run by design).

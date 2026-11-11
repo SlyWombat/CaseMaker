@@ -6,7 +6,7 @@
 // the difference; every section opens from its icon; the active state is kept; the choice is
 // remembered per browser; the phone behaviour is unchanged.
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { SIDEBAR_COLLAPSED_W, SIDEBAR_LS_KEY } from '../../src/components/layout/useSidebarCollapsed';
 
 test.setTimeout(180_000);
@@ -101,7 +101,7 @@ test('#1123-47 — the collapsed rail is remembered across a reload', async ({ c
   await cm.ready();
   await openWorkspace(page);
   // Item 10's reload restore is the CNC workspace's: enter the job before reloading.
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.waitForTimeout(500);
   await page.getByTestId('sidebar-collapse').click();

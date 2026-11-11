@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import type { Download, Page } from '@playwright/test';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 /** Load a board (which shows the sidebar) and open the Engrave panel on the deterministic job. */
 async function openEngravePanel(page: Page): Promise<void> {
@@ -15,7 +15,7 @@ async function openEngravePanel(page: Page): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
 
@@ -190,7 +190,7 @@ test('the default job: generate, save, sheet, reload, run record — then the ed
     // PRESENTS THE RUN: the job's name, its stock and cutter, and its own diagnostics — not an empty
     // open-a-file form asking for a stock and a cutter the job already has. The run's finished Result
     // still belongs to the engrave run and is not shown as this panel's own.
-    await page.getByTestId('sidebar-button-cnc-sim').click();
+    await enterCnc(page, 'cnc-sim');
     await expect(page.getByTestId('sim-panel')).toBeVisible();
     await expect(page.getByTestId('sim-job-run')).toBeVisible();
     await expect(page.getByTestId('sim-job-run-line')).toContainText('the job’s own program');
@@ -218,7 +218,7 @@ test('the default job: generate, save, sheet, reload, run record — then the ed
 
   await test.step('the run record: blank as written, then the measured run beside the estimate', async () => {
     // Back to Engrave: opening a record is the panel's own door.
-    await page.getByTestId('sidebar-button-cnc-engrave').click();
+    await enterCnc(page);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
     const ncFile = downloads[0]!.name;

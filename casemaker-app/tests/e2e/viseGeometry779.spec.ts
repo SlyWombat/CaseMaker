@@ -15,7 +15,7 @@
 //   CASEMAKER_PORT=5401 npx playwright test tests/e2e/viseGeometry779.spec.ts
 
 import type { Page, TestInfo } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -101,8 +101,7 @@ test('#779 the engrave preview draws the stock sitting IN the vise', async ({ cm
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  const btn = page.getByTestId('sidebar-button-cnc-engrave');
-  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(1200);
   await page.screenshot({ path: shot(testInfo, '779-engrave-preview.png'), fullPage: true });

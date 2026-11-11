@@ -5,7 +5,7 @@
 // was; a choice that would replace open work asks once in the app's own dialog, never
 // window.confirm. Reload-restore (items 10/11) is its own spec and must stay green beside this one.
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(420_000);
 
@@ -15,7 +15,7 @@ async function openCncWithJob(page: Page): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await expect(page.getByTestId('cnc-mode-design')).toHaveAttribute('aria-pressed', 'true');
   await page.waitForTimeout(500);

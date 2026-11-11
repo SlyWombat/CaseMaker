@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { BITS_INVENTORY, serveHouse } from './fixtures/fakeHouse';
 import { rememberMachine } from './fixtures/rememberMachine';
 import { installFakeConsole } from './fixtures/fakeConsole';
@@ -86,7 +86,7 @@ async function openCard(page: Page): Promise<void> {
   // Idempotent: the sidebar button TOGGLES the section, and the second boot in this test starts
   // from a page already on the engrave panel.
   if (!(await page.getByTestId('engrave-panel').isVisible().catch(() => false))) {
-    await page.getByTestId('sidebar-button-cnc-engrave').click();
+    await enterCnc(page);
   }
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.getByTestId('cnc-mode-cut').click();

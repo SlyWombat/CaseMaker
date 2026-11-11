@@ -4,7 +4,7 @@
 // proves the DOOR in the real app: picking an OBJ fills the target row with the mesh's own measured
 // size, and the panel STATES the unit reading an OBJ has no way to declare for itself.
 import path from 'node:path';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 const OBJ = path.resolve(process.cwd(), 'tests/fixtures/obj/box.obj');
 
@@ -14,7 +14,7 @@ test('an OBJ target object is read at the import door, with its unit stated', as
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   await page.getByTestId('engrave-target-input').setInputFiles(OBJ);

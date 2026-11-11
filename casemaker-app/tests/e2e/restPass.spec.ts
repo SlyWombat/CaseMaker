@@ -6,7 +6,7 @@
 // leftover at its floor, and writes program 2 from that. The dev/web build ships the two built-in
 // flat cutters, so the pair is the 3.175 mm flat and the 1 mm flat.
 
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 /** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
 async function menuItem(page: import('@playwright/test').Page, testid: string) {
@@ -24,7 +24,7 @@ test('#667 — a region row pairs a rough and a rest cutter, and the run is two 
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // A clean region job: the shipped job's three demo labels out, one rectangle pocket in.

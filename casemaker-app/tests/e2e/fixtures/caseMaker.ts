@@ -66,3 +66,12 @@ export async function openCutterGroup(page: Page): Promise<void> {
   if (!open) await page.getByTestId('engrave-group-cutter-summary').click();
   await page.getByTestId('engrave-tool').waitFor({ state: 'visible' });
 }
+
+/**
+ * #1123-59 — ENTER THE CNC WORKSPACE (the Job panel) the way the door does. A board case's design
+ * rail has no Job entry any more, and a walk that loads the placeholder board project to get a CNC
+ * job open used to click it; it opens the section through the app's own setter instead.
+ */
+export async function enterCnc(page: Page, section: 'cnc-engrave' | 'cnc-sim' = 'cnc-engrave'): Promise<void> {
+  await page.evaluate((id) => window.__caseMaker!.openSidebarSection(id), section);
+}

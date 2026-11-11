@@ -13,7 +13,7 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { attachEngraveRunDiagnostics } from './fixtures/runDiagnostics';
 import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
@@ -40,7 +40,7 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   const jobPath = testInfo.outputPath('mouse-shell-two-sides.cutjob.json');
@@ -93,7 +93,7 @@ test('#754/#723 — a two-side mouse shell opens, posts the model engine’s fou
   // (3 and 4) restart from the blank — with the earlier setup's carried floor still applied — and
   // the Technical fold NAMES them and the carry (#1032: the old two-program shape never met this,
   // and asserted the line's absence rather than its content).
-  await page.getByTestId('sidebar-button-cnc-sim').click();
+  await enterCnc(page, 'cnc-sim');
   await expect(page.getByTestId('sim-panel')).toBeVisible();
   const checked = page.getByTestId('sim-job-checked');
   await expect(checked).toContainText('all 4 programs');

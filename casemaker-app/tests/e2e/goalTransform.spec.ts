@@ -11,7 +11,7 @@ import type { Page } from '@playwright/test';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(600_000);
 
@@ -93,7 +93,7 @@ async function openJob(page: Page, job: EngraveJob): Promise<void> {
     // goal's x 36 and turned a refusal into a 37-minute plan.
     await window.__caseMaker!.waitForIdle();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   const menu = page.getByTestId('engrave-file-menu');
   if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();

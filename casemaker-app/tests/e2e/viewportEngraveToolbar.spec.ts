@@ -19,7 +19,7 @@
 //   npx playwright test tests/e2e/viewportEngraveToolbar.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -75,7 +75,7 @@ test('engrave section: Top, Fit and the zoom buttons take ordinary clicks and mo
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   // Let the preview build and the section-open AutoFrame settle.
   await page.waitForTimeout(700);
@@ -133,7 +133,7 @@ test('the depth legend stays put and inside the pane while the camera orbits (#3
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   // #516 item 5 / #1010 — the default job starts tool-less and the measured pick is OFFERED, not
   // applied, so nothing is cut and the legend lists no depths. Fit the built-in flat through the
   // panel's own select, the way a person would (the same fit `engrave.spec.ts`'s #288 test makes);
@@ -338,7 +338,7 @@ test('#361 — the depth legend clears the toolbar at both widths', async ({ cm,
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
 
   await expectCleared(page, 'engrave-preview-legend', 'engrave');
@@ -360,7 +360,7 @@ test('#361 — the sacrificial swatch clears the toolbar at both widths', async 
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible({ timeout: 60_000 });
 
   // The swatch reads the SIM store, so a sim scene has to be up for it to render at all — and the
@@ -380,7 +380,7 @@ test('a dialog is above every element of the viewport pane (#348)', async ({ cm,
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await page.waitForTimeout(700);
 

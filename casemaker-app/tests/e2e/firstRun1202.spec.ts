@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, enterCnc } from './fixtures/caseMaker';
 import { installFakeConsole, type FakeConsole } from './fixtures/fakeConsole';
 import { houseHealth, locationDocument, serveHouse, type Json } from './fixtures/fakeHouse';
 import type { Page } from '@playwright/test';
@@ -118,7 +118,7 @@ async function openSeatProposal(page: Page): Promise<void> {
 /** After a reload the job is restored: the Cut card is reached without the wizard door. */
 async function openCutRegistration(page: Page): Promise<void> {
   if ((await page.getByTestId('engrave-panel').count()) === 0) {
-    await page.getByTestId('sidebar-button-cnc-engrave').click();
+    await enterCnc(page);
   }
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.getByTestId('cnc-mode-cut').click();

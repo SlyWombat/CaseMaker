@@ -15,6 +15,7 @@
  * wants the run states, and the upload's own file protocol is a different subject.
  */
 import type { Page } from '@playwright/test';
+import { enterCnc } from './caseMaker';
 import { expect, openCutterGroup } from './caseMaker';
 import { rememberMachine } from './rememberMachine';
 
@@ -28,7 +29,7 @@ export async function generateOnce(page: Page, opts: { tool?: string } = {}): Pr
     window.__caseMaker!.engraveReset();
   });
   await rememberMachine(page, RUN_STATUS);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   if (opts.tool !== undefined) {

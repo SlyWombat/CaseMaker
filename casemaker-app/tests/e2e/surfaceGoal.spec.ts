@@ -19,7 +19,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
@@ -46,7 +46,7 @@ test('#731 — on plain http (no crypto.subtle) an STL still loads, with the sam
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // An empty job, so Surface a mesh is offered (the shipped job starts with three demo labels).
@@ -77,7 +77,7 @@ test('a goal STL from the picker generates, and the UI states its own check and 
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // Surface a mesh is offered on an EMPTY job; the shipped job starts with the three demo

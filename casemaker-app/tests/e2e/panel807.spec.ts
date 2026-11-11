@@ -1,6 +1,6 @@
 // #807/#800 — the first screen's one disclosure affordance and the file bar's clean line, and the
 // run rows' words after a run ("generated · checked · simulated · matches the design").
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -10,7 +10,7 @@ test('#807 — the first screen: one › per disclosure, and the file bar is a l
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // Each row ends with the one affordance; the stock's edit is in its opened body.
@@ -27,7 +27,7 @@ test('#800 — after a run the rows say generated · checked · simulated · mat
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   await page.getByTestId('engrave-generate').click();

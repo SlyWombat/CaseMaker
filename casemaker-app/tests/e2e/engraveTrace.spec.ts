@@ -8,7 +8,7 @@
 // Assertions read the panel's own words and the traced geometry, never pixels.
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 /** Load a board (which shows the sidebar) and open the Engrave panel on the deterministic job. */
 async function openEngravePanel(page: Page): Promise<void> {
@@ -16,7 +16,7 @@ async function openEngravePanel(page: Page): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
 

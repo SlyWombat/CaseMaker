@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { rememberMachine } from './fixtures/rememberMachine';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
@@ -34,7 +34,7 @@ test.skip('#827 — a bore’s centre becomes the origin from the Register step'
   if (at === null || 'reason' in at) throw new Error(`the centre seed failed: ${at === null ? 'null' : at.reason}`);
   fake.setFeature({ kind: 'bore', radiusMm: 8.88 / 2, centre: { x: at.x, y: at.y }, topZ: -8 });
 
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.getByTestId('cnc-mode-cut').click();
   await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();

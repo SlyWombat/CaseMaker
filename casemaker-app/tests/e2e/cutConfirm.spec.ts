@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 import { locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { rememberMachine } from './fixtures/rememberMachine';
 
@@ -34,7 +34,7 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
     window.__caseMaker!.engraveReset();
   });
   await rememberMachine(page, STATUS);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // Generate: the ordinary path's four ticks, and the freeze that follows a green gate.
@@ -223,7 +223,7 @@ test('#769 review — at the 760 px column with a rotary module the DRO wraps an
   // job names none) — the tool cell then carries a real name, the band's elastic cell at the length
   // the 987 px measurement had. The engrave panel lives in the right-hand column; the viewport
   // column stays 1440 − 320 − 360 = 760 px.
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await openCutterGroup(page);
   // #1065 — the picker lists the shop's own cutters when the house has records (this fixture's

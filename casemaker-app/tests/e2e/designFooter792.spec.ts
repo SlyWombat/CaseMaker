@@ -1,7 +1,7 @@
 // #792 — the right panel's Design footer: ONE primary button. Generate is full width on the app's
 // primary container, the "Generate" subheading is gone, and Save .nc… / Run sheet… / Open run
 // record… live in File ▾. The screenshots are the hand-in's record of the changed state.
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(120_000);
 
@@ -11,7 +11,7 @@ test('#792 — the Design footer has one primary button and the run’s files ar
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   const footer = page.getByTestId('engrave-footer');
@@ -40,7 +40,7 @@ test('#793/#794 — the Ready card is one line and the primary becomes Cut…', 
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // #793 — before any press the footer says nothing about a run.

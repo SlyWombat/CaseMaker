@@ -11,7 +11,7 @@
 
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 // The bench corpus lives at the repository root, one level above `casemaker-app`.
 const COIN = fileURLToPath(
@@ -24,7 +24,7 @@ async function openEngravePanel(page: Page): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
 

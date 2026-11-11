@@ -38,7 +38,7 @@ describe('#155 — the toolbox project’s rail', () => {
   it('leads with the toolbox section, and drops everything board-shaped', () => {
     enableToolbox();
     render(<Sidebar />);
-    expect(sectionIds()).toEqual(['toolbox', 'export', 'cnc-engrave', 'cnc-sim']);
+    expect(sectionIds()).toEqual(['toolbox', 'export']);
     for (const id of ['board', 'case', 'rack', 'insert', 'ports', 'hats', 'features', 'assets']) {
       expect(screen.queryByTestId(`sidebar-button-${id}`), `${id} should be hidden`).toBeNull();
     }
@@ -47,7 +47,7 @@ describe('#155 — the toolbox project’s rail', () => {
   it('the template reaches the same rail as a hand-enabled project', () => {
     useProjectStore.getState().setProject(findTemplate('toolbox')!.build());
     render(<Sidebar />);
-    expect(sectionIds()).toEqual(['toolbox', 'export', 'cnc-engrave', 'cnc-sim']);
+    expect(sectionIds()).toEqual(['toolbox', 'export']);
   });
 
   it('a stale board-shaped section resets to the toolbox panel, not to Export', () => {
@@ -57,10 +57,10 @@ describe('#155 — the toolbox project’s rail', () => {
     expect(useViewportStore.getState().activeSidebarSection).toBe('toolbox');
   });
 
-  it('a shell project still keeps every section', () => {
+  it('a shell project keeps its own sections, not the toolbox’s (#1123-59)', () => {
     useProjectStore.getState().setProject(createDefaultProject('rpi-4b'));
     render(<Sidebar />);
-    expect(sectionIds()).toContain('toolbox');
+    expect(sectionIds()).not.toContain('toolbox');
     expect(sectionIds()).toContain('board');
   });
 });

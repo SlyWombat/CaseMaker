@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 /** #1123 item 10 — the one record that says the CNC workspace was open (`workspaceSession.ts`). */
 const WORKSPACE_KEY = 'casemaker.workspace.v1';
@@ -32,7 +32,7 @@ test('#1122 — Load opens a .cutjob.json from the door and lands on the Job pan
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   const [download] = await Promise.all([
     page.waitForEvent('download'),

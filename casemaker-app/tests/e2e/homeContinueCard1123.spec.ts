@@ -2,14 +2,14 @@
 // card above the four cards, in their own style: the title "Continue", the line under it, and the
 // primary button at its right (under the text at phone width). Only when there is work to return to.
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 async function homeWithOpenJob(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await page.waitForTimeout(500);
   await page.getByTestId('home').click();

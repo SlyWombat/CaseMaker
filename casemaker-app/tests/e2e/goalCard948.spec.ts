@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(1_500_000);
@@ -151,7 +151,7 @@ async function openJob(page: Page, file: string, name: string): Promise<void> {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   const menu = page.getByTestId('engrave-file-menu');
   if (!(await menu.isVisible())) await page.getByTestId('engrave-file-menu-toggle').click();

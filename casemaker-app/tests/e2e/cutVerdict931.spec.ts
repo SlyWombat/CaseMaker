@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect, openCutterGroup, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, openSignCard, enterCnc } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
@@ -210,7 +210,7 @@ test('#931 — a stopped sweep: Cut and Design both say it stopped before it fin
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   const labels = page.getByTestId(/^engrave-label-row-/);
   for (let i = 0; i < 3; i++) {

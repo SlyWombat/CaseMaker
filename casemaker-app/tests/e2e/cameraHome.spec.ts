@@ -3,7 +3,7 @@
 // clearance frame (`coordinate.clearance_x/y/z`). The move itself is proved against the fake
 // console in `machineCameraHome.spec.ts`; this file pins the pane's wiring and its guard's words.
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { rememberMachine } from './fixtures/rememberMachine';
 
 const IDLE = '<Idle|MPos:0,0,0|WPos:0,0,0>';
@@ -17,7 +17,7 @@ test('#770 the camera pane offers one fixed move, only on an idle machine', asyn
     window.__caseMaker!.engraveReset();
   });
   await rememberMachine(page, IDLE, false);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // The pane is opened from the status strip's monitor popover.

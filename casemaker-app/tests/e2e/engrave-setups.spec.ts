@@ -10,14 +10,14 @@
 // the deterministic default job, then open Engrave from the sidebar.
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 async function openEngravePanel(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   // #1123 item 27 — the Setups section is its OWN group in the Design tab, closed by default.
   await page.getByTestId('engrave-group-setups-summary').click();

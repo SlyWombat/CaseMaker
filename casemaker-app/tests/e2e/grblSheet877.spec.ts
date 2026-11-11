@@ -3,7 +3,7 @@
 // operator's own sender: zero in the sender at the stock's corner, G10 L20 P1 as the aside, none
 // of the Z1's probe, M491 or PRB steps.
 import type { Page } from '@playwright/test';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -26,7 +26,7 @@ test('#877 — a stated machine draws its work area, and its run sheet speaks th
   const seeded = await page.evaluate(() => window.__caseMaker!.statedMachineSeed('grbl:shapeoko-4'));
   expect(seeded).toHaveProperty('machineId');
 
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // THE PICTURE, on the design screen before any run takes the viewport: the stated work area is

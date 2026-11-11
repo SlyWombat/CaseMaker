@@ -58,19 +58,19 @@ if (featureSim) {
  *  live inside the rack panel itself. Both `cnc-` panels are included: a
  *  `.nc` file and a block of stock held in the vise have nothing to do with
  *  the open project. */
-const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export', 'cnc-sim', 'cnc-engrave'];
+const RACK_SECTION_IDS: SidebarSectionId[] = ['rack', 'export'];
 
 /** Same idea for the name-badge archetype (issue #167): no board, no shell,
  *  no ports — but unlike a rack the badge IS the thing the engrave editor
  *  drives, so that panel stays and the rack's own section does not. Since
  *  #282 the Part section leads it: the badge's own outline, colour split and
  *  magnet were write-once before that. */
-const BADGE_SECTION_IDS: SidebarSectionId[] = ['part', 'export', 'cnc-sim', 'cnc-engrave'];
+const BADGE_SECTION_IDS: SidebarSectionId[] = ['part', 'export'];
 
 /** Same idea for the tool-insert archetype (issue #158): a plate of pockets
  *  has no board, no ports and no shell features, but it is a plain printed
  *  part so it keeps the Export section. */
-const INSERT_SECTION_IDS: SidebarSectionId[] = ['insert', 'export', 'cnc-sim', 'cnc-engrave'];
+const INSERT_SECTION_IDS: SidebarSectionId[] = ['insert', 'export'];
 
 /** Same idea for the bare-blank archetype (issue #280): the project IS the
  *  blank, so there is no board, no shell and no ports — but it is the thing the
@@ -80,21 +80,28 @@ const INSERT_SECTION_IDS: SidebarSectionId[] = ['insert', 'export', 'cnc-sim', '
  *  changing the other's rail. The Part section (#282) is where the plate's own
  *  size, thickness and corner radius live — the last of which no other route
  *  could reach. */
-const BLANK_SECTION_IDS: SidebarSectionId[] = ['part', 'export', 'cnc-sim', 'cnc-engrave'];
+const BLANK_SECTION_IDS: SidebarSectionId[] = ['part', 'export'];
 
 /** Same idea for the stacking-toolbox archetype (issue #155): a bin and a lid
  *  have no board, no ports and no shell features, but they are printed parts
  *  and the toolbox's own parameters are the thing worth editing — so the
  *  toolbox section leads the rail, as the rack's does for a rack. */
-const TOOLBOX_SECTION_IDS: SidebarSectionId[] = ['toolbox', 'export', 'cnc-sim', 'cnc-engrave'];
+const TOOLBOX_SECTION_IDS: SidebarSectionId[] = ['toolbox', 'export'];
 
-/** A shell project offers every section EXCEPT `part` (#282): its two archetypes are the board-less
- *  ones, and a shell has neither `case.badge` nor `case.blank` to edit. Built from `SECTIONS`
- *  rather than written out, so a section added to the rail is a shell section by default and the
- *  archetype-only ones have to say so. */
+/** A shell project offers its OWN sections only (#1123 row 6, the analyst's ruling): the board
+ *  case's editors. Not `part` (#282: a shell has neither `case.badge` nor `case.blank`), not the
+ *  other archetypes' editors (Mini rack, Tool insert, Toolbox), and not the CNC entries — a design
+ *  workspace shows no Job and no Simulate; a board case is not cut. Built from `SECTIONS`, so a
+ *  section added to the rail is a shell section by default and the others have to say so. */
+const NOT_A_SHELL_SECTION: readonly SidebarSectionId[] = ['part', 'rack', 'insert', 'toolbox', 'cnc-engrave', 'cnc-sim'];
 const SHELL_SECTION_IDS: SidebarSectionId[] = SECTIONS.map((s) => s.id).filter(
-  (id) => id !== 'part',
+  (id) => !NOT_A_SHELL_SECTION.includes(id),
 );
+
+/** #1123 row 6 — the archetypes that can be cut (Part / Rack / Tool insert / Toolbox): their design
+ *  rail ends with one action that enters the CNC workspace for the project. A board case (and a
+ *  stand, which lives in the Case sections) has none. */
+const CUTTABLE: readonly Archetype[] = ['rack', 'insert', 'toolbox', 'badge', 'blank'];
 
 /**
  * #1123-59 — THE CNC WORKSPACE'S RAIL: the machine pin (rendered above the list), the job, and its
@@ -285,6 +292,38 @@ export function Sidebar() {
             </button>
           );
         })}
+        {/* #1123 row 6 — the one door from a design workspace to the CNC, for a project that can be
+            cut: the rail's last entry. It enters the CNC workspace for THIS project (where the CNC
+            rail applies) and is absent there. */}
+        {featureSim && workspace === 'case' && CUTTABLE.includes(archetype) && (
+          <button
+            type="button"
+            onClick={() => onSelect('cnc-engrave', false)}
+            data-testid="sidebar-cut-on-cnc"
+            aria-label="Cut this on the CNC — open this project as a job on the machine"
+            title="Cut this on the CNC — open this project as a job on the machine"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: icons ? 'center' : 'flex-start',
+              gap: icons ? 0 : 10,
+              width: '100%',
+              padding: icons ? '10px 0' : '10px 12px',
+              marginBottom: 4,
+              background: '#1a1f25',
+              border: '1px solid #2a2f36',
+              borderRadius: 4,
+              color: '#d1d5db',
+              fontSize: 13,
+              fontWeight: 500,
+              textAlign: 'left',
+              cursor: 'pointer',
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 16 }}>🪵</span>
+            {!icons && <span>Cut this on the CNC</span>}
+          </button>
+        )}
       </aside>
     </>
   );

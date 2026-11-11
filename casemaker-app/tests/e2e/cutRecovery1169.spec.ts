@@ -9,7 +9,7 @@
 // desktop-mode dev server Playwright starts beside the web one (see runStates.spec.ts).
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 import { lanServerPort } from '../../scripts/e2ePort';
 import type { Page } from '@playwright/test';
@@ -38,7 +38,7 @@ async function prepareFakeRun(page: Page): Promise<void> {
     window.__caseMaker!.engraveReset();
   });
   await rememberMachine(page);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await openCutterGroup(page);
   await page.getByTestId('engrave-tool').selectOption('flat-1.0');

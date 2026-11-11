@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
@@ -474,7 +474,7 @@ async function seed(
 }
 
 async function openCut(page: Page): Promise<void> {
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   // After a reload the panel mounts behind the restored job; give the first paint room.
   await expect(page.getByTestId('engrave-panel')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('cnc-mode-cut').click();

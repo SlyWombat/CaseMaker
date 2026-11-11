@@ -4,7 +4,7 @@
 // on one connection; the store keeps a CHANGED reading only, so the monitor follows a press
 // instead of streaming identical polls. The fake console (fixtures/fakeConsole.ts) answers both.
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { rememberMachine } from './fixtures/rememberMachine';
 import { DIAGNOSE_TOUCHED, installFakeConsole } from './fixtures/fakeConsole';
 
@@ -27,7 +27,7 @@ test('#826 — the status monitor reads the controller’s switches and Wi-Fi, a
     window.__caseMaker!.engraveReset();
   });
   await rememberMachine(page, STATUS);
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('machine-status')).toBeVisible();
 
   // The heartbeat asks `?` and `diagnose` on one connection every 2 s.

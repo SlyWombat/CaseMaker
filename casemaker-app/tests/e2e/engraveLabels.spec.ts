@@ -16,7 +16,7 @@
 // Run (Windows, Vite started by hand per #226):
 //   npx playwright test tests/e2e/engraveLabels.spec.ts
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { LABEL_PAD } from '../../src/components/viewport/projectedLabel';
 
 /** The two axis labels the issue measured; the jaw-source floating label was removed in #520, and
@@ -28,8 +28,7 @@ async function openEngrave(page: import('@playwright/test').Page): Promise<void>
   await page.evaluate(async () => {
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
   });
-  const btn = page.getByTestId('sidebar-button-cnc-engrave');
-  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  await enterCnc(page);
   await page.waitForSelector('[data-testid="engrave-preview-legend"]', { timeout: 60_000 });
   await page.waitForTimeout(700);
 }

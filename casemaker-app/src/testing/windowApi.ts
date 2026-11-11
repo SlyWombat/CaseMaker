@@ -77,6 +77,12 @@ export interface CaseMakerTestApi {
   setProject(p: Project): Promise<void>;
   patchCase(patch: Partial<Project['case']>): Promise<void>;
   loadBuiltinBoard(id: string): Promise<void>;
+  /**
+   * #1123-59 — open a rail section directly (the store's own setter: `cnc-` ids enter the CNC
+   * workspace). A board case has no Job entry in its design rail, so the e2e walks that used to
+   * click it from the placeholder board project enter the workspace here, as the door does.
+   */
+  openSidebarSection(id: 'cnc-engrave' | 'cnc-sim'): void;
   getMeshStats(node: 'shell' | 'lid' | 'all'): MeshStats | null;
   getSceneGraph(): SceneNodeSummary[];
   setDebounce(ms: number): void;
@@ -531,6 +537,9 @@ export function installCaseMakerTestApi(): void {
       // #277 — records opened by an earlier test live in localStorage, where they would otherwise
       // put a "last measured" line under a later test's estimate.
       useRunRecordStore.getState().clear();
+    },
+    openSidebarSection(id) {
+      useViewportStore.getState().setActiveSidebarSection(id);
     },
     setMachine(observation, statusLine) {
       // The app's own "a check found it" path (and its persistence), then the live line the

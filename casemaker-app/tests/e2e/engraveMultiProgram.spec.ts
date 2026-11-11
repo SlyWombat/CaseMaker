@@ -16,7 +16,7 @@
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { toolDisplayName } from '../../src/engine/cnc/toolDisplay';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 /** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
 async function menuItem(page: import('@playwright/test').Page, testid: string) {
@@ -87,7 +87,7 @@ test('#744 — a later program’s cutter collision blocks Save, naming that pro
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // A region pocket on the default job's cutter (`flat-1.0`, lengths unstated), so program 1 of the

@@ -2,7 +2,7 @@
 // failed" mid-plan. The check reads `navigator.userAgentData` at app start, so the stub is
 // installed before the fixture's first navigation; the probe never runs because bitness 32
 // short-circuits it.
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test('#1124 — a 32-bit renderer sees the plain message and Generate is off', async ({ cm, page }) => {
   await page.addInitScript(() => {
@@ -19,7 +19,7 @@ test('#1124 — a 32-bit renderer sees the plain message and Generate is off', a
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   await expect(page.getByTestId('engrave-generate-blocker')).toHaveText(

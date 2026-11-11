@@ -8,7 +8,7 @@
 // The fixture is the 20 × 20 × 6 mm chamfered block `surfaceGoal.spec.ts` and
 // `generateProgress785.spec.ts` use, so the simulation is long enough to switch during it.
 import { fileURLToPath } from 'node:url';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, enterCnc } from './fixtures/caseMaker';
 
 const STL = fileURLToPath(new URL('./fixtures/chamfered-block.stl', import.meta.url));
 
@@ -20,7 +20,7 @@ test('#896 — Job ⇄ Simulate twice during a goal simulation, and the run surv
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // An empty job, so Surface a mesh is offered, with the built-in flat the other goal specs use.
@@ -47,9 +47,9 @@ test('#896 — Job ⇄ Simulate twice during a goal simulation, and the run surv
   );
 
   for (let i = 0; i < 2; i++) {
-    await page.getByTestId('sidebar-button-cnc-sim').click();
+    await enterCnc(page, 'cnc-sim');
     await expect(page.getByTestId('sim-panel')).toBeVisible();
-    await page.getByTestId('sidebar-button-cnc-engrave').click();
+    await enterCnc(page);
     await expect(page.getByTestId('engrave-panel')).toBeVisible();
   }
 

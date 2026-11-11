@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/caseMaker';
+import { test, expect, enterCnc } from '../fixtures/caseMaker';
 
 /**
  * #716 review — at phone width the map's labels must not print over each other or under the Depth
@@ -74,7 +74,7 @@ test('the map’s labels clear each other and the Depth panel at phone width (#7
   if (((await page.getByTestId('sidebar').boundingBox())?.x ?? 0) < 0) {
     await page.getByTestId('sidebar-handle').click();
   }
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-preview-legend')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('rotary-view-controls')).toBeVisible();
 

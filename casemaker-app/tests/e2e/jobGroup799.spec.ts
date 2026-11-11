@@ -3,7 +3,7 @@
 // Add operation menu. The screenshots are the hand-in's record of the changed states.
 import { writeFileSync } from 'node:fs';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 import { routeHouse, twoSideJob } from './fixtures/twoSideMouseShell';
 
 test.setTimeout(120_000);
@@ -14,7 +14,7 @@ test('#799 — the Job group: Stock disclosure, Cutter line, and the Add menu’
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // 1. The closed Stock line: one fact, with the voids behind it, not a top-level row.
@@ -52,7 +52,7 @@ test('#1123 item 44 — the settled pre-plan Cutter line says the set is planned
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // The two-sided shell without the operator's pick: the document carries a tool, sources do not
@@ -83,7 +83,7 @@ test('#1171 — five fact-bearing group lines and one fixed progress row', async
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   const jobPath = testInfo.outputPath('two-sides-1171.cutjob.json');

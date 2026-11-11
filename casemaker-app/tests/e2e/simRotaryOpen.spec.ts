@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 test.setTimeout(600_000);
 const ROOT = path.resolve(process.cwd(), '..');
@@ -26,7 +26,7 @@ async function openInSimulate(page: Page, file: string): Promise<void> {
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-close').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
-  await page.getByTestId('sidebar-button-cnc-sim').click();
+  await enterCnc(page, 'cnc-sim');
   await expect(page.getByTestId('sim-panel')).toBeVisible();
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.getByTestId('sim-open').click()]);
   await chooser.setFiles(file);

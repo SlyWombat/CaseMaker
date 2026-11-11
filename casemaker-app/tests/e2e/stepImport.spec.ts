@@ -4,7 +4,7 @@
 // geometry, this proves the DOOR — that Vite serves the glue and the wasm, that picking a STEP
 // tessellates it, and that the target row shows the mesh's own measured size.
 import path from 'node:path';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, enterCnc } from './fixtures/caseMaker';
 
 const STEP = path.resolve(process.cwd(), 'tests/fixtures/step/box-with-hole.step');
 
@@ -14,7 +14,7 @@ test('a STEP target object is tessellated by the CAD kernel at the import door',
     await window.__caseMaker!.loadBuiltinBoard('rpi-4b');
     window.__caseMaker!.engraveReset();
   });
-  await page.getByTestId('sidebar-button-cnc-engrave').click();
+  await enterCnc(page);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 
   // The panel's own reference-object door; the kernel is fetched lazily on this pick.
