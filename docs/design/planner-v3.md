@@ -16,6 +16,8 @@ The proposal keeps the question, because it is the product's advantage, and chan
 2. **Cut on exact geometry.** Build toolpaths once, for the chosen plan, with the existing exact drop-cutter. Posted points never come from a grid.
 3. **Prove once.** Simulate and check the posted programs once, with one simulator that shares no code with the planner.
 
+The same three steps serve every way the machine can hold and turn a part: one-sided jobs, flips with any number of sides, indexed and continuous 4th-axis work, and lathe-style turning. §4A states the general model (poses, charts, one stock, one clock) and shows each capability as an instance of it, so that putting a figure on the rotary is a new instance and not a new engine.
+
 Expected result: Generate dominated by one plan and one proof. The target is under two minutes for the tray on dave-1 (§9); that is a target to be measured in the first slice, not a measurement.
 
 Roughly 25–30 thousand lines of planner, pick and simulation code are replaced or deleted (§7). The job document, the IR, the posts, the verifier, the registration and run code, and the UI contract of Generate are kept.
@@ -82,7 +84,27 @@ From the Z1 Demo Jobs page rebuilt on the published build `e741c9266` (2026-11-1
 
 The agreed lines are cycle ≤ 2× vendor and cutters ≤ vendor + 1. The organizer misses both by a wide margin. The mechanism is the objective's first key: simulated leftover outranks everything, so any cutter that removes a few more cells is added whatever it costs in time and bit changes. The selector in §4.3 keeps the objective's order but needs a tolerance on that first key (open decision 7).
 
-### 2.6 What is sound
+### 2.6 Setups, flips and the rotary today (second review, land18 `bb935dcd3`)
+
+**There are five planners, not one.** The model engine plans a mesh goal from the top and, on one path, the bottom. Four other paths never go through it: the legacy 2.5D items, rotary wrap (`rotary/wrap.ts`), rotation relief (`cam/rotaryRelief.ts`, its own radial field and its own rough and finish), and indexed faces (`cam/indexed.ts`). The panther on the stick and the panther on the rod are planned by different engines.
+
+**Setups are described three ways.** The document's `JobSetup` (`types/engraveJob.ts:1909`), the setups engine's `Setup` with six axis faces (`setups/types.ts:83`), and the model planner's `SetupSpec` with an `up` vector (`cam/model/plan.ts:243`). The types allow any number of setups; the model planner accepts top and bottom only (`cam/model/setups.ts:40, 138, 171`).
+
+**Two-sidedness is special-cased in at least nine places:** tabs when `setups.length > 1` (`plan.ts:1995`); the opposite surface is always `perSetup[0]` (`plan.ts:2030`); registration is always against setup 0 (`plan.ts:1354`); every saved side is read as top or bottom (`engraveGenerate.ts:6503`); locating holes read `sides[1]` only (`:6603`); the band conversion tests `up[2] === -1` (`:5333`); `SetupFlip` is one axis and one turn; `JobSetupPins` is exactly two; `flipTabBands` is one plane and two bands.
+
+**Each side plans the whole goal** in its own frame, limited by a depth band. Nothing subtracts what another side already cut, except the last setup's freeing contour.
+
+**The goal check is one side only.** A goal cut from more than one side is returned "unchecked" (`engrave/goalCheckInput.ts:61-86`). `unionWholeSurface` (`cam/model/wholeSurface.ts:91`) has no caller. The carried stock between setups is refused for 90° side setups (`setups/carry.ts:123-125`).
+
+**On the rotary:**
+- Rotation relief uses one cutter for rough and finish, a single-valued radius field (no undercuts), and full turns at constant X for roughing (`rotaryRelief.ts:336-408`). On the panther, 491,000 of 1,244,000 map cells are air.
+- Most 2.5D operations are refused: through-cuts, cut-outs, chamfers, traces, drilled holes, threads, inlays, facing (`rotary/findings.ts:113-131`).
+- Indexed faces are `job.faces`, not setups, and a goal on a rod takes no manual setups (`engraveGenerate.ts:7488-7506`).
+- There is no turning operation. The A axis is modelled as unbounded, the post unwinds whole turns (`post/z1.ts:372-377`), and a continuous spiral exists only as a test fixture.
+- Time is modelled twice: the verifier uses the surface-speed formula with the 60°/s cap (`verify.ts:762-767`); the cycle estimate uses arc length at the design radius with no cap (`cam/ir.ts:558-587`).
+- The jaw keep-out, tailstock band, tailstock body and turn clearance are code constants (`rotary/wrap.ts:41-53`, `rotary/tailstock.ts:22-30`). The rod's axis and face angle are measured datums on the bed profile.
+
+### 2.7 What is sound
 
 Feature recognition (`cam/model/features/*`), the drop-cutter and its index, the row sampler, linking, the IR (`cam/ir.ts`), both posts, `verify.ts`, the G-code interpreter and timeline, the column engine's core, and the goal check's verdict rule are self-contained and are kept.
 
@@ -182,6 +204,97 @@ Ordering and linking are unchanged. The air-fraction and rapids acceptance lines
 
 ---
 
+## 4A. The general model — every capability is an instance of it
+
+**Ruling this section answers (maintainer, 2026-11-11):** the design covers the full capability set from the start; limits and unknown dimensions are run-time data. The engine is not redesigned again to put the panther on the 4th axis.
+
+Sections 4.1–4.6 describe the pipeline for one fixed setup seen from above. That is one instance. The engine is built on four general things, and every job kind is a choice of values for them.
+
+### 4A.1 Pose
+
+A **pose** is where the part sits relative to the machine: a rotation and a translation, with the hold that keeps it there. Any rotation, not only six faces.
+
+- A job has a list of poses. One pose is today's single-sided job.
+- A pose may be **fixed** (the operator placed it) or **driven** (the A axis placed it). A driven pose is a one-parameter family: the same hold, turned by an angle.
+- Going from one fixed pose to another is an operator action (a flip, a re-seat) with a price in seconds and a registration method. Going between driven poses is a machine move with a time.
+
+### 4A.2 Chart
+
+A **chart** is how a pose sees the part: two coordinates across and one along the tool axis.
+
+| Chart | Across | Along the tool | Used by |
+|---|---|---|---|
+| **Planar** | x, y | z | Any fixed or indexed pose: the tool comes straight down |
+| **Cylindrical** | x along the rod, angle θ | radius r | Continuous rotary: the tool points at the axis while the rod turns |
+| **Profile** | x along the rod | radius r | Turning: the cylindrical chart with θ collapsed to its outermost value |
+
+Everything in §4.2 is defined on a chart, not on "the top view":
+- **Surface bounds:** per cell, the goal's height along the tool axis as a guaranteed interval.
+- **Tip bounds:** the surface dilated by the cutter. In the planar chart the cutter's footprint is the same everywhere. In the cylindrical chart a surface point at angle offset Δθ and radius r′ sits r′·sin Δθ to the side of the tool and r′·cos Δθ along it, so the same formula is evaluated with those two numbers. One function, the chart supplies the geometry.
+- **Flat reach:** polygons in the chart's own across-plane. On the cylindrical chart that is the unrolled map, with the across-rod scale the existing wrap code already computes.
+- **Cell size:** a chart states the real size of a cell (on the cylindrical chart, arc length = r·dθ), so areas, volumes and times are in millimetres on every chart.
+
+### 4A.3 One stock, cut from every pose
+
+The remaining material is one object for the whole job. It is stored as **one height field per chart that has cut it**, plus the blank: a point is still material when it is inside the blank and below every chart's field at that point. A cut in any pose only ever lowers that pose's own field, so the representation is exact for what a 3- or 4-axis machine can do, for any number of poses and any mix of planar and cylindrical charts.
+
+From it, for any pose about to be planned, the planner reads the surface that pose starts from (the blank, less everything earlier poses removed). This replaces the depth band as the way sides share the work: a side no longer plans the whole goal and stops at a plane; it plans what is left that it can reach.
+
+The proof (§4.5) keeps its own copy of the same idea, built from the posted programs, and judges the **whole goal surface** after all poses: each piece of the goal's surface is checked in a chart that sees it.
+
+### 4A.4 Which pose cuts what
+
+For each candidate pose the fields give the part of the goal's surface it can finish: visible in its chart, within the cutters' reach, and outside the hold's keep-outs. Choosing poses is then one more selection, on the same objective as §4.3 and decided the same way, from the fields:
+
+1. **Coverage first.** Add poses while they add reachable surface above the tolerance (`plan.leftoverEquivalencePct`).
+2. **Then time.** A fixed pose costs its operator action and its registration; a driven pose costs its A move; continuous rotation costs nothing extra.
+3. Each piece of surface is assigned to the cheapest pose that reaches it; a piece two poses reach is cut once.
+
+Candidate poses come from the hold: a vise offers the six faces; a bracket or tape offers top and bottom; the chuck offers every angle (indexed) and continuous turning. A job may fix its poses (the operator's stated flip) and the planner honours them.
+
+This generalises today's `goalFlipPlan`, which scores six faces by visible area and offers one flip.
+
+### 4A.5 One clock
+
+Time comes from one function that takes a move and the pose's **kinematics**: which axes move, each axis's rate and acceleration limits, and what the controller's feed word means for that combination. The selector's estimate, the IR's cycle estimate and the verifier's warning all call it. For the rotary that means the 60°/s cap and the surface-speed formula are applied once, everywhere, and a slow A axis shows up in the estimate before it shows up at the machine.
+
+### 4A.6 Limits are records
+
+Every limit the planner uses is read from a record with its provenance, at run time: axis travel, rates and the stock envelope from the machine profile; the chuck's jaw keep-out, the tailstock's body and band, the bracket's arms, the vise's jaws and the clamps from the accessory and hold records; the rod's axis, the jaw face and the face angle from the bed profile's datums. A value that is a default or unmeasured is used as recorded and stated on the sheet. Whether the machine may run an unmeasured setup is the run gate's decision (#1202), not the planner's: the planner always produces a plan.
+
+The constants this moves to records: `ROTARY_JAW_KEEP_OUT_MM`, `ROTARY_TAILSTOCK_BAND_MM`, the tailstock body (`rotary/tailstock.ts:22-30`), the turn clearance (`rotary/wrap.ts:53`), the envelope fallback (`wrap.ts:56-57`).
+
+### 4A.7 The capabilities, as instances
+
+| Capability | Poses | Chart | Operations | What is new against today |
+|---|---|---|---|---|
+| One-sided job | 1 fixed | planar | all | nothing |
+| Two-sided flip | 2 fixed, a half turn apart | planar each | all | sides share one stock; whole-surface check; cutters and bit changes priced across both |
+| Any-sided job (side faces in the vise) | up to 6 fixed | planar each | all | the model planner accepts any face, not only top and bottom |
+| Indexed 4th axis | N driven angles on the chuck | planar each | all 2.5D and 3D operations at each angle | pockets, drills, chamfers, threads and contours become available on the rod; no operator action between faces |
+| Wrap | continuous | cylindrical | engrave, pocket, trace on the unrolled map | goes through the same selector and proof |
+| Rotation relief (the panther on the rod) | continuous | cylindrical | rough, rest, finish, pencil with the selector's cutter chain | more than one cutter; rough by spiral; what the radial pass cannot reach is assigned to indexed poses by §4A.4 |
+| Turning (lathe operation) | continuous | profile | rough to a profile, finish a profile, grooves, part-off | new operation; also the roughing stage of every rotary relief (remove everything outside the goal's envelope of revolution first) |
+
+Two consequences worth stating plainly:
+- **Undercuts on the rod.** A radius field is single-valued, so a continuous pass alone leaves undercuts. The model handles them by adding indexed poses for the surface the radial pass cannot see, chosen by coverage and time like any other pose. That is the combination a figure on the rod needs.
+- **Turning is not a separate engine.** It is the profile chart: one curve, radius against length. Flat reach along that curve is one-dimensional, the path is a spiral (A continuous, X advancing a step-over per turn), and time comes from the one clock.
+
+### 4A.8 What changes in the data model
+
+- One setup record. The document's `JobSetup`, the setups engine's `Setup` and the planner's `SetupSpec` become one description of a pose, with a kind (`fixed` or `driven`), its rotation, its hold and its registration.
+- Indexed faces (`job.faces`) become driven poses. A goal on a rod may have poses.
+- The nine two-sided special cases in §2.6 are replaced by rules over the pose list: tabs and release belong to the last pose that holds the part by them; registration is carried from the pose before; locating features are planned for each fixed-to-fixed transition.
+- `SetupFlip` (one axis, one turn) and `JobSetupPins` (exactly two) become properties of a transition between two poses.
+- The depth band stays as an operator's statement ("do not cut below here from this side"), no longer the mechanism that divides the work.
+
+### 4A.9 What is not known
+
+- How accurate the cylindrical tip bounds are near the axis, where a cell's arc length goes to zero. The existing relief already refuses cells within 2 mm of the axis; that limit becomes a record.
+- Whether the Z1's controller holds a constant surface feed on a continuous spiral. The feed formula is from the verifier's model and one bench session; the spiral has never run on the machine.
+- The cost of reading one pose's start surface out of several charts on a large job. It is a field computation of the same order as the tip bounds; it is measured when it is built.
+- X 0 at the jaw face and A 0 at home are unconfirmed defaults in the rotary record.
+
 ## 5. Standing rulings this design keeps
 
 Facing off by default. Ideal as a recommendation, never a gate; owned plan is the default; no refusal where an owned tool can do the job. Catalogue feed rows, with the row named. No budgets: a refusal on memory or time is a method defect. One program per tool. Fixtures are machine-fixed and never reflected in a flip. Rotary chuck keep-out and tailstock band. V-carve as a floor-correct pocket. Verdicts never excuse silence: a dropped region, cutter or run is stated. Every chosen number is a registry entry with a recommendation (#1207). Every tie names its key.
@@ -223,6 +336,11 @@ Three leaks into planner internals need a stated field in place of a reach into 
 | `workers/sim/engraveGenerate.ts` (9,157) | Replace | One orchestrator |
 | `engrave/oracle.ts` | Review | It compares the simulation with the CAM's own prediction; the code calls this "the CAM grading its own homework". Keep only if it finds something the goal check cannot |
 | Legacy 2.5D `cam/*` (pocket, profile, trace, chamfer, drill, thread, facing) | Keep as primitives | They become ops of the one pipeline; the model engine already uses them this way |
+| `rotary/wrap.ts` (455) | Keep its geometry | The unrolling and the footprint scale become the cylindrical chart's across-plane (§4A.2) |
+| `cam/rotaryRelief.ts` (415), `rotary/radialField.ts` | Replace | Rotation relief becomes the pipeline on the cylindrical chart (slice 7b); the radial sampling is kept as that chart's surface sampler |
+| `cam/indexed.ts` (283), `rotary/faceOps.ts`, `job.faces` | Replace | Indexed faces become driven poses with ordinary ops (slice 7a) |
+| `cam/model/setups.ts`, `setups/*`, `engrave/goalFlipPlan.ts`, `goalFlipSetups.ts` | Replace | One pose record and pose selection (§4A.4, §4A.8); the reflection and Z0 carry rules are kept |
+| `cam/model/wholeSurface.ts` | Use | The whole-surface union has no caller today; the proof needs it |
 | `cam/chamfer3d.ts`, `cam/moveWire.ts` | Delete | No importers outside tests |
 | Registration, run, post, UI | Untouched | |
 
@@ -271,7 +389,24 @@ Each slice lands alone, is measured before the next starts, and leaves the app w
 6. **One orchestrator.** `engraveGenerate.ts` and the store/CLI duplicates collapse; cancel signal; honest progress stages.
 7. **Legacy item paths join the pipeline** as features and ops.
 
-Slices 0–3 change no posted byte. Slice 4 changes picks and therefore programs, so Set B and the cycle pins are re-pinned with reasons. Slice 5 changes the frozen gate and needs the maintainer's explicit yes.
+The general model of §4A is built in this order. Each line is a slice of its own, in the same style, and none needs the engine redesigned:
+
+| Slice | What it adds | Depends on |
+|---|---|---|
+| 2b | Charts: the fields module takes a chart; cylindrical and profile tip bounds; cell sizes in mm | 2 |
+| 2c | One stock from many charts: the start surface of a pose | 2b |
+| 3b | One clock: a single time function with per-pose kinematics, used by the estimate, the IR and the verifier | 3 |
+| 4 | The selector decides, **over the pose list** (§4A.4), not one side at a time | 2c, 3, 3b |
+| 4b | One setup record; the two-sided special cases become rules over poses | 4 |
+| 5 | One simulator, whole-surface check across poses | 4 |
+| 7a | 2.5D items and indexed faces as poses and ops | 4b |
+| 7b | Rotation relief through the pipeline (the panther on the rod), with indexed poses for undercuts | 2b, 4, 7a |
+| 7c | Turning: the profile chart, spiral roughing and finishing, grooves and part-off | 2b, 3b |
+| 7d | Rotary limits from records (§4A.6) | 7a |
+
+Slices 0–3 as posted (#1213–#1216) are unchanged by §4A: the fields module's planar functions become the planar chart's, and the shadow selector prices one pose. Slice 4 is where the pose list matters, and it is not written until 2c and 3b exist.
+
+Slices 0–3 change no decision. Slice 1 may move a posted feed word or a last digit, as its issue states. Slice 4 changes picks and therefore programs, so Set B and the cycle pins are re-pinned with reasons. Slice 5 changes the frozen gate and needs the maintainer's explicit yes.
 
 ---
 
@@ -306,5 +441,6 @@ Asked one by one; these replace the open list below.
 - **Flute-limited reach** breaks the nested structure. The subset search covers it, but its size on the 166-cutter catalogue is not yet known.
 - **The bounded field's ambiguous share** on organic meshes (the panther, the elephant) is not known. If most cells are ambiguous the field saves little there, and those jobs keep today's cost for masks.
 - **The column engine as verdict** has only been a diagnostic so far. Its agreement with the stamp on the reference set has to be shown before slice 5.
-- **Not reviewed:** the rotary relief planner beyond its entry points, and the PCB isolation path. Both are assumed to enter as features in slice 7.
+- **Rotary and setups are now reviewed** (§2.6) and designed (§4A). Still not reviewed: the PCB isolation path, assumed to enter as 2.5D features in slice 7a.
+- **The rotary's unknowns are bench facts,** listed in §4A.9. They are inputs with provenance; none changes the design.
 - **Not in this design:** tree-ordered Z-level roughing (cutting each basin to depth before leaving it). The review found ordering is not the bottleneck; it becomes worth doing only if the air-fraction or rapids lines fail.
