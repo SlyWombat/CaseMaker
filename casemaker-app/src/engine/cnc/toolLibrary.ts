@@ -114,6 +114,12 @@ export const ToolLibraryEntrySchema = z.object({
    * a `1` to the name.
    */
   metalDuty: z.number().int().nullable().optional(),
+  /**
+   * #1172 item 5 — an `inv:` entry whose owner turned "Use this bit in plans" OFF. Absent is ON
+   * (`!== false`); the plan search filters these entries out, while the Manage list still shows
+   * them. Never set on another tier.
+   */
+  useInPlans: z.boolean().optional(),
 });
 
 export const ToolLibrarySchema = z.array(ToolLibraryEntrySchema).superRefine((list, ctx) => {

@@ -614,6 +614,8 @@ export function ToolsScope() {
                   </button>
                 </th>
                 <th>Case</th>
+                <th>Kept</th>
+                <th className="num">In plans</th>
                 <th>From</th>
               </tr>
             </thead>
@@ -640,7 +642,7 @@ export function ToolsScope() {
               })}
               {groups.length === 0 && (
                 <tr className="more">
-                  <td colSpan={12} data-testid="manage-no-matches">
+                  <td colSpan={14} data-testid="manage-no-matches">
                     nothing matches “{query}”
                   </td>
                 </tr>
@@ -685,9 +687,31 @@ export function ToolsScope() {
  * not-applicable dot. A colour outside the palette prints its word with an outlined swatch, never a
  * guessed paint chip.
  */
-function CaseCell({ copies }: { copies: readonly ToolCopy[] }): ReactNode {
+function CaseCell({ copies, colour }: { copies: readonly ToolCopy[]; colour?: string }): ReactNode {
   const cases = distinctCases(copies);
-  if (cases.length === 0) return <span className="num dim">{NOT_APPLICABLE}</span>;
+  if (cases.length === 0) {
+    // #1172 item 3 — the item's own case colour is the case of every piece that states none.
+    if (colour === undefined || colour.trim() === '') return <span className="num dim">{NOT_APPLICABLE}</span>;
+    const paint = caseSwatch(colour);
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
+        <span
+          title={`${colour.toLowerCase()} case`}
+          data-case={colour.toLowerCase()}
+          data-testid={`manage-tools-case-swatch-${colour.toLowerCase()}`}
+          style={{
+            display: 'inline-block',
+            width: 9,
+            height: 9,
+            borderRadius: 2,
+            background: paint ?? 'transparent',
+            border: paint === null ? '1px dashed #7d8894' : '1px solid #10151a',
+          }}
+        />
+        <small>{colour.toLowerCase()}</small>
+      </span>
+    );
+  }
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
       {cases.map((c) => {
@@ -741,7 +765,7 @@ function Rows({
   return (
     <>
       <tr className="grp" data-testid={`manage-group-${tier}`}>
-        <td colSpan={12}>
+        <td colSpan={14}>
           {TIER_HEADING[tier]} <small>{tierNote(tier, count)}</small>
         </td>
       </tr>
@@ -796,7 +820,14 @@ function Rows({
               {possession === null ? NOT_APPLICABLE : haveWords(possession, machineName)}
             </td>
             <td data-testid={`manage-tools-case-${entry.key}`}>
-              <CaseCell copies={possession?.copies ?? []} />
+              <CaseCell copies={possession?.copies ?? []} colour={possession?.caseColour} />
+            </td>
+            {/* #1172 items 2/5 — the place the bit is kept, and the plans switch in the list. */}
+            <td className={possession?.keptIn === undefined ? 'dim' : undefined} data-testid={`manage-tools-kept-${entry.key}`}>
+              {possession === null || possession.keptIn === undefined ? NOT_APPLICABLE : possession.keptIn}
+            </td>
+            <td className="num" data-testid={`manage-tools-plans-${entry.key}`}>
+              {possession === null ? NOT_APPLICABLE : possession.useInPlans === false ? 'no' : 'yes'}
             </td>
             <td>
               <span className={`tag tag--${tier}`}>{TIER_TAG[tier]}</span>
@@ -806,7 +837,7 @@ function Rows({
       })}
       {more > 0 && (
         <tr className="more">
-          <td colSpan={12} data-testid={`manage-more-${tier}`}>
+          <td colSpan={14} data-testid={`manage-more-${tier}`}>
             … {more} more catalogue {more === 1 ? 'row' : 'rows'} — search or scroll
           </td>
         </tr>

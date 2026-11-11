@@ -292,7 +292,7 @@ function Detail({ entry, item }: { entry: ToolLibraryEntry; item: InventoryItem 
           showing the old values. */}
       {item !== null && (
         <InventoryEditor
-          key={`${item.id}\u0000${item.quantity}\u0000${item.notes ?? ''}`}
+          key={`${item.id}\u0000${item.quantity}\u0000${item.notes ?? ''}\u0000${item.caseColour ?? ''}\u0000${item.keptIn ?? ''}\u0000${item.useInPlans !== false}`}
           item={item}
         />
       )}
@@ -505,6 +505,11 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
   // render, and `react-hooks/set-state-in-effect` refuses it.
   const [quantity, setQuantity] = useState(String(item.quantity));
   const [notes, setNotes] = useState(item.notes ?? '');
+  // #1172 items 2-5 — the item-level case colour and place, and the plans switch. Drafts like the
+  // ones above: saved by the panel's one footer Save.
+  const [caseColour, setCaseColour] = useState(item.caseColour ?? '');
+  const [keptIn, setKeptIn] = useState(item.keptIn ?? '');
+  const [useInPlans, setUseInPlans] = useState(item.useInPlans !== false);
 
   // The count rule is the register doors' rule, imported rather than re-derived (#331): blank means
   // one at both ends, and the sentence a refusal shows is the one sentence, in `registerCutter.ts`.
@@ -517,7 +522,20 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
       : null;
   const qtyProblem = quantityProblem(quantity) ?? copiesBlock;
   const nextNotes = notes.trim().length === 0 ? null : notes;
-  const dirty = qtyProblem === null && (qty !== item.quantity || nextNotes !== item.notes);
+  const nextCase = caseColour.trim().length === 0 ? undefined : caseColour.trim();
+  const nextKept = keptIn.trim().length === 0 ? undefined : keptIn.trim();
+  const dirty =
+    qtyProblem === null &&
+    (qty !== item.quantity ||
+      nextNotes !== item.notes ||
+      nextCase !== item.caseColour ||
+      nextKept !== item.keptIn ||
+      useInPlans !== (item.useInPlans !== false));
+
+  // #1172 item 3 — an old record may still carry "Case: yellow" in its notes. Offer to move it; never
+  // parse the notes behind the operator's back.
+  const caseInNotes = item.caseColour === undefined ? /^\s*case:\s*(.+)$/im.exec(notes) : null;
+  const movedCase = caseInNotes === null ? null : caseInNotes[1]!.trim();
 
   // #1172 item 7 — this draft is one part of the panel's single Save; the copies' draft is another,
   // and the footer composes both into ONE `updateItem` call.
@@ -526,10 +544,17 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
     detailSave('inventory', {
       dirty,
       problem: qtyProblem,
-      merge: (current) => ({ ...current, quantity: qty, notes: nextNotes }),
+      merge: (current) => ({
+        ...current,
+        quantity: qty,
+        notes: nextNotes,
+        caseColour: nextCase,
+        keptIn: nextKept,
+        useInPlans,
+      }),
     });
     return () => detailSave('inventory', null);
-  }, [detailSave, dirty, qtyProblem, qty, nextNotes]);
+  }, [detailSave, dirty, qtyProblem, qty, nextNotes, nextCase, nextKept, useInPlans]);
 
   return (
     <>
@@ -561,6 +586,65 @@ function InventoryEditor({ item }: { item: InventoryItem }) {
           />
         </label>
       </div>
+      <div className="grid2">
+        <label className="lf">
+          <span>
+            case colour <em>optional</em>
+          </span>
+          <input
+            className="fld fld--text"
+            type="text"
+            value={caseColour}
+            data-testid="manage-item-case-colour"
+            aria-label="Case colour"
+            onChange={(e) => setCaseColour(e.target.value)}
+          />
+        </label>
+        <label className="lf">
+          <span>
+            kept in <em>optional</em>
+          </span>
+          <input
+            className="fld fld--text"
+            type="text"
+            value={keptIn}
+            data-testid="manage-item-kept-in"
+            aria-label="Where the bit is kept"
+            onChange={(e) => setKeptIn(e.target.value)}
+          />
+        </label>
+      </div>
+      {movedCase !== null && (
+        <button
+          type="button"
+          className="linkish"
+          data-testid="manage-item-move-case"
+          onClick={() => {
+            setCaseColour(movedCase);
+            setNotes(
+              notes
+                .split(/\r?\n/)
+                .filter((line) => !/^\s*case:\s*(.+)$/im.test(line))
+                .join('\n'),
+            );
+          }}
+        >
+          Move &lsquo;Case: {movedCase}&rsquo; into Case colour
+        </button>
+      )}
+      <label className="lf">
+        <span>plans</span>
+        <span className="row" style={{ gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={useInPlans}
+            data-testid="manage-item-use-in-plans"
+            aria-label="Use this bit in plans"
+            onChange={(e) => setUseInPlans(e.target.checked)}
+          />
+          <span>Use this bit in plans</span>
+        </span>
+      </label>
       <label className="lf">
         <span>
           notes <em>optional</em>
