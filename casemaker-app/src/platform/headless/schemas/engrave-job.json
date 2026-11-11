@@ -2575,6 +2575,17 @@
                                 ],
                                 "description": "The fitted shank/post diameter, millimetres (6.35 for 1/8\", 6 for the 6 mm post); null/absent when unrecorded."
                               },
+                              "statedTipDiameterMm": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "The operator-stated ball diameter, millimetres (provenance stated); not a measurement."
+                              },
                               "tip": {
                                 "anyOf": [
                                   {
@@ -3160,6 +3171,37 @@
                         "required": [
                           "x",
                           "y"
+                        ],
+                        "type": "object"
+                      },
+                      "topTouchTip": {
+                        "description": "The top-touch tip and its source (#1200).",
+                        "properties": {
+                          "diameterMm": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The ball diameter the top-touch inset used, millimetres; null = the registry floor stands."
+                          },
+                          "source": {
+                            "description": "Where that diameter came from.",
+                            "enum": [
+                              "measured",
+                              "stated",
+                              "vendor",
+                              "floor"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "diameterMm",
+                          "source"
                         ],
                         "type": "object"
                       }
@@ -4658,6 +4700,17 @@
                             ],
                             "description": "The fitted shank/post diameter, millimetres (6.35 for 1/8\", 6 for the 6 mm post); null/absent when unrecorded."
                           },
+                          "statedTipDiameterMm": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The operator-stated ball diameter, millimetres (provenance stated); not a measurement."
+                          },
                           "tip": {
                             "anyOf": [
                               {
@@ -5243,6 +5296,37 @@
                     "required": [
                       "x",
                       "y"
+                    ],
+                    "type": "object"
+                  },
+                  "topTouchTip": {
+                    "description": "The top-touch tip and its source (#1200).",
+                    "properties": {
+                      "diameterMm": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The ball diameter the top-touch inset used, millimetres; null = the registry floor stands."
+                      },
+                      "source": {
+                        "description": "Where that diameter came from.",
+                        "enum": [
+                          "measured",
+                          "stated",
+                          "vendor",
+                          "floor"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "diameterMm",
+                      "source"
                     ],
                     "type": "object"
                   }

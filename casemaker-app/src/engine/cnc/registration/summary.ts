@@ -3,11 +3,28 @@
  * it: what the plan will do, and what the run found. Pure.
  */
 
-import { probeInstrumentOf, type RegistrationPlan } from './plan';
+import { probeInstrumentOf, topTouchTipRadiusMm, topTouchTipWords, type RegistrationPlan } from './plan';
+import { topTouchEdgeMarginsMm } from './cutBlank';
 import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import type { RegistrationOutcome } from './outcome';
 
 const n = (v: number) => String(Math.round(v * 100) / 100);
+
+/**
+ * #1200 — THE CARD'S TIP FACT AND ITS PROVENANCE. The value stands alone ("Top touches are kept
+ * 3 mm inside the edges"); the source is its own sentence, never a caveat on the value.
+ */
+function tipSentence(plan: RegistrationPlan): string {
+  const tip = plan.topTouchTip;
+  const hold = plan.holdUncertainty;
+  const floor = plan.settings.probeFootprintShrinkMm;
+  if (tip === undefined || hold === undefined || floor === undefined) return '';
+  const margins = topTouchEdgeMarginsMm(
+    { tipRadiusMm: topTouchTipRadiusMm(tip), tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? 0 },
+    { floorMm: floor, hold },
+  );
+  return ` Top touches are kept ${n(Math.min(margins.xMm, margins.yMm))} mm inside the edges. ${topTouchTipWords(tip, floor)}.`;
+}
 
 export function summarizePlan(plan: RegistrationPlan): string {
   const s = plan.settings;
@@ -29,7 +46,8 @@ export function summarizePlan(plan: RegistrationPlan): string {
         : '';
     return (
       `Home, fit ${probeWords} and measure it (M491); touch the TOP OF THE BLANK at ${points} — ` +
-      `two touches that must agree, each seek stopping above the bed at machine Z ${n(floor)}; home when finished.${assumes}`
+      `two touches that must agree, each seek stopping above the bed at machine Z ${n(floor)}; home when finished.${assumes}` +
+      tipSentence(plan)
     );
   }
   if (plan.references) {
@@ -37,7 +55,8 @@ export function summarizePlan(plan: RegistrationPlan): string {
     return (
       `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
       `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
-      `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
+      `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.` +
+      tipSentence(plan)
     );
   }
   // #1123 item 29 — a plan with NO scans (a bracket whose offset was measured: the bracket fixes
@@ -83,7 +102,8 @@ export function summarizePlan(plan: RegistrationPlan): string {
   return (
     `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
-    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}`
+    `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}` +
+    tipSentence(plan)
   );
 }
 
