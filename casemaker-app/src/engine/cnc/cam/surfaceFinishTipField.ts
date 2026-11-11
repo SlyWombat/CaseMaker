@@ -159,6 +159,11 @@ export function finishingMoves(
    * sample its own move — the rotary relief's reading, which wraps the moves after.
    */
   mergeToleranceMm = 0,
+  /** #1164 — hold the HIGHER of two adjacent samples' tips across their segment (rotate only): a
+   *  single feed between two clamped samples runs the ball at an interpolated radius, which can
+   *  sit below the clamp the material between them needs. The default `false` keeps the flat
+   *  finish's posted bytes identical (Set B). */
+  holdClamps = false,
 ): CamMove[] {
   // #889 — packed, as the roughing is.
   const moves = new MoveStore({ mergeToleranceMm });
@@ -185,6 +190,17 @@ export function finishingMoves(
           moves.rapid(x, y, hopZ);
           moves.feed(x, y, z, feeds.plungeFeed);
           open = true;
+        } else if (holdClamps) {
+          // #1164 — lift to the higher clamp at the outgoing sample, TRAVERSE at it, then settle
+          // onto the next sample's own tip; the segment never cuts below either endpoint's clamp.
+          const hold = Math.max(z, prevZ);
+          if (hold > prevZ + 1e-9) moves.feed(prevX, prevY, hold, feeds.feed);
+          if (hold > z + 1e-9) {
+            moves.feed(x, y, hold, feeds.feed);
+            moves.feed(x, y, z, feeds.plungeFeed);
+          } else {
+            moves.feed(x, y, z, feeds.feed);
+          }
         } else {
           const corner = staircaseCorner(prevX, prevY, prevZ, x, y, z);
           if (corner !== null) moves.feed(corner.x, corner.y, corner.z, feeds.feed);

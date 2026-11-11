@@ -319,6 +319,10 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     hf.pitch,
     SAFE_Z,
     HOP_Z,
+    undefined,
+    undefined,
+    undefined,
+    true, // #1164 — hold the higher clamp across each finish segment (rotary only)
   );
   const finishing: CamOperation = {
     number: 2,
