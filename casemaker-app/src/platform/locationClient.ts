@@ -38,6 +38,8 @@ import { ShopDefaultsSchema } from './defaultsClient';
 import { PowerSwitchSchema } from './powerClient';
 import { WasteboardSchema, ScarSchema } from '@/engine/cnc/wasteboard';
 import { RegistrationsSchema } from './registrationMemo';
+// #1202 — the motion routines that have completed on this machine, validated and drop-on-bad.
+import { RoutineCompletionsSchema } from './routineRecord';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -627,6 +629,13 @@ export const MachineRecordSchema = z.object({
    * never a machine the app cannot read). Absent on records written before the section existed.
    */
   registrations: RegistrationsSchema,
+  /**
+   * #1202 — the motion routines that have COMPLETED on this machine, each with its line-sequence
+   * shape, date and build (see `platform/routineRecord.ts`). A routine absent here has never run
+   * on this controller, and its card says so before the press. Unreadable entries are dropped;
+   * absent on records written before the section existed.
+   */
+  completedRoutines: RoutineCompletionsSchema,
   /**
    * #1179 blank identity — the CURRENT blank id per job, on this machine (issue comment
    * 6776457695): a blank sits on one machine's bed, so the job file must never carry one. Written
