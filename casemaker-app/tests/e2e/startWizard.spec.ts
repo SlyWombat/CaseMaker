@@ -27,7 +27,7 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
     'This page can write, check and simulate; to run the machine, open the desktop app.',
   );
   await expect(page.getByTestId('start-wizard-check')).toHaveCount(0);
-  await expect(page.getByTestId('start-wizard-next')).toHaveText('Next: what are you cutting');
+  await expect(page.getByTestId('start-wizard-next')).toHaveText('Next: what are you making');
   await page.getByTestId('start-wizard-next').click();
 
   // Step 2 — the question, first since #897: its answer is what the blank is sized from.

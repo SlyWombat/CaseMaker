@@ -217,7 +217,7 @@ test.describe('first job acceptance (§6)', () => {
     await expect(page.getByTestId('start-wizard')).toBeVisible();
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 1 of 4 · Machine');
     // The web build cannot drive a machine; the button says so and does not gate the job.
-    await expect(page.getByTestId('start-wizard-next')).toHaveText('Next: what are you cutting');
+    await expect(page.getByTestId('start-wizard-next')).toHaveText('Next: what are you making');
     await capture(page, 'wizard-1-machine');
     await tap(page, 'start-wizard-next');
 

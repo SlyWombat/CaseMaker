@@ -278,7 +278,7 @@ describe('#280/#682 — step 1, the machine check', () => {
       // …and nothing was checked: the step did not pretend to open a socket.
       expect(useMachineStore.getState().outcome).toBeNull();
       // #1106 item 9 — ONE advancing label on both builds: never "without a machine".
-      expect(screen.getByTestId('start-wizard-next').textContent).toBe('Next: what are you cutting');
+      expect(screen.getByTestId('start-wizard-next').textContent).toBe('Next: what are you making');
       fireEvent.click(screen.getByTestId('start-wizard-next'));
       // #897 — the work comes before the blank: step 2 is the question.
       expect(screen.getByTestId('start-wizard-progress').textContent).toContain('What are you cutting?');
