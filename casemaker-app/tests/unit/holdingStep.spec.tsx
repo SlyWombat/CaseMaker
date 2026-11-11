@@ -341,7 +341,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     // The job's answer IS the chuck: the row is selected even though the machine cannot honour it.
     expect(radio('rotary').checked).toBe(true);
     expect(radio('rotary').disabled).toBe(true);
-    expect(rowText('rotary')).toContain('Needs the rotary on the pins');
+    expect(rowText('rotary')).toContain('Put the rotary on the pins');
     expect(screen.getByTestId('engrave-setup-change-rotary')).toBeTruthy();
     // And the wizard will not leave held in it: Next is blocked with the row's own reason.
     expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(true);
