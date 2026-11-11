@@ -100,6 +100,13 @@ export interface SideTouchSubject {
   mountDatum: RegistrationPlan['mountDatum'];
   corner?: RegistrationPlan['corner'];
   cornerXFrom?: RegistrationPlan['cornerXFrom'];
+  /**
+   * #1200 — THE UNIT'S TOUCH RESTRICTION, when the plan carries one. A `z-only` unit never takes
+   * a sideways touch, whatever the mount leaves free: its edges are found by stepping Z over them
+   * (the bracket-and-bisect), the way the pre-#1133 plans did. Absent (`null`/undefined) keeps
+   * #1133's rule byte for byte — every probe sideways where the mount allows.
+   */
+  probe?: { touches?: 'z-only' | 'all' } | null;
 }
 
 /**
@@ -115,6 +122,8 @@ export interface SideTouchSubject {
  * `cornerXFrom` unset only on that case, from the measured jaw top).
  */
 export function sideTouchSelected(plan: SideTouchSubject, edge: Edge): boolean {
+  // #1200 — a unit the operator restricted to top touches takes NO sideways seek, on any mount.
+  if (plan.probe?.touches === 'z-only') return false;
   if (sideTouchAllowed(plan.mount, edge)) return !(plan.mount === 'vise' && plan.mountDatum === null);
   return (
     plan.mount === 'vise' &&

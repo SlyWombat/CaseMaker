@@ -2277,6 +2277,17 @@ const registrationPlanSchema = z.object({
         .enum(['z-only', 'xyz'])
         .optional()
         .describe('The probe instrument the plan was made for: z-only (wired) or xyz (3D probe).'),
+      // #1200 — the operator's restriction on that UNIT: z-only plans no sideways touch. Absent on
+      // a plan frozen before the field, which keeps #1133's dispatch exactly.
+      touches: z
+        .enum(['z-only', 'all'])
+        .optional()
+        .describe('The probe unit’s touch restriction: z-only (top touches only) or all.'),
+      tipLateralUncertaintyMm: z
+        .number()
+        .finite()
+        .optional()
+        .describe('The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.'),
       tip: z
         .object({
           diameterMm: z.number().finite().describe('Probe tip diameter, in millimetres.'),

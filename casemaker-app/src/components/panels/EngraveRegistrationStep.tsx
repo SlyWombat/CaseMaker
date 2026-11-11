@@ -183,6 +183,9 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
+  // #1200 — a unit the operator restricted says so before the press: "3D probe · top touches only".
+  const restricted = plan.probe?.touches === 'z-only';
+  const probeWords = `${probeInstrumentOf(plan.probe) === 'xyz' ? '3D probe' : 'wired probe'}${restricted ? ' · top touches only' : ''}`;
   // #1070 — the seat plan is one touch, named for what it measures. #1189 — a RE-MEASURE says
   // why it is being taken again, before the press.
   if (isSeatPlan(plan)) {
@@ -192,14 +195,13 @@ function proposalLine(plan: RegistrationPlan): string {
     const where =
       plan.mountTap === null ? '' : ` · machine X ${p3(plan.mountTap.x)}, Y ${p3(plan.mountTap.y)}`;
     return plan.seatRemeasure === 'probe-refit'
-      ? `the bracket seat again — the seat on file predates the probe’s last fitting · one Z seek on the wasteboard beside the front arm${where} · wired probe`
-      : `the bracket seat — one Z seek on the wasteboard beside the front arm${where} · wired probe`;
+      ? `the bracket seat again — the seat on file predates the probe’s last fitting · one Z seek on the wasteboard beside the front arm${where} · ${probeWords}`
+      : `the bracket seat — one Z seek on the wasteboard beside the front arm${where} · ${probeWords}`;
   }
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });
   const touchWords = `${touches} touch${touches === 1 ? '' : 'es'}`;
-  const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? '3D probe' : 'wired probe';
   const list =
     edges.length === 0
       ? 'no edge scan'

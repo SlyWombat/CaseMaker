@@ -94,6 +94,8 @@ function cutBlankCheckPoints(
     tipRadiusMm: plan.settings.tipRadiusMm,
     tipLengthMm: plan.probe?.tipLengthMm ?? null,
     bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+    // #1200 — the unit's stated lateral uncertainty, so a top touch keeps clear of the edges.
+    tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? null,
   };
   const obstacles = plan.mountObstacles.map((o) => ({ min: o.min, max: o.max }));
   if (blankMap !== null) {
@@ -114,6 +116,8 @@ function cutBlankCheckPoints(
       tipRadiusMm: plan.settings.tipRadiusMm,
       tipLengthMm: plan.probe?.tipLengthMm ?? null,
       bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+      // #1200 — the same top-touch floor on the raster fallback path.
+      tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? null,
     },
     fallbackRadiusMm,
     obstacles: plan.mountObstacles.map((o) => ({ min: o.min, max: o.max })),
@@ -190,10 +194,14 @@ export function planRegistrationAttempt(args: {
   // #934 — THE BRANCHES THE BENCH HAS NOT RUN are refused HERE, at the operator seam, not inside
   // the pure planner: the engine's own specs are the regression suite for the code we keep, and
   // the operator path cannot reach these inputs once this refuses them.
-  if (args.probe?.instrument === 'xyz') {
+  // #1200 — a 3D unit RESTRICTED TO TOP TOUCHES is a registration instrument: it plans the
+  // Z-only routine the wired V2 gets, so nothing about the bench's unrun side-touch branch is
+  // reached. An UNRESTRICTED 3D unit stays refused by name (that branch has not been run).
+  if (args.probe?.instrument === 'xyz' && args.probe.touches !== 'z-only') {
     return {
       kind: 'refused',
-      reason: 'the 3D probe is not a registration instrument on this machine yet — fit the wired V2 probe and register again',
+      reason:
+        'the 3D probe is not a registration instrument on this machine yet — restrict it to top touches in Manage › Accessories, or fit the wired V2 probe and register again',
     };
   }
   if (job.stock.shape === 'disc') {

@@ -45,7 +45,7 @@ import type { SetupFlip } from '@/types/engraveJob';
 import { settingsProblem, type RegistrationSettings } from './settings';
 import { planFootprintRegistration } from './footprint';
 import { centrePair } from './centreFind';
-import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed } from './probe3d';
+import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed, sideTouchSelected, type SideTouchSubject } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
 
@@ -138,10 +138,31 @@ export interface ProbeSpec {
    */
   tipLengthMm?: number | null;
   bodyDiameterMm?: number | null;
+  /**
+   * #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT. `z-only` never plans a sideways
+   * `G38.3`: a stylus that is not exactly on the spindle axis reads every edge off by the bend,
+   * and side loads are what break a repaired one. `all` keeps the instrument's own capability.
+   *
+   * The effect is separate from `instrument` on purpose: the INSTRUMENT is what the variant is
+   * (a 3D probe still releases its stylus before any rapid, still needs its M491 reference), and
+   * this is how far the operator lets it touch. `probeFor` states the unit's default — `all` for
+   * the 3D variant, `z-only` for the wired V2 (the issue's ruling, 2026-11-10) — and a plan with
+   * no probe at all (or a probe with the field absent) keeps #1133's rule byte for byte.
+   */
+  touches?: ProbeTouchRestriction;
+  /**
+   * #1200 — HOW FAR OFF THE AXIS THE TIP MAY BE, mm, as the operator states it (0 default). A top
+   * touch is never planned closer to an edge than this plus the tip radius: near an edge the ball
+   * can drop onto the roll-off and read low, and a bent stylus makes that worse.
+   */
+  tipLateralUncertaintyMm?: number;
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
 export type ProbeInstrument = 'z-only' | 'xyz';
+
+/** #1200 — the operator's restriction on one probe UNIT: top touches only, or everything. */
+export type ProbeTouchRestriction = 'z-only' | 'all';
 
 /**
  * The instrument an accessory variant names. The house registers the 3D probe as variant `'3d'`
@@ -555,14 +576,24 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   }
 
   const surfacePoint = input.cutCentre ?? { x: (stock.xMin + stock.xMax) / 2, y: (stock.yMin + stock.yMax) / 2 };
-  const inset = Math.max(1, stock.cornerRadius);
+  // #1200 — A TOP TOUCH KEEPS THE UNIT'S LATERAL UNCERTAINTY PLUS THE TIP RADIUS CLEAR OF EVERY
+  // EDGE: near an edge the ball can meet the roll-off instead of the flat top and read low, and an
+  // off-axis tip (a bent stylus) turns that into an error. The old inset (a millimetre, or the
+  // corner radius) still applies on top.
+  const lateralSigma = probe?.tipLateralUncertaintyMm ?? 0;
+  const topTouchInset = Math.max(1, stock.cornerRadius, s.tipRadiusMm + lateralSigma);
   if (
-    surfacePoint.x < stock.xMin + inset ||
-    surfacePoint.x > stock.xMax - inset ||
-    surfacePoint.y < stock.yMin + inset ||
-    surfacePoint.y > stock.yMax - inset
+    surfacePoint.x < stock.xMin + topTouchInset ||
+    surfacePoint.x > stock.xMax - topTouchInset ||
+    surfacePoint.y < stock.yMin + topTouchInset ||
+    surfacePoint.y > stock.yMax - topTouchInset
   ) {
-    return { ok: false, reason: 'the surface point is not well inside the stock' };
+    return {
+      ok: false,
+      reason:
+        `the surface touch point is not well inside the stock: a top touch keeps ${r3(topTouchInset)} mm clear of every edge ` +
+        `(the tip's ${r3(s.tipRadiusMm)} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''})`,
+    };
   }
 
   // #1070 — A BED-HELD JOB IS REGISTERED ON THE CUT REGION'S FOOTPRINT. The region's extents go
@@ -585,7 +616,15 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       softLimits: input.softLimits ?? null,
       expectedSurface: input.expectedSurface,
       seekFromMachineZ,
-      probe: { instrument: input.probe?.instrument === 'xyz' ? 'xyz' : 'z-only', tipRadiusMm: s.tipRadiusMm },
+      probe: {
+        instrument: input.probe?.instrument === 'xyz' ? 'xyz' : 'z-only',
+        tipRadiusMm: s.tipRadiusMm,
+        // #1200 — the unit's restriction rides the footprint plan too: the dispatch reads it.
+        ...(input.probe?.touches === undefined ? {} : { touches: input.probe.touches }),
+        ...(input.probe?.tipLateralUncertaintyMm === undefined
+          ? {}
+          : { tipLateralUncertaintyMm: input.probe.tipLateralUncertaintyMm }),
+      },
       settings: {
         scanInsideMm: s.scanInsideMm,
         scanReachMm: s.scanReachMm,
@@ -810,6 +849,26 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       const named = zOnly.map((e) => `the ${e} edge`).join(' and ');
       notes.push(
         `${named} ${zOnly.length === 1 ? 'keeps' : 'keep'} the Z-only scan: no measured jaw top for a sideways touch; banded to ±${s.edgeBandMm} mm`,
+      );
+    }
+  }
+  // #1200 — THE RESTRICTION IS STATED, WITH WHAT WAS PLANNED INSTEAD. A unit restricted to top
+  // touches takes no sideways seek (sideTouchSelected); where the mount WOULD have offered one,
+  // the note names those edges and the method they got instead. Nothing is said when the
+  // unrestricted plan would have been the same (a mount with no free edge, or a plan with no probe).
+  if (probe !== null && probe.touches === 'z-only') {
+    const unrestricted: SideTouchSubject = {
+      mount,
+      mountDatum,
+      ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
+      ...(cornerXFrom === undefined ? {} : { cornerXFrom }),
+      probe: { touches: 'all' },
+    };
+    const wouldSide = [...new Set(scans.filter((sc) => sideTouchSelected(unrestricted, sc.edge)).map((sc) => sc.edge))];
+    if (wouldSide.length > 0) {
+      const named = wouldSide.map((e) => `the ${e} edge`).join(', ');
+      notes.push(
+        `the probe is restricted to top touches: ${named} ${wouldSide.length === 1 ? 'is' : 'are'} found by stepping Z over ${wouldSide.length === 1 ? 'it' : 'them'}, not with a sideways touch`,
       );
     }
   }

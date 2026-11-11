@@ -587,6 +587,13 @@ function AccessoryDetail({
   const [product, setProduct] = useState(item.product ?? '');
   const [variant, setVariant] = useState(item.variant ?? '');
   const [checkoutTo, setCheckoutTo] = useState(machines[0]?.id ?? '');
+  /**
+   * #1200 — the operator's touch restriction on this probe UNIT. On: top touches only (no
+   * sideways `G38.3` anywhere). Off: the unit's default (all for a 3D variant, z-only for the
+   * wired V2). The reason and date are the record of the decision.
+   */
+  const [zOnly, setZOnly] = useState(item.touches === 'z-only');
+  const [touchReason, setTouchReason] = useState(item.touchesReason ?? '');
   // #595 — the probe's last registration reading (M491 + rest), and the machine's own bed datum for
   // a mount that has no tapped reading of its own yet.
   const probeReadings = item.kind === 'probe' ? probeReadingsLine(item) : null;
@@ -598,7 +605,8 @@ function AccessoryDetail({
 
   const productChanged = product !== (item.product ?? '');
   const variantChanged = variant !== (item.variant ?? '');
-  const touched = productChanged || variantChanged;
+  const touchesChanged = zOnly !== (item.touches === 'z-only') || touchReason.trim() !== (item.touchesReason ?? '');
+  const touched = productChanged || variantChanged || touchesChanged;
 
   const save = async (record: FixtureRecord): Promise<boolean> => {
     const ok = (await saveAccessory(record)) === 'ok';
@@ -611,6 +619,18 @@ function AccessoryDetail({
       ...item,
       product: product.trim() === '' ? null : product.trim(),
       variant: variant.trim() === '' ? null : variant.trim(),
+      // #1200 — the restriction and its record. `touchesSince` moves only when the decision does.
+      ...(item.kind === 'probe'
+        ? {
+            touches: zOnly ? ('z-only' as const) : ('all' as const),
+            ...(touchReason.trim() === '' ? {} : { touchesReason: touchReason.trim() }),
+            ...(zOnly !== (item.touches === 'z-only')
+              ? { touchesSince: new Date().toISOString() }
+              : item.touchesSince === undefined
+                ? {}
+                : { touchesSince: item.touchesSince }),
+          }
+        : {}),
     });
 
   const checkout = () =>
@@ -673,6 +693,32 @@ function AccessoryDetail({
           />
         )}
       </label>
+      {item.kind === 'probe' && (
+        <>
+          <label className="lf" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              data-testid="manage-acc-touches-zonly"
+              checked={zOnly}
+              onChange={(e) => setZOnly(e.target.checked)}
+            />
+            <span>Use for top touches only</span>
+          </label>
+          {zOnly && (
+            <label className="lf">
+              <span>why</span>
+              <input
+                className="fld fld--text"
+                type="text"
+                data-testid="manage-acc-touches-reason"
+                value={touchReason}
+                placeholder="e.g. the ball tip may not be straight down"
+                onChange={(e) => setTouchReason(e.target.value)}
+              />
+            </label>
+          )}
+        </>
+      )}
       <div className="btn-row">
         <button
           type="button"
