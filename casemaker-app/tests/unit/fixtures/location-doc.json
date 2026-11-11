@@ -1060,6 +1060,41 @@
       "unit": "mm",
       "note": "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"
     },
+    "rotary.tailstockBandMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the last part of the stick-out the tailstock keeps the cutter out of"
+    },
+    "rotary.turnClearanceMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "Makera's own rule, not measured: clearance above the stock before a rapid may turn or traverse the rod"
+    },
+    "rotary.tailstockCentreMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the live centre's length from the stock's free end to the tailstock body"
+    },
+    "rotary.tailstockBodyMm": {
+      "value": 40.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the tailstock body's length along the rod"
+    },
+    "rotary.tailstockHousingRadiusMm": {
+      "value": 45.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the tailstock housing's radius about the rotary axis"
+    },
     "margins.boundaryMarginMm": {
       "value": 0.2,
       "source": "seeded",

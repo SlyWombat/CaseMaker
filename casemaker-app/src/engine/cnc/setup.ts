@@ -27,6 +27,7 @@ import { aabbOfProfile, type Profile } from '@/engine/compiler/profile';
 import type { Mm, Vec2, Vec3 } from '@/types/units';
 import type { Sacrificial } from '@/types/engraveJob';
 import { workOriginOf, type AxisRange, type Mill } from './machine';
+import type { RotaryLimits } from './rotary/limits';
 
 export type Degrees = number;
 
@@ -81,7 +82,14 @@ export type Workholding =
    * behind the stock's free end (`rotary/tailstock.ts`), `false` is an open free end, and an
    * absent flag (a synthetic setup that never stated one) keeps the old "not modelled" notice.
    */
-  | { kind: 'rotary-chuck'; jawDiameter: Mm; stickout: Mm; tailstock?: boolean }
+  | {
+      kind: 'rotary-chuck';
+      jawDiameter: Mm;
+      stickout: Mm;
+      tailstock?: boolean;
+      /** #1222 — the shop's rotary limits, when the caller resolved them. */
+      limits?: RotaryLimits;
+    }
   | { kind: 'tape-down'; contact: Profile; shim?: Profile }
   | { kind: 'printed-nest'; nest: string; seatClearance: Mm };
 

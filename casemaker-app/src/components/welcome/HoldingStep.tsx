@@ -29,7 +29,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { rotaryStockFits } from '@/engine/cnc/setups/plan';
-import { ROTARY_JAW_KEEP_OUT_MM, ROTARY_TAILSTOCK_BAND_MM, type RotaryMap } from '@/engine/cnc/rotary/wrap';
+import type { RotaryMap } from '@/engine/cnc/rotary/wrap';
 import {
   ROTARY_NECK_LENGTH_MM,
   ROTARY_NECK_MIN_LENGTH_MM,
@@ -2638,7 +2638,8 @@ export function HoldingStep({
             </p>
             <p style={MUTED}>Tailstock: in — Makera’s shipped value (Studio’s rotary relief)</p>
             <p style={MUTED}>
-              Keep-out: {fmt(ROTARY_JAW_KEEP_OUT_MM)} mm from the jaws, a {fmt(ROTARY_TAILSTOCK_BAND_MM)} mm
+              Keep-out: {fmt(readDefault(shopDefaults ?? null, 'rotary.jawKeepOutMm').value)} mm from the jaws, a{' '}
+              {fmt(readDefault(shopDefaults ?? null, 'rotary.tailstockBandMm').value)} mm
               tailstock band — Case Maker’s defaults until measured
             </p>
             <p style={MUTED} data-testid="engrave-setup-rotary-axis-datum">

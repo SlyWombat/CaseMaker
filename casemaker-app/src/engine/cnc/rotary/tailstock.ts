@@ -15,18 +15,23 @@
  * missed collision is not.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
+import type { RotaryLimits } from './limits';
 import type { Mm } from '@/types/units';
 
 /** PROVISIONAL: the live centre's length, from the stock's free end to the body's front face, mm. */
-export const ROTARY_TAILSTOCK_CENTRE_MM: Mm = 12;
+// #1222 — the registry's labelled fallback (recommended value).
+export const ROTARY_TAILSTOCK_CENTRE_MM: Mm = readDefault(null, 'rotary.tailstockCentreMm').value;
 /** PROVISIONAL: the tailstock body's length along X, mm. */
-export const ROTARY_TAILSTOCK_BODY_MM: Mm = 40;
+// #1222 — the registry's labelled fallback.
+export const ROTARY_TAILSTOCK_BODY_MM: Mm = readDefault(null, 'rotary.tailstockBodyMm').value;
 /**
  * PROVISIONAL, and deliberately LARGER than the figure reads: the housing's radius about the
  * axis, mm. The body and the live centre both sit inside it, so a false refusal that names this
  * number is preferred to a missed collision.
  */
-export const ROTARY_TAILSTOCK_HOUSING_RADIUS_MM: Mm = 45;
+// #1222 — the registry's labelled fallback.
+export const ROTARY_TAILSTOCK_HOUSING_RADIUS_MM: Mm = readDefault(null, 'rotary.tailstockHousingRadiusMm').value;
 
 /** The obstacle's cylinder: X span and radius about the A axis, in the program's work frame. */
 export interface TailstockSpan {
@@ -39,11 +44,19 @@ export interface TailstockSpan {
  * The tailstock's obstacle for a holding. Its radius is the LARGEST of the provisional housing,
  * half the chuck's jaw diameter and the stock's radius — never smaller than any of them.
  */
-export function tailstockSpan(stickout: Mm, jawDiameter: Mm, stockRadius: Mm): TailstockSpan {
+export function tailstockSpan(
+  stickout: Mm,
+  jawDiameter: Mm,
+  stockRadius: Mm,
+  limits?: Pick<RotaryLimits, 'tailstockCentreMm' | 'tailstockBodyMm' | 'tailstockHousingRadiusMm'>,
+): TailstockSpan {
+  const centre = limits?.tailstockCentreMm ?? ROTARY_TAILSTOCK_CENTRE_MM;
+  const body = limits?.tailstockBodyMm ?? ROTARY_TAILSTOCK_BODY_MM;
+  const housing = limits?.tailstockHousingRadiusMm ?? ROTARY_TAILSTOCK_HOUSING_RADIUS_MM;
   return {
-    x0: stickout + ROTARY_TAILSTOCK_CENTRE_MM,
-    x1: stickout + ROTARY_TAILSTOCK_CENTRE_MM + ROTARY_TAILSTOCK_BODY_MM,
-    radius: Math.max(ROTARY_TAILSTOCK_HOUSING_RADIUS_MM, jawDiameter / 2, stockRadius),
+    x0: stickout + centre,
+    x1: stickout + centre + body,
+    radius: Math.max(housing, jawDiameter / 2, stockRadius),
   };
 }
 

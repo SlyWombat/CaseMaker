@@ -1991,8 +1991,13 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
   // `sweep.ts` carry the same wall).
   let chuckHits = 0;
   let chuckFirstLine: number | null = null;
+  // #1222 — the shop's keep-out, carried on the setup; the constant is its labelled fallback.
+  const jawKeepOut =
+    setup.workholding.kind === 'rotary-chuck'
+      ? (setup.workholding.limits?.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM)
+      : ROTARY_JAW_KEEP_OUT_MM;
   const chuckReached = (x0: number, x1: number): boolean =>
-    rotary && Math.min(x0, x1) - cutter.radius < ROTARY_JAW_KEEP_OUT_MM - 1e-6;
+    rotary && Math.min(x0, x1) - cutter.radius < jawKeepOut - 1e-6;
 
   // #776 — the span sweep is exact for a rotary flat end mill's pure-A moves (see
   // `applyRotaryPureAFlat`); every other move, and the test seam that disables it, takes the
@@ -2189,7 +2194,7 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       line: chuckFirstLine ?? 0,
       message:
         `line ${chuckFirstLine}: ${chuckHits === 1 ? 'a move reaches' : `${chuckHits} moves reach`} the chuck — ` +
-        `the cutter's edge goes past the jaw tips (the keep-out is the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the ` +
+        `the cutter's edge goes past the jaw tips (the keep-out is the first ${jawKeepOut} mm of the ` +
         'stick-out) at any Z: the jaws\' reach depends on the grip, so no height over them is clear.',
     });
   }

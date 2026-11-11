@@ -706,7 +706,7 @@ function sweepPlan(
   let report: OracleReport | null = null;
   let note: string | null = null;
   const mill = jobMachine(applied, ctx.calibration);
-  const setup = toSetup(applied, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const setup = toSetup(applied, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   for (let i = 0; i < gen.programs.length; i++) {
     const program = gen.programs[i]!;
     const tool = toolFor([...(shop.tools ?? [])], program.toolKey);
@@ -747,7 +747,7 @@ function sweepPlan(
       // oracle does), so a plan that gouges the goal cannot pass on the plan alone.
       if (i === gen.programs.length - 1) {
         // #948 — the same pass line the run's own oracle uses, read from the shop opts here.
-        const rotaryGoalMap = rotaryMapOf(applied);
+        const rotaryGoalMap = rotaryMapOf(applied, shop.defaults ?? null);
         const goal = goalCheckForProgram(
           applied,
           gen.surface3d != null,

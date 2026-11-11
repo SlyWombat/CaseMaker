@@ -444,6 +444,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // session guard; the verifier and the relief CAM still hold the constant, which derives from
   // this key's fallback.
   'rotary.jawKeepOutMm': { label: 'rotary chuck keep-out past the jaw tips (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  // #1222 — the rotary module's limits, as the shop states them (recommended values keep today's
+  // programs, findings and sentences byte-identical).
+  'rotary.tailstockBandMm': { label: 'rotary tailstock band at the free end (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 10 },
+  'rotary.turnClearanceMm': { label: 'clearance above the stock before the rod may turn or traverse (Makera’s rule)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  'rotary.tailstockCentreMm': { label: 'tailstock live centre length (provisional)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 12 },
+  'rotary.tailstockBodyMm': { label: 'tailstock body length (provisional)', unit: 'mm', rule: z.number().min(0).max(200), fallback: 40 },
+  'rotary.tailstockHousingRadiusMm': { label: 'tailstock housing radius about the axis (provisional)', unit: 'mm', rule: z.number().min(0).max(150), fallback: 45 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

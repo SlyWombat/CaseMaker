@@ -1980,7 +1980,12 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
   // setup states whether it is in (#241 slice 4). An absent flag keeps the pre-#241 behaviour (the
   // synthetic setups and old documents), where nothing claimed to check it.
   if (setup.part.kind === 'cylinder') {
-    const keepOut = ROTARY_JAW_KEEP_OUT_MM + radius;
+    // #1222 — the shop's keep-out, carried on the setup; the constant is its labelled fallback.
+    const jawKeepOut =
+      setup.workholding.kind === 'rotary-chuck'
+        ? (setup.workholding.limits?.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM)
+        : ROTARY_JAW_KEEP_OUT_MM;
+    const keepOut = jawKeepOut + radius;
     /** Whether the straight move x0 → x1 reaches inside the keep-out band, at any Z. */
     const crosses = (x0: number, x1: number): boolean => Math.min(x0, x1) < keepOut - 1e-6;
     const jawHits: { line: number; x: number; z: number; kind: string }[] = [];
@@ -2009,7 +2014,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
         code: 'rotary-into-chuck',
         message:
           `line ${first.line}: a ${first.kind} reaches the chuck — the ⌀${(2 * radius).toFixed(3)} mm cutter's ` +
-          `edge goes past the jaw tips (the keep-out is the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out) ` +
+          `edge goes past the jaw tips (the keep-out is the first ${jawKeepOut} mm of the stick-out) ` +
           `at any Z: the jaws' reach depends on the grip, so no height over them is clear` +
           `${jawHits.length > 1 ? ` (${jawHits.length} moves in all)` : ''}.`,
       });
@@ -2029,7 +2034,7 @@ export function sweepTimeline(tl: ManifoldToplevel, timeline: Timeline, tool: To
     setup.workholding.kind === 'rotary-chuck' &&
     setup.workholding.tailstock === true
   ) {
-    const span = tailstockSpan(setup.workholding.stickout, setup.workholding.jawDiameter, topZ);
+    const span = tailstockSpan(setup.workholding.stickout, setup.workholding.jawDiameter, topZ, setup.workholding.limits);
     const hits: { line: number; kind: string }[] = [];
     for (const m of timeline.airMoves) {
       if (segmentEntersTailstock(m.from, m.to, radius, span)) {
