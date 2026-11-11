@@ -12,6 +12,8 @@
  */
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { readDefault } from '@/platform/defaultsClient';
+import type { StockItem } from '@/platform/stockClient';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from './stockStart';
 
@@ -23,10 +25,53 @@ export const WORK_STOCK_SKIN_MM = 1;
 
 /**
  * #1098 — the house's plate stock, mm, when the shelf does not name one first. An outline cut
- * THROUGH needs a plate: the cut frees the part, so the blank must be the piece. 12 mm is the
- * wizard's stock plate (`stockStart.ts`'s shelf forms); the shelf's own plate wins when present.
+ * THROUGH needs a plate: the cut frees the part, so the blank must be the piece. It is a shop
+ * setting (`stock.defaultPlateThicknessMm`, #1207), read here at its recommendation; a caller with
+ * the shop's defaults passes the shop's own number as `ProposalContext.plateThicknessMm`.
  */
-export const HOUSE_PLATE_THICKNESS_MM = 12;
+export const HOUSE_PLATE_THICKNESS_MM = readDefault(null, 'stock.defaultPlateThicknessMm').value;
+
+/**
+ * What the proposal may also read, beyond the work: the house's shelf (an outline takes the
+ * smallest plate that holds it), the job's material, and the shop's default plate thickness.
+ */
+export interface ProposalContext {
+  shelf?: readonly StockItem[];
+  jobMaterial?: StockMaterial | null;
+  plateThicknessMm?: number;
+}
+
+/**
+ * #1098 — THE SHELF PLATE FOR A DRAWING. Among the shelf's plates that are free (some left, none
+ * held back) and hold the drawing's extent plus the margin each side (turned either way), with a
+ * thickness of at least `needMm`: the job's material first when one is set, then the smallest
+ * area, then the thinnest. Null when none holds it.
+ */
+export function shelfPlateFor(
+  extent: { length: number; width: number },
+  needMm: number,
+  material: StockMaterial | null,
+  shelf: readonly StockItem[],
+): StockItem | null {
+  const m = WORK_STOCK_MARGIN_MM;
+  const needL = extent.length + 2 * m;
+  const needW = extent.width + 2 * m;
+  const free = (i: StockItem): number => i.quantity - i.reservations.reduce((a, r) => a + r.quantity, 0);
+  const candidates = shelf.filter((i) => {
+    if (i.form !== 'plate' || free(i) <= 0) return false;
+    const { length: l, width: w, thickness: t } = i.size;
+    if (l == null || w == null || t == null || t + 1e-9 < needMm) return false;
+    return (l >= needL - 1e-9 && w >= needW - 1e-9) || (l >= needW - 1e-9 && w >= needL - 1e-9);
+  });
+  const area = (i: StockItem): number => (i.size.length ?? 0) * (i.size.width ?? 0);
+  candidates.sort(
+    (a, b) =>
+      Number(material !== null && b.material === material) - Number(material !== null && a.material === material) ||
+      area(a) - area(b) ||
+      (a.size.thickness ?? 0) - (b.size.thickness ?? 0),
+  );
+  return candidates[0] ?? null;
+}
 
 /**
  * #1100 — the margin a preset's cut-out or pocket leaves each side, mm. Ten, not the mesh rule's
@@ -56,7 +101,7 @@ export type WorkShape =
    * #1098 — a vector outline (SVG/DXF) the question step read. `through` is the Cut it out
    * choice (a profile needs a plate the cut can free); Pocket it and Carve it leave it false.
    */
-  | { kind: 'outline'; length: number; width: number; through: boolean }
+  | { kind: 'outline'; length: number; width: number; through: boolean; depthMm?: number }
   /** #1100 — a shape cut through the blank (Cut out a shape). */
   | { kind: 'cutout'; length: number; width: number }
   /** #1100 — a flat-floored recess (A pocket or tray). */
@@ -88,7 +133,8 @@ function n(v: number): string {
  * THE THICKNESS RULE, in one place. #898's underside styles are a new branch here, not a second
  * rule in the step: a style says how much material sits under the work.
  */
-export function proposedThickness(work: WorkShape): number | null {
+export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): number | null {
+  const plateMm = ctx.plateThicknessMm ?? HOUSE_PLATE_THICKNESS_MM;
   switch (work.kind) {
     case 'mesh':
       return round1(work.size.z + WORK_STOCK_SKIN_MM);
@@ -98,14 +144,15 @@ export function proposedThickness(work: WorkShape): number | null {
       return PCB_STANDARD_THICKNESS_MM;
     case 'outline':
       // #1098 — a through cut frees the part from a plate; Pocket it and Carve it bite into one.
-      // Both start on the house's plate (12 mm; the shelf's own plate wins in the step).
-      return HOUSE_PLATE_THICKNESS_MM;
+      // Both start on the house's plate (the shop's default; the shelf's own plate wins in
+      // `proposeStock`).
+      return plateMm;
     case 'cutout':
       // #1100 — the cut frees the part, so the blank is a plate the profile can go through.
-      return HOUSE_PLATE_THICKNESS_MM;
+      return plateMm;
     case 'pocket':
       // #1100 — the floor needs its depth plus six millimetres of body under it.
-      return round1(Math.max(work.depth + 6, HOUSE_PLATE_THICKNESS_MM));
+      return round1(Math.max(work.depth + 6, plateMm));
     case 'rod':
       // #1107 — a rod's "thickness" is its own length in the standing box.
       return round1(work.length);
@@ -118,8 +165,8 @@ export function proposedThickness(work: WorkShape): number | null {
  * The blank the work proposes, or null when it does not size one (a pocket, a profile or a hole
  * keeps today's default).
  */
-export function proposeStock(work: WorkShape): StockProposal | null {
-  const thickness = proposedThickness(work);
+export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockProposal | null {
+  const thickness = proposedThickness(work, ctx);
   if (thickness === null) return null;
   switch (work.kind) {
     case 'mesh': {
@@ -171,6 +218,21 @@ export function proposeStock(work: WorkShape): StockProposal | null {
       // #1098 — the drawing's own extent, plus the same margin every mesh gets; the plate is the
       // house's, because an SVG carries no material of its own.
       const m = WORK_STOCK_MARGIN_MM;
+      // The shelf's own plate wins: a pocket needs its depth plus the skin; a cut-out no thickness.
+      const need = work.through ? 0 : (work.depthMm ?? 0) + WORK_STOCK_SKIN_MM;
+      const held = shelfPlateFor(work, need, ctx.jobMaterial ?? null, ctx.shelf ?? []);
+      if (held !== null) {
+        const { length: l, width: w, thickness: t } = held.size as { length: number; width: number; thickness: number };
+        return {
+          form: 'plate',
+          material: held.material,
+          length: l,
+          width: w,
+          thickness: t,
+          finish: 'rough',
+          sentence: `From your shelf: ${held.material} plate, ${n(l)} × ${n(w)} × ${n(t)} mm.`,
+        };
+      }
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,

@@ -1003,6 +1003,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the tape strips stop this far in from every edge of the stock"
     },
+    "stock.defaultPlateThicknessMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the house's common plate \u2014 the thickness a drawing's blank starts at when no shelf plate holds it"
+    },
     "rotary.gripMm": {
       "value": 15.0,
       "source": "seeded",

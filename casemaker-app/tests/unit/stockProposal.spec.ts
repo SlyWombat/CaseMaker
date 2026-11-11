@@ -13,6 +13,7 @@ import {
   WORK_STOCK_SKIN_MM,
   proposeStock,
   proposedThickness,
+  shelfPlateFor,
   type WorkShape,
 } from '@/engine/cnc/stockProposal';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from '@/engine/cnc/stockStart';
@@ -21,6 +22,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import type { OperationChoice } from '@/components/welcome/OperationStep';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { StockItem } from '@/platform/stockClient';
 
 const MESH: WorkShape = { kind: 'mesh', size: { x: 40, y: 30, z: 12 } };
 const TEXT: WorkShape = { kind: 'text', size: { length: 50, width: 10 }, depth: 2 };
@@ -176,7 +178,7 @@ describe('#897 — the work, in the terms a blank is sized from', () => {
     const cut = workShapeFor({ type: 'outline', outline, use: 'profile' }, job());
     expect(cut).toEqual({ kind: 'outline', length: 60, width: 60, through: true });
     const pocket = workShapeFor({ type: 'outline', outline, use: 'pocket', depth: 2 }, job());
-    expect(pocket).toEqual({ kind: 'outline', length: 60, width: 60, through: false });
+    expect(pocket).toEqual({ kind: 'outline', length: 60, width: 60, through: false, depthMm: 2 });
   });
 
   it('an empty line, a missing file or no choice sizes nothing', () => {
@@ -195,5 +197,61 @@ describe('#897 — the work, in the terms a blank is sized from', () => {
       stock: { ...job().stock, shape: 'cylinder' as const, diameter: 20, length: 20, width: 20, thickness: 100 },
     };
     expect(workShapeFor({ type: 'pocket' }, rod)).toEqual({ kind: 'none' });
+  });
+});
+
+
+// #1098 item 5 — an outline takes the smallest shelf plate that holds it.
+const plate = (id: string, l: number, w: number, t: number, over: Partial<StockItem> = {}): StockItem =>
+  ({
+    id,
+    material: 'hardwood',
+    form: 'plate',
+    size: { length: l, width: w, thickness: t },
+    layers: [],
+    quantity: 1,
+    reservations: [],
+    notes: null,
+    ...over,
+  }) as unknown as StockItem;
+
+describe('#1098 — an outline takes the smallest shelf plate that holds it', () => {
+  const extent = { length: 60, width: 60 };
+  it('prefers the smallest area that holds extent + the margin each side, then the thinnest', () => {
+    const shelf = [plate('big', 300, 200, 6), plate('fit', 72, 70, 9), plate('fit-thin', 72, 70, 6), plate('small', 60, 60, 12)];
+    expect(shelfPlateFor(extent, 0, null, shelf)?.id).toBe('fit-thin');
+  });
+
+  it('holds the drawing turned either way', () => {
+    expect(shelfPlateFor(extent, 0, null, [plate('turned', 80, 70, 12)])?.id).toBe('turned');
+    expect(shelfPlateFor({ length: 100, width: 60 }, 0, null, [plate('turned', 72, 112, 12)])?.id).toBe('turned');
+  });
+
+  it('a pocket needs its depth plus the skin; a cut-out needs no thickness', () => {
+    const shelf = [plate('thin', 80, 80, 3), plate('thick', 80, 80, 12)];
+    expect(shelfPlateFor(extent, 0, null, shelf)?.id).toBe('thin');
+    expect(shelfPlateFor(extent, 4 + WORK_STOCK_SKIN_MM, null, shelf)?.id).toBe('thick');
+  });
+
+  it('the job’s material is preferred when one is set; used-up and held plates are skipped', () => {
+    const shelf = [plate('ply', 72, 72, 6, { material: 'plywood' as never }), plate('hard', 90, 90, 6)];
+    expect(shelfPlateFor(extent, 0, 'hardwood' as never, shelf)?.id).toBe('hard');
+    expect(shelfPlateFor(extent, 0, null, [plate('gone', 72, 72, 6, { quantity: 0 })])).toBeNull();
+    expect(
+      shelfPlateFor(extent, 0, null, [plate('held', 72, 72, 6, { reservations: [{ jobId: 'job-1', quantity: 1 }] as never })]),
+    ).toBeNull();
+  });
+
+  it('the proposal is that blank, in its real size, with the shelf sentence', () => {
+    const p = proposeStock(OUTLINE, { shelf: [plate('fit', 72, 70, 9)] })!;
+    expect(p).toMatchObject({ form: 'plate', length: 72, width: 70, thickness: 9 });
+    expect(p.sentence).toBe('From your shelf: hardwood plate, 72 × 70 × 9 mm.');
+  });
+
+  it('no shelf plate fits: the default thickness, which is a shop setting', () => {
+    const p = proposeStock(OUTLINE, { shelf: [plate('tiny', 20, 20, 9)], plateThicknessMm: 15 })!;
+    expect(p).toMatchObject({ length: 70, width: 70, thickness: 15 });
+    expect(p.sentence).toBe(`Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`);
+    expect(proposeStock(OUTLINE)!.thickness).toBe(HOUSE_PLATE_THICKNESS_MM);
   });
 });

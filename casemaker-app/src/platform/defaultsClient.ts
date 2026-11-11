@@ -303,6 +303,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // choice the strips stop at, inside every edge where the edge scans land.
   'tape.holdRatio': { label: 'tape hold ratio (chosen, not measured)', unit: 'x', rule: z.number().min(1).max(1000), fallback: 100 },
   'tape.insetMm': { label: 'tape inset from every edge (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 2 },
+  // #1098 — the plate a drawing is worked on when the shelf holds none that fits (#1207).
+  'stock.defaultPlateThicknessMm': { label: 'default plate thickness for a drawing (chosen)', unit: 'mm', rule: z.number().min(1).max(100), fallback: 12 },
   // #414 — runtime is weighted by the material cut (the maintainer, 2026-10-16). Chosen, not measured.
   'tools.wearWeight.plastic': { label: 'wear weight, plastic', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },
   'tools.wearWeight.wood': { label: 'wear weight, wood', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },

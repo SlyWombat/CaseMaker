@@ -44,7 +44,9 @@ import {
 import { WizardDropZone } from './WizardDropZone';
 import { WizardFileField } from './WizardFileField';
 import { WizardThumbnail } from './WizardThumbnail';
-import { workShapeFor } from './workShape';
+import { proposalContextFor, workShapeFor } from './workShape';
+import { useStockStore } from '@/store/stockStore';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { operationCreateBlocked } from './operationCreate';
 import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetupIdOf } from '@/engine/cnc/engrave/jobSetup';
 import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
@@ -567,15 +569,17 @@ export function OperationStep({
   const reportedChoice = untouchedEngrave ? null : choice;
   // #1099 — the blank this file will be cut from, stated under its thumbnail. The Stock step
   // still carries the full provenance sentence; this is the promise of the numbers to come.
+  const shelfItems = useStockStore((st) => st.items);
+  const shopDefaultsForSentence = useShopDefaultsStore((st) => st.defaults);
   const proposalSentence = useMemo(() => {
     if (reportedChoice === null) return null;
-    const proposal = proposeStock(workShapeFor(reportedChoice, job));
+    const proposal = proposeStock(workShapeFor(reportedChoice, job), proposalContextFor(job, shelfItems, shopDefaultsForSentence ?? null));
     if (proposal === null) return null;
     const n = (v: number): string => String(Number(v.toFixed(2)));
     return `Will cut on a ${n(proposal.length)} × ${n(proposal.width)} × ${n(proposal.thickness)} mm ${
       proposal.form === 'plate' ? 'plate' : proposal.form
     } — change on the next step.`;
-  }, [reportedChoice, job]);
+  }, [reportedChoice, job, shelfItems, shopDefaultsForSentence]);
   // #1107 — a NULL choice is the SHELL's rule (a new run is refused, a re-entry's Done is not),
   // so its sentence belongs in the footer, not in a field that does not exist.
   const unblock = reportedChoice === null ? null : operationCreateBlocked(reportedChoice);

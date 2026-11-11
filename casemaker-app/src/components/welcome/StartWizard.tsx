@@ -56,7 +56,7 @@ import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
-import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
+import { partFootprintFor, proposalContextFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
 import { readLastMachineId, writeLastMachineId } from './lastMachine';
 import type { MachineRecord } from '@/platform/locationClient';
@@ -362,7 +362,12 @@ export function StartWizard(): JSX.Element {
     void fontEpoch; // a parsed face changes the MEASUREMENT, not the choice or the job
     return workShapeFor(operationChoice, job);
   }, [operationChoice, job, fontEpoch]);
-  const proposal = useMemo(() => proposedStockFor(work, job, proposeStock(work)), [work, job]);
+  const shelfItems = useStockStore((s) => s.items);
+  const shopDefaultsForProposal = useShopDefaultsStore((s) => s.defaults);
+  const proposal = useMemo(
+    () => proposedStockFor(work, job, proposeStock(work, proposalContextFor(job, shelfItems, shopDefaultsForProposal ?? null))),
+    [work, job, shelfItems, shopDefaultsForProposal],
+  );
   // #930 — whether the vise's jaws are the fixture over this blank: with no machine record the
   // app's own vise model is, and a bed job has no jaw tops to clear.
   const viseOnPins = useMemo(() => {
