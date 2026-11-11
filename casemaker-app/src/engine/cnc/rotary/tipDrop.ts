@@ -23,6 +23,18 @@
  * `asin(min(1, r/ρ_min))` — not the flat field's `r/R` (field 2). A column is "reached" when the
  * floor function returns a value at all; raising the tip eventually lifts the cutter off it.
  *
+ * A POOLED CELL IS JUDGED AT ITS BLOCK'S NEAR EDGE (#1164 a). A planning field pooled from a finer
+ * one carries, per cell, ONE maximum standing for the whole block of fine cells centred on the
+ * cell's coordinate (`footprintHalfMm`, see `poolRadialField.ts`). Reading that maximum only at
+ * the coordinate under-lifts: the block's nearer material is lower than the maximum but much closer
+ * to the cutter, and near the reach edge the requirement is steep in distance — the giraffe's
+ * 0.4077 mm gouge sat 0.46 mm inside a neighbouring cell whose maximum the tip drop had placed a
+ * full pitch away. So each cell's requirement is evaluated at the block's nearest point to the
+ * tool, `|dj|·pitch − half` and `|di|·pitch − half`, floored at 0, and the stencil is extended by
+ * the half-extent. The requirement falls with distance, so this bounds every column in the block.
+ * A point-sampled field states half-extent 0 and is judged exactly as before (the V-groove
+ * acceptance's "smallest tip" pin).
+ *
  * The minimal tip per column is found by BISECTION on the shared floor function, for every cutter
  * shape — one derivation, no closed form to drift (the note permits the ball's closed form only
  * with a pin against this function; bisection IS that function, so the pin is unnecessary). The
@@ -44,14 +56,25 @@ export interface RotaryTipTool {
 }
 
 /**
+ * How far either side of its coordinate a cell's value may stand for material, mm. A pooled
+ * planning field states it (`PooledRadialField.footprintHalfMm`); the sampler's own fine field is
+ * point samples and states none.
+ */
+function footprintHalfMm(field: GoalRadialField): number {
+  const half = (field as GoalRadialField & { footprintHalfMm?: number }).footprintHalfMm;
+  return typeof half === 'number' && Number.isFinite(half) && half > 0 ? half : 0;
+}
+
+/**
  * The field's own work in its unit: CELLS × COLUMNS IN THE TRUE REACH, so the plan's budget
  * statement and the loop cannot disagree. The iteration constant above is folded in — the unit is
  * calibrated to wall-clock like the flat's — and every column evaluation costs the same.
  */
 export function rotaryTipFieldOpsFor(field: GoalRadialField, tool: RotaryTipTool): number {
   const reachAngle = Math.asin(Math.min(1, tool.radius / Math.max(field.minRadius, 1e-6)));
-  const rows = Math.ceil((reachAngle * field.radius) / field.pitch) + 1;
-  const cols = Math.ceil(tool.radius / field.pitch) + 1;
+  const half = footprintHalfMm(field);
+  const rows = Math.ceil((reachAngle * field.radius + half) / field.pitch) + 1;
+  const cols = Math.ceil((tool.radius + half) / field.pitch) + 1;
   const columns = (2 * rows + 1) * (2 * cols + 1);
   // A ball takes the closed form: ONE evaluation per column. Every other shape bisects, and the
   // unit states the work honestly (the iteration constant is folded in).
@@ -151,8 +174,9 @@ export function rotaryFinishTipField(
   // radius anywhere in the field — the worst case a column band can present.
   const rhoMin = Math.max(field.minRadius, 1e-6);
   const reachAngle = Math.asin(Math.min(1, tool.radius / rhoMin));
-  const rows = Math.ceil((reachAngle * radius) / pitch) + 1;
-  const cols = Math.ceil(tool.radius / pitch) + 1;
+  const half = footprintHalfMm(field);
+  const rows = Math.ceil((reachAngle * radius + half) / pitch) + 1;
+  const cols = Math.ceil((tool.radius + half) / pitch) + 1;
   const tips = new Float32Array(nx * ny);
   for (let j = 0; j < ny; j++) {
     for (let i = 0; i < nx; i++) {
@@ -161,14 +185,17 @@ export function rotaryFinishTipField(
       let tipAbs = 0;
       for (let dj = -rows; dj <= rows; dj++) {
         const jj = ((j + dj) % ny + ny) % ny;
-        const phi = (dj * pitch) / radius;
+        // The block's NEAREST point to the tool — the requirement falls with distance, so
+        // judging the cell's maximum here bounds every fine column the block carries.
+        const phi = Math.max(0, Math.abs(dj) * pitch - half) / radius;
         for (let di = -cols; di <= cols; di++) {
           const ii = i + di;
           if (ii < 0 || ii >= nx) continue; // beyond the sampled X the stock continues: no column
           const nAt = jj * nx + ii;
           const rho = covered[nAt] === 1 ? radius + z[nAt]! : radius;
           if (rho > radius) continue; // past the envelope there is nothing to cut
-          const required = columnTipRequirement(tool.cutter, rho, phi, di * pitch, radius);
+          const dx = Math.max(0, Math.abs(di) * pitch - half);
+          const required = columnTipRequirement(tool.cutter, rho, phi, dx, radius);
           if (required > tipAbs) tipAbs = required;
         }
       }
