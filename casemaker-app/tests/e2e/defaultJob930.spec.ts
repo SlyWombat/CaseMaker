@@ -116,7 +116,7 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   // Step 3 — the house's stick, proposed for both kinds of work.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toHaveText(
-    'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   );
   await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');

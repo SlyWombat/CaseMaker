@@ -38,7 +38,7 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   // sizes a plate from its ink). The starters are the door's (#680), not a list under the step.
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText(
-    'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   );
   await page.getByTestId('start-wizard-close').click();
   // #1123 item 2 — ✕ leaves the operator in the CNC workspace, not on the door. The starters are

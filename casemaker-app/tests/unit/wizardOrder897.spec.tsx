@@ -177,7 +177,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     // #930 — THE HOUSE'S STOCK, not a plate sized from the line: the shop cuts 36 × 36 × 100 mm
     // hardwood sticks, and a first job keeps every default.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
+      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
     );
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
     expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
@@ -216,7 +216,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     // The proposal sizes the blank; it does not overrule the piece the job has named.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
     // …and because the step's answer still MATCHES the proposal, the sentence it came from stays.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The house’s stock');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {

@@ -208,7 +208,8 @@ export function MachineStep({
     found && machine !== null && machine.status !== null
       ? readMachineRest(machine.status)?.homed === true
       : false;
-  const word = found ? `Online · ${wordBase}${homed ? ' · homed' : ''}` : wordBase;
+  // #1109 — `homed` is the spec's word; the operator reads what it means.
+  const word = found ? `Online · ${wordBase}${homed ? ' · knows where it is' : ''}` : wordBase;
   const checked = found ? timeOfDay(machine.observedAt) : null;
 
   // Last seen belongs to the machine this line is about. When a house record exists, another
@@ -339,9 +340,10 @@ export function MachineStep({
             </span>
             <button
               type="button"
+              className="sw-btn"
               data-testid="start-wizard-check"
               disabled={busy}
-              style={{ marginLeft: 'auto', padding: '3px 12px' }}
+              style={{ marginLeft: 'auto' }}
               onClick={() => requestCheck()}
             >
               {busy ? 'Looking…' : 'Check again'}
@@ -355,7 +357,7 @@ export function MachineStep({
           {found && route !== null && (
             <p style={NOTE} data-testid="start-wizard-machine-route">
               {route === 'recorded'
-                ? 'Reached at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
                 : route === 'network'
                   ? 'Found on the network.'
                   : 'Reached at the address you gave.'}
@@ -377,10 +379,12 @@ export function MachineStep({
           )}
 
           {/* THE ONE FOLD. The address and Connect are not a second way to ask the question; they
-              are the manual route for a machine the search cannot hear. */}
+              are the manual route for a machine the search cannot hear. A fold toggle is not an
+              action: `data-fold` keeps it out of the component-set gate. */}
           <button
             type="button"
             data-testid="start-wizard-machine-another"
+            data-fold="true"
             aria-expanded={another}
             style={FOLD}
             onClick={() => setAnother((open) => !open)}
@@ -403,7 +407,6 @@ export function MachineStep({
                     spellCheck={false}
                     data-testid="start-wizard-address"
                     aria-label="Machine address"
-                    title="For a machine the search cannot hear."
                     style={{ width: 120 }}
                     value={address}
                     onChange={(e) => onAddress(e.target.value)}
@@ -411,6 +414,7 @@ export function MachineStep({
                 </label>
                 <button
                   type="button"
+                  className="sw-btn"
                   data-testid="start-wizard-connect-address"
                   disabled={busy || address.trim().length === 0}
                   onClick={() => requestCheck(address.trim())}

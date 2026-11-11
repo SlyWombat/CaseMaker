@@ -130,7 +130,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     expect(machine?.host).toBe(HOUSE_HOST);
     // #693's reader: Idle with MPos at the Z1's homed rest is `homed`; the check sends no `$H`.
     expect(stateLine().textContent).toBe(
-      `Online · Idle · homed · checked ${hhmm(machine!.observedAt)}`,
+      `Online · Idle · knows where it is · checked ${hhmm(machine!.observedAt)}`,
     );
     expect((screen.getByTestId('start-wizard-next') as HTMLButtonElement).disabled).toBe(false);
   });
@@ -143,7 +143,7 @@ describe('#682 — step 1 is the house’s machine', () => {
     await waitFor(() => expect(stateLine().getAttribute('data-state')).toBe('found'));
     expect(stateLine().textContent).toContain('Online');
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain(
-      'Reached at its recorded address',
+      'Found at the address you wrote',
     );
     expect(screen.getByTestId('start-wizard-machine-route').textContent).toContain('cannot receive broadcasts');
     // The route is remembered with the check, so a re-opened wizard can still say it.

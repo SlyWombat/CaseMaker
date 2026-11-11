@@ -795,10 +795,15 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     // The shipped dimensions are a fact about where the numbers came from: one line in the step,
     // not a finding row. The warning speaks only where an unmeasured figure could decide the job.
     expect(screen.queryAllByTestId('engrave-setup-step-finding-vise-default')).toHaveLength(0);
-    expect(screen.getByTestId('engrave-setup-holding-vise-provenance').textContent).toContain(
-      'Vise: the shipped dimensions, not measured on this machine.',
-    );
+    const provenance = screen.getByTestId('engrave-setup-holding-vise-provenance');
+    // #1109 — the model's disclaimer lives in Technical; 0.71 mm proud is outside its 0.5 mm.
+    expect(provenance.textContent).toBe("The vise is the app's model, not measured on this machine.");
     const technical = screen.getByTestId('engrave-setup-holding-technical');
+    expect(technical.contains(provenance)).toBe(true);
+    // The ledge's gloss is visible under the seat's row — the step is not obvious from the picture.
+    expect(screen.getByTestId('engrave-setup-ledge-gloss').textContent).toContain(
+      'The step on the vise jaws a thin blank rests on',
+    );
     expect(technical.textContent).toContain('10 mm fixed');
     expect(technical.textContent).toContain('10 mm moving');
     expect(technical.textContent).toContain('100 mm long');
@@ -807,6 +812,15 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(screen.queryByTestId('engrave-setup-findings')?.textContent ?? '').not.toContain(
       'Vise dimensions: shipped defaults',
     );
+  });
+
+  it('#1109 — a blank under 0.5 mm proud says the model could decide it, above the radios', () => {
+    seedLocation(machineWith(null));
+    openHolding(dj({ length: 80, width: 60, thickness: 3.4 }));
+    const line = screen.getByTestId('engrave-setup-holding-vise-provenance');
+    expect(line.textContent).toContain('It matters here: the blank stands 0.3 mm proud');
+    expect(line.textContent).toContain('inside the 0.5 mm the model could be wrong by');
+    expect(screen.getByTestId('engrave-setup-holding-technical').contains(line)).toBe(false);
   });
 });
 

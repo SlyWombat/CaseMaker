@@ -311,7 +311,7 @@ describe('#280/#682 — step 1, the machine check', () => {
     render(<StartWizard />);
 
     await waitForState('error');
-    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Not answering');
+    expect(screen.getByTestId('start-wizard-machine-state').textContent).toContain('Offline');
     const reason = screen.getByTestId('start-wizard-machine-reason').textContent ?? '';
     expect(reason).toContain('udp: bind failed');
     // #726 W24 — the sentence is printed ONCE ("The search failed: the search failed: …" was the
@@ -631,17 +631,38 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(next.textContent).toBe('Next: holding — starts the job');
     // #930 — the shop's 36 × 36 × 100 mm hardwood stick, and the sentence says so.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
+      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
     );
     // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
     expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
     expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
-    // …and the sentence goes the moment a number is the operator's own.
+    // #1109 — the sentence survives typing: a slip must not lose where the numbers came from.
     typePiece();
+    expect(screen.getByTestId('engrave-setup-stock-provenance')).toBeTruthy();
+    // A different valid number, COMMITTED on blur, is the operator's own.
+    fireEvent.blur(screen.getByTestId('start-wizard-make-length'));
     expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('#1109 — a typo that lands back on the seed keeps the provenance; a committed change drops it', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+
+    const length = screen.getByTestId('start-wizard-make-length');
+    fireEvent.change(length, { target: { value: '3' } });
+    fireEvent.change(length, { target: { value: '36' } });
+    fireEvent.blur(length);
+    expect(screen.getByTestId('engrave-setup-stock-provenance')).toBeTruthy();
+
+    fireEvent.change(length, { target: { value: '40' } });
+    fireEvent.blur(length);
+    expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
   });
 
   it('a pocket proposes the house’s stock too: Next is ready, with the sentence it came from', () => {
@@ -658,7 +679,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
 
     const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
     expect(next.disabled).toBe(false);
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The house’s stock');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
     expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
 
     typePiece();

@@ -155,7 +155,7 @@ describe('#685 — step 4, what are you cutting', () => {
     // #874 — the group says what its two operations share: they are files.
     expect(screen.getByTestId('operation-picker-group-file').textContent).toContain('From a file');
     const chips = within(screen.getByTestId('operation-picker')).getAllByRole('button');
-    expect(chips.map((chip) => chip.textContent)).toEqual([
+    expect(chips.map((chip) => chip.firstElementChild?.textContent)).toEqual([
       'Engrave text',
       'V-carve',
       'V-carve, variable depth',
@@ -193,7 +193,7 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(create.disabled).toBe(true);
     // The ONE sentence that unblocks it, and the way to act on it is the field above.
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Type the text to engrave.',
+      'Type the text to engrave — for example, a name.',
     );
     // #874 — the sentence names the Text field, so it sits IN that field's box, under the field.
     expect(
@@ -221,7 +221,7 @@ describe('#685 — step 4, what are you cutting', () => {
     const text = screen.getByTestId('start-wizard-op-text') as HTMLInputElement;
     expect(create.disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Type the text to engrave.',
+      'Type the text to engrave — for example, a name.',
     );
 
     // A real browser's input event, outside act(): the field's commit is synchronous, but a passive
@@ -301,7 +301,7 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(input.getAttribute('accept')).toContain('.stl');
     expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Choose the mesh to surface.',
+      'Pick the mesh to surface — a .stl or .step file.',
     );
 
     // The read is a real one (file bytes, then a hash), so every wait below is on the STATE it
@@ -379,7 +379,7 @@ describe('#685 — step 4, what are you cutting', () => {
     const create = (): HTMLButtonElement => screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create().disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      "Choose the board's Gerber and drill files.",
+      "Pick the board's Gerber and drill files.",
     );
 
     const input = screen.getByTestId('start-wizard-op-pcb-files') as HTMLInputElement;

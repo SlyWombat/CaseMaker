@@ -358,7 +358,7 @@ export function MachineStatusStrip(): JSX.Element | null {
   const state = runPaused
     ? 'Paused'
     : stateWord(line?.state ?? null, registrationActive && line?.state === 'Run', heartbeat?.reachable ?? null);
-  const idle = state === 'Idle' || state === 'Not answering' || state === 'Offline';
+  const idle = state === 'Idle' || state.startsWith('Offline');
   // #647 — an alarm says its reason when the line carries one: `ALARM: Probe fail` is the operator's
   // next question, and it is already in the reply.
   const rawStatus = machine.status ?? (typeof machine.statusLine === 'string' ? machine.statusLine : null);
@@ -564,9 +564,9 @@ export function MachineStatusStrip(): JSX.Element | null {
               ? 'A program is running — stop it first.'
               : state === 'Paused'
                 ? 'The program is paused — resume or stop it first.'
-                : state === 'Homing'
+                : state.startsWith('Homing')
                   ? 'The machine is homing — wait for Idle.'
-                  : state === 'Not answering' || state === 'Offline'
+                  : state.startsWith('Offline')
                     ? 'The machine is not answering.'
                     : null
         }

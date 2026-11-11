@@ -95,7 +95,7 @@ describe('#1180 — #1107 supersedes item 3’s empty job on a new run', () => {
     // #1100 — the question opens on the preset cards; the sign card is the one that types text.
     fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
     expect(primary().disabled).toBe(true);
-    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave.');
+    expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe('Type the text to engrave — for example, a name.');
 
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Zoomba' } });
     expect(primary().disabled).toBe(false);

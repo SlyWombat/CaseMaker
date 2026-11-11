@@ -52,7 +52,7 @@ export function houseStockProposal(): StockProposal {
     // as it is, so the first-job path does not face — and the post-facing re-touch, which this
     // milestone hides until its bench run, is not on it. The operator can still choose "as bought".
     finish: 'finished',
-    sentence: 'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    sentence: 'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   };
 }
 

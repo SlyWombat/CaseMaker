@@ -89,7 +89,7 @@ describe('#752 the rotary Operation step', () => {
     expect((screen.getByTestId('start-wizard-op-reads-select') as HTMLSelectElement).value).toBe('along');
     fireEvent.click(screen.getByTestId('start-wizard-op-rotary-engrave'));
     expect(lastChoice(onChoice)).toMatchObject({ type: 'engrave', text: '', reads: 'along' });
-    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Type the text to engrave.');
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Type the text to engrave — for example, a name.');
     fireEvent.change(screen.getByTestId('start-wizard-op-reads-select'), { target: { value: 'around' } });
     expect(lastChoice(onChoice)).toMatchObject({ type: 'engrave', text: '', reads: 'around' });
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Zoomba' } });
@@ -123,7 +123,7 @@ describe('#752 the rotary Operation step', () => {
     fireEvent.change(screen.getByTestId('start-wizard-op-flute-length'), { target: { value: '30' } });
     expect(lastChoice(onChoice)).toEqual({ type: 'flute', lengthMm: 30 });
     fireEvent.change(screen.getByTestId('start-wizard-op-flute-length'), { target: { value: '0' } });
-    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('The flute needs a length above 0 mm.');
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('The flute needs a length above 0 — type a number in mm.');
   });
 
   it('Relief asks for its file; Create waits for one that reads cleanly', () => {
@@ -131,7 +131,7 @@ describe('#752 the rotary Operation step', () => {
     fireEvent.click(screen.getByTestId('start-wizard-op-rotary-relief'));
     expect(screen.getByTestId('start-wizard-op-surface-file')).toBeDefined();
     expect(lastChoice(onChoice)).toEqual({ type: 'surface', target: null });
-    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Choose the mesh to surface.');
+    expect(operationCreateBlocked(lastChoice(onChoice))).toBe('Pick the mesh to surface — a .stl or .step file.');
   });
 
   it('a flat job shows the preset cards, with the flat picker behind Something else…', () => {

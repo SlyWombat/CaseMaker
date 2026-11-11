@@ -133,7 +133,7 @@ for (const vp of VIEWPORTS) {
       // Step 3 — the blank.
       await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
       await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
-      await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('The house’s stock');
+      await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('The stock this workshop keeps');
       await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
       await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('100');
@@ -207,7 +207,7 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByTestId('start-wizard-op-surface-file')).toHaveCount(0);
       await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
       await expect(page.getByTestId('start-wizard-create-unblock')).toHaveText(
-        "Choose the board's Gerber and drill files.",
+        "Pick the board's Gerber and drill files.",
       );
 
       // The circuit board's Gerbers: the set named in the row with Change.
