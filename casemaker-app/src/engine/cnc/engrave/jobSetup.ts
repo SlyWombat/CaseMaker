@@ -1229,6 +1229,13 @@ export function fixtureMountOf(job: EngraveJob, setupIndex = 0): Mount {
   return mount === 'tape' && jobFence(job) !== null ? 'bracket' : mount;
 }
 
+/** #1102 — how the bracket is bolted down for a job whose bracket holds or fences it, else null. */
+export function bracketPlacementOf(job: Pick<EngraveJob, 'workholding'>): 'anchored' | 'placed' | null {
+  if (job.workholding.kind === 'bracket') return job.workholding.bracket.placement ?? 'anchored';
+  const fence = jobFence(job);
+  return fence === null ? null : (fence.placement ?? 'anchored');
+}
+
 /** The job's own obstacle boxes: the bracket hold's, or the fence's. */
 export function jobFixtureVoids(job: Pick<EngraveJob, 'workholding'>): BracketObstacle[] | null {
   if (job.workholding.kind === 'bracket') return job.workholding.bracket.obstacles ?? null;

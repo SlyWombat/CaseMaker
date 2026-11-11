@@ -8,6 +8,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { planRegistrationAttempt } from '@/components/panels/registrationAttempt';
+import type { MachineCalibration } from '@/engine/cnc/calibration';
+import { registrationTouches } from '@/engine/cnc/plan';
+import { registrationSettings } from '@/engine/cnc/registration/settings';
+import type { ProbeSpec } from '@/engine/cnc/registration/plan';
+import type { Setup } from '@/engine/cnc/setups';
+import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
+
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import { engraveJobDocumentSchema, parseEngraveJob } from '@/store/engraveJobSchema';
@@ -87,5 +95,85 @@ describe('#1102 the migration: the vendor tray’s side 2 is tape + fence', () =
     const strip = (j: EngraveJob) => ({ ...j, id: undefined, setups: undefined });
     expect(migrated.job.workholding).toEqual(expected.job.workholding);
     expect(strip(migrated.job)).toEqual(strip(expected.job));
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------------
+// Registration: with a fence the datum is the bracket corner from the anchor record.
+
+const LOCATION = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
+  machines: { calibration: MachineCalibration }[];
+};
+const CALIBRATION = LOCATION.machines[0]!.calibration;
+const PROBE: ProbeSpec = {
+  id: 'fx-probe-1',
+  variant: 'wired-touch',
+  instrument: 'z-only',
+  tip: { diameterMm: 2, rimOffsetMm: 0.7, rimOffsetUncertaintyMm: 0.25 },
+};
+const SETTINGS = registrationSettings(null, PROBE).settings;
+
+function trayJob(workholding: JobWorkholding): EngraveJob {
+  const base = defaultEngraveJob();
+  return {
+    ...base,
+    name: '1102 registration',
+    stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
+    labels: [],
+    shapes: [
+      { id: 'tray-pocket', name: 'Tray', kind: 'rect', position: { x: 77.34, y: 63 }, rotation: 0, width: 100, height: 90, depth: 6, cornerRadius: 3, enabled: true },
+    ],
+    workholding,
+  };
+}
+
+function attemptFor(job: EngraveJob, mountKind: 'tape' | 'bracket') {
+  clearTargetObjectMeshCache();
+  const setup = {
+    index: 0,
+    rotation: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    stockBefore: { bounds: { min: [0, 0, -job.stock.thickness], max: [job.stock.length, job.stock.width, 0] }, cuts: [] },
+  } as unknown as Setup;
+  return planRegistrationAttempt({
+    job,
+    setup,
+    mount: { kind: mountKind, board: true },
+    mountDatum: null,
+    mountDatumMismatch: null,
+    mountDatumMismatchName: null,
+    surfaceTopZ: null,
+    bracketSeat: { value: -85.788, what: 'bracket seat', measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 },
+    probe: PROBE,
+    probeName: 'Makera Wired Probe V2',
+    mountTap: null,
+    defaults: null,
+    calibration: CALIBRATION,
+    settings: SETTINGS,
+  });
+}
+
+describe('#1102 registration with the fence', () => {
+  it('a taped + fenced job plans no edge find and one top touch, XY from the anchor', () => {
+    const job = trayJob({ kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence: FENCE } });
+    const attempt = attemptFor(job, 'tape');
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.scans).toEqual([]);
+    expect(attempt.plan.corner).toBeUndefined();
+    expect(registrationTouches({ ok: true, plan: attempt.plan })).toBe(1);
+    expect(attempt.plan.bracketOrigin!.from).toContain('anchor');
+    expect(attempt.plan.bracketOrigin!.x).toBeCloseTo(CALIBRATION.frame.anchor1[0], 3);
+  });
+
+  it('unfenced tape is still refused with its sentence', () => {
+    const attempt = attemptFor(trayJob({ kind: 'tape', tape: defaultTapeHold() }), 'tape');
+    expect(attempt.kind).toBe('refused');
+    if (attempt.kind !== 'refused') return;
+    expect(attempt.reason).toBe('registration on tape has not been run on this machine yet — hold the blank in the vise');
   });
 });

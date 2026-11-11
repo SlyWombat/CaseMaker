@@ -22,6 +22,7 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { bracketPlacementOf, jobFence } from '@/engine/cnc/engrave/jobSetup';
 import { cutRegionOf, mountObstaclesFor } from '@/engine/cnc/registration/footprintJob';
 import { cutBlankCandidates, cutBlankCandidatesFromMap, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
 import type { FinishedCutMap } from '@/platform/locationClient';
@@ -185,7 +186,12 @@ export function planRegistrationAttempt(args: {
    */
   setupIndex?: number;
 }): RegistrationAttempt {
-  const { job, setup, mount, defaults, calibration } = args;
+  const { job, setup, defaults, calibration } = args;
+  // #1102 — A FENCED TAPE JOB REGISTERS AS A BRACKET JOB: the tape holds, the bracket corner locates,
+  // so the datum is the anchor record's bracket corner and Z is one top touch on the stock — no
+  // edge find on the fenced edges. Unfenced tape keeps its refusal below.
+  const mount: MountSpec =
+    args.mount.kind === 'tape' && jobFence(job) !== null ? { kind: 'bracket', board: args.mount.board } : args.mount;
   // #934 — REGISTRATION FROM EARLIER FEATURES is one of the branches the bench has not run; it is
   // refused by name, not crashed on and not planned as if it were the datum path.
   if (referenceOpenings(setup).openings.length > 0) {
@@ -229,7 +235,7 @@ export function planRegistrationAttempt(args: {
     // the bracket — a fact of the bench, shared by every job until someone moves it — never from
     // the anchor it is not on. A profile that states none refuses by name, pointing at where the
     // statement lives. The field lives on land7's BracketHold; read it defensively.
-    const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
+    const placed = bracketPlacementOf(job) === 'placed';
     const sizes = bracketSettings(defaults);
     let datum: { x: number; y: number; from: string; offsetMeasured: boolean };
     if (placed) {

@@ -110,7 +110,7 @@ import type { FootprintPlan } from '../../../src/engine/cnc/registration/footpri
 import type { NodeMeshOutput } from '../../../src/workers/geometry/meshOutput';
 import { rotaryMapOf } from '../../../src/engine/cnc/rotary/wrap';
 import { Z1 } from '../../../src/engine/cnc/machine';
-import { jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
+import { fixtureMountOf, jobMount, jobMountObstacles, jobSetups, jobTool, toSetup } from '../../../src/engine/cnc/engrave/jobSetup';
 // #835 — each setup's own work, measured and written back into that setup only.
 import {
   deadSetupKeys,
@@ -526,7 +526,7 @@ export function sheetRegistrationFor(
   job: EngraveJob,
   where: LoadedLocation | null,
 ): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
-  if (where === null || jobMount(job) !== 'bracket') return {};
+  if (where === null || fixtureMountOf(job) !== 'bracket') return {};
   const machine = where.machines[0];
   const calibration = machine?.calibration;
   if (calibration === undefined || calibration === null) return {};

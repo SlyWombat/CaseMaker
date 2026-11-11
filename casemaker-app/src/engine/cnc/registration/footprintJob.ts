@@ -33,7 +33,7 @@ import { surfaceSpreadPlan } from '@/engine/cnc/engrave/surfaceSpread';
 import type { PlanObstacle, ProbeSpec } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { planFootprintRegistration, type FootprintBox, type FootprintInput, type FootprintPlan, type FootprintScanSettings } from '@/engine/cnc/registration/footprint';
-import { jobMount } from '@/engine/cnc/engrave/jobSetup';
+import { bracketPlacementOf, fixtureMountOf } from '@/engine/cnc/engrave/jobSetup';
 import type { MountSpec } from '@/engine/cnc/setups';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 
@@ -133,7 +133,7 @@ export function footprintInputFor(args: FootprintJobArgs): FootprintJobResult {
   // #1070 (C8) — the seed is the ANCHOR for an anchored bracket and the BED PROFILE'S PLACEMENT
   // for a placed one (the same rule the Cut step plans by; one seam, no second derivation). A
   // placed job whose profile states no position cannot be seeded.
-  const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
+  const placed = bracketPlacementOf(job) === 'placed';
   let datum: { x: number; y: number; from: string; offsetMeasured: boolean };
   if (placed) {
     const seed = args.placedSeed ?? null;
@@ -399,7 +399,7 @@ export function sheetRegistrationPlan(args: {
   placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
 }): { footprint?: FootprintPlan; seatSeek?: SeatSeek } {
   const { job, calibration, defaults, probe, bracketSeat, placedSeed } = args;
-  if (jobMount(job) !== 'bracket') return {};
+  if (fixtureMountOf(job) !== 'bracket') return {};
   const mount: MountSpec = { kind: 'bracket', board: job.sacrificial.under !== null };
   const input = footprintInputFor({ job, mount, calibration, defaults, probe, bracketSeat, placedSeed });
   if (input.ok) {
