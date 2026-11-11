@@ -1801,6 +1801,27 @@
       "unit": "mm",
       "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
     },
+    "vise.cutProudMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the seat recommendation wants the seat's proud height at least the cut plus this, so the cutter's flute is not in the jaws at the bottom of the cut"
+    },
+    "vise.jawSideClearanceMm": {
+      "value": 6.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a cut within this of the gripped edge can be under the jaws \u2014 the largest cutter radius the wizard expects (3 mm) plus 3 mm"
+    },
+    "vise.jawTopToleranceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"
+    },
     "registration.guardedFloorMarginMm": {
       "value": 1.0,
       "source": "seeded",

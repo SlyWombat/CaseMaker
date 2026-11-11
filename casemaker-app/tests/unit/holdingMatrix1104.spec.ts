@@ -11,10 +11,24 @@ import { describe, expect, it } from 'vitest';
 import { isRoundStock } from '@/engine/cnc/stockStart';
 import { LEDGE_STEP } from '@/engine/cnc/fixture';
 import { mountOptions } from '@/components/welcome/holdingMounts';
-import { MachineRecordSchema, type BedProfile, type MachineRecord } from '@/platform/locationClient';
+import { MachineRecordSchema, type BedProfile, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as { machines: unknown[] };
+const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
+  machines: unknown[];
+  accessories: FixtureRecord[];
+};
+const ROTARY = {
+  id: 'fx-rotary-1',
+  kind: 'rotary-module',
+  product: 'makera-4th-axis',
+  variant: null,
+  constants: {},
+  unit: {},
+  provenance: {},
+  whereabouts: { kind: 'box' },
+  history: [],
+} as unknown as FixtureRecord;
 
 const BOARDS_AND_TAPE: NonNullable<BedProfile['consumables']> = {
   tape: { widthMm: 25, thicknessMm: 0.1, provenance: 'typed' },
@@ -103,4 +117,70 @@ describe('#1104 the holding matrix has no dead ends', () => {
       }
     }
   });
+});
+
+// ── The stated matrix (analyst's item 9): machine state × ownership × stock form × build ─────────
+type PinsState = 'no record' | 'nothing on the pins' | 'vise on the pins' | 'rotary on the pins' | 'bracket on the pins';
+
+function machineIn(state: PinsState): MachineRecord | null {
+  if (state === 'no record') return null;
+  const m = machineWith(BOARDS_AND_TAPE);
+  const profile = m.bedProfiles![0]!;
+  if (state === 'vise on the pins') return m;
+  const base = profile.placements[0]!;
+  if (state === 'rotary on the pins') {
+    profile.placements = [{ ...base, id: 'pl-rotary', where: { kind: 'pins', pins: 'rotary', anchor: null } }];
+  } else if (state === 'nothing on the pins') {
+    profile.placements = [];
+  } else {
+    // The bracket sits at anchor 1 on an otherwise bare bed.
+    profile.placements = [{ ...base, id: 'pl-bracket', where: { kind: 'anchor', pins: null, anchor: 1 } } as never];
+  }
+  return m;
+}
+
+const FORMS: Array<{ name: string; form: Cell['form']; stock: Cell['stock'] }> = [
+  ...CELLS.map((c) => ({ name: c.name, form: c.form, stock: c.stock })),
+  { name: 'sheet 1.5 mm', form: 'sheet', stock: { length: 80, width: 60, thickness: 1.5 } },
+  { name: 'printed blank 4 mm', form: 'printed-blank', stock: { length: 80, width: 50, thickness: 4 } },
+];
+
+describe('#1104 item 9 — the stated matrix: every cell has an enabled row, a disabled row with an action, or the guard', () => {
+  const STATES: PinsState[] = ['no record', 'nothing on the pins', 'vise on the pins', 'rotary on the pins', 'bracket on the pins'];
+  for (const state of STATES) {
+    for (const owned of [true, false]) {
+      for (const drive of [true, false]) {
+        for (const f of FORMS) {
+          it(`${f.name} · ${state} · ${owned ? 'accessories owned' : 'accessories not owned'} · ${drive ? 'desktop' : 'web'}`, () => {
+            const rows = mountOptions({
+              machine: machineIn(state),
+              accessories: owned ? [...DOC.accessories, ROTARY] : [],
+              stock: f.stock,
+              round: isRoundStock(f.form),
+              disc: f.form === 'disc',
+              tape: null,
+              canReachMachine: drive,
+            });
+            // An impossible seat is never a row.
+            for (const r of rows) {
+              if (r.mount === 'block') expect(f.stock.thickness).toBeGreaterThanOrEqual(LEDGE_STEP);
+              if (r.mount === 'bed-tape') expect(isRoundStock(f.form)).toBe(false);
+            }
+            // The cell has a way forward: an enabled row, a disabled row with its action in place —
+            // or NO row at all, which HoldingStep renders as the guard sentence and its two actions
+            // (engrave-setup-no-hold; pinned in holdingStep.spec.tsx).
+            if (rows.length > 0) {
+              const forward = rows.some((r) => !r.disabled) || rows.some((r) => r.disabled && r.action != null);
+              expect(forward, JSON.stringify(rows.map((r) => [r.mount, r.disabled, r.action?.kind ?? null]))).toBe(true);
+            }
+            // Every refusal is a capitalised sentence; the web build never offers the change wizard.
+            for (const r of rows) {
+              if (r.reason !== null) expect(r.reason.charAt(0), r.reason).toBe(r.reason.charAt(0).toUpperCase());
+              if (!drive) expect(r.action?.kind, r.mount).not.toBe('change-machine');
+            }
+          });
+        }
+      }
+    }
+  }
 });

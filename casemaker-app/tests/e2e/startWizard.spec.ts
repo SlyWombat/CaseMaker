@@ -243,13 +243,16 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   // The hold follows from the blank, and the last step creates the goal.
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  // #1103 — THE SEAT READS THE WORK: a 6 mm surfacing pass reaches the blank's edge, so the reason
-  // line states what the recommendation judged instead of the wizard silently gripping it as a
-  // block. The screenshot is the hand-in's record.
+  // #1103 — THE SEAT READS THE WORK: a 6 mm surfacing pass reaches the blank's edge, so the
+  // recommendation is the board fallback with its sentence — 6 mm down on a 7 mm blank leaves
+  // 3.9 mm proud on the ledge, so 2.1 mm of the cut is below the jaw tops. The screenshot is the
+  // hand-in's record.
   const reason = page.getByTestId('engrave-setup-recommendation-reason');
   await expect(reason).toBeVisible();
   await expect(reason).toContainText('Recommended:');
-  await expect(reason).toContainText('jaw');
+  await expect(reason).toContainText('2.1 mm of the cut would be below the jaw tops');
+  // The recommended seat is the one the step arrives in: the board row, selected.
+  await expect(page.getByTestId('engrave-setup-mount-board')).toBeChecked();
   await page.getByTestId('engrave-setup-step-holding').screenshot({ path: 'test-results/1103-holding-seat.png' });
   await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
   await page.getByTestId('engrave-setup-next').click();
