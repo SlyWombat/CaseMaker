@@ -298,8 +298,24 @@ describe('#1197 — the run panel’s stop reports', () => {
     const report = reports[0]!;
     expect(report.action).toBe('run');
     expect(report.error).toBe('read failed: Connection reset by peer (os error 104)');
-    // The run log is the session's transcript, mapped as the store holds it (a string per line).
-    expect(report.transcript).toEqual(entry.lines.map((s) => ({ line: '', reply: s })));
+    // #1208 — THE REPORT CARRIES THE RUN'S CONVERSATION, not the dock's display strings: the line
+    // that went out and its own reply are separate fields. The `play` line is the app's, with the
+    // controller's answer beside it; every status poll is a real `?` line; nothing reads as a
+    // machine reply with an empty line.
+    expect(report.transcript).toEqual(entry.transcript);
+    expect(report.transcript.find((t) => t.line.startsWith('play '))).toEqual({
+      line: 'play /sd/gcodes/job.nc',
+      reply: 'File size 10',
+    });
+    // The failed abort keeps its failure where it happened: the line that went out, and the
+    // transport's answer beside it (not a display string with an empty line).
+    expect(report.transcript.find((t) => t.line === 'abort')?.reply).toBe(
+      'read failed: Connection reset by peer (os error 104)',
+    );
+    expect(report.transcript.some((t) => t.line === '?')).toBe(true);
+    expect(report.transcript.every((t) => t.line !== '')).toBe(true);
+    // The status polls are readable again, so the report's last status line is the run's own.
+    expect(report.lastStatus).toMatch(/^</);
     // An upload outside the job flow names the file; there is no package to claim.
     expect(report.job).toEqual({ id: 'job.nc', name: 'job.nc', packageHash: null });
   }, 30000);
@@ -337,7 +353,12 @@ describe('#1197 — the run panel’s stop reports', () => {
     const entry = useMachineRunStore.getState().runs[machineKey(TARGET)]!;
     expect(reports[0]!.action).toBe('home');
     expect(reports[0]!.error).toBe('timeout — no reply within 60000 ms');
-    expect(reports[0]!.transcript).toEqual(entry.lines.map((s) => ({ line: '', reply: s })));
+    // #1208 — the same conversation, not the display strings. The Home press happens outside the
+    // run's own watch, so the report carries the run that preceded it.
+    expect(reports[0]!.transcript).toEqual(entry.transcript);
+    expect(reports[0]!.transcript.every((t) => t.line !== '')).toBe(true);
+    expect(reports[0]!.transcript.some((t) => t.line === '?')).toBe(true);
+    expect(reports[0]!.lastStatus).toMatch(/^</);
     expect(reports[0]!.job).toEqual({ id: 'job.nc', name: 'job.nc', packageHash: null });
   }, 30000);
 

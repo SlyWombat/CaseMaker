@@ -154,8 +154,14 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           ? outcome.reason
           : null;
   const runReportError = runFailure !== null && stopIsReportable(runFailure) ? runFailure : null;
-  /** #1197 — the run's lines are what the dock's Transcript tab shows; the report carries the same. */
-  const runTranscript = entry.lines.map((s) => ({ line: '', reply: s }));
+  /**
+   * #1197/#1208 — THE REPORT CARRIES THE RUN'S CONVERSATION, not the dock's display strings: the
+   * store keeps every line sent and the reply it got (the registration executor's shape). The
+   * display lines flatten a reply among the app's own notes, so mapping them made every run line
+   * read as a machine reply with an empty line. An entry prepared before the field existed has
+   * none; an empty transcript is honest, an invented one is not.
+   */
+  const runTranscript = entry.transcript ?? [];
   const canRun = !running && (confirmed || acknowledged);
   // #470 (review R7) — the vacuum sentence says what THIS prepared file will do, not what the runner
   // used to do for every file. An app upload owns the vacuum (#469), so the file's own words decide:

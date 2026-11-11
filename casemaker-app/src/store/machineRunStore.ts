@@ -49,6 +49,7 @@ import { machineAt, useLocationStore } from './locationStore';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
+import type { StopTranscriptEntry } from '@/platform/machineStopReport';
 
 /**
  * What a run knows about its job, for its end (#414). Everything but the program is OPTIONAL: the job
@@ -525,6 +526,14 @@ export interface RunEntry {
   programHash: string;
   progress: Progress | null;
   lines: string[];
+  /**
+   * #1208 — THE RUN'S CONVERSATION, for the stop report: every line this run sent and the reply it
+   * got, as the run's own `sent` events carried them. `lines` is the dock's display: a `?` has no
+   * display line there, a reply is flattened to its first line, and the app's notes sit among them.
+   * A report needs the split — which line went out, and what came back — so it maps THIS. Absent on
+   * an entry prepared before the field existed, which reads as "no conversation".
+   */
+  transcript?: StopTranscriptEntry[];
   outcome: RunOutcome | null;
   stopAsked: boolean;
   /**
@@ -637,6 +646,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             programHash,
             progress: null,
             lines: [],
+            transcript: [],
             outcome: null,
             stopAsked: false,
             paused: false,
@@ -672,7 +682,7 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       // #1154 — the heartbeat log's clock starts where the program does: "the first 5 min" is the
       // run's, not the first reply's.
       statusLogs.set(machine, createStatusLog(Date.now()));
-      patch(machine, { running: true, progress: null, lines: [], outcome: null, stopAsked: false, paused: false, firstProgressAt: null, pausedMs: 0, pausedAt: null, toolWaiting: null, end: null });
+      patch(machine, { running: true, progress: null, lines: [], transcript: [], outcome: null, stopAsked: false, paused: false, firstProgressAt: null, pausedMs: 0, pausedAt: null, toolWaiting: null, end: null });
       const session = attachConsole(target);
       // #1173 — THE RUN IS THE STATUS POLLER while it lasts. Its hold says so, so the machine
       // store's shared timer stays off for this machine; a page that opens during the run adds a
@@ -735,8 +745,19 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                 statusLogs.get(machine)?.push({ atMs: e.atMs, ...readStatusFields(e.raw) });
               }
               else if (e.kind === 'note') patch(machine, { lines: [...entry.lines, `(${e.text})`] });
-              else if (e.kind === 'sent' && e.line !== '?') {
-                patchRun({ lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] });
+              else if (e.kind === 'sent') {
+                // #1208 — THE REPORT'S CONVERSATION. Every line the run sent goes in — the status
+                // polls included, and Stop's own lines, which go through the same seam — as the
+                // sent line and the reply it got. `lines` stays the display's: a `?` has no display
+                // line, and a reply there is flattened to one. A `poll` event needs no entry of its
+                // own: it follows the `sent` '?' carrying the same raw text, while the opening poll
+                // (and the stop's polls) never produce a poll event at all.
+                const transcript = [...(entry.transcript ?? []), { line: e.line, reply: e.reply }];
+                patchRun(
+                  e.line === '?'
+                    ? { transcript }
+                    : { transcript, lines: [...entry.lines, `> ${e.line}  ${e.reply.trim().split('\n')[0] ?? ''}`] },
+                );
               } else if (e.kind === 'missed') {
                 // A missed status poll is a result, not an error: the page reads "not answering".
                 noteRunStatus(null);

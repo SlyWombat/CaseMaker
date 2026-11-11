@@ -65,11 +65,13 @@ test('#1197 — a Home press on a dead link offers its own report, and the repor
   expect(report['action']).toBe('home');
   // THAT press's failure sentence, not the panel's "home it by hand" note.
   expect(String(report['error'])).toContain('read failed: Connection reset by peer (os error 104)');
-  // THIS run's transcript, as the dock's Transcript tab shows it — the play line is in it.
+  // THIS run's conversation, not the dock's display strings (#1208): the play line is the app's,
+  // with the controller's answer beside it, and every status poll is a real `?` line.
   const transcript = report['transcript'] as { line: string; reply: string }[];
   expect(transcript.length).toBeGreaterThan(0);
-  expect(transcript.every((entry) => entry.line === '')).toBe(true);
-  expect(transcript.some((entry) => entry.reply.includes('play /sd/gcodes/job.nc'))).toBe(true);
+  expect(transcript.some((entry) => entry.line === 'play /sd/gcodes/job.nc')).toBe(true);
+  expect(transcript.every((entry) => entry.line !== '')).toBe(true);
+  expect(transcript.some((entry) => entry.line === '?')).toBe(true);
   // The machine and the job the entry names.
   const machine = report['machine'] as { host: string; port: number };
   expect(machine).toEqual({ host: '192.0.2.10', port: 2222 });
