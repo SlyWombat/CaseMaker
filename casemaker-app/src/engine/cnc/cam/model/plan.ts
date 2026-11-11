@@ -2391,6 +2391,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
         leftoverEquivalencePct,
+        // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
+        leftoverTallMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
         bitChange,
         reachMarginMm,
@@ -3391,6 +3393,12 @@ export interface PlanPocketsOptions {
   toolChangeSeconds: number;
   /** planner v3 A1 — the shop's leftover tolerance, % of the goal's covered cells. */
   leftoverEquivalencePct?: number;
+  /**
+   * planner v3 A6 (#1232) — the shop's `plan.leftoverTallMm`: the height at which leftover counts
+   * as tall. Only the sheet's sentence reads it here (the picker's own use is the rank's); absent
+   * → the registry's recommendation, never a literal.
+   */
+  leftoverTallMm?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -4687,6 +4695,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const text =
       `The cutters chosen leave ${extraMm2} mm² more than the most thorough set would, and save about ${minutes} min. ` +
       `Sets within ${t.tolerancePct} % of the surface of each other are chosen by time (a shop setting).`;
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1232 (planner v3 A6) — the tall rule kept a slower set: say what was passed over and why.
+  if (choice.tallGuard !== undefined) {
+    const g = choice.tallGuard;
+    const extraMm2 = Math.round(g.extraTallCells * g.cellAreaMm2 * 10) / 10;
+    const minutes = Math.max(1, Math.round(g.givenUpSeconds / 60));
+    const tallMm = opts.leftoverTallMm ?? readDefault(null, 'plan.leftoverTallMm').value;
+    const text =
+      `A set of cutters about ${minutes} min faster was passed over: it would leave ${extraMm2} mm² more standing over ${tallMm} mm tall. ` +
+      `Material that tall is never traded for time (a shop setting).`;
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }

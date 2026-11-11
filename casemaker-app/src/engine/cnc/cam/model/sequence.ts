@@ -385,6 +385,12 @@ export interface SequenceChoice {
    * not the least-leftover chain. Cells and seconds are the picker's own numbers.
    */
   leftoverTolerance?: { tolerancePct: number; chosenLeftoverCells: number; bestLeftoverCells: number; cellAreaMm2: number; savedSeconds: number };
+  /**
+   * #1232 (planner v3 A6) — set only when the TALL rule kept a slower set: the fastest set that
+   * was passed over left this many more tall cells, and was this many seconds faster. The sheet
+   * states it so a longer job has a reason on it.
+   */
+  tallGuard?: { extraTallCells: number; cellAreaMm2: number; givenUpSeconds: number };
 }
 
 const EPS = 1e-9;
@@ -1075,6 +1081,54 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): re
   ] as const;
 }
 
+/**
+ * #1232 (planner v3 A6) — DID THE TALL RULE KEEP A SLOWER SET? The leftover tolerance (#1217)
+ * treats sets within a share of each other as equal on leftover and lets time decide; the tall
+ * rule (#1224) refuses a faster set that leaves more material standing above the shop's tall
+ * limit. When that rule is what kept a slower set, the sheet has had no reason to give. This
+ * finds the fastest set that was passed over: within the leftover tolerance of the most thorough
+ * set, leaving MORE tall cells than the chosen one, and faster than it.
+ */
+export interface TallGuardNote {
+  /** Index, in the list given, of the faster set that was passed over. */
+  refusedIndex: number;
+  /** How many more cells it would leave standing above the tall limit than the chosen set. */
+  extraTallCells: number;
+  /** How many seconds faster it was. */
+  givenUpSeconds: number;
+}
+
+/**
+ * #1232 — the note {@link TallGuardNote}, or null when the tall rule kept nothing (or the
+ * tolerance is off). `coveredCells` is the set's own coverage, the same number the rank's
+ * tolerance floor is measured against.
+ */
+export function tallGuardNote(
+  sets: readonly { tallCells: number; leftoverCells: number; totalSeconds: number }[],
+  chosenIndex: number,
+  tolerancePct: number,
+  coveredCells: number,
+): TallGuardNote | null {
+  if (!(tolerancePct > 0) || sets.length === 0 || chosenIndex < 0 || chosenIndex >= sets.length) return null;
+  const chosen = sets[chosenIndex]!;
+  const floor = Math.min(...sets.map((s) => s.leftoverCells)) + (tolerancePct / 100) * coveredCells;
+  let best: { index: number; set: (typeof sets)[number] } | null = null;
+  sets.forEach((set, index) => {
+    if (index === chosenIndex) return;
+    if (!(set.tallCells > chosen.tallCells)) return;
+    if (!(set.leftoverCells <= floor)) return;
+    if (!(set.totalSeconds < chosen.totalSeconds)) return;
+    if (best === null || set.totalSeconds < best.set.totalSeconds) best = { index, set };
+  });
+  if (best === null) return null;
+  const found: { index: number; set: (typeof sets)[number] } = best;
+  return {
+    refusedIndex: found.index,
+    extraTallCells: found.set.tallCells - chosen.tallCells,
+    givenUpSeconds: Math.round(chosen.totalSeconds - found.set.totalSeconds),
+  };
+}
+
 /** The rank WITHOUT the coverage keys — the order the picker used before #961, and the one the
  *  price baseline (the best chain with no coverage rest) is chosen on. */
 function priceBaselineRank(ranked: RankedSequence): readonly [number, number, number, number, number, string] {
@@ -1319,6 +1373,19 @@ export function chooseSequence(
       savedSeconds: Math.round(strict.cost.totalSeconds - chosenRanked.cost.totalSeconds),
     };
   }
+  // planner v3 A6 — did the tall rule keep a slower set? (the sheet says so)
+  let tallGuard: SequenceChoice['tallGuard'];
+  if (tolerancePct > 0 && chosenRanked !== undefined && chosenRanked.coverage !== null) {
+    const note = tallGuardNote(
+      measured.map((r) => ({ tallCells: r.tallCells ?? 0, leftoverCells: r.coverage!, totalSeconds: r.cost.totalSeconds })),
+      measured.indexOf(chosenRanked),
+      tolerancePct,
+      Math.max(...measured.map((r) => r.coveredCells ?? 0)),
+    );
+    if (note !== null) {
+      tallGuard = { extraTallCells: note.extraTallCells, cellAreaMm2: chosenRanked.cellAreaMm2 ?? 0, givenUpSeconds: note.givenUpSeconds };
+    }
+  }
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient
   // flute, or the key) instead of deferring to a policy issue.
   let pickNote: string | null = null;
@@ -1407,6 +1474,7 @@ export function chooseSequence(
     unplanned: best.failures,
     ...(pickNote === null ? {} : { pickNote }),
     ...(leftoverTolerance === undefined ? {} : { leftoverTolerance }),
+    ...(tallGuard === undefined ? {} : { tallGuard }),
   };
 }
 

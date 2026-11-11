@@ -109,11 +109,24 @@ describe('#1217 the leftover tolerance', () => {
 
 describe('#1224 the tall-cell rule', () => {
   it('tall leftover is never forgiven', () => {
-    expect(sig(chooseTall(0.5, 50, 0).steps)).toBe('pocket:t6+rest:t3');
+    const choice = chooseTall(0.5, 50, 0);
+    expect(sig(choice.steps)).toBe('pocket:t6+rest:t3');
+    // #1232 — the tall rule kept this (slower) chain; the note names the faster, taller one and
+    // its giveaway is the difference of the two chains' own totals in this fixture.
+    expect(choice.tallGuard).toBeDefined();
+    expect(choice.tallGuard!.extraTallCells).toBe(50);
+    const chainOf = (x: (typeof choice.considered)[number]): string =>
+      x.steps.map((s) => `${s.kind}:${s.cutterKey}`).join('+');
+    const passedOver = choice.considered.find((x) => chainOf(x) === 'pocket:t6');
+    expect(passedOver?.cost).not.toBeNull();
+    expect(choice.tallGuard!.givenUpSeconds).toBe(Math.round(choice.cost.totalSeconds - passedOver!.cost!));
   });
 
   it('equal tall leftover: time decides', () => {
-    expect(sig(chooseTall(0.5, 50, 50).steps)).toBe('pocket:t6');
+    const choice = chooseTall(0.5, 50, 50);
+    expect(sig(choice.steps)).toBe('pocket:t6');
+    // The fastest chain won: the tall rule kept nothing back (#1232).
+    expect(choice.tallGuard).toBeUndefined();
   });
 
   it('no tall leftover anywhere is the #1217 case', () => {
