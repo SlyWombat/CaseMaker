@@ -24,6 +24,8 @@ import {
   useEngraveRegistrationStore,
 } from '@/store/engraveRegistrationStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { recheckRendererForGenerate, resetRendererCheck } from '@/engine/cnc/rendererBits';
+
 import {
   setEngravePreviewClientLoader,
   useEngravePreviewStore,
@@ -819,6 +821,36 @@ describe('#726 W16 — a goal job counts its goal, verifies by the sweep, and as
     });
     render(<EngravePanel />);
     expect(screen.getByTestId('engrave-item-count').textContent).toBe('1');
+  });
+
+  it('#1123-54 — a TWO-SIDED mesh job counts both goals, not "Items 0"', () => {
+    act(() => {
+      const job = defaultEngraveJob();
+      const goal = (id: string, setupId: string): NonNullable<EngraveJob['targetObjects']>[number] => ({
+        id,
+        name: `${id}.stl`,
+        format: 'stl',
+        sha256: 'b'.repeat(64),
+        data: 'QUJD',
+        size: { x: 30, y: 30, z: 10 },
+        position: { x: 50, y: 30, z: 0 },
+        rotation: 0,
+        enabled: true,
+        role: 'goal',
+        setupId,
+      });
+      useEngraveJobStore.setState({
+        job: {
+          ...job,
+          labels: [],
+          shapes: [],
+          targetObject: undefined,
+          targetObjects: [goal('tgt-goal-1', 'setup-1'), goal('tgt-goal-2', 'setup-2')],
+        },
+      });
+    });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-item-count').textContent).toBe('2');
   });
 
   it('a surface run is checked by the sweep: the verified row states it after the simulation', () => {
@@ -4883,14 +4915,55 @@ describe('#785 EngravePanel — the one-click top-band cut', () => {
     }));
     render(<EngravePanel />);
     fireEvent.click(screen.getByTestId('engrave-generate'));
-    await waitFor(() =>
-      expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+    // #1181 — these are clock deadlines, not the subject. The stage arrives through the async
+    // run-client load; under the loaded run the default 1 s waitFor still read 'starting the
+    // worker…' while the client was being fetched. 15 s only trips if the stage never arrives.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('roughing level 41 of 112'),
+      { timeout: 15_000 },
     );
+    // #1176 — the row also states the pipeline stage and the reported percent, in that order.
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('stage 4 of 7');
+    expect(screen.getByTestId('engrave-generate-progress').textContent).toContain('37 %');
     fireEvent.click(screen.getByTestId('engrave-generate-cancel'));
     expect(cancels).toBe(1);
-    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('engrave-generate-progress')).toBeNull(), { timeout: 15_000 });
     release({ ok: false, stage: 'findings', findings: [], feeds: null, cam: null, nc: null, verify: null, errors: [] } as unknown as import('@/workers/sim/engraveGenerate').EngraveGenerated);
     setEngraveRunClientLoader(null);
+  });
+});
+
+// #1176 part 2 — ONE HOME FOR THE CUTTER FACTS. The #798 line and the #1127 checklist used to
+// render inside the JOB group's body beside the stock and part rows; the Cutters group that names
+// them showed only its select. They live in the Cutters group now, and the Job group keeps the
+// stock/part facts — the testids and their routes are unchanged.
+describe('#1176 — the Cutter line and checklist live in the Cutters group', () => {
+  it('the Job group holds the stock/part facts; the Cutters group holds the cutter line and checklist', () => {
+    // The checklist renders only with cutters, so give the panel a generated run with one program.
+    act(() => {
+      useEngraveRunStore.setState({
+        generated: {
+          ok: true, stage: 'done', findings: [], feeds: null, threads: null, cam: null, nc: 'G90\nM02',
+          verify: null, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null,
+          facingError: null, facingCam: null, predicted: [], designItems: [], errors: [],
+          programs: [{
+            setupIndex: 0, setupId: 'setup-0', toolKey: 'inv:kz-o-flute-3-175-25', nc: 'G0 X0 Y0\nM02\n',
+            verify: { ok: true, findings: [], stats: { lines: 1, cuttingMoves: 0, deepestZ: 0, bbox: { min: [0, 0, 0], max: [1, 1, 0] } } },
+            frameNc: null, frameVerify: null, programHash: 'hash-0', cam: null,
+          }],
+        } as unknown as EngraveGenerated,
+      });
+    });
+    render(<EngravePanel />);
+    const job = screen.getByTestId('engrave-group-job');
+    const cutters = screen.getByTestId('engrave-group-cutter');
+    const line = screen.getByTestId('engrave-cutter-line');
+    const checklist = screen.getByTestId('engrave-cutter-checklist');
+    expect(job.contains(line)).toBe(false);
+    expect(job.contains(checklist)).toBe(false);
+    expect(cutters.contains(line)).toBe(true);
+    expect(cutters.contains(checklist)).toBe(true);
   });
 });
 
@@ -5893,7 +5966,14 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     fireEvent.click(press);
     // #1126 put the house-availability probe (an HTTP fact) between the press and the pipeline
     // call, so one microtask flush no longer reaches it — wait for the call itself instead.
-    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true));
+    // #1181 — THE WAIT MUST OUTLAST THE PROBE. With no service answering, the probe runs to its
+    // own DEFAULT_TIMEOUT_MS (2 s, houseClient.ts) before the in-page path is taken; waitFor's 1 s
+    // default therefore expired on any host without the house service (GPD-Dave failed in 1.1 s,
+    // unloaded; k3 answers in ms because it runs the service). 15 s is a clock deadline, not the
+    // subject — the assertion is unchanged.
+    await waitFor(() => expect(seen, 'the press asks the pipeline for the ladder').toBe(true), {
+      timeout: 15_000,
+    });
   }, 60_000);
 
   it('a stale run’s rest line is not shown as current — no run line, no press', () => {
@@ -5939,5 +6019,49 @@ describe('#1046 EngravePanel — the standard-balls press', () => {
     render(<EngravePanel />);
     openDrawer();
     expect(screen.queryByTestId('engrave-goal-measure-balls')).toBeNull();
+  });
+});
+
+// #1123 item 52 — THE MEMORY WARNING BELONGS TO ITS RUN. The press probe's line stays beside
+// Generate while the run is in flight; when the run settles it comes down (the run's Log keeps it,
+// recorded as its first line).
+describe('#1123-52 the memory warning', () => {
+  afterEach(() => resetRendererCheck());
+
+  it('is shown while its run is in flight, and comes down when the run settles', async () => {
+    await recheckRendererForGenerate(undefined, () => ({ ok: false, reservedMb: 0, failedAtMb: 0 }));
+    useEngraveRunStore.setState({ phase: 'generating' });
+    render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-generate-memory-warning').textContent).toContain('450 MiB');
+    act(() => useEngraveRunStore.setState({ phase: 'ready' }));
+    expect(screen.queryByTestId('engrave-generate-memory-warning')).toBeNull();
+  });
+});
+
+// #1191 — a run restored from another build says where its programs came from, once, where the
+// Generate press is. It is not a finding and carries no Fix: the action is the press below it.
+describe('#1191 — the restored run’s origin line', () => {
+  it('shows the build line beside Generate, and only while the restored result is on screen', () => {
+    useEngraveRunStore.setState({
+      restoreNote: 'These programs were generated by build 1.0.0+oldcommit on 9 Nov.',
+      restoreChecking: false,
+    });
+    const view = render(<EngravePanel />);
+    expect(screen.getByTestId('engrave-run-restore-note').textContent).toBe(
+      'These programs were generated by build 1.0.0+oldcommit on 9 Nov.',
+    );
+    // The same screen while this build is still checking the bytes: its own line, and no note yet
+    // is not required — the note stays, because the programs really did come from that build.
+    useEngraveRunStore.setState({ restoreChecking: true });
+    view.rerender(<EngravePanel />);
+    expect(screen.getByTestId('engrave-run-restore-checking')).toBeTruthy();
+    expect(screen.getByTestId('engrave-run-restore-note')).toBeTruthy();
+    // The next Generate clears both the note and the unverified state (run()'s own reset).
+    act(() => {
+      useEngraveRunStore.setState({ restoreNote: null, restoreChecking: false });
+    });
+    view.rerender(<EngravePanel />);
+    expect(screen.queryByTestId('engrave-run-restore-note')).toBeNull();
+    expect(screen.queryByTestId('engrave-run-restore-checking')).toBeNull();
   });
 });

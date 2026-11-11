@@ -58,7 +58,11 @@ import { operatorRunError } from './runErrorWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useRendererVerdict } from '@/hooks/useRendererVerdict';
 // #1124 — the press's own re-probe (the landing ruling): only a failure at Generate refuses.
-import { recheckRendererForGenerate, rendererProbeFailedAtStartup } from '@/engine/cnc/rendererBits';
+import {
+  clearRendererWarning,
+  recheckRendererForGenerate,
+  rendererProbeFailedAtStartup,
+} from '@/engine/cnc/rendererBits';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { cuttingDiameter, drillPointAngle, pointLength, statedCuttingSize, type Tool, isCuttingRecord } from '@/engine/cnc/tool';
 import { tierOf } from '@/engine/cnc/toolTiers';
@@ -2284,6 +2288,12 @@ export function EngravePanel(): JSX.Element {
   // ---- the run (#206) ----------------------------------------------------------------------
 
   const run = useEngraveRunStore();
+  // #1123 item 52 — THE MEMORY WARNING BELONGS TO THE RUN IN PROGRESS. The press probe publishes
+  // it beside Generate, and the run records it as the Log's first line; once the run settles the
+  // line comes down, so it cannot outlive the run on the panel.
+  useEffect(() => {
+    if (run.phase === 'ready' || run.phase === 'blocked') clearRendererWarning();
+  }, [run.phase]);
   // #1051 — ONCE A PLAN HAS POSTED, THE CUTTER LINE SPEAKS FOR IT: the posted programs' cutters,
   // in the order they cut. The pre-plan sentence — the rule's or the search's advice — can name
   // cutters the job does not use, so it is replaced once a result exists; the screen never shows
@@ -2569,6 +2579,8 @@ export function EngravePanel(): JSX.Element {
           dialectName,
           statedOrigin,
           ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
+          // #1203 — the fitted post's shank, so the probe steps name the collet.
+          ...(sheetProbe === null ? {} : { probeShankMm: sheetProbe.shankMm ?? null }),
           // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
           // profile it was planned on; "not measured" when the datums are absent.
           rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }),
@@ -3005,7 +3017,7 @@ export function EngravePanel(): JSX.Element {
         if (key) setTool(key, 'computed');
       }
     }
-    await run.generate();
+    await run.generate(null, { memoryWarning: rendererVerdict.warning });
   }
 
   /** #893 — the row's Simulate press: sweep and check the program already on screen. */
@@ -3309,7 +3321,12 @@ export function EngravePanel(): JSX.Element {
   const chamferCount = job.chamfers?.length ?? 0;
   // #726 W16 — a GOAL mesh is the job's work ("Surface a mesh" is an operation): it counted as 0
   // items beside "Target object (1)", so the job read as empty while it had a whole 3D program.
-  const goalCount = job.targetObject?.enabled === true && (job.targetObject.role ?? 'reference') === 'goal' ? 1 : 0;
+  // #1123-54 — EVERY side's goal counts, not only the legacy single `targetObject`: a two-sided
+  // mesh job keeps its goals in `targetObjects[]`, so the count read "Items 0" on a job whose whole
+  // content was two mesh operations.
+  const goalCount = jobTargetObjects(job).filter(
+    (target) => target.enabled === true && (target.role ?? 'reference') === 'goal',
+  ).length;
   const itemTotal =
     goalCount +
     job.labels.length +
@@ -3797,65 +3814,6 @@ export function EngravePanel(): JSX.Element {
         )}
         </div>
       </details>
-
-      {/* #798 — the Cutter as ONE line above the fold: the tool, where the answer came from, and
-          the measured plan's fidelity. The Cutter group below (the select, the Cutting rows, the
-          Override and the Technical fold) opens from this line's `›` and defaults closed. */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 6 }}>
-        <span
-          data-testid="engrave-cutter-line"
-          title="The cutter this job is written for, where that answer came from, and — when the measured search chose it — the plan's fidelity."
-          style={{ fontSize: 12, color: '#d1d5db' }}
-        >
-          <span style={MUTED}>Cutter</span> · {cutterVerdict}
-        </span>
-        <button
-          type="button"
-          data-testid="engrave-cutter-open"
-          style={{ background: 'none', border: 'none', font: 'inherit', color: '#8fb8e0', margin: 0, padding: 0, cursor: 'pointer', marginLeft: 'auto' }}
-          title="Open the Cutter group — the cutter select, the cutting rows, the override and the technical facts."
-          onClick={() => setGroupsOpen((m) => ({ ...m, 'engrave-group-cutter': true }))}
-        >
-          ›
-        </button>
-      </div>
-      {/* #1127 — the cutter checklist: one row per distinct cutter, in program order, with the
-          operator's located/replaced state. Ticking is never a byte input; a replacement is, and
-          it goes through the job (the whole-run regenerate follows with its estimate). */}
-      <CutterChecklist
-        rows={cutterRows}
-        entries={checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash]}
-        // #1127 — a tick is recorded against THE RUN (the frozen package's hash), so before this
-        // run has been frozen (its first look at Cut) a tick has nowhere to be kept: the rows stay
-        // readable and the controls wait rather than toggling back on themselves — and they SAY
-        // why (#803): the reason rides each control's title and aria-description.
-        disabled={checklistHash === undefined}
-        disabledReason="tick each bit at the Cut step, once the program is generated"
-        onSet={(key, entry) => {
-          if (checklistHash === undefined) return;
-          useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);
-          if (entry?.state === 'replaced' && entry.replacedWith !== undefined) {
-            useEngraveJobStore.getState().replaceCutter(key, entry.replacedWith);
-          }
-        }}
-      />
-
-      {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
-          measured answer for that setup is drawn with its press; taking it writes THAT setup only
-          and records the substitution the one sentence states. */}
-      {setupOffers.map((offer) => (
-        <p key={offer.setupIndex} style={{ ...MUTED, margin: '4px 0 0' }} data-testid={`engrave-setup-measured-${offer.setupIndex + 1}`}>
-          {offer.sentence}{' '}
-          <button
-            type="button"
-            data-testid={`engrave-use-measured-setup-${offer.setupIndex + 1}`}
-            title="Write this setup's measured plan into the setup, replacing the cutter it does not hold."
-            onClick={() => applySetupPlan(offer.setupIndex, offer.cutters, offer.records)}
-          >
-            Use the measurement for setup {offer.setupIndex + 1}
-          </button>
-        </p>
-      ))}
 
       {/* 1a — the skim of the top (#432 slice 4, decision Q6; #686's one line). On wood and metal
           the choice is one line with its current number; `change` opens the choice and the depth in
@@ -4510,6 +4468,65 @@ export function EngravePanel(): JSX.Element {
         summary={cutterGroupSummary}
         {...groupProps('engrave-group-cutter', false)}
       >
+      {/* #1176 — #798's one line and the #1127 checklist live IN the group they name (the Job
+          group's body keeps the stock/part facts only). The select, the Cutting rows, the Override
+          and the Technical fold follow below; `›` still opens the group, as its testid promises. */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 6 }}>
+        <span
+          data-testid="engrave-cutter-line"
+          title="The cutter this job is written for, where that answer came from, and — when the measured search chose it — the plan's fidelity."
+          style={{ fontSize: 12, color: '#d1d5db' }}
+        >
+          <span style={MUTED}>Cutter</span> · {cutterVerdict}
+        </span>
+        <button
+          type="button"
+          data-testid="engrave-cutter-open"
+          style={{ background: 'none', border: 'none', font: 'inherit', color: '#8fb8e0', margin: 0, padding: 0, cursor: 'pointer', marginLeft: 'auto' }}
+          title="Open the Cutter group — the cutter select, the cutting rows, the override and the technical facts."
+          onClick={() => setGroupsOpen((m) => ({ ...m, 'engrave-group-cutter': true }))}
+        >
+          ›
+        </button>
+      </div>
+      {/* #1127 — the cutter checklist: one row per distinct cutter, in program order, with the
+          operator's located/replaced state. Ticking is never a byte input; a replacement is, and
+          it goes through the job (the whole-run regenerate follows with its estimate). */}
+      <CutterChecklist
+        rows={cutterRows}
+        entries={checklistHash === undefined ? undefined : job.cutterChecklist?.[checklistHash]}
+        // #1127 — a tick is recorded against THE RUN (the frozen package's hash), so before this
+        // run has been frozen (its first look at Cut) a tick has nowhere to be kept: the rows stay
+        // readable and the controls wait rather than toggling back on themselves — and they SAY
+        // why (#803): the reason rides each control's title and aria-description.
+        disabled={checklistHash === undefined}
+        disabledReason="tick each bit at the Cut step, once the program is generated"
+        onSet={(key, entry) => {
+          if (checklistHash === undefined) return;
+          useEngraveJobStore.getState().setCutterChecklistEntry(checklistHash, key, entry);
+          if (entry?.state === 'replaced' && entry.replacedWith !== undefined) {
+            useEngraveJobStore.getState().replaceCutter(key, entry.replacedWith);
+          }
+        }}
+      />
+
+      {/* #1010 — A SETUP'S DEAD CUTTER IS OFFERED BESIDE THE CUTTER LINE, never substituted. The
+          measured answer for that setup is drawn with its press; taking it writes THAT setup only
+          and records the substitution the one sentence states. */}
+      {setupOffers.map((offer) => (
+        <p key={offer.setupIndex} style={{ ...MUTED, margin: '4px 0 0' }} data-testid={`engrave-setup-measured-${offer.setupIndex + 1}`}>
+          {offer.sentence}{' '}
+          <button
+            type="button"
+            data-testid={`engrave-use-measured-setup-${offer.setupIndex + 1}`}
+            title="Write this setup's measured plan into the setup, replacing the cutter it does not hold."
+            onClick={() => applySetupPlan(offer.setupIndex, offer.cutters, offer.records)}
+          >
+            Use the measurement for setup {offer.setupIndex + 1}
+          </button>
+        </p>
+      ))}
+
       {/* 3 — tool */}
       <h3 style={SUBHEAD}>Tool</h3>
       <select

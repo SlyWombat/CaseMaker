@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import { PROBE_OPEN_REPLY, PROBE_TRIGGERED_REPLY, sentReply as reply } from './helpers/registrationFixtures';
 import { runFlipRegistration } from '@/engine/cnc/registration/execute';
+import { dryFlipRegistration } from '@/engine/cnc/registration/dryRun';
 import { planFlipRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { flipZ0 } from '@/engine/cnc/engrave/flipChoice';
@@ -48,6 +49,8 @@ function ctx(): RegistrationPlan {
     mount: 'vise',
     stock: { xMin: 0, yMin: 0, xMax: 44.5, yMax: 60, cornerRadius: 0 },
     surfacePoint: { x: 22, y: 30 },
+    // #1199 — the frame states the MACHINE's clearance beside its seek start.
+    machineClearanceZ: -3,
     seek: { fromMachineZ: -3, travelMm: 60, band: { min: -60, max: -4 } },
     mountDatum: null,
     probe: null,
@@ -148,7 +151,8 @@ const deps = (console: ReturnType<typeof fakeMachine>) => ({
 });
 
 /** The carried Z0, as the job states it: side 2's top at the fake's surface, ± 0.3 mm. */
-const Z0 = () => flipZ0({ seatMm: SURFACE_Z, thicknessMm: 0, toleranceMm: 0.3 });
+// #1189 — the carried top is a raw reading in the run's own probe seating (the fake's M491 = -80).
+const Z0 = () => flipZ0({ seatMm: SURFACE_Z, thicknessMm: 0, toleranceMm: 0.3, probeRefZ: -80 });
 
 describe('#1088 the flip registration executor', () => {
   it('runs the plan’s steps in order: guards, the front pair, the seed, then each bore’s four touches', async () => {
@@ -222,7 +226,7 @@ describe('#1088 the flip registration executor', () => {
     const machine = fakeMachine(sent);
     // The carried top says the blank sits 5 mm above where its corner touches read — a chip under
     // the blank (or the wrong seat) is what this finds.
-    const carried = flipZ0({ seatMm: SURFACE_Z + 5, thicknessMm: 0, toleranceMm: 0.3 });
+    const carried = flipZ0({ seatMm: SURFACE_Z + 5, thicknessMm: 0, toleranceMm: 0.3, probeRefZ: -80 });
     const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: carried }, deps(machine) as never);
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -259,4 +263,39 @@ describe('#1088 the flip registration executor', () => {
     // The alarm is cleared only if `?` reads Alarm — this fake stays Idle, so no `$X` went out.
     expect(sent).not.toContain('$X');
   }, 60_000);
+});
+
+describe('#1202 — the flip registration’s dry line view', () => {
+  it('records the plan’s own lines in order, all clean under the guard, and the real run sends the same ones', async () => {
+    const dry = await dryFlipRegistration(
+      { plan: flipPlan(), ctx: ctx(), z0: Z0() },
+      { liveClearanceZ: -3 },
+    );
+    // The plan's own sequence, as the card will show it: a real list, no refusal on it.
+    expect(dry.identity.routine).toBe('flip-registration');
+    expect(dry.lines.length).toBeGreaterThan(8);
+    expect(dry.refused).toBe(false);
+    for (const entry of dry.lines) expect(entry.refused).toBeNull();
+    // The approach segment of the plan obeys #1199's order: nothing sideways before a Z at the
+    // clearance.
+    const firstXY = dry.lines.findIndex((l) => /^(?:G53 )?G0 X/.test(l.line));
+    expect(firstXY).toBeGreaterThan(0);
+    expect(dry.lines.slice(0, firstXY).some((l) => /^G53 G0 Z/.test(l.line))).toBe(true);
+
+    // SHOWN == SENT for the reply-INDEPENDENT part: the same plan through the executor against the
+    // fake machine sends the same lines in the same order until the first probe's answer can steer
+    // a branch (the dry console scripts its own readings; the card's note says the list is "under
+    // the readings it expects"). The approach — the lines a wrong order would endanger — is exact.
+    const sent: string[] = [];
+    const machine = fakeMachine(sent);
+    const r = await runFlipRegistration(flipPlan(), { ctx: ctx(), z0: Z0() }, deps(machine) as never);
+    expect(r.ok, r.ok ? '' : r.reason).toBe(true);
+    const shown = dry.lines.map((l) => l.line);
+    let common = 0;
+    while (common < shown.length && common < sent.length && shown[common] === sent[common]) common += 1;
+    // The shared prefix runs through the guards and the first seeks — every reply-independent
+    // line — and it is the clearance-lift-then-XY shape the guard exists for.
+    expect(common, `diverged at ${String(common)}: ${shown[common] ?? '(end)'} vs ${sent[common] ?? '(end)'}`).toBeGreaterThanOrEqual(14);
+    expect(shown.slice(0, common).some((l) => /^G53 G0 Z/.test(l))).toBe(true);
+  }, 120_000);
 });

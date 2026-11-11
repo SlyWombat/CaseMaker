@@ -6,7 +6,7 @@
 // reaches Holding through the same door → stock path every first job takes, measures the SVGs
 // against the slot, reads the two labels, and keeps a screenshot for the eye.
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.setTimeout(120_000);
 
@@ -15,6 +15,7 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-plate').click();

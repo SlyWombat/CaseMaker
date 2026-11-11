@@ -121,7 +121,7 @@ describe('reserve, consume, release (#413)', () => {
 
   it('an entry at 0 is refused with the job that used it', () => {
     const blank = StockItemSchema.parse(SHELF[1]);
-    expect(reserveStock(blank, 'job-2', 1, AT)).toEqual({ ok: false, reason: 'none left — consumed by job-12' });
+    expect(reserveStock(blank, 'job-2', 1, AT)).toEqual({ ok: false, reason: 'None left — used by job 12' });
   });
 
   it('releases a reservation and leaves the count', () => {
@@ -180,7 +180,7 @@ describe('the shelf store (#413)', () => {
     await useStockStore.getState().refresh();
     svc.calls.length = 0;
     expect(await useStockStore.getState().reserve('stock-blank1', 'job-2', 1)).toBe(false);
-    expect(useStockStore.getState().notice?.text).toContain('consumed by job-12');
+    expect(useStockStore.getState().notice?.text).toContain('used by job 12');
     expect(svc.calls).toEqual([]);
 
     svc.bump();

@@ -47,7 +47,15 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
-  workers: 1,
+  // #1180 — FOUR WORKERS LOCALLY, ONE ON CI. The suite ran serially since 2026-04-27
+  // (9a33d96bc) to dodge dev-server restarts caused by the app's server-port setting; #372 removed
+  // that setting from the browser build (settings.spec.ts asserts its absence), and every test
+  // gets its own browser context, so nothing mutable is shared between workers. Measured on
+  // land18 2026-11-10: full suite 30.1 min serial → 10.3 min quiet / 14.3 min under a loaded box,
+  // identical results, zero flaky; smoke tier 1.1 min. A spec that flakes only under load is
+  // marked serial (its own file/describe or project) — the suite is never dropped back to one
+  // worker. CI keeps 1 until CI has run at all.
+  workers: isCI ? 1 : 4,
   reporter: isCI ? [['html', { open: 'never' }], ['github']] : 'list',
   expect: {
     toHaveScreenshot: { maxDiffPixelRatio: 0.005 },

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -103,14 +103,20 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   await page.getByTestId('start-wizard-next').click();
 
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
-  await page.getByTestId(`engrave-setup-what-${kind}`).click();
-  if (kind === 'engrave') await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+  // #1100 — a text job comes from the sign card; the engine chips live under Something else….
+  if (kind === 'engrave') {
+    await openSignCard(page);
+    await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
+  } else {
+    await openSomethingElse(page);
+    await page.getByTestId('engrave-setup-what-pocket').click();
+  }
   await page.getByTestId('start-wizard-operation-next').click();
 
   // Step 3 — the house's stick, proposed for both kinds of work.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toHaveText(
-    'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   );
   await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
@@ -191,8 +197,8 @@ test('#930 — a saved ledge the stock cannot sit in arrives on the waste board,
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await page.getByTestId('engrave-setup-what-engrave').click();
-  await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+  await openSignCard(page);
+  await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
   await page.getByTestId('start-wizard-operation-next').click();
 
   // The blank the saved seat cannot take: a 1.5 mm plate whose top would sit below the jaw tops.

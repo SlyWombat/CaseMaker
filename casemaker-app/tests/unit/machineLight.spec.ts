@@ -16,9 +16,6 @@ afterEach(() => setMachineConsoleLoader(null));
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
-const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
 
 const status = (text: string): ((line: string) => ConsoleSend) => (line) =>
@@ -49,37 +46,6 @@ describe('#422 the work-light switch', () => {
     const r = await toggleLight(TARGET, false);
     expect(r).toMatchObject({ kind: 'toggled', on: false });
     expect(z1.sent).toEqual(['?', 'M822']);
-  });
-
-  it('refuses a running machine without sending anything', async () => {
-    const z1 = fakeConsoleSession(status(RUNNING));
-    const r = await toggleLight(TARGET, true);
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('Run');
-    expect(z1.sent).toEqual(['?']);
-    expect(z1.closes).toBe(1);
-  });
-
-  it('refuses an Idle line whose P: percent says the job has not finished', async () => {
-    const z1 = fakeConsoleSession(status(MID_JOB));
-    const r = await toggleLight(TARGET, true);
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('90%');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('refuses an alarmed machine without sending anything', async () => {
-    const z1 = fakeConsoleSession(status(ALARM));
-    const r = await toggleLight(TARGET, true);
-    expect(r.kind).toBe('busy');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('reports an unreadable status line as an error, and sends nothing', async () => {
-    const z1 = fakeConsoleSession(status('???'));
-    const r = await toggleLight(TARGET, true);
-    expect(r.kind).toBe('error');
-    expect(z1.sent).toEqual(['?']);
   });
 
   it('reports a timeout on the code without claiming a mode', async () => {

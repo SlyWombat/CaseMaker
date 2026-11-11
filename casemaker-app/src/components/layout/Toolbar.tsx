@@ -22,6 +22,10 @@ import { PartsMenu } from '@/components/layout/PartsMenu';
 import { ExportModal } from '@/components/panels/ExportModal';
 import { useManageModeStore } from '@/store/manageModeStore';
 import { useFlightRecorderStore } from '@/store/flightRecorderStore';
+import { useMachineRunStore } from '@/store/machineRunStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
+import { ConfirmDialog } from './ConfirmDialog';
 import { useViewportStore } from '@/store/viewportStore';
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -66,6 +70,10 @@ function useIsCompactBar(): boolean {
 export function Toolbar() {
   const project = useProjectStore((s) => s.project);
   const showWelcome = useProjectStore((s) => s.showWelcome);
+  const showHome = useProjectStore((s) => s.showHome);
+  // #1123-48 — a machine RUN disables Home with its reason; Generate may carry on behind Home.
+  const machineRunning = useMachineRunStore((s) => Object.values(s.runs).some((r) => r.running === true));
+  const [confirmNewOpen, setConfirmNewOpen] = useState(false);
   // While the welcome overlay is up, the store still holds the LAST project
   // (or the createDefaultProject placeholder) — Save / Save as / Export
   // would silently operate on that stale state, which is what the user hits
@@ -235,8 +243,11 @@ export function Toolbar() {
     [openDoorPicked],
   );
 
-  const onNew = useCallback(() => {
-    if (!window.confirm('Start a new project? Unsaved changes will be lost.')) return;
+  // #1123-48 — NEW ASKS IN THE APP'S OWN DIALOG, in honest words: the open work IS saved (the
+  // stores persist it), so "unsaved changes will be lost" was only true when something really was
+  // unsaved. The dialog says which, and the press then does the old work.
+  const doNew = useCallback(() => {
+    setConfirmNewOpen(false);
     // #311 — New returns to the board picker, so the Manage surface has to come down first: left
     // open on top of the overlay it would hide the very thing New just asked for, and the button
     // would look like it did nothing.
@@ -247,6 +258,23 @@ export function Toolbar() {
     // session that died, and it goes with the project rather than sitting over the new job.
     useFlightRecorderStore.getState().dismiss();
   }, [showWelcome, closeManage]);
+  const onNew = useCallback(() => setConfirmNewOpen(true), []);
+  /** What New replaces, in the operator's words, read at press time. */
+  const newSentence = ((): string => {
+    const file = useEngraveJobFileStore.getState();
+    const name = file.fileName ?? useEngraveJobStore.getState().job.name;
+    return file.dirty
+      ? `Unsaved changes in "${name}" will be lost. The project and its job are replaced by a fresh one.`
+      : `"${name}" will be replaced by a fresh project. Its job is not kept — save it first if you need it back.`;
+  })();
+  /**
+   * #1123-48 — HOME: the main page over the work that is open. It resets nothing (the project and
+   * the CNC job stay in their stores), and the main page's Continue row returns to them.
+   */
+  const onHome = useCallback(() => {
+    closeManage();
+    showHome();
+  }, [showHome, closeManage]);
 
   // Open the multi-part export modal — per-part Save buttons + thumbnails
   // + a Save All footer that lays everything flat for printing. The old
@@ -260,6 +288,23 @@ export function Toolbar() {
   // One node per control, rendered in exactly one place per layout. Desktop
   // keeps the original left-to-right order; below the breakpoint the primary
   // controls stay inline and the rest move into the ⋯ menu.
+  // #1123-48 — HOME, FIRST IN THE TOOLBAR, always present. During a machine run it is disabled and
+  // says why: a run is not something to navigate away from (the analyst's fields).
+  const homeBtn = (
+    <button
+      type="button"
+      data-testid="home"
+      onClick={onHome}
+      disabled={machineRunning}
+      aria-disabled={machineRunning}
+      // #134 (2026-11-10) — on a phone the word drops and the icon stays (index.css), so the
+      // control needs a name of its own: a screen reader would otherwise read only the emoji.
+      aria-label="Home"
+      title={machineRunning ? 'a program is running — Home is available when it ends' : 'The main page — nothing is discarded, and Continue brings you back here'}
+    >
+      🏠 <span className="btn-label">Home</span>
+    </button>
+  );
   const newBtn = (
     <button
       onClick={onNew}
@@ -338,6 +383,7 @@ export function Toolbar() {
     <button
       onClick={onLoadClick}
       data-testid="load-project"
+      aria-label="Load"
       title="Load a project or a cutting job (.caseproj.json or .cutjob.json)"
     >
       📂 <span className="btn-label">Load</span>
@@ -372,6 +418,7 @@ export function Toolbar() {
     <button
       onClick={() => setDocsOpen(true)}
       data-testid="docs-open"
+      aria-label="Docs"
       title="Open the User Manual"
     >
       📖 <span className="btn-label">Docs</span>
@@ -440,6 +487,7 @@ export function Toolbar() {
     <div className="toolbar-buttons">
       {isCompactBar ? (
         <>
+          {homeBtn}
           {undoBtn}
           {redoBtn}
           {!cncSection && saveBtn}
@@ -499,6 +547,7 @@ export function Toolbar() {
         </>
       ) : (
         <>
+          {homeBtn}
           {!cncSection && newBtn}
           {manageBtn}
           {undoBtn}
@@ -522,6 +571,16 @@ export function Toolbar() {
       {error && <span style={{ color: '#ff8888', fontSize: 12 }}>{error}</span>}
       {docsOpen && <DocsModal initialId="user-manual" onClose={() => setDocsOpen(false)} />}
       {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+      {confirmNewOpen && (
+        <ConfirmDialog
+          title="Start a new project?"
+          body={newSentence}
+          confirmLabel="Start a new project"
+          onConfirm={doNew}
+          onCancel={() => setConfirmNewOpen(false)}
+          testId="new-project-confirm"
+        />
+      )}
     </div>
   );
 }

@@ -76,6 +76,20 @@ export function haveWords(item: InventoryItem, machineName: (id: string) => stri
 }
 
 /**
+ * How many pieces a job could plan with: good or worn, and in the operator's hands. A piece in a
+ * machine is not on the shelf, and broken/lost pieces are out of service (#1149). The list's Have
+ * column sorts on this.
+ */
+export function usablePieces(item: InventoryItem): number {
+  let usable = 0;
+  for (const copy of item.copies) {
+    if (copy.whereabouts.kind === 'machine') continue;
+    if (copy.condition === 'new' || copy.condition === 'used' || copy.condition === 'worn') usable += 1;
+  }
+  return usable;
+}
+
+/**
  * What a row can be found by beyond its cutter numbers: the words on its case and the place it is
  * kept (#1172 item 2). The colour is the copy's (#491); the place today is the operator's note,
  * which the add doors call `where it lives`.

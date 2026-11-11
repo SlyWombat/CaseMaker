@@ -153,6 +153,9 @@ export function planFlipAttempt(job: EngraveJob, input: FlipAttemptInput): FlipA
     mount: setup.mount?.kind === 'bracket' ? 'bracket' : setup.mount?.kind === 'tape' ? 'tape' : 'vise',
     stock: { xMin: 0, yMin: 0, xMax: length, yMax: width, cornerRadius: 0 },
     surfacePoint: point,
+    // #1199 — the machine's clearance, carried separately from the seek start so the executor's
+    // guard is built from the machine and not from this frame's band.
+    machineClearanceZ: input.seekFromMachineZ,
     seek: { fromMachineZ: input.seekFromMachineZ, travelMm: Math.max(0, input.seekFromMachineZ - band.minMm), band: { min: band.minMm, max: band.maxMm } },
     mountDatum: null,
     probe: null,

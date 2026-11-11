@@ -127,7 +127,7 @@ function fakeZ1(opts: { holes?: ReferenceOpening[]; shift?: { x: number; y: numb
 }
 const yes = async () => true;
 async function run(p: RegistrationPlan, fake = fakeZ1()) {
-  const r = await runRegistration(p, { console: fake.console, operator: yes });
+  const r = await runRegistration(p, { liveClearanceZ: -3, console: fake.console, operator: yes });
   if (!r.ok) throw new Error(r.reason);
   return { ...r, fake };
 }
@@ -160,7 +160,7 @@ describe('#789 the probe connector’s supply', () => {
           ? { kind: 'sent' as const, line, text: 'ok', frames: 1, elapsedMs: 1 }
           : fake.console.send(line, timing),
     };
-    const r = await runRegistration(plan(), { console: noPrb, operator: yes });
+    const r = await runRegistration(plan(), { liveClearanceZ: -3, console: noPrb, operator: yes });
     expect(r.ok).toBe(false);
     expect(fake.lines).toContain('M831');
     expect(fake.lines.filter((line) => line === 'M832')).toHaveLength(1);
@@ -169,7 +169,7 @@ describe('#789 the probe connector’s supply', () => {
 
   it('sends neither line when the probe is never fitted', async () => {
     const fake = fakeZ1();
-    const r = await runRegistration(plan(), { console: fake.console, operator: async () => false });
+    const r = await runRegistration(plan(), { liveClearanceZ: -3, console: fake.console, operator: async () => false });
     expect(r.ok).toBe(false);
     expect(fake.lines).not.toContain('M831');
     expect(fake.lines).not.toContain('M832');
@@ -276,9 +276,9 @@ describe('#429 the run', () => {
     expect(fake.lowest()).toBeGreaterThanOrEqual(SURFACE - Math.max(S.capBelowSurfaceMm, S.surfaceToleranceMm) - 1e-9);
     const park = SURFACE + S.parkAboveSurfaceMm;
     for (const z of fake.xyAtZ) expect(z === -3 || Math.abs(z - park) < 1e-6).toBe(true);
-    expect(await applyCorrection(o, { console: fake.console, operator: yes }, { confirmed: false })).toMatchObject({ ok: false });
+    expect(await applyCorrection(o, { liveClearanceZ: -3, console: fake.console, operator: yes }, { confirmed: false })).toMatchObject({ ok: false });
     expect(fake.lines.some((l) => l.startsWith('G10'))).toBe(false);
-    const applied = await applyCorrection(o, { console: fake.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(o, { liveClearanceZ: -3, console: fake.console, operator: yes }, { confirmed: true });
     expect(applied.ok && applied.line).toMatch(new RegExp(`^G10 L2 P1 X${(G54.x + o.offset.x).toFixed(3)} Y${(G54.y + o.offset.y).toFixed(3)} `));
   });
 
@@ -293,7 +293,7 @@ describe('#429 the run', () => {
     expect(o.rotationDeg).toBeLessThan(1.4);
     expect(o.usable).toBe(false);
     expect(o.problems.join(' ')).toContain('re-seat it square');
-    expect(await applyCorrection(o, { console: fake.console, operator: yes }, { confirmed: true })).toMatchObject({ ok: false });
+    expect(await applyCorrection(o, { liveClearanceZ: -3, console: fake.console, operator: yes }, { confirmed: true })).toMatchObject({ ok: false });
     const cw = (await run(plan(), fakeZ1({ turnDeg: -1 }))).outcome;
     expect(cw.rotationDeg).toBeLessThan(-0.6);
   });
@@ -334,7 +334,7 @@ describe('#429 the run', () => {
   it('a part misplaced so the surface touch falls into a hole stops before any scan', async () => {
     const p = plan();
     const fake = fakeZ1({ shift: { x: p.surfacePoint.x - 14, y: p.surfacePoint.y - 30 } });
-    const r = await runRegistration(p, { console: fake.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: fake.console, operator: yes });
     // The bounded seek finds nothing down to the band, and the run stops there, saying how low the probe may be.
     expect(r).toMatchObject({ ok: false, reason: expect.stringContaining('the surface seek') });
     expect(fake.lines.filter((l) => l.startsWith('G38.3'))).toHaveLength(1);

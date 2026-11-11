@@ -127,6 +127,7 @@ import {
 } from './holdingMounts';
 import type { PartFootprint } from './workShape';
 import type { WorkFacts } from './workFacts';
+import { Explain } from './Explain';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
@@ -1945,6 +1946,10 @@ export function HoldingStep({
           source: 'saved',
         };
   const seatPhrase = answers.vise.seat === 'floor' ? 'on the vise body' : 'on the jaws’ ledge';
+  // #1109 — the unmeasured vise's model error decides a job only when the blank's proud height is
+  // inside it: under 0.5 mm, the sentence stays under the radios; otherwise it is Technical's.
+  const viseProud = mechanismOf(current) === 'vise' ? seatedProud(answers) : null;
+  const viseModelDecides = viseProud !== null && viseProud >= 0 && viseProud < 0.5;
 
   // #743 D7 — round is a fact about the STOCK: a disc is one even when no entry names it (j04),
   // so the step's word and its picture read `stock.shape` first.
@@ -2271,11 +2276,12 @@ export function HoldingStep({
             Makera’s rule for {isBlock ? `${fmt(jawSpan)} mm across the section` : `⌀${fmt(jawSpan)}`}: standard under ⌀20,
             reverse inner 20–35, reverse outer over 35
           </span>
+          <Explain term="self-centring-scroll">Reverse is them turned round for larger stock.</Explain>
         </FieldRow>
         {isBlock && (
           <p className="hint" style={{ margin: 0 }} data-testid="engrave-setup-rotary-centring">
             The chuck is a four-jaw self-centring scroll: a square section centres like a round one.
-            Measure its run-out with the rotary reference tap before the run.
+            Measure how far it wobbles off true with the rotary reference tap before the run.
           </p>
         )}
         <FieldRow label="Grip">
@@ -2300,6 +2306,7 @@ export function HoldingStep({
             mm in the jaws
           </label>
           <span data-testid="engrave-setup-rotary-stickout">Stick-out {fmt(chuck.stickout)} mm</span>
+          <Explain term="stick-out" />
         </FieldRow>
         <FieldRow label="Tailstock">
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -2334,6 +2341,7 @@ export function HoldingStep({
             />
             {neck === undefined ? 'off — the part is not cut down for sawing' : 'on — leave the part on a neck and saw it off'}
           </label>
+          <Explain term="neck-for-parting" />
         </FieldRow>
         {neck !== undefined && (
           <FieldRow label="Neck size">
@@ -2611,10 +2619,12 @@ export function HoldingStep({
               on every vise job; now it is one line under the radios, and `vise-default` speaks
               only where an unmeasured figure could decide the job (a grip or proud height inside
               the band). #875 — moved under the radios: above them it read as a warning between
-              the question and its answers. */}
-          {mechanismOf(current) === 'vise' && answers.vise.source === 'default' && (
+              the question and its answers. #1109 — the model's disclaimer itself lives in
+              Technical; what stays here is the case where it can decide the job. */}
+          {mechanismOf(current) === 'vise' && answers.vise.source === 'default' && viseModelDecides && (
             <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
-              Vise: the shipped dimensions, not measured on this machine.
+              It matters here: the blank stands {fmt(viseProud!)} mm proud, inside the 0.5 mm the model
+              could be wrong by.
             </p>
           )}
 
@@ -2687,6 +2697,11 @@ export function HoldingStep({
           <details data-testid="engrave-setup-holding-technical">
             <summary style={{ fontSize: 12, cursor: 'pointer' }}>Technical</summary>
             <div style={{ marginTop: 4 }}>
+              {mechanismOf(current) === 'vise' && answers.vise.source === 'default' && !viseModelDecides && (
+                <p style={MUTED} data-testid="engrave-setup-holding-vise-provenance">
+                  The vise is the app's model, not measured on this machine.
+                </p>
+              )}
               {defaultFinding !== null && (
                 <FindingRow finding={defaultFinding} testid="engrave-setup-step-finding-vise-default" />
               )}
@@ -2860,6 +2875,11 @@ function MountRow({
           )}
         </span>
       </label>
+      {option.mount === 'ledge' && (
+        <div style={{ marginLeft: 22 }} data-testid="engrave-setup-ledge-gloss">
+          <Explain term="jaw-ledge" />
+        </div>
+      )}
       {option.disabled && option.escape !== null && canReachMachine && (
         <button
           type="button"

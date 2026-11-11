@@ -212,8 +212,8 @@ describe('#647 the DRO — state as connection', () => {
   it('#655 reads the firmware’s Tool state as waiting for the cutter', () => {
     remember('<Tool|MPos:-10.09,-12.83,-3|WPos:0,0,0|T:0,-9.757,1>');
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for the cutter');
-    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Waiting for the cutter');
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for a cutter');
+    expect(screen.getByTestId('machine-status-state').getAttribute('data-state')).toBe('Waiting for a cutter');
   });
 
   it('names an alarm and carries its reason', () => {
@@ -223,10 +223,10 @@ describe('#647 the DRO — state as connection', () => {
     expect(screen.getByTestId('machine-status-alarm-reason').textContent).toContain('Probe fail');
   });
 
-  it('says Not answering with no status yet, and Offline when the heartbeat cannot reach it', () => {
+  it('says Offline — no answer on the network with no status yet, and Offline when the heartbeat cannot reach it', () => {
     remember(null);
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-state').textContent).toBe('Not answering');
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Offline — no answer on the network');
     cleanup();
     useMachineStore.getState().noteHeartbeat(false);
     render(<MachineStatusStrip />);
@@ -728,7 +728,7 @@ describe('#1123 items 32/33 — Continue, Unlock and Home on the strip', () => {
   it('item 32 — a machine waiting for the cutter offers Continue; an idle one does not', () => {
     remember('<Tool|MPos:-10.09,-12.83,-3|WPos:138.31,111.97,71.875|T:0,-9.757,1>');
     render(<MachineStatusStrip />);
-    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for the cutter');
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for a cutter');
     expect(screen.getByTestId('machine-status-tool-continue')).toBeTruthy();
     cleanup();
     remember('<Idle|MPos:-1,-1,-1|WPos:0,0,0|T:1>');

@@ -67,13 +67,16 @@ export function available(item: StockItem): number {
 /**
  * Reserve `quantity` of `item` for `jobId`. A job holds ONE reservation per entry: reserving again
  * replaces its count (a job that now needs two plates, not one), judged against what the OTHER jobs
- * hold. An entry at 0 is refused with the job that used it last — "consumed by job 12" (§5.1).
+ * hold. An entry at 0 is refused with the job that used it last — "used by job 12" (§5.1).
  */
 export function reserveStock(item: StockItem, jobId: string, quantity: number, at: string): StockStep {
   if (!Number.isInteger(quantity) || quantity <= 0) return { ok: false, reason: 'reserve at least one' };
   if (item.quantity === 0) {
     const last = item.consumed[item.consumed.length - 1];
-    return { ok: false, reason: last ? `none left — consumed by ${last.jobId}` : 'none left on the shelf' };
+    return {
+      ok: false,
+      reason: last ? `None left — used by job ${last.jobId.replace(/^job-/, '')}` : 'None left on the shelf',
+    };
   }
   const others = item.reservations.filter((r) => r.jobId !== jobId);
   const free = item.quantity - others.reduce((a, r) => a + r.quantity, 0);

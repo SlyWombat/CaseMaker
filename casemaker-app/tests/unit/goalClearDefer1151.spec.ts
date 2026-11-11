@@ -23,7 +23,10 @@ describe('#1151 the deferred ideal on the #764 shell', () => {
     const modelInput = await buildModelPlanInputForGoal(j, j.targetObject!, BALL_TOOL, {}, undefined, catalogue, []);
     const owned = await planOwnedOnly(modelInput);
     expect(JSON.stringify(deferred.plan)).toBe(JSON.stringify(owned));
-  }, 120_000);
+    // #1181 — measured compute, not a hang: two full plans take ~75 s alone (k3, 2026-11-10). The
+    // 120 s budget lacked headroom and the loaded run (four CPU hogs beside the suite) crossed it.
+    // 300 s matches the sibling case's 240 s plus the same margin.
+  }, 300_000);
 
   it('#1151 — a job whose recorded choice is the ideal waits for both plans', async () => {
     const { engraveGenerate } = await import('@/workers/sim/engraveGenerate');

@@ -15,7 +15,7 @@
 
 import { useState } from 'react';
 import { useFlightRecorderStore } from '@/store/flightRecorderStore';
-import { crashBannerSentence } from './crashBannerSentence';
+import { crashBannerSentence, reportWhenWords } from './crashBannerSentence';
 
 export function CrashRecoveryBanner() {
   const previous = useFlightRecorderStore((s) => s.previous);
@@ -59,7 +59,7 @@ export function CrashRecoveryBanner() {
       }}
     >
       <span data-testid="crash-banner-sentence" style={{ flex: '1 1 320px' }}>
-        {crashBannerSentence(moment)}
+        {crashBannerSentence(moment, { canSend: houseOk })}
       </span>
       <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <input
@@ -85,7 +85,7 @@ export function CrashRecoveryBanner() {
       </button>
       {saved !== null && (
         <span data-testid="crash-saved" style={{ color: '#b8d8a8' }}>
-          Saved {saved}
+          Saved the report of {reportWhenWords(moment.stoppedAt)}: {saved}
         </span>
       )}
       {error !== null && (
@@ -95,7 +95,7 @@ export function CrashRecoveryBanner() {
       )}
       {sent !== null && (
         <span data-testid="crash-sent" style={{ color: '#b8d8a8' }}>
-          Sent to the house: {sent}
+          Sent the report of {reportWhenWords(moment.stoppedAt)} to the house: {sent}
         </span>
       )}
       {sendError !== null && (

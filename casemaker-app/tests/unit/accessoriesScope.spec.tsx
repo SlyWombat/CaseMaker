@@ -315,6 +315,85 @@ describe('#601 — the detail rail edits the label and retires', () => {
   });
 });
 
+// #1200 — THE OPERATOR'S TOUCH RESTRICTION, on the probe's own rail: "Use for top touches only",
+// with the reason and the date it changed. A mount has no such control.
+describe('#1200 — the probe rail restricts a unit to top touches', () => {
+  let calls: Array<{ method: string; path: string; body: unknown }>;
+
+  beforeEach(() => {
+    calls = [];
+    setHouseClientLoader(async () => fakeClient((method, path, body) => calls.push({ method, path, body })));
+  });
+
+  it('the toggle and its reason save onto the probe record, dated', async () => {
+    seed();
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-probe-1'));
+    const toggle = screen.getByTestId('manage-acc-touches-zonly') as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByTestId('manage-acc-touches-reason'), {
+      target: { value: 'the ball tip may not be 100% straight down' },
+    });
+    fireEvent.click(screen.getByTestId('manage-acc-save'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const sent = calls[0]!.body as FixtureRecord;
+    expect(sent.touches).toBe('z-only');
+    expect(sent.touchesReason).toBe('the ball tip may not be 100% straight down');
+    expect(typeof sent.touchesSince).toBe('string');
+    // The measured record rides along untouched.
+    expect(sent.unit).toMatchObject({ tipDiameterMm: 2 });
+  });
+
+  // #1203 — the shank is a swappable post: a swap writes the fitted shank + a history line, and
+  // never touches the sensor's tip values.
+  it('#1203 — fitting another post moves the shank and writes history; the tip values survive', async () => {
+    seed();
+    const state = useLocationStore.getState();
+    const location = state.location!;
+    useLocationStore.setState({
+      location: {
+        ...location,
+        accessories: (location.accessories ?? []).map((a) =>
+          a.id === 'fx-probe-1'
+            ? {
+                ...a,
+                unit: {
+                  ...a.unit,
+                  shankMm: 6.35,
+                  posts: [
+                    { id: 'post-1-8', label: '1/8\" post', diameterMm: 6.35, condition: 'fitted' },
+                    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: 'spare' },
+                  ],
+                },
+              }
+            : a,
+        ),
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-probe-1'));
+    expect(screen.getByTestId('manage-acc-shank-line').textContent).toContain('1/8" post fitted');
+    fireEvent.change(screen.getByTestId('manage-acc-post-select'), { target: { value: 'post-6' } });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    const sent = calls[0]!.body as FixtureRecord;
+    expect(sent.unit.shankMm).toBe(6);
+    expect(sent.unit.tipDiameterMm).toBe(2.0);
+    expect(sent.unit.posts).toEqual([
+      { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: 'spare' },
+      { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: 'fitted' },
+    ]);
+    expect(sent.history[sent.history.length - 1]!.what).toContain('fitted the 6 mm post');
+  });
+
+  it('a mount has no touch control', () => {
+    seed();
+    render(<AccessoriesScope />);
+    fireEvent.click(screen.getByTestId('manage-accessories-pick-fx-vise-1'));
+    expect(q('manage-acc-touches-zonly')).toBeNull();
+  });
+});
+
 describe('#595 — the records the detail rail states', () => {
   it('names the probe’s last M491 and its M119 rest, dated', () => {
     const probe: FixtureRecord = {

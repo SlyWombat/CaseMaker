@@ -126,6 +126,20 @@ export interface FakeConsoleOptions {
   /** #1169 — the controller raises an alarm when the run reaches this line: the reply carries
    *  `ALARM:` and the run ends. */
   alarmAtLine?: number;
+  /**
+   * #1170 — where an idle machine reports its head. Default `[0,0,0]`; `[-1,-1,-1]` is the
+   * controller's HOMED rest, which `readMachineRest` reads as homed. A test that exercises the
+   * flip card's arrival (home before the light) needs the fake to say it is already home.
+   */
+  idleMpos?: readonly [number, number, number];
+  /**
+   * #1187 — THE LINK DIES. When the app writes this exact line, THAT session's reads start failing
+   * with the Rust relay's own words ('read failed: Connection reset by peer (os error 104)'): the
+   * write went out, the answer never came. Per session, so the shared status poller (which only
+   * ever writes `?`) is untouched; `M491` is a line only a registration sends, which is what makes
+   * the reset land on the registration's press.
+   */
+  resetAfterWrite?: string;
 }
 
 /**
@@ -163,6 +177,13 @@ export interface FakeConsole {
   files(): FakeSdFile[];
   /** #1173A — what the controller answers from now on (and whether it answers at all). */
   setPhase(phase: FakeConsolePhase): void;
+  /**
+   * #1197 — THE HOME PRESS DIES ON THE LINK. The next `$H` goes out and its session's reads fail
+   * with `detail` (the relay's own transport words): the panel sees a Home that was not sent, which
+   * is what its stop report is about. Home lines from a run's own epilogue are not what a spec
+   * wants here, so arm it only when the operator's press is next.
+   */
+  failHomeWith(detail: string): void;
 }
 
 /**
@@ -172,7 +193,7 @@ export interface FakeConsole {
 export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = {}): Promise<FakeConsole> {
   const steps = opts.steps ?? 12;
   const seen: string[] = [];
-  const conns = new Map<number, { out: number[]; in: number[] }>();
+  const conns = new Map<number, { out: number[]; in: number[]; dead?: boolean; deadDetail?: string }>();
   let nextConn = 1;
   let phase: 'idle' | 'running' | 'paused' | 'stopped' | 'done' = 'idle';
   // #1173A — the machine page's four states, forced by a spec. `idle` lets the scripted program
@@ -191,6 +212,8 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
   let chuck: FakeChuck | null = null;
   // #886 — the card's own listing, seeded by the spec and changed by its deletes.
   let files: FakeSdFile[] = [...(opts.files ?? [])];
+  // #1197 — the detail the next `$H`'s session answers instead of a reply; null until armed.
+  let homeFailure: string | null = null;
   // #1179 B — per-probe-point Z offsets (the nth distinct XY the probe touches).
   let probeOffsets: readonly number[] = [];
   const probePoints = new Map<string, number>();
@@ -237,7 +260,9 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
     }
     const state = phase === 'running' ? 'Run' : phase === 'paused' ? 'Hold' : 'Idle';
     const progress = phase === 'idle' || phase === 'stopped' ? '' : `|P:${line},${phase === 'done' ? 100 : percent},${elapsed}`;
-    return `<${state}|MPos:0,0,0|WPos:0,0,0${progress}|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>`;
+    const [mx, my, mz] = opts.idleMpos ?? [0, 0, 0];
+    const mpos = `${mx.toFixed(3)},${my.toFixed(3)},${mz.toFixed(3)}`;
+    return `<${state}|MPos:${mpos}|WPos:0,0,0${progress}|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>`;
   };
 
   const replyFor = (text: string): number[] => {
@@ -434,12 +459,30 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
           const lineText = type === PTYPE_CTRL_SINGLE ? '?' : text;
           seen.push(lineText.trim());
           session.out.push(...replyFor(lineText));
+          // #1187 — the link dies after this line: the reply above will never be read.
+          if (opts.resetAfterWrite !== undefined && lineText.trim() === opts.resetAfterWrite) {
+            session.dead = true;
+            session.out.length = 0;
+          }
+          // #1197 — the same death on a Home press: `$H` went out and its answer never came.
+          if (homeFailure !== null && lineText.trim() === '$H') {
+            session.dead = true;
+            session.deadDetail = homeFailure;
+            session.out.length = 0;
+            homeFailure = null;
+          }
         }
       }
       return route.fulfill({ status: 204, body: '' });
     }
     if (tail === 'tcp/read') {
       const session = body.conn === undefined ? undefined : conns.get(body.conn);
+      if (session?.dead === true) {
+        return route.fulfill({
+          status: 500,
+          json: { error: session.deadDetail ?? 'read failed: Connection reset by peer (os error 104)' },
+        });
+      }
       if (session === undefined || session.out.length === 0) {
         // The client's read window: an empty answer is "nothing yet", not an error.
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -473,5 +516,6 @@ export async function installFakeConsole(page: Page, opts: FakeConsoleOptions = 
         elapsed = 0;
       }
     },
+    failHomeWith: (detail: string) => (homeFailure = detail),
   };
 }

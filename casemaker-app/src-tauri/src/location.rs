@@ -47,7 +47,7 @@ use crate::feeds::{validate_table, FeedRow};
 use crate::house::{validate_tiers, HouseDoc, HouseError, InventoryItem, UserTool};
 use crate::stock::{validate_shelf, StockItem};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// Magic string that says "this is a Case Maker location file".
 pub const LOCATION_KIND: &str = "casemaker-location";
@@ -148,6 +148,16 @@ pub struct FixtureRecord {
     pub whereabouts: AccessoryWhereabouts,
     #[serde(default)]
     pub history: Vec<AccessoryHistory>,
+    /// #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT: `z-only` never plans a sideways
+    /// `G38.3`, `all` keeps its instrument's own capability. Absent = the unit's default (`all`
+    /// for a 3D variant, `z-only` for the wired V2), derived by the client's `probeFor`; the
+    /// reason and date are the operator's record of the decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touches_since: Option<String>,
 }
 
 /// A datum measured ON this bed (§1). There is no "typed" constructor: `validate` refuses
@@ -168,6 +178,12 @@ pub struct MeasuredDatum {
     /// surface-top fallback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rests_on_stock: Option<bool>,
+    /// #1189 — THE PROBE'S REFERENCE when this datum was measured: the `M491` tool-length reading
+    /// from the same seating. The datum's `value` is a raw machine Z; `value − probe_ref_z` is the
+    /// probe-independent height. Omitted on datums measured before the key existed (a legacy datum
+    /// the Register card re-measures rather than trusting across a refit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_ref_z: Option<f64>,
 }
 
 /// #1059 — A DATUM MEASURED IN DEGREES, not millimetres: the A work zero of a square stock's OWN
@@ -429,6 +445,15 @@ impl FixtureRecord {
             if variant.trim().is_empty() {
                 return Err(HouseError::BadEntry(format!(
                     "machine {machine}'s fixture {} names an empty variant",
+                    self.id
+                )));
+            }
+        }
+        // #1200 — the restriction is one of exactly two words; a typo must not read as "all".
+        if let Some(touches) = &self.touches {
+            if touches != "z-only" && touches != "all" {
+                return Err(HouseError::BadEntry(format!(
+                    "machine {machine}'s fixture {} states touches: {touches} — the words are z-only or all",
                     self.id
                 )));
             }
@@ -857,6 +882,20 @@ pub struct FinishedCutMap {
     pub depth: CutMapStream,
 }
 
+/// #1179 — the cut map of ONE setup/face (the analyst's ruling, issue comment 6775024844): side 1
+/// and side 2 never merge, `complete` carries the map, and `unknown` carries the reason a merge
+/// could not finish (both enforced by `finished_programs::validate_runs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FinishedSetupCutMap {
+    pub setup_index: u32,
+    pub state: String,
+    #[serde(default)]
+    pub unknown_reason: Option<String>,
+    #[serde(default)]
+    pub map: Option<FinishedCutMap>,
+}
+
 /// #1179 — the stock dims the mask is placed on. `thicknessMm` is the JOB'S STATED thickness.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -899,8 +938,14 @@ pub struct FinishedRun {
     pub stock: Option<FinishedRunStock>,
     #[serde(default)]
     pub registration: Option<FinishedRunRegistration>,
+    /// #1179 blank identity (issue comment 6776457695) — WHICH blank this program was cut on.
+    /// Opaque; the current id for a job lives on the machine (`current_blank`), never in a job file.
     #[serde(default)]
-    pub cut_map: Option<FinishedCutMap>,
+    pub blank_id: Option<String>,
+    /// #1179 — one entry per setup/face; the newest record carries the blank's whole state. A list
+    /// rather than an option so an older document (no key) and a run with no maps both read as [].
+    #[serde(default)]
+    pub cut_maps: Vec<FinishedSetupCutMap>,
 }
 
 /// One physical machine at the location (§3.1).
@@ -957,6 +1002,17 @@ pub struct MachineRecord {
     /// while absent, so a record written before the section round-trips without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrations: Option<serde_json::Value>,
+    /// #1202 — the motion routines that have COMPLETED on this machine, as the client sent them:
+    /// a routine id, the shape hash of its line sequence, when it last completed and by which
+    /// build. A routine absent here has never run on this controller. Omitted while absent, so a
+    /// record written before the section round-trips without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_routines: Option<serde_json::Value>,
+    /// #1179 blank identity — the current blank id per JOB on this machine (issue comment
+    /// 6776457695): a blank sits on one machine's bed, so a job file never carries one. Omitted
+    /// while absent, so a record written before the section round-trips without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_blank: Option<BTreeMap<String, String>>,
     /// An optional controllable power switch (#416). None is the default and the common case. Written
     /// only through `/api/v1/power/:id`; a machine PUT keeps whatever is stored (`put_machine`).
     #[serde(default)]
@@ -1279,6 +1335,8 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            completed_routines: None,
+            current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -1310,16 +1368,22 @@ mod tests {
                 measured_at: Some("2026-11-10T13:00:00.000Z".into()),
                 plan_expected_top_machine_z: Some(-60.0),
             }),
-            cut_map: Some(FinishedCutMap {
-                cell_mm: 2.0,
-                cols: 80,
-                rows: 63,
-                x0_mm: 0.0,
-                y0_mm: 0.0,
-                step_mm: 0.05,
-                flat: CutMapStream { encoding: "rle".into(), data: "5040:1".into() },
-                depth: CutMapStream { encoding: "rle".into(), data: "5040:0".into() },
-            }),
+            blank_id: None,
+            cut_maps: vec![FinishedSetupCutMap {
+                setup_index: 1,
+                state: "complete".into(),
+                unknown_reason: None,
+                map: Some(FinishedCutMap {
+                    cell_mm: 2.0,
+                    cols: 80,
+                    rows: 63,
+                    x0_mm: 0.0,
+                    y0_mm: 0.0,
+                    step_mm: 0.05,
+                    flat: CutMapStream { encoding: "rle".into(), data: "5040:1".into() },
+                    depth: CutMapStream { encoding: "rle".into(), data: "5040:0".into() },
+                }),
+            }],
         }
     }
 
@@ -1330,6 +1394,7 @@ mod tests {
             by: "wired-probe".into(),
             at: Some([-150.0, -150.0]),
             rests_on_stock: None,
+            probe_ref_z: None,
         }
     }
 
@@ -1354,6 +1419,10 @@ mod tests {
             provenance: [("jawBarWidth".to_string(), "measured:2026-10-13".to_string())].into(),
             whereabouts: AccessoryWhereabouts::Box {},
             history: Vec::new(),
+            // #1200 — no restriction on this test fixture.
+            touches: None,
+            touches_reason: None,
+            touches_since: None,
         }
     }
 
@@ -1497,7 +1566,8 @@ mod tests {
     fn a_finished_run_round_trips_in_camel_case_and_refuses_a_broken_cut_map() {
         // #1179. Every field but the hash is optional — a partial record is still true — and the
         // map is all-or-nothing: an over-cap stream, a non-RLE encoding or a zero grid refuses the
-        // whole record, never a half-filled grid.
+        // whole record, never a half-filled grid. The maps are PER SETUP (the 11-10 ruling):
+        // `complete` carries its map, `unknown` carries the reason a merge could not finish.
         let mut machine = a_machine("m-1");
         machine.finished_programs = vec!["a1b2c3d4".into()];
         machine.finished_runs = vec![a_finished_run("a1b2c3d4", 1)];
@@ -1508,13 +1578,14 @@ mod tests {
             v["finishedRuns"][0]["registration"]["surfaceMachineZ"],
             serde_json::json!(-60.487)
         );
-        assert_eq!(v["finishedRuns"][0]["cutMap"]["stepMm"], serde_json::json!(0.05));
+        assert_eq!(v["finishedRuns"][0]["cutMaps"][0]["map"]["stepMm"], serde_json::json!(0.05));
+        assert_eq!(v["finishedRuns"][0]["cutMaps"][0]["state"], serde_json::json!("complete"));
         let back: MachineRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, machine);
 
         let partial: FinishedRun =
             serde_json::from_value(serde_json::json!({ "hash": "a1b2c3d4" })).unwrap();
-        assert_eq!(partial.cut_map, None);
+        assert!(partial.cut_maps.is_empty());
         assert_eq!(partial.program_index, None);
 
         let good = serde_json::json!({
@@ -1533,11 +1604,137 @@ mod tests {
             let mut machine = a_machine("m-1");
             machine.finished_programs = vec!["a1b2c3d4".into()];
             machine.finished_runs = vec![FinishedRun {
-                cut_map: Some(serde_json::from_value(bad).unwrap()),
+                cut_maps: vec![FinishedSetupCutMap {
+                    setup_index: 1,
+                    state: "complete".into(),
+                    unknown_reason: None,
+                    map: Some(serde_json::from_value(bad).unwrap()),
+                }],
                 ..a_finished_run("a1b2c3d4", 1)
             }];
             assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))), "{field}: {machine:?}");
         }
+
+        // The state's own rules: complete needs its map, unknown needs its reason, and a state
+        // outside the pair refuses the record.
+        for entry in [
+            serde_json::json!({ "setupIndex": 1, "state": "complete" }),
+            serde_json::json!({ "setupIndex": 1, "state": "unknown" }),
+            serde_json::json!({ "setupIndex": 1, "state": "unknown", "unknownReason": "  " }),
+            serde_json::json!({ "setupIndex": 1, "state": "partial", "map": good }),
+        ] {
+            let mut machine = a_machine("m-1");
+            machine.finished_programs = vec!["a1b2c3d4".into()];
+            machine.finished_runs = vec![FinishedRun {
+                cut_maps: vec![serde_json::from_value(entry).unwrap()],
+                ..a_finished_run("a1b2c3d4", 1)
+            }];
+            assert!(matches!(machine.validate(), Err(HouseError::BadEntry(_))), "{machine:?}");
+        }
+        let unknown = FinishedSetupCutMap {
+            setup_index: 2,
+            state: "unknown".into(),
+            unknown_reason: Some("the map does not fit the record even at 8 mm cells".into()),
+            map: None,
+        };
+        let mut machine = a_machine("m-1");
+        machine.finished_programs = vec!["a1b2c3d4".into()];
+        machine.finished_runs = vec![FinishedRun { cut_maps: vec![unknown], ..a_finished_run("a1b2c3d4", 1) }];
+        machine.validate().unwrap();
+    }
+
+    #[test]
+    fn a_step_one_finished_run_serialises_to_the_shared_wire_fixture() {
+        // #1179 — THE GOLDEN WIRE FILE both halves share (`tests/unit/fixtures/house-served-finished-
+        // run.json`): F's step-1 finish-write shape as the real service served it (registration
+        // g54 {x, y} with no z, so the Rust Option writes null). The Rust side asserts its own
+        // serde output equals the file — a serde change that alters the wire fails HERE — and the
+        // TS side parses the same file with the client schema, so a client change fails there.
+        // Keep the two in step when the record gains a field.
+        let run = FinishedRun {
+            hash: "a1b2c3d4".into(),
+            job_id: Some("job-1".into()),
+            job_name: Some("M1 tray".into()),
+            package_key: Some("abcdef0123456789".into()),
+            key8: Some("abcdef01".into()),
+            program_index: Some(3),
+            program_count: Some(17),
+            program_name: Some("tray-p03.nc".into()),
+            cutter_key: Some("inv:kz-a".into()),
+            setup_index: Some(1),
+            finished_at: Some("2026-11-10T13:00:00.000Z".into()),
+            stock: Some(FinishedRunStock {
+                length_mm: Some(100.0),
+                width_mm: Some(100.0),
+                thickness_mm: Some(25.0),
+            }),
+            registration: Some(FinishedRunRegistration {
+                surface_machine_z: Some(-60.487),
+                g54: Some(FinishedRunG54 { x: Some(77.344), y: Some(63.0), z: None }),
+                top_source: Some("touch".into()),
+                measured_top_machine_z: Some(-60.487),
+                implied_thickness_mm: None,
+                measured_at: Some("2026-11-10T13:00:00.000Z".into()),
+                plan_expected_top_machine_z: None,
+            }),
+            blank_id: None,
+            cut_maps: Vec::new(),
+        };
+        let wire = serde_json::to_value(&run).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string("../tests/unit/fixtures/house-served-finished-run.json")
+                .expect("the shared golden wire fixture"),
+        )
+        .unwrap();
+        assert_eq!(wire, fixture, "the Rust wire shape moved; update the golden fixture with it");
+    }
+
+    #[test]
+    fn the_machine_record_round_trips_its_current_blank() {
+        // #1179 blank identity — the current blank id per job lives on the MACHINE record and is
+        // omitted while absent, so a record written before the section round-trips unchanged.
+        let mut machine = a_machine("m-1");
+        machine.current_blank = Some(BTreeMap::from([("job-1".to_string(), "blank-abc".to_string())]));
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["currentBlank"]["job-1"], serde_json::json!("blank-abc"));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+        machine.current_blank = None;
+        let v = serde_json::to_value(&machine).unwrap();
+        assert!(v.get("currentBlank").is_none(), "{v}");
+    }
+
+    #[test]
+    fn the_machine_record_round_trips_its_completed_routines() {
+        // #1202 — the motion routines that have completed on this machine, with their line-sequence
+        // shape, date and build. Omitted while absent, so a record written before the section
+        // round-trips unchanged; present, it comes back exactly as the client sent it.
+        let mut machine = a_machine("m-1");
+        machine.completed_routines = Some(serde_json::json!([
+            {
+                "routine": "seat-press",
+                "shape": "0f3c9a11",
+                "at": "2026-11-11T09:12:00.000Z",
+                "build": { "version": "1.0.0", "commit": "abc1234" },
+            },
+            {
+                "routine": "registration",
+                "shape": "aa11bb22",
+                "at": "2026-11-11T09:40:00.000Z",
+                "build": { "version": "1.0.0", "commit": "abc1234" },
+            },
+        ]));
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["completedRoutines"][0]["routine"], serde_json::json!("seat-press"));
+        assert_eq!(v["completedRoutines"][0]["shape"], serde_json::json!("0f3c9a11"));
+        assert_eq!(v["completedRoutines"][1]["build"]["commit"], serde_json::json!("abc1234"));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+        machine.completed_routines = None;
+        let v = serde_json::to_value(&machine).unwrap();
+        assert!(v.get("completedRoutines").is_none(), "{v}");
     }
 
     #[test]
@@ -1710,6 +1907,56 @@ mod tests {
     }
 
     #[test]
+    fn a_probe_units_touch_restriction_validates_and_round_trips() {
+        // #1200 — the operator's restriction on the unit (top touches only) is optional, round-trips
+        // with its reason and date, and a word outside the two is refused.
+        let mut loc = LocationDoc::fresh();
+        let mut probe = a_bed_fixture();
+        probe.id = "fx-probe-3d".into();
+        probe.kind = "probe".into();
+        probe.variant = Some("3d".into());
+        probe.touches = Some("z-only".into());
+        probe.touches_reason = Some("the ball tip may not be 100% straight down".into());
+        probe.touches_since = Some("2026-11-10T20:15:00.000Z".into());
+        // #1203 — the fitted post's shank and the posts the unit owns ride the open `unit` map.
+        probe.unit = serde_json::json!({
+            "tipDiameterMm": 2.0, "rimOffsetMm": 0.7, "rimOffsetUncertaintyMm": 0.25,
+            "shankMm": 6.0,
+            "posts": [
+                { "id": "post-1-8", "label": "1/8\" post", "diameterMm": 6.35, "condition": "broken" },
+                { "id": "post-6", "label": "6 mm post", "diameterMm": 6.0, "condition": "fitted" }
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        // The bed profile places the vise, so the machine must own it (the fixture's own rule).
+        loc.accessories = vec![a_bed_fixture(), probe.clone()];
+        loc.machines.push(a_machine_with_a_bed());
+        loc.validate().unwrap();
+        let v = serde_json::to_value(&loc).unwrap();
+        assert_eq!(v["accessories"][1]["touches"], serde_json::json!("z-only"));
+        assert_eq!(v["accessories"][1]["touchesReason"], serde_json::json!("the ball tip may not be 100% straight down"));
+        assert_eq!(v["accessories"][1]["unit"]["shankMm"], serde_json::json!(6.0));
+        assert_eq!(v["accessories"][1]["unit"]["posts"][0]["condition"], serde_json::json!("broken"));
+        let back: LocationDoc = serde_json::from_value(v).unwrap();
+        assert_eq!(back, loc);
+
+        // Absent fields must not be written back (a document written before #1200 keeps its shape).
+        let plain = a_bed_fixture();
+        let pv = serde_json::to_value(&plain).unwrap();
+        assert!(pv.get("touches").is_none(), "touches was written: {pv}");
+
+        // One of exactly two words.
+        let mut bad = probe;
+        bad.touches = Some("sideways".into());
+        let mut loc_bad = LocationDoc::fresh();
+        loc_bad.accessories = vec![a_bed_fixture(), bad];
+        loc_bad.machines.push(a_machine_with_a_bed());
+        assert!(matches!(loc_bad.validate(), Err(HouseError::BadEntry(_))));
+    }
+
+    #[test]
     fn a_machine_without_a_bed_says_nothing_about_one() {
         // #510's round-trip rule: a document written before the bed existed must not GAIN the keys.
         // `fixtures` (the #412 settings record) is untouched and still serialized as before.
@@ -1857,6 +2104,26 @@ mod tests {
         unknown["typedBy"] = serde_json::json!("hand");
         let err = serde_json::from_value::<MeasuredDatum>(unknown).unwrap_err().to_string();
         assert!(err.contains("typedBy"), "{err}");
+    }
+
+    /// #1189 — THE PROBE REFERENCE a datum was measured at is a KNOWN key: it round-trips on the
+    /// wire (camelCase), an older datum stays without one, and an unknown key is still refused.
+    #[test]
+    fn a_datum_stores_the_probe_reference_it_was_measured_at() {
+        let mut datum = a_datum(-85.75);
+        datum.probe_ref_z = Some(-9.094);
+        let v = serde_json::to_value(&datum).unwrap();
+        assert_eq!(v["probeRefZ"], serde_json::json!(-9.094), "the reference is written in camelCase");
+        let back: MeasuredDatum = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(back, datum);
+
+        // A datum measured before the key existed parses, and stays without one in the file.
+        let legacy: MeasuredDatum = serde_json::from_value(serde_json::json!({
+            "value": -60.487, "measuredAt": "2026-11-09T00:00:00.000Z", "by": "wired-probe", "at": [3.5, 3.5]
+        }))
+        .unwrap();
+        assert_eq!(legacy.probe_ref_z, None);
+        assert!(serde_json::to_value(&legacy).unwrap().get("probeRefZ").is_none());
     }
 
     /// #1070 (C8) — a placed bracket's seed is a KNOWN key on a placement: it round-trips with

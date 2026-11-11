@@ -396,7 +396,9 @@ describe('the package store (#419 §4): freeze takes the blank, and keeps it whi
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.reservation.kind).toBe('refused');
-    expect(res.reservation.text).toContain('job-12');
+    // #1109 §4 (later) renders the holder in friendly words ("used by job 12" — the job- prefix
+    // stripped); the later issue's wording wins.
+    expect(res.reservation.text).toContain('used by job 12');
     expect(useEngravePackageStore.getState().packageFor(job.id)).not.toBeNull();
   });
 

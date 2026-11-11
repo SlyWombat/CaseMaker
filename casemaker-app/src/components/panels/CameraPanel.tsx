@@ -37,6 +37,7 @@ import { resolvedMachineById } from '@/engine/cnc/calibration';
 import { readStatusLine } from '@/platform/desktop/protocol';
 import {
   cameraHomeLines,
+  cameraHomeLiftProblem,
   cameraHomeWords,
   runCameraHome,
   type CameraHomeBasis,
@@ -190,10 +191,15 @@ export function CameraPanel(): JSX.Element | null {
   const stateWord = statusLine?.state ?? null;
   const percent = statusLine?.progress.percent ?? null;
   const idleNoJob = stateWord !== null && stateWord.toLowerCase() === 'idle' && (percent === null || percent >= 100);
+  // #1199 — the pose is the clearance key, but the press proves it: a Z below the resolved
+  // clearance refuses instead of traversing under it.
+  const poseProblem = cameraHomeLiftProblem(pose, profile.toolChange.clearanceZ);
   const homeRefusal =
     machine === null
       ? 'No machine is connected.'
-      : idleNoJob
+      : poseProblem !== null
+        ? poseProblem
+        : idleNoJob
         ? null
         : stateWord === null
           ? 'The machine’s state is not known.'
@@ -205,7 +211,7 @@ export function CameraPanel(): JSX.Element | null {
     if (homeBusy || machine === null || homeRefusal !== null) return;
     setHomeBusy(true);
     setHomeNote(null);
-    const r = await runCameraHome({ host: machine.host, port: machine.port }, cameraHomeLines(pose));
+    const r = await runCameraHome({ host: machine.host, port: machine.port }, cameraHomeLines(pose, profile.toolChange.clearanceZ));
     setHomeNote(homeWords(r, pose));
     setHomeBusy(false);
   }

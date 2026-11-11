@@ -19,7 +19,7 @@ import {
   type HouseCall,
   type HouseClient,
 } from '@/platform/houseClient';
-import { MachineRecordSchema, type MachineRecord } from '@/platform/locationClient';
+import { MachineRecordSchema, type FinishedRun, type FinishedSetupCutMap, type MachineRecord } from '@/platform/locationClient';
 import {
   clearStoredBaseline,
   finishedProgramsFor,
@@ -43,7 +43,7 @@ function fakeService() {
     address: TARGET,
     updatedAt: '2026-10-15T00:00:00.000Z',
   });
-  const posts: { id: string; hash: string }[] = [];
+  const posts: { id: string; hash: string; run?: FinishedRun }[] = [];
   let version = 1;
   const view = () =>
     JSON.stringify({
@@ -77,12 +77,25 @@ function fakeService() {
     inventory: async () => ({ kind: 'ok', etag: '"i"', items: [] }),
     call: async (method, path, body): Promise<HouseCall> => {
       if (method === 'GET' && path === '/location') return { kind: 'ok', text: view(), etag: `"loc-${version}"` };
+      if (method === 'PUT' && path.startsWith('/location/machines/')) {
+        // #1179 blank identity — the finish-write mints a job's first blank id through the same
+        // guarded machine PUT as every other record.
+        Object.assign(machine, body as MachineRecord);
+        version += 1;
+        return { kind: 'ok', text: '' };
+      }
       if (method === 'POST' && path.startsWith('/finished-programs/')) {
         const id = decodeURIComponent(path.slice('/finished-programs/'.length));
         if (id !== machine.id) return { kind: 'refused', status: 404, message: `machine ${id} is not in the location` };
-        const hash = (body as { hash: string }).hash;
-        posts.push({ id, hash });
-        if (!machine.finishedPrograms.includes(hash)) machine.finishedPrograms.push(hash);
+        const posted = body as { hash: string; run?: FinishedRun };
+        posts.push({ id, hash: posted.hash, ...(posted.run === undefined ? {} : { run: posted.run }) });
+        if (posted.run !== undefined) {
+          // #1179 — the service upserts the record newest-wins, even for a hash already listed.
+          const at = machine.finishedRuns.findIndex((record) => record.hash === posted.run!.hash);
+          if (at >= 0) machine.finishedRuns.splice(at, 1);
+          machine.finishedRuns.push(posted.run);
+        }
+        if (!machine.finishedPrograms.includes(posted.hash)) machine.finishedPrograms.push(posted.hash);
         version += 1;
         return { kind: 'ok', text: '' };
       }
@@ -130,6 +143,51 @@ describe('#419 §4.5 finished programs: the durable per-machine list', () => {
     expect(again).toEqual({ ok: true, added: false, text: '' });
     expect(service.posts).toHaveLength(1);
     expect(service.machine.finishedPrograms).toEqual([HASH]);
+  });
+
+  it('#1179 — the finish posts the record; each setup’s map is cumulative on its own face', async () => {
+    const entry = (setupIndex: number, level: number): FinishedSetupCutMap[] => [
+      {
+        setupIndex,
+        state: 'complete',
+        map: {
+          cellMm: 2,
+          cols: 2,
+          rows: 1,
+          x0Mm: 0,
+          y0Mm: 0,
+          stepMm: 0.05,
+          flat: { encoding: 'rle' as const, data: '2:1' },
+          depth: { encoding: 'rle' as const, data: `1:${level},1:0` },
+        },
+      },
+    ];
+    const run = (hash: string, programIndex: number, setupIndex: number, level: number): FinishedRun => ({
+      hash,
+      jobId: 'job-1',
+      packageKey: 'package-1',
+      programIndex,
+      programCount: 5,
+      stock: { lengthMm: 20, widthMm: 10 },
+      cutMaps: entry(setupIndex, level),
+    });
+    await useLocationStore.getState().recordFinishedProgram('m-1', 'aaaa1111', run('aaaa1111', 1, 1, 4));
+    await useLocationStore.getState().recordFinishedProgram('m-1', 'bbbb2222', run('bbbb2222', 2, 1, 10));
+    expect(service.posts[0]!.run?.cutMaps?.[0]?.map?.depth.data).toBe('1:4,1:0');
+    // The second program's layer is merged with the first record's: the deeper cut wins.
+    expect(service.posts[1]!.run?.cutMaps?.[0]?.map?.depth.data).toBe('1:10,1:0');
+    // A shallow later layer never lowers a cut that is already in the wood.
+    await useLocationStore.getState().recordFinishedProgram('m-1', 'cccc3333', run('cccc3333', 3, 1, 2));
+    expect(service.posts[2]!.run?.cutMaps?.[0]?.map?.depth.data).toBe('1:10,1:0');
+    // #1179's ruling — setup 2 is its OWN face: its own entry, and side 1 is carried untouched.
+    await useLocationStore.getState().recordFinishedProgram('m-1', 'dddd4444', run('dddd4444', 4, 2, 6));
+    expect(service.posts[3]!.run?.cutMaps?.map((e) => e.setupIndex)).toEqual([1, 2]);
+    expect(service.posts[3]!.run?.cutMaps?.[0]?.map?.depth.data).toBe('1:10,1:0');
+    expect(service.posts[3]!.run?.cutMaps?.[1]?.map?.depth.data).toBe('1:6,1:0');
+    // The record upserts: a repeat WITH a record posts even though the hash is already listed.
+    await useLocationStore.getState().recordFinishedProgram('m-1', 'aaaa1111', run('aaaa1111', 1, 1, 4));
+    expect(service.posts).toHaveLength(5);
+    expect(service.machine.finishedRuns.map((record) => record.hash)).toEqual(['bbbb2222', 'cccc3333', 'dddd4444', 'aaaa1111']);
   });
 
   it('the persisted list is what the plan sees, so an already-cut program is not “new”', async () => {

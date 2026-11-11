@@ -54,6 +54,8 @@ const STATE: CSSProperties = {
   fontSize: 11,
   color: '#e8eef4',
 };
+/** #1106 — what a row says where nothing can be checked (the web build) or the record has no address. */
+const PROFILE_ONLY_WORDS = 'profile only — vendor defaults; connect it at Cut';
 const MUTED_INLINE: CSSProperties = { color: '#8a97a5' };
 const FOLD: CSSProperties = {
   display: 'block',
@@ -118,6 +120,14 @@ export interface MachineStepProps {
   onAddress: (value: string) => void;
   /** THE check. With no host it searches; with one it connects to that address (the fold). */
   onCheck: (host?: string) => void;
+  /** #1106 — the machine the job carries (the row that is selected). */
+  selectedMachineId?: string | null;
+  /** #1106 — the machine last used, first in the list and pre-selected on a new job. */
+  lastMachineId?: string | null;
+  /** #1106 — choose a machine for the job. */
+  onSelectMachine?: (id: string) => void;
+  /** #1106 — the machine-change wizard, opened here for the selected machine's bed. */
+  onChangeBed?: () => void;
 }
 
 export function MachineStep({
@@ -130,9 +140,16 @@ export function MachineStep({
   address,
   onAddress,
   onCheck,
+  selectedMachineId = null,
+  lastMachineId = null,
+  onSelectMachine,
+  onChangeBed,
 }: MachineStepProps): JSX.Element {
   const [another, setAnother] = useState(false);
-  const house = houseMachine(machines);
+  // #1106 — the selected machine is the header's, not merely the first record: step 1 is a picker.
+  const selectedRecord =
+    selectedMachineId === null || machines === null ? null : (machines.find((m) => m.id === selectedMachineId) || null);
+  const house = selectedRecord ?? houseMachine(machines);
   const houseHost = house?.address?.host ?? null;
 
   // THE CHECK ON OPEN (#682, E4). One per arrival at the step; Back remounts the body, so going
@@ -159,7 +176,9 @@ export function MachineStep({
     onCheck(host);
   }
 
-  const checking = busy || !checkStarted || outcome === null;
+  // #1106 item 2 — "checking" only where a check can run. The web build never calls `onCheck`, so
+  // `outcome` stays null and the selected row read "Checking…" for ever.
+  const checking = canReachMachine && (busy || !checkStarted || outcome === null);
   const found = !checking && outcome === 'found' && machine !== null;
   const line = machine?.statusLine ?? (machine?.status ? readStatusLine(machine.status) : null);
 
@@ -193,7 +212,8 @@ export function MachineStep({
     found && machine !== null && machine.status !== null
       ? readMachineRest(machine.status)?.homed === true
       : false;
-  const word = found ? `Online · ${wordBase}${homed ? ' · homed' : ''}` : wordBase;
+  // #1109 — `homed` is the spec's word; the operator reads what it means.
+  const word = found ? `Online · ${wordBase}${homed ? ' · knows where it is' : ''}` : wordBase;
   const checked = found ? timeOfDay(machine.observedAt) : null;
 
   // Last seen belongs to the machine this line is about. When a house record exists, another
@@ -206,8 +226,76 @@ export function MachineStep({
       ? formatStamp(lastReached.observedAt)
       : null;
 
+  // #1106 — WHICH MACHINE? The location's CNC records, the last used first, profile-only rows a
+  // full citizen. A one-machine house sees its machine selected and presses Next.
+  const orderedMachines = (machines ?? [])
+    .slice()
+    .sort((a, b) => {
+      const used = (m: MachineRecord): number => (m.id === lastMachineId ? 0 : 1);
+      if (used(a) !== used(b)) return used(a) - used(b);
+      const address = (m: MachineRecord): number => (m.address === null ? 1 : 0);
+      if (address(a) !== address(b)) return address(a) - address(b);
+      return displayName(a, null, null)!.localeCompare(displayName(b, null, null)!);
+    });
+
   return (
     <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
+      {/* #821 — the same one sentence the Manage card carries
+          (#1106 item 2: it HEADS the step, above the list): the relay-less deploy cannot drive
+          a machine, and says where it can. The job can still be set up here. */}
+      {!canReachMachine && (
+        <p style={NOTE} data-testid="start-wizard-machine-note-build">
+          {NO_MACHINE_RELAY_SENTENCE}
+        </p>
+      )}
+      {orderedMachines.length > 0 && (
+        <div data-testid="start-wizard-machine-list" style={{ display: 'grid', gap: 4, margin: '2px 0 10px' }}>
+          <p style={{ ...MUTED, margin: 0 }}>Which machine?</p>
+          {orderedMachines.map((record) => {
+            const selected = record.id === (selectedMachineId ?? house?.id ?? null);
+            const profile = activeProfileOf(record);
+            const bed = profile === null ? null : `${MACHINE_MOUNT_WORDS[activeMountOf(record)]} · ${surfaceWords(profile.surface)}`;
+            const state = !canReachMachine
+              ? PROFILE_ONLY_WORDS
+              : selected
+              ? checking
+                ? 'Checking…'
+                : found
+                  ? `Online · ${wordBase}`
+                  : 'Offline — you can still write, check and simulate; the machine is needed at Cut'
+              : record.address === null
+                ? PROFILE_ONLY_WORDS
+                : 'Offline — you can still write, check and simulate; the machine is needed at Cut';
+            return (
+              <button
+                key={record.id}
+                type="button"
+                className="sw-btn"
+                data-testid={`start-wizard-machine-row-${record.id}`}
+                data-mount={activeMountOf(record)}
+                aria-pressed={selected}
+                disabled={onSelectMachine === undefined}
+                onClick={() => onSelectMachine?.(record.id)}
+                style={{ width: '100%', textAlign: 'left', padding: 5, border: selected ? '1px solid #5a8abf' : undefined }}
+              >
+                <span style={{ display: 'block', fontSize: 12, color: '#cfe' }}>
+                  {displayName(record, null, null)}
+                  {bed === null ? '' : ` · ${bed}`}
+                </span>
+                <span style={{ display: 'block', ...MUTED, margin: 0 }}>{state}</span>
+                {record.profileId === null && (
+                  <span style={{ display: 'block', ...MUTED, margin: 0 }}>no profile — set it in Manage › Machines</span>
+                )}
+              </button>
+            );
+          })}
+          {onChangeBed !== undefined && (
+            <button type="button" className="sw-btn" data-testid="start-wizard-change-bed" onClick={onChangeBed} style={{ textAlign: 'left' }}>
+              Change what’s on the bed…
+            </button>
+          )}
+        </div>
+      )}
       {(name !== null || host !== null) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
           {name !== null && (
@@ -270,9 +358,10 @@ export function MachineStep({
             </span>
             <button
               type="button"
+              className="sw-btn"
               data-testid="start-wizard-check"
               disabled={busy}
-              style={{ marginLeft: 'auto', padding: '3px 12px' }}
+              style={{ marginLeft: 'auto' }}
               onClick={() => requestCheck()}
             >
               {busy ? 'Looking…' : 'Check again'}
@@ -286,7 +375,7 @@ export function MachineStep({
           {found && route !== null && (
             <p style={NOTE} data-testid="start-wizard-machine-route">
               {route === 'recorded'
-                ? 'Reached at its recorded address — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
+                ? 'Found at the address you wrote — the network search heard nothing, which is normal for a server that cannot receive broadcasts.'
                 : route === 'network'
                   ? 'Found on the network.'
                   : 'Reached at the address you gave.'}
@@ -308,10 +397,12 @@ export function MachineStep({
           )}
 
           {/* THE ONE FOLD. The address and Connect are not a second way to ask the question; they
-              are the manual route for a machine the search cannot hear. */}
+              are the manual route for a machine the search cannot hear. A fold toggle is not an
+              action: `data-fold` keeps it out of the component-set gate. */}
           <button
             type="button"
             data-testid="start-wizard-machine-another"
+            data-fold="true"
             aria-expanded={another}
             style={FOLD}
             onClick={() => setAnother((open) => !open)}
@@ -334,7 +425,6 @@ export function MachineStep({
                     spellCheck={false}
                     data-testid="start-wizard-address"
                     aria-label="Machine address"
-                    title="For a machine the search cannot hear."
                     style={{ width: 120 }}
                     value={address}
                     onChange={(e) => onAddress(e.target.value)}
@@ -342,6 +432,7 @@ export function MachineStep({
                 </label>
                 <button
                   type="button"
+                  className="sw-btn"
                   data-testid="start-wizard-connect-address"
                   disabled={busy || address.trim().length === 0}
                   onClick={() => requestCheck(address.trim())}
@@ -357,13 +448,6 @@ export function MachineStep({
         </>
       )}
 
-      {/* #821 — the same one sentence the Manage card carries: the relay-less deploy cannot drive
-          a machine, and says where it can. The job can still be set up here. */}
-      {!canReachMachine && (
-        <p style={NOTE} data-testid="start-wizard-machine-note-build">
-          {NO_MACHINE_RELAY_SENTENCE}
-        </p>
-      )}
     </div>
   );
 }

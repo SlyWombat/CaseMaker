@@ -45,7 +45,7 @@ import type { SetupFlip } from '@/types/engraveJob';
 import { settingsProblem, type RegistrationSettings } from './settings';
 import { planFootprintRegistration } from './footprint';
 import { centrePair } from './centreFind';
-import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed } from './probe3d';
+import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed, sideTouchSelected, type SideTouchSubject } from './probe3d';
 
 export type Mount = 'vise' | 'bracket' | 'tape';
 
@@ -138,10 +138,38 @@ export interface ProbeSpec {
    */
   tipLengthMm?: number | null;
   bodyDiameterMm?: number | null;
+  /**
+   * #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT. `z-only` never plans a sideways
+   * `G38.3`: a stylus that is not exactly on the spindle axis reads every edge off by the bend,
+   * and side loads are what break a repaired one. `all` keeps the instrument's own capability.
+   *
+   * The effect is separate from `instrument` on purpose: the INSTRUMENT is what the variant is
+   * (a 3D probe still releases its stylus before any rapid, still needs its M491 reference), and
+   * this is how far the operator lets it touch. `probeFor` states the unit's default — `all` for
+   * the 3D variant, `z-only` for the wired V2 (the issue's ruling, 2026-11-10) — and a plan with
+   * no probe at all (or a probe with the field absent) keeps #1133's rule byte for byte.
+   */
+  touches?: ProbeTouchRestriction;
+  /**
+   * #1200 — HOW FAR OFF THE AXIS THE TIP MAY BE, mm, as the operator states it (0 default). A top
+   * touch is never planned closer to an edge than this plus the tip radius: near an edge the ball
+   * can drop onto the roll-off and read low, and a bent stylus makes that worse.
+   */
+  tipLateralUncertaintyMm?: number;
+  /**
+   * #1203 — THE SHANK (POST) FITTED TO THIS UNIT, its diameter in mm. The wired V2's sensor and
+   * tip are one unit; the shank is a threaded post that swaps for different collets (1/8" =
+   * 6.35 mm, 6 mm), so the fit-probe prompt names the collet the operator must have in the
+   * spindle. The tip values belong to the sensor and survive a swap; only this changes.
+   */
+  shankMm?: number | null;
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
 export type ProbeInstrument = 'z-only' | 'xyz';
+
+/** #1200 — the operator's restriction on one probe UNIT: top touches only, or everything. */
+export type ProbeTouchRestriction = 'z-only' | 'all';
 
 /**
  * The instrument an accessory variant names. The house registers the 3D probe as variant `'3d'`
@@ -167,6 +195,12 @@ export interface MountDatum {
   jawTopZ: number;
   measuredAt: string;
   by: string;
+  /**
+   * #1189 — the probe's `M491` reference at the tap that measured this jaw top. The value is a raw
+   * machine Z; a probe refitted since then makes every expected surface shift by the difference.
+   * Absent/null on a legacy datum: the card asks for the one-touch re-measure instead of using it.
+   */
+  probeRefZ?: number | null;
 }
 
 /**
@@ -204,6 +238,12 @@ export interface PlanMountTap {
   expectZ?: number | null;
   /** #607 — how far below the reading the DATUM sits: the bracket's own height; 0/absent for the vise. */
   datumOffsetMm?: number;
+  /**
+   * #1189 — the probe's reference at the measurement `expectZ` comes from. The executor corrects
+   * `expectZ` by `today's M491 − probeRefZ` before it compares a touch with it. Absent/null on a
+   * legacy datum: the tap runs without a stale expectation and writes a fresh reading.
+   */
+  probeRefZ?: number | null;
 }
 
 export interface PlanInput {
@@ -232,6 +272,13 @@ export interface PlanInput {
    * stock, and using it would offset the whole seek band by the difference between the two tools.
    */
   expectedSurface: { machineZ: number; from: string };
+  /**
+   * #1201 — A GUARDED TOP SEEK: no expected surface. The band becomes
+   * [floorMachineZ + marginMm, seekFromMachineZ − parkAboveSurfaceMm] and any contact in it is the
+   * reading (the agreement checks prove it). `expectedSurface` is then unused; the #1166 derived-top
+   * offer is off. The card plans this for a bracket job with no trusted seat.
+   */
+  guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
   /**
    * #598 — the MEASURED mount datum (the vise's jaw top, machine Z). Present on the normal vise path;
    * null/absent means the caller could not supply one and turns the plan into a `need-datum` ("tap the
@@ -271,6 +318,21 @@ export interface PlanInput {
    * seek accepts a surface up to `jawTop + thickness + tolerance`. Absent on the legacy seat path.
    */
   stockThicknessMm?: number;
+  /**
+   * #1189 — THE PROBE REFERENCE the expected surface was computed from (its datum's `probeRefZ`).
+   * The plan is built before the probe's `M491`; the executor shifts the expected top and every
+   * band derived from it by `today's M491 − this`. Absent/null: a derived or typed seat (no datum
+   * sets the expectation), or a stored plan from before the key — today's behaviour.
+   */
+  probeRefZ?: number | null;
+  /** #1189 — the datum's words in the correction sentence ('the seat', 'the jaw top', …). */
+  probeRefLabel?: string | null;
+  /**
+   * #1189 — when the seek's FLOOR comes from a different datum than its expected top (a surface
+   * top above, the jaw under it), that datum's own reference. Absent: the floor follows
+   * {@link probeRefZ}.
+   */
+  floorProbeRefZ?: number | null;
   /**
    * REQUIRED, and the CALLER's to supply: the machine's own travel height in MACHINE Z — the resolved
    * machine's `toolChange.clearanceZ` (`machine.ts` → `resolveMachine`), the Z the controller lifts to
@@ -338,6 +400,16 @@ export interface RegistrationPlan {
   corner?: { id: CornerId; xEdge: 'left' | 'right'; yEdge: 'front' | 'back' };
   /** #619 — the stock's thickness, mm, for the datum path's upper surface bound. */
   stockThicknessMm?: number;
+  /** #1189 — the probe reference the Z expectations were computed at, and whose words; see PlanInput. */
+  probeRefZ?: number | null;
+  probeRefLabel?: string | null;
+  /** #1189 — the floor's own datum reference when it differs from {@link probeRefZ}. */
+  floorProbeRefZ?: number | null;
+  /**
+   * #1189 — this is the SEAT-SEEK plan run to re-measure a seat whose stored reading predates the
+   * probe's last fitting (it carries no reference). The one touch writes it with the reference.
+   */
+  seatRemeasure?: 'probe-refit';
   surfacePoint: { x: number; y: number };
   /**
    * #1179 B — TOUCH POINTS ON A BLANK THAT HAS BEEN CUT, work XY with the depth each point is
@@ -359,8 +431,30 @@ export interface RegistrationPlan {
    * choice; the run's note carries the sentence.
    */
   surfaceChecksProbeNote?: string;
+  /**
+   * #1199 — THE MACHINE'S OWN TRAVEL HEIGHT this plan was built against (`toolChange.clearanceZ`),
+   * carried SEPARATELY from {@link RegistrationPlan.seek}: the executor's guard is built from THIS,
+   * never from the seek's start, so a plan (or a caller) that states a band approach as its travel
+   * height cannot hand a probing run a floor of −81.25. Absent on persisted plans from before the
+   * field: the executor refuses to run them rather than guess (`planTravelProblem`).
+   */
+  machineClearanceZ?: number;
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
+  /**
+   * #1201 — A GUARDED TOP SEEK: NO EXPECTED TOP.
+   *
+   * A bracket job whose bed has no trusted seat does not need one: the top is measured on the
+   * blank. The plan's `surfaceChecks` are the two touch points (the path origin, inset, and the
+   * cut area's centre), both at `depthMm: 0`; the seek starts at the machine's clearance and stops
+   * on contact anywhere above `floorMachineZ + marginMm`. The executor accepts the reading as the
+   * top (it must not offer #1166's derived top, which would be the band's ceiling) and the two
+   * readings are proved by the agreement rule. The seat stays a bed-setup datum.
+   *
+   * `seatIgnored` is why the plan is guarded, in the card's words: `legacy` — a seat is on file
+   * but was measured before the probe's last fitting; `absent` — the bed states none.
+   */
+  guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
   /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */
   mountDatum: MountDatum | null;
   /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
@@ -452,8 +546,10 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
 
   // The surface seek: bounded to the expected surface ± tolerance, and started from the machine's own
   // travel height (`seekFromMachineZ`) — the SAME value the obstacle check below is measured from.
+  // #1201 — a GUARDED seek has no expected top: its band is the bed's floor to the clearance.
+  const guarded = input.guarded ?? null;
   const exp = input.expectedSurface.machineZ;
-  if (!Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
+  if (guarded === null && !Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
   const seekFromMachineZ = input.seekFromMachineZ;
   if (!Number.isFinite(seekFromMachineZ)) return { ok: false, reason: 'the machine’s travel height is not known' };
   const mountDatum = input.mountDatum ?? null;
@@ -499,16 +595,24 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
   // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed
   // below the jaw tops (#517) — keeps the band's own floor.
-  const seekFloor =
-    mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ
-      ? r3(mountDatum.jawTopZ - s.surfaceToleranceMm)
-      : r3(exp - s.surfaceToleranceMm);
-  const band = { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) };
+  const floorFromDatum = guarded === null && mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ;
+  const seekFloor = floorFromDatum ? r3(mountDatum!.jawTopZ - s.surfaceToleranceMm) : r3(exp - s.surfaceToleranceMm);
+  const band =
+    guarded === null
+      ? { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) }
+      : { min: r3(guarded.floorMachineZ + guarded.marginMm), max: r3(seekFromMachineZ - s.parkAboveSurfaceMm) };
+  if (guarded !== null && !(band.min < band.max)) {
+    return { ok: false, reason: 'the guarded seek has no room between the bed’s floor and the machine’s clearance' };
+  }
+  // #1189 — the floor is the JAW's when it comes from the jaw datum; it then shifts by that
+  // datum's own reference, which may differ from the expected surface's (a surface top above, a
+  // jaw measured in another seating). Absent, both follow the expected surface's datum.
+  const floorProbeRefZ = floorFromDatum ? (mountDatum!.probeRefZ ?? null) : (input.probeRefZ ?? null);
   if (band.max + s.parkAboveSurfaceMm > seekFromMachineZ) {
     return { ok: false, reason: `the stock's top is expected at machine Z ${exp}: too high to park ${s.parkAboveSurfaceMm} mm above it` };
   }
   const travel = r3(seekFromMachineZ - band.min);
-  if (travel > s.surfaceSeekMm) {
+  if (guarded === null && travel > s.surfaceSeekMm) {
     return {
       ok: false,
       reason: `the stock's top is expected ${r3(seekFromMachineZ - exp)} mm below the start, more than the ${s.surfaceSeekMm} mm the surface touch may travel`,
@@ -516,14 +620,24 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   }
 
   const surfacePoint = input.cutCentre ?? { x: (stock.xMin + stock.xMax) / 2, y: (stock.yMin + stock.yMax) / 2 };
-  const inset = Math.max(1, stock.cornerRadius);
+  // #1200 — A TOP TOUCH KEEPS THE UNIT'S LATERAL UNCERTAINTY PLUS THE TIP RADIUS CLEAR OF EVERY
+  // EDGE: near an edge the ball can meet the roll-off instead of the flat top and read low, and an
+  // off-axis tip (a bent stylus) turns that into an error. The old inset (a millimetre, or the
+  // corner radius) still applies on top.
+  const lateralSigma = probe?.tipLateralUncertaintyMm ?? 0;
+  const topTouchInset = Math.max(1, stock.cornerRadius, s.tipRadiusMm + lateralSigma);
   if (
-    surfacePoint.x < stock.xMin + inset ||
-    surfacePoint.x > stock.xMax - inset ||
-    surfacePoint.y < stock.yMin + inset ||
-    surfacePoint.y > stock.yMax - inset
+    surfacePoint.x < stock.xMin + topTouchInset ||
+    surfacePoint.x > stock.xMax - topTouchInset ||
+    surfacePoint.y < stock.yMin + topTouchInset ||
+    surfacePoint.y > stock.yMax - topTouchInset
   ) {
-    return { ok: false, reason: 'the surface point is not well inside the stock' };
+    return {
+      ok: false,
+      reason:
+        `the surface touch point is not well inside the stock: a top touch keeps ${r3(topTouchInset)} mm clear of every edge ` +
+        `(the tip's ${r3(s.tipRadiusMm)} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''})`,
+    };
   }
 
   // #1070 — A BED-HELD JOB IS REGISTERED ON THE CUT REGION'S FOOTPRINT. The region's extents go
@@ -546,7 +660,17 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       softLimits: input.softLimits ?? null,
       expectedSurface: input.expectedSurface,
       seekFromMachineZ,
-      probe: { instrument: input.probe?.instrument === 'xyz' ? 'xyz' : 'z-only', tipRadiusMm: s.tipRadiusMm },
+      probe: {
+        instrument: input.probe?.instrument === 'xyz' ? 'xyz' : 'z-only',
+        tipRadiusMm: s.tipRadiusMm,
+        // #1200 — the unit's restriction rides the footprint plan too: the dispatch reads it.
+        ...(input.probe?.touches === undefined ? {} : { touches: input.probe.touches }),
+        ...(input.probe?.tipLateralUncertaintyMm === undefined
+          ? {}
+          : { tipLateralUncertaintyMm: input.probe.tipLateralUncertaintyMm }),
+        // #1203 — the fitted post's shank rides the plan so the executor can name the collet.
+        ...(input.probe?.shankMm === undefined || input.probe.shankMm === null ? {} : { shankMm: input.probe.shankMm }),
+      },
       settings: {
         scanInsideMm: s.scanInsideMm,
         scanReachMm: s.scanReachMm,
@@ -565,11 +689,16 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         mount,
         stock,
         stockThicknessMm: input.stockThicknessMm,
+        ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
+        ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
+        ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
         surfacePoint: {
           x: r3((input.region.min[0] + input.region.max[0]) / 2),
           y: r3((input.region.min[1] + input.region.max[1]) / 2),
         },
+        machineClearanceZ: seekFromMachineZ,
         seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+        ...(guarded === null ? {} : { guarded }),
         mountDatum,
         probe,
         mountTap,
@@ -771,8 +900,39 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       );
     }
   }
+  // #1200 — THE RESTRICTION IS STATED, WITH WHAT WAS PLANNED INSTEAD. A unit restricted to top
+  // touches takes no sideways seek (sideTouchSelected); where the mount WOULD have offered one,
+  // the note names those edges and the method they got instead. Nothing is said when the
+  // unrestricted plan would have been the same (a mount with no free edge, or a plan with no probe).
+  if (probe !== null && probe.touches === 'z-only') {
+    const unrestricted: SideTouchSubject = {
+      mount,
+      mountDatum,
+      ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
+      ...(cornerXFrom === undefined ? {} : { cornerXFrom }),
+      probe: { touches: 'all' },
+    };
+    const wouldSide = [...new Set(scans.filter((sc) => sideTouchSelected(unrestricted, sc.edge)).map((sc) => sc.edge))];
+    if (wouldSide.length > 0) {
+      const named = wouldSide.map((e) => `the ${e} edge`).join(', ');
+      notes.push(
+        `the probe is restricted to top touches: ${named} ${wouldSide.length === 1 ? 'is' : 'are'} found by stepping Z over ${wouldSide.length === 1 ? 'it' : 'them'}, not with a sideways touch`,
+      );
+    }
+  }
+  // #1200 (manager's note) — A RESTRICTED 3D UNIT IS A NEW PATH: it has never run a registration
+  // on this machine, and it stays under the first-run guard until the bench proves it. Said on the
+  // plan's own notes, so the card and the record carry it.
+  if (probe !== null && probe.instrument === 'xyz' && probe.touches === 'z-only') {
+    notes.push(
+      'the 3D probe has not run a registration on this machine yet: this top-touches-only path is its first run and stays under the first-run guard until the bench proves it',
+    );
+  }
   notes.push(
-    `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`,
+    guarded === null
+      ? `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`
+      // #1201 — the guarded seek's own sentence: no expectation, a floor, and what proves the reading.
+      : `the top is guarded: no expected surface — the seek stops on contact above machine Z ${band.min} (the bed’s floor + a margin), and the two check points must agree`,
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,
     // #1133 — the band, its provenance, and what it buys: the maintainer's own rule.
     `every edge find stays within ±${s.edgeBandMm} mm of where the edge is expected (the stock's own size error, the mount's repeat 0.05 mm and fit 0.1 mm, plus margin); the probe stops at the first touch off the stock`,
@@ -788,8 +948,13 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       // #525 — present only on a corner plan, so every other plan's record is unchanged.
       ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
       stockThicknessMm: input.stockThicknessMm,
+      ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
+      ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
+      ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
       surfacePoint,
+      machineClearanceZ: seekFromMachineZ,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+      ...(guarded === null ? {} : { guarded }),
       mountDatum,
       probe,
       mountTap,

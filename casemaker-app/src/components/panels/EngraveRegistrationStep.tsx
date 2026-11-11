@@ -49,10 +49,8 @@ import type { EngraveJob } from '@/types/engraveJob';
 import { probeInstrumentOf, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { expectedTopOf, thicknessNote } from '@/engine/cnc/registration/thicknessNote';
 import { readDefault } from '@/platform/defaultsClient';
-import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import { implicitJobSetup, implicitSetupFor, registrationOf } from '@/engine/cnc/registration/implicitSetup';
 import type { MountSpec, Setup } from '@/engine/cnc/setups';
-import { useMountTap } from '@/hooks/useMountTap';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { summarizeOutcome, summarizePlan } from '@/engine/cnc/registration/summary';
 import { canonicalJson } from '@/engine/cnc/engrave/package';
@@ -123,6 +121,7 @@ import { faceUpOf, planFromSetups, setupsSettings } from '@/engine/cnc/setups';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, rotaryOf } from '@/engine/cnc/machine';
 import { planRegistrationAttempt } from './registrationAttempt';
+import { blankScopeFor } from '@/engine/cnc/registration/blankIdentity';
 import { RotaryAxisTap } from '@/components/manage/RotaryAxisTap';
 import { RotaryFaceAngleTap } from '@/components/manage/RotaryFaceAngleTap';
 import type { RegistrationAttempt } from './EngraveSetupRow';
@@ -137,6 +136,15 @@ import {
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useMachineStopReportStore } from '@/store/machineStopReportStore';
+// #1187 — a stopped action's own report (the transport/controller error's card action).
+import { StopReportAction } from '@/components/panels/StopReportAction';
+import { stopIsReportable } from '@/platform/machineStopReport';
+// #1202 + #1199 item 3 — the dry line view and the first-run mark.
+import { dryFlipRegistration, dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -162,6 +170,85 @@ const OK = '#9fd19b';
 const BAD = '#f0b4ad';
 const WARN = '#e0c07a';
 
+/**
+ * #1202 + #1199 item 3 — A ROUTINE'S OWN DRY LINES, MARKED WHEN THIS MACHINE HAS NEVER RUN THEM.
+ * One card serves every motion routine the registration step offers: the sequence the press will
+ * run (the SAME executor, against a recording console), this machine's record of that exact shape,
+ * the guard's refusals, and the operator's own first-run statement. The testids are the same for
+ * whichever routine owns the card — only one routine's card is on screen at a time.
+ */
+function RoutineDryPreview({
+  preview,
+  firstRun,
+  ticked,
+  onTick,
+  headless,
+}: {
+  preview: DryRoutine;
+  firstRun: boolean;
+  ticked: boolean;
+  onTick: (checked: boolean) => void;
+  headless: string | null;
+}) {
+  return (
+    <div
+      data-testid="engrave-registration-routine"
+      data-routine={preview.identity.routine}
+      data-shape={preview.identity.shape}
+      style={{ marginTop: 6 }}
+    >
+      {firstRun && (
+        <p style={{ ...MUTED, color: WARN, margin: '4px 0' }} data-testid="engrave-registration-first-run">
+          This measurement has not run on this machine before — stay at the Stop.
+        </p>
+      )}
+      <details data-testid="engrave-registration-dry">
+        <summary data-testid="engrave-registration-dry-summary">
+          What will be sent — {preview.lines.length} line{preview.lines.length === 1 ? '' : 's'}
+        </summary>
+        <ol style={{ ...MUTED, paddingLeft: 18, margin: '4px 0' }} data-testid="engrave-registration-dry-list">
+          {preview.lines.map((l, i) => (
+            <li
+              key={`${i}-${l.line}`}
+              data-testid={`engrave-registration-dry-line-${i}`}
+              data-refused={l.refused === null ? undefined : 'true'}
+              style={l.refused === null ? undefined : { color: BAD }}
+            >
+              <code>{l.line}</code>
+              {l.refused !== null && <span> — {l.refused}</span>}
+            </li>
+          ))}
+        </ol>
+        <p style={{ ...MUTED, margin: '2px 0 0' }} data-testid="engrave-registration-dry-note">
+          The routine’s own sequence, under the readings the plan expects. Every line is checked
+          again live as it is sent — this view previews; the guard enforces.
+        </p>
+      </details>
+      {headless !== null && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">
+          {headless}
+        </p>
+      )}
+      {preview.refused && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
+          The marked line would be refused — the press is disabled.
+        </p>
+      )}
+      {firstRun && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' }} data-testid="engrave-registration-first-run-statement">
+          <input
+            type="checkbox"
+            data-testid="engrave-registration-first-run-tick"
+            checked={ticked}
+            onChange={(e) => onTick(e.target.checked)}
+          />
+          <span>I am at the machine — the probe is fitted, the head is clear, and I will stay at the Stop.</span>
+        </label>
+      )}
+    </div>
+  );
+}
+
 export interface EngraveRegistrationStepProps {
   /** The job whose approved setup-1 registration is run. */
   job: EngraveJob;
@@ -182,19 +269,46 @@ const n = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** #797 follow-up — the plan in one line: where it touches, how many touches, which probe. */
 function proposalLine(plan: RegistrationPlan): string {
-  // #1070 — the seat plan is one touch, named for what it measures.
-  if (isSeatPlan(plan)) return 'the bracket seat — one Z seek on the wasteboard beside the front arm · wired probe';
+  // #1200 — a unit the operator restricted says so before the press: "3D probe · top touches only".
+  const restricted = plan.probe?.touches === 'z-only';
+  const probeWords = `${probeInstrumentOf(plan.probe) === 'xyz' ? '3D probe' : 'wired probe'}${restricted ? ' · top touches only' : ''}`;
+  // #1201 — THE GUARDED TOP SEEK: no seat, two touches ON the blank. The machine XY of each is
+  // stated before the press (the work points carried by the plan, offset by the bracket's origin).
+  if (plan.guarded !== undefined) {
+    const p3 = (v: number): string => String(Math.round(v * 1000) / 1000);
+    const origin = plan.bracketOrigin;
+    const at = (point: { x: number; y: number }): string =>
+      origin === null
+        ? `(${p3(point.x)}, ${p3(point.y)})`
+        : `machine X ${p3(origin.x + point.x)}, Y ${p3(origin.y + point.y)}`;
+    const points = (plan.surfaceChecks ?? []).map(at);
+    return `the top on the blank — ${points.length === 0 ? 'two touches' : points.join(' and ')} · ${probeWords}`;
+  }
   const order = ['left', 'front', 'right', 'back'] as const;
   const edges = order.filter((edge) => plan.scans.some((scan) => scan.edge === edge));
   const touches = registrationTouches({ ok: true, plan });
   const touchWords = `${touches} touch${touches === 1 ? '' : 'es'}`;
-  const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? '3D probe' : 'wired probe';
   const list =
     edges.length === 0
       ? 'no edge scan'
       : edges.length === 1
         ? `${edges[0]} edge`
         : `${edges.slice(0, -1).join(', ')} and ${edges.at(-1)} edges`;
+  // #1179 amendment (2026-11-10) — WHERE it will touch, before the press, so the operator can
+  // clear those spots: chips collect against the edges, and the bench's first check was the
+  // front-left corner. The inset is the nearest check's distance to any stock edge (the candidates
+  // prefer 10 mm; a narrow uncut area relaxes to the 3 mm margin).
+  const checks = plan.surfaceChecks ?? [];
+  if (checks.length > 0) {
+    const inset = Math.round(
+      Math.min(
+        ...checks.map((c) =>
+          Math.min(c.x - plan.stock.xMin, plan.stock.xMax - c.x, c.y - plan.stock.yMin, plan.stock.yMax - c.y),
+        ),
+      ),
+    );
+    return `${list}, then the top · ${touchWords} · ${probeWords} — the checks touch at least ${inset} mm in from the stock's edges`;
+  }
   return `${list}, then the top · ${touchWords} · ${probeWords}`;
 }
 
@@ -265,32 +379,35 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // Design → Setups stays the place to edit it.
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
-  const machineRecord = target === null ? null : machineAt(target);
-  // #1166 — HAS THIS JOB FINISHED PROGRAMS ON THIS MACHINE? The machine record's own list plus the
-  // job's run log — the release store's `done` union, so the two places progress is written are read
-  // the same way here. The executor offers the bracket's derived top only when something has cut.
-  const hasFinishedPrograms = useMemo(
-    () =>
-      (machineRecord?.finishedPrograms ?? []).length > 0 ||
-      (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
-    [machineRecord, job.runLog],
+  // #1202 — a LIVE subscription: the first-run mark is read from this machine's record, and the
+  // location may arrive after the card mounts (a fresh load). A one-shot read left the mark stuck
+  // on "never run" even when the record already said it had.
+  const machineRecord = useLocationStore((s) =>
+    target === null
+      ? null
+      : s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
   );
   /**
    * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK. A finished run of this job keeps the top its
    * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
    * continues from THAT top rather than from seat + stated thickness.
    */
-  const lastRecordedTopMachineZ = useMemo(() => {
-    let latest: { at: string; machineZ: number } | null = null;
+  const lastRecordedTop = useMemo(() => {
+    let latest: { at: string; machineZ: number; probeRefZ: number | null } | null = null;
     for (const run of machineRecord?.finishedRuns ?? []) {
       if (run.jobId !== job.id) continue;
       const machineZ = run.registration?.surfaceMachineZ;
       if (machineZ === undefined) continue;
       const at = run.finishedAt ?? '';
-      if (latest === null || at >= latest.at) latest = { at, machineZ };
+      // #1189 — the seating the recorded top was read in; the executor corrects the raw value by
+      // today's M491, and refuses to use it at all when the record carries no reference.
+      const probeRefZ = run.registration?.probeRefZ ?? null;
+      if (latest === null || at >= latest.at) latest = { at, machineZ, probeRefZ };
     }
-    return latest?.machineZ ?? null;
+    return latest;
   }, [machineRecord, job.id]);
+  const lastRecordedTopMachineZ = lastRecordedTop?.machineZ ?? null;
+  const lastRecordedTopProbeRefZ = lastRecordedTop?.probeRefZ ?? null;
   const probe = useMemo(() => probeFor(machineRecord), [machineRecord]);
   const mountDatum = useMemo(() => mountDatumFor(machineRecord), [machineRecord]);
   const mountDatumMismatchBy = useMemo(() => mountDatumMismatch(machineRecord), [machineRecord]);
@@ -312,6 +429,26 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const registrationSetup = flippedSetup ? (job.setups?.[setupNumber - 1] ?? null) : (job.setups?.[0] ?? null);
   const registrationSetupIndex =
     registrationSetup === null ? 1 : (job.setups?.findIndex((s) => s.id === registrationSetup.id) ?? 0) + 1;
+  // #1179 blank identity (the analyst's fields, issue comment 6776457695) — THE GUARD READS THE
+  // BLANK, NOT THE MACHINE. `blankScopeFor` is the one reading of `currentBlank`/`blankId`/`cutMaps`:
+  // a job WITH an id scopes to that id (legacy and other-blank entries are out of scope by
+  // construction); a job WITHOUT one takes the safe default — legacy finished entries mean the
+  // blank MAY have been cut, so the unknown-cuts path runs and the "new blank" press is offered.
+  // The same entry feeds stage 2's candidates, so the card cannot say "nothing has cut" and then
+  // plan three touches.
+  const blankScope = useMemo(
+    () =>
+      blankScopeFor({
+        machine: machineRecord,
+        jobId: job.id,
+        setupIndex: registrationSetupIndex,
+        packageHashes: (job.package?.programs ?? []).map((program) => program.hash),
+        runLogFinished: (job.runLog ?? []).some((entry) => entry.outcome === 'finished'),
+      }),
+    [machineRecord, job.id, registrationSetupIndex, job.package, job.runLog],
+  );
+  /** True when the next registration measures a blank that has already been cut. */
+  const hasFinishedPrograms = blankScope.cutsOnThisBlank;
   // The heartbeat's answer and its status line, for the memo's G54 check — the same 2 s read the
   // status strip draws, never a new socket.
   const heartbeat = useMachineStore((s) => s.heartbeat);
@@ -319,6 +456,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const restoreJob = useEngraveRegistrationStore((s) => s.restoreJob);
   const restoreSetup = useEngraveRegistrationStore((s) => s.restoreSetup);
   const [restoreVerdict, setRestoreVerdict] = useState<RegistrationMemoVerdict | null>(null);
+  /** #1179 — the sentence after the "This is a new blank" / registration mint. */
+  const [blankNote, setBlankNote] = useState<string | null>(null);
 
   // #1123-40 — RESTORE FROM THE HOUSE, ONCE THE MACHINE HAS SAID WHERE ITS G54 IS. The memo is the
   // record this job's setup last wrote — the plan, the outcome, the measuredAt. It is put back only
@@ -408,16 +547,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     [machineRecord, registrations, seekFromMachineZ, job],
   );
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
-  // #1070, 6b's ruling — THE FIRST-RUN SEAT PRESS: a seat plan (one bracket-seat mount tap, no
-  // scans) runs through the STANDALONE tap with the plan's own seek bound, not the registration
-  // executor; its reading is written as the bed profile's bracket seat by the same hook.
-  const seatTapApi = useMountTap({
-    target,
-    settings: regSettings,
-    floor: jobMachine(job, calibration).envelope.z.min,
-    probeId: probe?.id ?? null,
-    successNote: 'the bracket seat is recorded — plan the registration again',
-  });
+  // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask (read before the
+  // seat tap is created so the tap can take the same answer the registration executor takes).
+  const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const setupSettings = useMemo(() => setupsSettings(defaults), [defaults]);
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
@@ -490,6 +622,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       settings: regSettings,
       // #1179 B — a blank that has been cut is MEASURED on known depths, not asked about.
       cutBlank: hasFinishedPrograms,
+      // #1179 stage 2 — THE MAP, WHEN THE BLANK'S RECORD HAS ONE FOR THIS SETUP. `complete` gives
+      // the candidates from the blank's own measured state; `unknown`/absent keeps the package
+      // footprint's unknown-cuts path.
+      cutBlankMap: blankScope.setupMap?.state === 'complete' ? (blankScope.setupMap.map ?? null) : null,
       largestOwnedDiameterMm,
       finishedHashes: machineRecord?.finishedPrograms ?? [],
       // #1179 B — only the registered setup's own programs are this face's known cuts.
@@ -510,8 +646,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     defaults,
     calibration,
     regSettings,
-    // #1179 B — the cut-blank trigger and the fallback cutter size are plan inputs.
+    // #1179 — the cut-blank trigger, its map and the fallback cutter size are plan inputs.
     hasFinishedPrograms,
+    blankScope,
     largestOwnedDiameterMm,
     machineRecord,
     registrationSetupIndex,
@@ -541,6 +678,10 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             thicknessMm,
             facingMm: job.facing?.enabled === true ? job.facing.depth : 0,
             toleranceMm: regSettings.surfaceToleranceMm,
+            // #1189 — the side-1 run's M491: the carried top is a raw reading in that seating, and
+            // the corner Z band is corrected to today's probe once the flip run measures it. The
+            // spread's own record names it; a stored registration is the fallback.
+            probeRefZ: surfaces[job.id]?.probeRefZ ?? registrations[job.id]?.outcome.probeRefZ ?? null,
           });
     return planFlipAttemptForJob(
       job,
@@ -554,7 +695,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       },
       setupNumber - 1,
     );
-  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools]);
+  }, [job, machineRecord, surfaces, probe, seekFromMachineZ, regSettings, setupNumber, flipGoal, tools, registrations]);
   // #1123-28 — the stored plan the operator approved, next to the planner's CURRENT proposal.
   // A changed planner (a build, a machine record) can make them differ; the card says so and
   // offers the new plan in place rather than silently running the old one.
@@ -562,6 +703,83 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const planDrift = plan !== null && proposalPlan !== null && canonicalJson(plan) !== canonicalJson(proposalPlan.plan);
 
   const [proposalOpen, setProposalOpen] = useState(false);
+  // #1202 + #1199 item 3 — THE PRESS PREVIEW. The routine the press would run is executed against
+  // a RECORDING console (no socket) and every line is shown with the motion-order guard's verdict,
+  // BEFORE the press. The same list's shape is the routine's identity: a shape this machine has
+  // never completed marks the press as a first run, which needs its own at-machine statement.
+  const [preview, setPreview] = useState<DryRoutine | null>(null);
+  const [routineTicked, setRoutineTicked] = useState(false);
+  const previewPlan: RegistrationPlan | null = plan ?? (proposal?.kind === 'plan' ? proposal.plan : null);
+  const previewFloor = jobMachine(job, calibration).envelope.z.min;
+  useEffect(() => {
+    if (previewPlan === null || target === null) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    const clearanceZ = previewPlan.machineClearanceZ ?? seekFromMachineZ;
+    const seat = seatTapArgs(previewPlan);
+    void (async () => {
+      try {
+        const dry =
+          seat !== null
+            ? await dryMountTap(seat, {
+                clearanceZ,
+                settings: regSettings,
+                workEnvelopeFloorZ: previewFloor,
+                mount: 'bracket',
+                planTravelMm: seat.planTravelMm,
+                routine: 'seat-press',
+                liveClearanceZ: seekFromMachineZ,
+              })
+            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings, liveClearanceZ: seekFromMachineZ });
+        if (live) setPreview(dry);
+      } catch {
+        if (live) setPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [previewPlan, target, seekFromMachineZ, regSettings, previewFloor]);
+  // A fresh statement per routine shape: the tick that satisfied the last press is not this one.
+  const previewShape = preview?.identity.shape ?? null;
+  useEffect(() => setRoutineTicked(false), [previewShape]);
+  const firstRun = preview !== null && !routineCompleted(machineRecord, preview.identity);
+  // The press is refused when the guard would refuse a line, and held until the operator's own
+  // statement when this exact routine has never completed on this machine (#1202 field 2).
+  const routineGate = (preview !== null && preview.refused) || (firstRun && !routineTicked);
+  // #1202 — the FLIP registration's own preview: side 2's frame plan, through the same executor
+  // the press runs, against the same live clearance. A routine of its own (its own id and shape).
+  const [flipPreview, setFlipPreview] = useState<DryRoutine | null>(null);
+  const [flipTicked, setFlipTicked] = useState(false);
+  useEffect(() => {
+    if (flipAttempt?.kind !== 'plan' || target === null) {
+      setFlipPreview(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const dry = await dryFlipRegistration(flipAttempt.attempt, { liveClearanceZ: seekFromMachineZ });
+        if (live) setFlipPreview(dry);
+      } catch {
+        if (live) setFlipPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flipAttempt, target, seekFromMachineZ]);
+  const flipShape = flipPreview?.identity.shape ?? null;
+  useEffect(() => setFlipTicked(false), [flipShape]);
+  const flipFirstRun = flipPreview !== null && !routineCompleted(machineRecord, flipPreview.identity);
+  const flipGate = (flipPreview !== null && flipPreview.refused) || (flipFirstRun && !flipTicked);
+  // #1202 field 4 — the same refusal for the flip's own first run.
+  const flipHeadlessRefusal = firstRunAutomationRefusal({ firstRun: flipFirstRun });
+  // #1202 field 4 — a first run under automation against a real controller is REFUSED, in words.
+  const headlessRefusal = firstRunAutomationRefusal({ firstRun });
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
   const [gridNote, setGridNote] = useState<string | null>(null);
@@ -607,13 +825,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
 
   /** #797 follow-up — approve the planner's proposal and start the run in ONE press. */
   async function approveAndStart(attempt: Extract<RegistrationAttempt, { kind: 'plan' }>): Promise<void> {
-    // #1070 — the seat press measures, it does not register: run the one bounded seek and stop
-    // (the hook writes the datum); the registration is planned again against the reading.
-    const seatTap = seatTapArgs(attempt.plan);
-    if (seatTap !== null) {
-      await seatTapApi.tapJaw(seatTap);
-      return;
-    }
     approvePlan(attempt);
     await start(attempt.plan);
   }
@@ -621,8 +832,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const record = useEngraveRegistrationStore((s) => s.record);
   /** #1088 — a later setup's registration is filed under its own setup id, never the job's. */
   const recordSetup = useEngraveRegistrationStore((s) => s.recordSetup);
-  // #797 — the one statement at Cut step 1 covers this step's probe-fitted ask.
-  const statementGiven = useEngraveRunStore((s) => s.acknowledged);
   const measureSurface = useEngraveRegistrationStore((s) => s.measureSurface);
   const houseMargins = useSettingsStore((s) => s.margins);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -635,6 +844,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const [runPlanUsed, setRunPlanUsed] = useState<RegistrationPlan | null>(null);
   const [written, setWritten] = useState<ApplyResult | null>(null);
   const [homeNote, setHomeNote] = useState<string | null>(null);
+  /**
+   * #1197 — THE HOME'S OWN FAILURE SENTENCE, kept apart from the operator note: the note says what
+   * to do by hand, the report carries what the console actually answered.
+   */
+  const [homeFailure, setHomeFailure] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * #743 D-2 — the operator's answer to a disc more than 1 % off the stated diameter: resize the
@@ -681,6 +895,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         resolverRef.current = null;
         answer(false);
       }
+      // BENCH BLOCKER 2026-11-10 — AND CLOSE THE SESSION. Leaving the app while the card sits at
+      // `measured` (the run ended, its origin not yet written) stranded this console: `again()` and
+      // the write press close it, but an unmount had no path that did. The Rust relay keeps a
+      // connection until `tcpClose`, so that stranded one showed as an ESTABLISHED socket to the
+      // controller (the analyst's leak). The executor's own epilogue still runs where it can, and
+      // closing twice is safe (`close()` is idempotent).
+      const handle = handleRef.current;
+      handleRef.current = null;
+      if (handle !== null) void handle.close();
     };
   }, []);
 
@@ -747,6 +970,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
    * a second `send` on that session would interleave on its single frame channel. What `abort` does
    * to an in-flight probe move is the S1 question; the outcome says what the machine reported.
    */
+  /**
+   * #1179 — "THIS IS A NEW BLANK". The operator's statement, minted on the machine record (E's
+   * `mintBlank`): a fresh id for this job, written through the guarded machine PUT. Old records
+   * keep their own ids as history and stop matching; the card re-plans to the single touch.
+   */
+  async function newBlank(): Promise<void> {
+    if (target === null) return;
+    const machine = machineAt(target);
+    if (machine === null) return;
+    const minted = await useLocationStore.getState().mintBlank(machine.id, job.id);
+    setBlankNote(
+      minted.ok
+        ? 'A new blank — this registration takes the single surface touch.'
+        : `The blank was not saved: ${minted.text}`,
+    );
+  }
+
   async function pressStop(): Promise<void> {
     if (stopRef.current) return;
     stopRef.current = true;
@@ -761,7 +1001,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     if (target === null) return;
     const handle = attachConsole(target);
     try {
-      setHomeNote(await homeAfterStop(handle));
+      const home = await homeAfterStop(handle);
+      setHomeNote(home.note);
+      setHomeFailure(home.failure);
     } finally {
       await handle.close();
     }
@@ -787,8 +1029,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     }
   }
 
-  /** Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. */
-  async function homeAfterStop(handle: ConsoleHandle): Promise<string> {
+  /**
+   * Stop, then home. The executor's stop sentence has already cleared G90/$X where it could. The
+   * note is what the operator is told; the failure is the console's own sentence, kept for #1197's
+   * report — the note alone ("home it by hand") is the app's words, not the machine's.
+   */
+  async function homeAfterStop(handle: ConsoleHandle): Promise<{ note: string; failure: string | null }> {
     try {
       // #588 — "in alarm" is the machine's State, not a sentence. `$X` to an Idle machine is a no-op
       // with no reply, so it would sit out the console's 60 s first-reply window before `$H` (the
@@ -800,10 +1046,16 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       }
       const reply = await handle.send('$H');
       return reply.kind === 'sent'
-        ? 'The machine was homed after the stop.'
-        : `The machine did not answer the home command (${reply.kind}) — home it by hand.`;
-    } catch {
-      return 'The machine could not be homed — home it by hand.';
+        ? { note: 'The machine was homed after the stop.', failure: null }
+        : {
+            note: `The machine did not answer the home command (${reply.kind}) — home it by hand.`,
+            failure: reply.detail,
+          };
+    } catch (e) {
+      return {
+        note: 'The machine could not be homed — home it by hand.',
+        failure: e instanceof Error ? e.message : String(e),
+      };
     }
   }
 
@@ -822,6 +1074,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setNarration(null);
     stopRef.current = false;
@@ -838,6 +1091,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         { ctx: attempt.attempt.ctx, z0: attempt.attempt.z0 },
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1199 item 2 — the LIVE machine's clearance, so the plan is proven against the machine
+          // as it is now, not only against the value it was planned with.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop is checked before every line, exactly as side 1's run.
           stopRequested: () => stopRef.current,
           // The Cut step-1 statement already names the probe, so the fit-probe ask is answered by it.
@@ -856,18 +1112,39 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         return;
       }
       if (!r.ok) {
-        const note = stopRef.current ? null : await homeAfterStop(handle);
+        const home = stopRef.current ? null : await homeAfterStop(handle);
         if (!aliveRef.current) {
           handleRef.current = null;
           await handle.close();
           return;
         }
         setResult(r);
-        setHomeNote(note);
+        setHomeNote(home?.note ?? null);
+        setHomeFailure(home?.failure ?? null);
         setPhase('failed');
         handleRef.current = null;
         await handle.close();
         return;
+      }
+      // #1202 — THE FLIP REGISTRATION COMPLETED: its identity is recorded on the machine (the
+      // guarded PUT). A refused write only means the next press marks the routine again. The
+      // card's preview is the identity's source; a press taken before it resolved computes the
+      // same identity from the same plan (the dry console never touches the wire).
+      if (target !== null) {
+        const flipMachine = machineAt(target);
+        if (flipMachine !== null) {
+          const flipIdentity =
+            flipPreview?.identity ??
+            (await dryFlipRegistration(attempt.attempt, { liveClearanceZ: seekFromMachineZ })).identity;
+          void saveMachineWithRetry(flipMachine, (current) =>
+            withRoutineCompletion(current, {
+              routine: 'flip-registration',
+              shape: flipIdentity.shape,
+              at: new Date().toISOString(),
+              build: buildStamp(),
+            }),
+          );
+        }
       }
       setResult(r);
       setPhase('measured');
@@ -895,18 +1172,29 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       return;
     }
     if (flipAttempt?.kind === 'refused') return;
+    // #1187 — a new run starts its stop report clean: the last stop's "Sent …" line belongs to
+    // THAT stop, never to the card this press may earn.
+    useMachineStopReportStore.getState().reset();
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;
-    // #1070 — a stored seat plan still runs as the seat press (the standalone tap, bounded).
-    const seatTap = effectivePlan === null ? null : seatTapArgs(effectivePlan);
-    if (seatTap !== null) {
-      await seatTapApi.tapJaw(seatTap);
-      return;
-    }
     // #797 — the ONE statement at Cut step 1 replaced this step's own at-machine tick.
     const acknowledged = useEngraveRunStore.getState().acknowledged;
     if (target === null || effectivePlan === null || !acknowledged || busy) return;
+    // #1179 — THE PACKAGE IS FINISHED ON THIS BLANK. Registering again begins a NEW blank: mint it,
+    // say so, and stop — the card re-plans against the fresh blank and the next press runs the
+    // single touch. The mint is the operator's statement; no old record is rewritten.
+    if (blankScope.packageFinishedUnderBlank) {
+      const machine = machineAt(target);
+      if (machine === null) return;
+      const minted = await useLocationStore.getState().mintBlank(machine.id, job.id);
+      setBlankNote(
+        minted.ok
+          ? 'The last blank was finished — this is a new blank. Press Register again to measure its top.'
+          : `The blank was not saved: ${minted.text}`,
+      );
+      return;
+    }
     // #639 — A NEW RUN FORGETS THE LAST CLAMPING. The record and the surface assessment belong to
     // the blank as it was; keeping them through a re-run (which may alarm out or be stopped) left
     // the Cut step claiming "Registration recorded", the dome tick ticked, and Upload enabled
@@ -916,6 +1204,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setNarration(null);
     stopRef.current = false;
@@ -959,6 +1248,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1199 item 2 — the LIVE machine's clearance at run time.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop: checked before every line, and the flag outlives the
           // prompt it may also decline.
           stopRequested: () => stopRef.current,
@@ -978,6 +1269,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           hasFinishedPrograms,
           // #1179 D/B4 — the blank's last recorded top, so the derived offer continues from it.
           lastRecordedTopMachineZ,
+          // #1189 — the probe's reference at the run that recorded it (null: not used across a refit).
+          lastRecordedTopProbeRefZ,
           // #587 — the executor narrates each step as it moves; surface it live.
           onStep: (sentence) => {
             if (aliveRef.current) setNarration(sentence);
@@ -1009,7 +1302,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         // recommendation and the material scan plan from (#496). Both spans travel with the count
         // of touches that produced them and the date they were taken: a figure with no provenance
         // is the assumed dome #496 removed.
-        measureSurface(job.id, target, r.spread);
+        // #1189 — with the seating the raw Z values were read in.
+        measureSurface(job.id, target, r.spread, r.data.probeRefZ);
         const store = useEngraveJobStore.getState();
         if (store.job.id === job.id) {
           const measuredAt = new Date().toISOString();
@@ -1039,18 +1333,36 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         // #933 — AFTER AN OPERATOR STOP THE MACHINE IS NOT HOMED BY THE APP. `$H` is a rapid, and
         // the whole point of a Stop is that nothing moves until the person says so; the panel
         // offers Home as its own press. Every other failure keeps the #588 epilogue.
-        const note = stopRef.current ? null : await homeAfterStop(handle);
+        const home = stopRef.current ? null : await homeAfterStop(handle);
         if (!aliveRef.current) {
           handleRef.current = null;
           await handle.close();
           return;
         }
         setResult(r);
-        setHomeNote(note);
+        setHomeNote(home?.note ?? null);
+        setHomeFailure(home?.failure ?? null);
         setPhase('failed');
         handleRef.current = null;
         await handle.close();
         return;
+      }
+      // #1202 — THE REGISTRATION COMPLETED. Its routine identity (the line sequence the press
+      // sent) is recorded on the machine BEFORE any house write that may fail: the MOTION finished
+      // without a stop, which is what the record claims, and an unreadable save only means the
+      // next press marks the routine again — the safe direction.
+      if (preview !== null && target !== null) {
+        const recordMachine = machineAt(target);
+        if (recordMachine !== null) {
+          void saveMachineWithRetry(recordMachine, (current) =>
+            withRoutineCompletion(current, {
+              routine: preview.identity.routine,
+              shape: preview.identity.shape,
+              at: new Date().toISOString(),
+              build: buildStamp(),
+            }),
+          );
+        }
       }
       // #636 — THE MEASUREMENT IS ON SCREEN BEFORE ANY HOUSE WRITE. A throw or a refused save in
       // the chain below used to land in the outer catch as `failed`, and the successful probe result
@@ -1089,13 +1401,14 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               const frame = viseFrameFromRegistration(frameRegistration, jobVise(job).jawStartY);
               rec = withVisePlacementFrame(rec, frame, { fixedJawFaceX: `measured:${now}`, jawStartY: 'typed' }, now);
               // #619 — write the measured surface top so the next plan expects the found top.
-              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now);
+              // #1189 — with the seating it was read in, so a later refit is corrected.
+              rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now, r.data.probeRefZ);
             }
             if (mountTap !== null) {
               rec =
                 bracketSeat !== null
-                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now)
-                  : withViseJawTopDatum(rec, mountTap, probeId, now);
+                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now, r.data.probeRefZ)
+                  : withViseJawTopDatum(rec, mountTap, probeId, now, r.data.probeRefZ);
             }
             return rec;
           };
@@ -1200,6 +1513,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         {
           console: { send: (line, timing) => handle.send(line, timing) },
           operator: askOperator,
+          // #1199 — the live machine's clearance, even for the origin write's session.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the Stop is live while the origin is written too: the button is on screen for
           // the whole phase, and a press that did nothing would be a dead press.
           stopRequested: () => stopRef.current,
@@ -1280,6 +1595,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               { z: result.data.surface.z, at: runPlan.surfacePoint },
               runPlan.probe?.id ?? null,
               now,
+              // #1189 — the seating this reading was taken in.
+              result.data.probeRefZ,
             );
           }
           return memo === null ? rec : withRegistrationMemo(rec, memo);
@@ -1325,6 +1642,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     setResult(null);
     setWritten(null);
     setHomeNote(null);
+    setHomeFailure(null);
     setError(null);
     setPrompt(null);
     setDiscAnswer(null);
@@ -1366,6 +1684,29 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       </div>
     );
   }
+
+  // #1202 + #1199 item 3 — WHAT WILL BE SENT, the first-run mark, and the press's own statement.
+  const routinePreview =
+    preview === null ? null : (
+      <RoutineDryPreview
+        preview={preview}
+        firstRun={firstRun}
+        ticked={routineTicked}
+        onTick={setRoutineTicked}
+        headless={headlessRefusal}
+      />
+    );
+
+  const flipRoutinePreview =
+    flipPreview === null ? null : (
+      <RoutineDryPreview
+        preview={flipPreview}
+        firstRun={flipFirstRun}
+        ticked={flipTicked}
+        onTick={setFlipTicked}
+        headless={flipHeadlessRefusal}
+      />
+    );
 
   return (
     <div
@@ -1416,6 +1757,33 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           <RotaryFaceAngleTap machine={machineRecord} job={job} testIdPrefix="engrave-rotary-face-angle" />
         )}
 
+  {/* #1179 — THE BLANK, SAID PLAINLY, WITH THE PRESS. Offered whenever the cut-blank path
+          is active (`cutsOnThisBlank`): the no-id legacy machine and a blank with cuts alike. */}
+      {hasFinishedPrograms && (
+        <div data-testid="engrave-registration-blank" style={{ marginTop: 6 }}>
+          <p style={{ ...MUTED, margin: '0 0 4px' }}>
+            {blankScope.reason === 'legacy-maybe-cut'
+              ? 'Earlier programs were cut on this machine, and this job has no blank of its own yet — its blank may have been cut. The registration measures the top on the wood that is still there.'
+              : 'This job’s blank has been cut — the registration measures the top on the wood that is still there.'}
+          </p>
+          <button
+            type="button"
+            data-testid="engrave-registration-new-blank"
+            style={{ padding: 6 }}
+            disabled={busy}
+            onClick={() => void newBlank()}
+          >
+            This is a new blank
+          </button>
+        </div>
+      )}
+      {/* #1179 — the note OUTLIVES the banner: a mint makes the blank fresh, which hides the
+          banner, and the operator still has to read what just happened. */}
+      {blankNote !== null && (
+        <p style={{ ...MUTED, margin: '4px 0 0' }} data-testid="engrave-registration-blank-note">
+          {blankNote}
+        </p>
+      )}
       {flipAttempt === null && plan === null && proposal !== null && proposal.kind === 'plan' && (
         <div
           data-testid="engrave-registration-proposal"
@@ -1434,19 +1802,31 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               ›
             </button>
           </p>
+          {proposal.plan.guarded !== undefined && (
+            <p style={{ ...MUTED, margin: '4px 0 0' }} data-testid="engrave-registration-top-on-blank">
+              {proposal.plan.guarded.seatIgnored === 'legacy'
+                ? 'The top is measured on the blank; the bed’s seat was last measured before this probe was fitted and is not used.'
+                : 'The top is measured on the blank; the bed states no seat.'}
+            </p>
+          )}
           {proposalOpen && (
             <p style={MUTED} data-testid="engrave-registration-proposal-detail">
               {summarizePlan(proposal.plan)}
             </p>
           )}
+          {routinePreview}
           <button
             type="button"
             data-testid="engrave-registration-approve-start"
-            disabled={!statementGiven || busy}
+            // #1201 — REGISTER, never a seat press: the seat is a bed-setup datum now. The
+            // statement is still required (the executor moves the probe only on the operator's word).
+            // #1202 — and a FIRST-RUN routine is refused at the guard level (a marked line) or
+            // held until its own statement, whichever press this is.
+            disabled={busy || !statementGiven || routineGate || headlessRefusal !== null}
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
-            {seatTapArgs(proposal.plan) === null ? 'Register' : 'Measure the bracket seat'}
+            Register
           </button>
           <p style={MUTED} data-testid="engrave-registration-proposal-where">
             This is the planner’s proposal; Design → Setups is where it is edited.
@@ -1511,15 +1891,18 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               : `The corner Z touches check the carried side-2 top ${flipAttempt.attempt.z0.topMachineZ} ± ${Math.round(((flipAttempt.attempt.z0.checkBand.maxMm - flipAttempt.attempt.z0.checkBand.minMm) / 2) * 1000) / 1000} mm; a reading outside that band stops the run before a bore is entered.`}
           </p>
           {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
-            <button
-              type="button"
-              data-testid="engrave-registration-start"
-              disabled={!statementGiven}
-              style={{ width: '100%', padding: 7, marginTop: 6 }}
-              onClick={() => void start()}
-            >
-              {phase === 'idle' ? 'Register side 2' : 'Register side 2 again'}
-            </button>
+            <>
+              {flipRoutinePreview}
+              <button
+                type="button"
+                data-testid="engrave-registration-start"
+                disabled={!statementGiven || flipGate || flipHeadlessRefusal !== null}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => void start()}
+              >
+                {phase === 'idle' ? 'Register side 2' : 'Register side 2 again'}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -1567,10 +1950,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             <>
               {/* #797 — the at-machine statement is the ONE statement at Cut step 1 (which names
                   the probe), so this step asks nothing of its own; it reads whether it was given. */}
+              {routinePreview}
               <button
                 type="button"
                 data-testid="engrave-registration-start"
-                disabled={!statementGiven}
+                disabled={!statementGiven || routineGate || headlessRefusal !== null}
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >
@@ -1623,7 +2007,36 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           {result !== null && !result.ok && (
             <div data-testid="engrave-registration-failed" style={{ marginTop: 6 }}>
               <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{result.reason}</p>
-              {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
+              {/* #1187 — a stop on a transport or controller error carries its OWN report: this
+                  press's transcript, the error, the machine's last status, the build, the job and
+                  its package. A refusal of the app's own (measurement, settings, operator Stop)
+                  never shows it. Nothing leaves the machine without this press. */}
+              {target !== null && stopIsReportable(result.reason) && (
+                <StopReportAction
+                  action="register"
+                  target={target}
+                  error={result.reason}
+                  transcript={result.transcript}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
+              {homeNote !== null && (
+                <p style={MUTED} data-testid="engrave-registration-home-note">
+                  {homeNote}
+                </p>
+              )}
+              {/* #1197 — the home that failed on the transport (or that the controller refused) gets
+                  the same report as the run's own stop, carrying the CONSOLE's sentence, not the
+                  panel's "home it by hand" note (#1187 rule 3). */}
+              {target !== null && homeFailure !== null && stopIsReportable(homeFailure) && (
+                <StopReportAction
+                  action="home"
+                  target={target}
+                  error={homeFailure}
+                  transcript={[]}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
               {stopOutcome !== null && (
                 <p style={MUTED} data-testid="engrave-registration-stop-outcome">
                   {stopWords(stopOutcome)}
@@ -1845,9 +2258,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           )}
 
           {error !== null && (
-            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-error">
-              {error}
-            </p>
+            <>
+              <p style={{ ...MUTED, color: BAD }} data-testid="engrave-registration-error">
+                {error}
+              </p>
+              {/* #1197 — a THROWN failure is a stop the app did not read as an outcome: its own
+                  sentence is the report's error, and the transcript is whichever half ran last.
+                  The gate is #1187's rule 3 — never a refusal of the app's own. */}
+              {target !== null && stopIsReportable(error) && (
+                <StopReportAction
+                  action="register"
+                  target={target}
+                  error={error}
+                  transcript={result?.transcript ?? written?.transcript ?? []}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
+            </>
           )}
 
           {(phase === 'measured' || phase === 'failed' || phase === 'recorded') && (

@@ -46,9 +46,19 @@ function expectedSurface(
   setup: Setup,
   dims: { x: number; y: number; z: number },
   datum: MountDatum | null,
-  surfaceTopZ: { value: number; measuredAt?: string; surface?: string } | null,
+  surfaceTopZ: { value: number; measuredAt?: string; surface?: string; probeRefZ?: number | null } | null,
   seatMachineZ: number | undefined,
-): { machineZ: number; from: string } {
+  seatProbeRefZ: number | null,
+  seatProbeRefLabel: string | null,
+): {
+  machineZ: number;
+  from: string;
+  /** #1189 — the datum reference the expected Z was computed at, and its words. */
+  probeRefZ: number | null;
+  probeRefLabel: string | null;
+  /** #1189 — the jaw datum's own reference when the seek's floor comes from it (surface top above). */
+  floorProbeRefZ: number | null;
+} {
   // #619 — a measured surface top beats the ledge estimate: the next plan expects the top that was
   // actually found, not `jawTop + (thickness − ledgeStep)`.
   // #513 — and the sentence names the DATUM: the bed profile's surface top, which surface it was
@@ -61,17 +71,27 @@ function expectedSurface(
       from:
         `the bed profile’s surface top${on === null ? '' : ` on ${on}`} at machine Z ${surfaceTopZ.value}` +
         `${day === null ? '' : `, measured ${day}`} (setup ${setup.index})`,
+      probeRefZ: surfaceTopZ.probeRefZ ?? null,
+      probeRefLabel: 'the surface top',
+      // The floor is the jaw's when a jaw datum is under the surface (#1189: its own reference).
+      floorProbeRefZ: datum === null ? null : (datum.probeRefZ ?? null),
     };
   }
   if (datum !== null) {
     return {
       machineZ: datum.jawTopZ + (dims.z - LEDGE_STEP),
       from: `the measured jaw top at machine Z ${datum.jawTopZ} + the stock's ${dims.z - LEDGE_STEP} mm proud (setup ${setup.index})`,
+      probeRefZ: datum.probeRefZ ?? null,
+      probeRefLabel: 'the jaw top',
+      floorProbeRefZ: datum.probeRefZ ?? null,
     };
   }
   return {
     machineZ: (seatMachineZ ?? NaN) + dims.z,
     from: `the seat at machine Z ${seatMachineZ} + the stock's ${dims.z} mm this way up (setup ${setup.index})`,
+    probeRefZ: seatProbeRefZ,
+    probeRefLabel: seatProbeRefLabel,
+    floorProbeRefZ: null,
   };
 }
 
@@ -87,14 +107,26 @@ export function registrationFor(
     /** Vise (#598): the measured jaw-top datum; the expected surface is `jawTopZ + (dims.z − LEDGE_STEP)`. */
     mountDatum?: MountDatum | null;
     /** #619 — the measured surface-top datum; when present it beats the ledge estimate for the expected surface.
-     *  #513 — it also carries the surface it was taken on and the day, for the sentence. */
-    surfaceTopZ?: { value: number; measuredAt?: string; surface?: string } | null;
+     *  #513 — it also carries the surface it was taken on and the day, for the sentence.
+     *  #1189 — and the probe reference it was measured at. */
+    surfaceTopZ?: { value: number; measuredAt?: string; surface?: string; probeRefZ?: number | null } | null;
+    /**
+     * #1189 — the reference of the datum behind `seatMachineZ` (the bracket's measured seat), and
+     * its words in the correction sentence. Null/absent when the expectation has no datum.
+     */
+    seatProbeRefZ?: number | null;
+    seatProbeRefLabel?: string | null;
     /** The checked-out probe, carried on the plan for the record. */
     probe?: ProbeSpec | null;
     /** #599 — the mount tap point (machine XY), computed by the caller from the bed placement. */
     mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
     /** #1133 — where the surface touch should land, work XY: the cut area's centre. */
     cutCentre?: { x: number; y: number };
+    /**
+     * #1201 — a GUARDED top seek: no expected surface. The band is the bed's floor + margin to the
+     * machine's clearance less the park height; the plan's checks prove the reading.
+     */
+    guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -109,11 +141,28 @@ export function registrationFor(
 ): { plan: PlanResult; references: ReferenceFeature[] } {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
   const datum = mount.kind === 'vise' ? (input.mountDatum ?? null) : null;
+  // #1201 — a guarded plan has no expected surface; the placeholder is never read (the band comes
+  // from `guarded`), and NaN keeps a caller that forgets from silently planning a wrong band.
+  const expected =
+    input.guarded !== undefined
+      ? { machineZ: Number.NaN, from: 'the top on the blank (guarded)', probeRefZ: null, probeRefLabel: null, floorProbeRefZ: null }
+      : expectedSurface(
+          setup,
+          dims,
+          datum,
+          input.surfaceTopZ ?? null,
+          input.seatMachineZ,
+          input.seatProbeRefZ ?? null,
+          input.seatProbeRefLabel ?? null,
+        );
   const plan = planRegistration(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: expectedSurface(setup, dims, datum, input.surfaceTopZ ?? null, input.seatMachineZ),
+      expectedSurface: { machineZ: expected.machineZ, from: expected.from },
+      probeRefZ: expected.probeRefZ,
+      probeRefLabel: expected.probeRefLabel,
+      floorProbeRefZ: expected.floorProbeRefZ,
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,
@@ -123,6 +172,7 @@ export function registrationFor(
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
       bracketConfirm: input.bracketConfirm,
+      ...(input.guarded === undefined ? {} : { guarded: input.guarded }),
       // #743 — a disc keeps its own four-edge plan; a rectangle's input has no `disc`.
       ...(input.disc !== undefined ? { disc: input.disc } : {}),
       ...(input.cutCentre !== undefined ? { cutCentre: input.cutCentre } : {}),
@@ -201,11 +251,15 @@ export function referenceRegistrationFor(
     return { ok: false, reason: `no earlier cut can be a reference: ${refused.join('; ') || 'none passes through to this face'}` };
   }
   const datum = mount.kind === 'vise' ? (input.mountDatum ?? null) : null;
+  const expected = expectedSurface(setup, dims, datum, input.surfaceTopZ ?? null, input.seatMachineZ, null, null);
   return planReferences(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
       mount: mount.kind,
-      expectedSurface: expectedSurface(setup, dims, datum, input.surfaceTopZ ?? null, input.seatMachineZ),
+      expectedSurface: { machineZ: expected.machineZ, from: expected.from },
+      probeRefZ: expected.probeRefZ,
+      probeRefLabel: expected.probeRefLabel,
+      floorProbeRefZ: expected.floorProbeRefZ,
       seekFromMachineZ: input.seekFromMachineZ,
       mountDatum: datum,
       probe: input.probe ?? null,

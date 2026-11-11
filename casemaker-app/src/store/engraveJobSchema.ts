@@ -2179,6 +2179,8 @@ const registrationSettingsSchema = z.object({
   // #1179 B — absent on a plan stored before the key existed; the executor's labelled fallback
   // answers then. Two touches on a blank that has been cut must agree to this, mm.
   cutBlankAgreeMm: z.number().finite().optional().describe('How close two touches on a cut blank must agree, in millimetres.'),
+  // #1179 amendment — how far above the band a cut-blank check may read and still be a reading.
+  cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.
   surfaceTouchCount: z
@@ -2236,6 +2238,19 @@ const registrationPlanSchema = z.object({
     .optional()
     .describe('Present when the plan measures a corner with two lines per edge; absent on every other plan.'),
   surfacePoint: positionSchema.describe('Work-coordinate point where the surface is probed.'),
+  // #1189 — the probe reference each datum-derived Z was computed at, so the executor corrects the
+  // plan to today's probe seating after its M491. Absent on older plans (their numbers stand).
+  probeRefZ: z.number().finite().nullable().optional().describe('The probe’s M491 when the expected surface’s datum was measured.'),
+  seatRemeasure: z.enum(['probe-refit']).optional().describe('A seat-seek plan run because the stored seat predates the probe’s last fitting.'),
+  probeRefLabel: z.string().nullable().optional().describe('The datum’s words in the seating-correction sentence.'),
+  floorProbeRefZ: z.number().finite().nullable().optional().describe('The probe reference of the seek floor’s own datum, when it differs.'),
+  machineClearanceZ: z
+    .number()
+    .finite()
+    .optional()
+    .describe(
+      'The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.',
+    ),
   seek: z
     .object({
       fromMachineZ: z.number().finite().describe('Machine Z the seek starts from, in millimetres.'),
@@ -2253,6 +2268,8 @@ const registrationPlanSchema = z.object({
       jawTopZ: z.number().finite().describe('Measured jaw-top machine Z, in millimetres.'),
       measuredAt: z.string().describe('When the datum was measured.'),
       by: z.string().describe('The probe id/variant that tapped the datum.'),
+      // #1189 — the probe's M491 at the tap, so the executor can correct the jaw top after a refit.
+      probeRefZ: z.number().finite().nullable().optional().describe('The probe’s M491 when the jaw top was tapped.'),
     })
     .nullable()
     .default(null)
@@ -2267,6 +2284,24 @@ const registrationPlanSchema = z.object({
         .enum(['z-only', 'xyz'])
         .optional()
         .describe('The probe instrument the plan was made for: z-only (wired) or xyz (3D probe).'),
+      // #1200 — the operator's restriction on that UNIT: z-only plans no sideways touch. Absent on
+      // a plan frozen before the field, which keeps #1133's dispatch exactly.
+      touches: z
+        .enum(['z-only', 'all'])
+        .optional()
+        .describe('The probe unit’s touch restriction: z-only (top touches only) or all.'),
+      tipLateralUncertaintyMm: z
+        .number()
+        .finite()
+        .optional()
+        .describe('The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.'),
+      // #1203 — the fitted post's shank diameter, so the run's prompts name the collet.
+      shankMm: z
+        .number()
+        .finite()
+        .nullable()
+        .optional()
+        .describe('The fitted shank/post diameter, millimetres (6.35 for 1/8", 6 for the 6 mm post); null/absent when unrecorded.'),
       tip: z
         .object({
           diameterMm: z.number().finite().describe('Probe tip diameter, in millimetres.'),
@@ -2288,6 +2323,12 @@ const registrationPlanSchema = z.object({
       y: z.number().finite().describe('The tap point Y, machine coordinates, in millimetres.'),
       fromMachineZ: z.number().finite().describe('The travel height the tap starts from, machine Z.'),
       label: z.string().describe('What the tap touches, for the operator.'),
+      // #1189 — the tap's datum reference and its expected reading, so a reloaded plan keeps the
+      // same check (and the same refit correction) the approved one had.
+      reference: z.enum(['vise-jaw-top', 'bracket-seat', 'rotary-axis']).optional().describe('Which datum the tap measures.'),
+      expectZ: z.number().finite().nullable().optional().describe('The machine Z the tap expects to meet.'),
+      datumOffsetMm: z.number().finite().optional().describe('How far below the reading the datum sits, millimetres.'),
+      probeRefZ: z.number().finite().nullable().optional().describe('The probe’s M491 when expectZ was measured.'),
     })
     .nullable()
     .default(null)

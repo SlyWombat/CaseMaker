@@ -95,6 +95,7 @@ function Host({
   const api = useMountTap({
     target: TARGET,
     settings: SETTINGS,
+    clearanceZ: -3,
     floor: -80,
     probeId: 'probe-1',
     successNote,
@@ -285,6 +286,9 @@ describe('#642 the bracket-seat write-back', () => {
     const bed = saves.at(-1)!.bedProfiles!.find((p) => p.id === 'bp1')!;
     expect(bed.datums.bracketSeatZ?.value).toBeCloseTo(-65.32, 3);
     expect(bed.datums.bracketSeatZ?.by).toBe('probe-1');
+    // #1189 — the datum carries the seating it was measured in, so a later refit is corrected
+    // (the runner's mocked M491 is -76.063).
+    expect(bed.datums.bracketSeatZ?.probeRefZ).toBeCloseTo(-76.063, 3);
     expect(shop).toHaveLength(1);
     expect(shop[0]!.key).toBe('bracket.seatMachineZ');
     expect(shop[0]!.value.value).toBeCloseTo(-65.32, 3);
@@ -471,7 +475,7 @@ describe('#1059 the face-angle step through the hook', () => {
   }
 
   function FaceHost({ inputs = faceInputs() }: { inputs?: FaceAngleInputs }) {
-    const api = useMountTap({ target: TARGET, settings: SETTINGS, floor: -80, probeId: 'probe-1', successNote: 'the face angle is recorded' });
+    const api = useMountTap({ target: TARGET, settings: SETTINGS, clearanceZ: -3, floor: -80, probeId: 'probe-1', successNote: 'the face angle is recorded' });
     const busy = useMountTapBusyFlag();
     return (
       <div>
@@ -527,8 +531,13 @@ describe('#1059 the face-angle step through the hook', () => {
     // The turn went out, and the datum landed on the active profile in DEGREES with its residual.
     expect(b.turns).toHaveLength(1);
     expect(b.turns[0]).toBeCloseTo(-2, 2);
+    // #1202 — ONE write: the datum and the routine's completion ride the SAME update (a separate
+    // completion PUT raced this one; the record that arrives last must be the one that has both).
     expect(saves).toHaveLength(1);
-    const datum = saves[0]!.bedProfiles!.find((p) => p.id === 'bp1')!.datums.rotaryFaceAngle!;
+    expect((saves[0]!.completedRoutines ?? []).some((c) => c.routine === 'face-angle')).toBe(true);
+    const datum = saves[0]!.bedProfiles!.find((p) => p.id === 'bp1')!.datums.rotaryFaceAngle;
+    expect(datum, 'the datum write').toBeDefined();
+    if (datum == null) throw new Error('the datum write must carry rotaryFaceAngle');
     expect(datum.value).toBeCloseTo(-2, 2);
     expect(datum.residualMm).toBeCloseTo(0, 6);
     expect(datum.by).toBe('probe-1');

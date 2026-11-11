@@ -1479,6 +1479,70 @@ mod tests {
         assert_eq!(exported["machines"][0]["id"], serde_json::json!("machine-1"));
     }
 
+    /// #1189 — A CLIENT WRITE OF A DATUM CARRYING THE PROBE REFERENCE is accepted and served back.
+    /// The datum struct is `deny_unknown_fields`, so a key the house did not know would reject the
+    /// WHOLE machine record mid-bench — the class of breakage the bench saw today. This is the
+    /// route, not only the serde unit: the app's PUT of a bed profile with `probeRefZ` must land.
+    #[tokio::test]
+    async fn a_datum_with_a_probe_reference_is_accepted_and_served_back() {
+        let (_dir, app) = app_under_test();
+        // The client's own order: the machine record first (its first PUT deliberately carries no
+        // bed — the store drops one there), then the bed as a second, guarded write.
+        let bare = serde_json::json!({
+            "id": "m-ref", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
+            "address": { "host": "192.0.2.10", "port": 2222 },
+            "calibration": null, "fixtures": {}, "margins": null,
+            "updatedAt": "2026-11-10T00:00:00.000Z"
+        });
+        let put = |if_match: &str, body: &serde_json::Value| {
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/location/machines/m-ref")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::IF_MATCH, if_match)
+                .body(Body::from(serde_json::to_vec(body).unwrap()))
+                .unwrap()
+        };
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let res = app.clone().oneshot(put(&tag, &bare)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let machine = serde_json::json!({
+            "id": "m-ref", "profileId": "Z1", "name": null, "serial": null, "firmware": null,
+            "address": { "host": "192.0.2.10", "port": 2222 },
+            "calibration": null, "fixtures": {}, "margins": null,
+            "bedProfiles": [{
+                "id": "bp-1", "name": "Current bed",
+                "createdAt": "2026-11-09T00:00:00.000Z",
+                "surface": { "kind": "bare-bed" },
+                "datums": {
+                    "surfaceTopZ": null,
+                    "viseJawTopZ": null,
+                    "bracketSeatZ": {
+                        "value": -85.788,
+                        "measuredAt": "2026-11-09T17:55:01.000Z",
+                        "by": "fx-probe-1",
+                        "at": [-175, -35],
+                        "restsOnStock": true,
+                        "probeRefZ": -9.094
+                    },
+                    "rotaryAxis": null
+                },
+                "placements": [],
+                "history": []
+            }],
+            "activeBedProfileId": "bp-1",
+            "updatedAt": "2026-11-10T00:00:00.000Z"
+        });
+        let tag = etag_of(&app, "/api/v1/location").await;
+        let res = app.clone().oneshot(put(&tag, &machine)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "the write carried the reference");
+        let view = json_of(app.clone().oneshot(get("/api/v1/location")).await.unwrap()).await;
+        let seat = &view["machines"][0]["bedProfiles"][0]["datums"]["bracketSeatZ"];
+        assert_eq!(seat["probeRefZ"], serde_json::json!(-9.094), "{seat}");
+        assert_eq!(seat["restsOnStock"], serde_json::json!(true), "{seat}");
+    }
+
     #[tokio::test]
     async fn a_finished_program_is_appended_over_http_without_a_validator() {
         // #419 §4.5. An APPEND, not a read-modify-write: no `If-Match`, and a repeat is a no-op.
@@ -1516,17 +1580,21 @@ mod tests {
 
         // #1179 — an optional `run` body records WHAT finished beside the hash; a hash-only body
         // (an older client) stays valid and changes nothing, and a run naming another hash is
-        // refused.
+        // refused. The maps are PER SETUP (the 11-10 ruling): a complete entry carries its map.
         let with_run = serde_json::json!({
             "hash": "a1b2c3d4",
             "run": {
                 "hash": "a1b2c3d4", "programIndex": 2, "programName": "tray-p02.nc",
                 "registration": { "surfaceMachineZ": -60.487, "topSource": "touch" },
-                "cutMap": {
-                    "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
-                    "flat": { "encoding": "rle", "data": "5040:1" },
-                    "depth": { "encoding": "rle", "data": "5040:0" }
-                }
+                "cutMaps": [{
+                    "setupIndex": 1,
+                    "state": "complete",
+                    "map": {
+                        "cellMm": 2, "cols": 80, "rows": 63, "x0Mm": 0, "y0Mm": 0, "stepMm": 0.05,
+                        "flat": { "encoding": "rle", "data": "5040:1" },
+                        "depth": { "encoding": "rle", "data": "5040:0" }
+                    }
+                }]
             }
         });
         let res = app.clone().oneshot(post_json("/api/v1/finished-programs/m-1", &with_run)).await.unwrap();
@@ -1540,7 +1608,14 @@ mod tests {
             view["machines"][0]["finishedRuns"][0]["registration"]["surfaceMachineZ"],
             serde_json::json!(-60.487)
         );
-        assert_eq!(view["machines"][0]["finishedRuns"][0]["cutMap"]["cols"], serde_json::json!(80));
+        assert_eq!(
+            view["machines"][0]["finishedRuns"][0]["cutMaps"][0]["map"]["cols"],
+            serde_json::json!(80)
+        );
+        assert_eq!(
+            view["machines"][0]["finishedRuns"][0]["cutMaps"][0]["state"],
+            serde_json::json!("complete")
+        );
 
         let mismatched =
             serde_json::json!({ "hash": "a1b2c3d4", "run": { "hash": "0badf00d" } });
@@ -2217,6 +2292,27 @@ mod tests {
         assert!(path.starts_with("crash-reports/"), "{path}");
         let stored = std::fs::read(dir.path().join(&path)).unwrap();
         assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored).unwrap(), body);
+
+        // #1187 — the OTHER report kind, through the same route: a stopped machine action's own
+        // record. Stored beside the crash reports, under a name that says which one it is, with the
+        // body it was posted with — so the house round-trips the new `kind`.
+        let stop = serde_json::json!({
+            "kind": "casemaker-machine-stop-report",
+            "version": 1,
+            "action": "register",
+            "error": "read failed: Connection reset by peer (os error 104)",
+            "transcript": [{ "line": "M491", "reply": "read failed: Connection reset by peer (os error 104)" }],
+        });
+        let stop_res = app
+            .clone()
+            .oneshot(post_json("/api/v1/crash-reports", &stop))
+            .await
+            .unwrap();
+        assert_eq!(stop_res.status(), StatusCode::CREATED);
+        let stop_path = json_of(stop_res).await.get("path").and_then(|p| p.as_str()).unwrap().to_string();
+        assert!(stop_path.starts_with("crash-reports/stop-"), "{stop_path}");
+        let stored_stop = std::fs::read(dir.path().join(&stop_path)).unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored_stop).unwrap(), stop);
 
         // A body that is not the app's report is refused, and the directory gains nothing.
         let bad = app

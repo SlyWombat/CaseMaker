@@ -545,7 +545,7 @@ describe('#585 the typed seat’s guarded deeper search', () => {
   it('offers ONE deeper search, finds a stock 3 mm below the band, and records the measured seat', async () => {
     const asked: string[] = [];
     const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
-    const r = await runRegistration(typed(), {
+    const r = await runRegistration(typed(), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step.kind);
@@ -565,7 +565,7 @@ describe('#585 the typed seat’s guarded deeper search', () => {
 
   it('stops with the cap named when nothing is found down to it', async () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 1000, xMax: 1001, yMin: 1000, yMax: 1001 } });
-    const r = await runRegistration(typed(), { console: z1.console, operator: async () => true });
+    const r = await runRegistration(typed(), { liveClearanceZ: -3, console: z1.console, operator: async () => true });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toContain('found nothing down to machine Z -61.982');
@@ -576,7 +576,7 @@ describe('#585 the typed seat’s guarded deeper search', () => {
   it('does not search when the operator declines the guarded step', async () => {
     const asked: string[] = [];
     const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
-    const r = await runRegistration(typed(), {
+    const r = await runRegistration(typed(), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step.kind);
@@ -610,7 +610,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     // The stock is not under the plan's surface point (the point has been cut away).
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     const asked: { kind: string; text: string }[] = [];
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step);
@@ -640,7 +640,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     const recorded = EXPECTED + 0.3;
     const asked: { kind: string; text: string }[] = [];
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step);
@@ -648,6 +648,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       },
       hasFinishedPrograms: true,
       lastRecordedTopMachineZ: recorded,
+      lastRecordedTopProbeRefZ: -76.063,
     });
     if (!r.ok) throw new Error(r.reason);
     const presses = asked.filter((s) => s.kind === 'derived-surface');
@@ -663,7 +664,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
   it('#1179 B4 — a record that agrees with the arithmetic says it is the same', async () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     const asked: { kind: string; text: string }[] = [];
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step);
@@ -671,6 +672,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       },
       hasFinishedPrograms: true,
       lastRecordedTopMachineZ: EXPECTED,
+      lastRecordedTopProbeRefZ: -76.063,
     });
     if (!r.ok) throw new Error(r.reason);
     const presses = asked.filter((s) => s.kind === 'derived-surface');
@@ -694,7 +696,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       },
     };
     const asked: { kind: string; text: string }[] = [];
-    const r = await runRegistration(plan('bracket'), {
+    const r = await runRegistration(plan('bracket'), { liveClearanceZ: -3,
       console: belowBand,
       operator: async (step) => {
         asked.push(step);
@@ -710,7 +712,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
   it('with NO finished programs the miss keeps today’s stop and offers nothing', async () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     const asked: string[] = [];
-    const r = await runRegistration(plan('bracket'), {
+    const r = await runRegistration(plan('bracket'), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step.kind);
@@ -724,7 +726,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
 
   it('declining the press stops with the seek’s own sentence', async () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
-    const r = await runRegistration(plan('bracket'), {
+    const r = await runRegistration(plan('bracket'), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => step.kind !== 'derived-surface',
       hasFinishedPrograms: true,
@@ -739,7 +741,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     const seatSeek = { ...plan('bracket'), surfacePoint: { x: -30, y: -30 } };
     const z1 = fakeZ1({ actual: BLANK }); // no stock under (−30, −30) either
     const asked: string[] = [];
-    const r = await runRegistration(seatSeek, {
+    const r = await runRegistration(seatSeek, { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step.kind);
@@ -757,7 +759,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
     // explain it. Today's stop keeps its sentence.
     const z1 = fakeZ1({ actual: BLANK, clamp: { xMin: 0, xMax: 38.1 } });
     const asked: string[] = [];
-    const r = await runRegistration(plan('bracket'), {
+    const r = await runRegistration(plan('bracket'), { liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         asked.push(step.kind);
@@ -774,7 +776,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
   it('c1: the question is asked before any probe motion; a typed in-band top continues with no seek', async () => {
     const z1 = fakeZ1({ actual: BLANK });
     const asked: TopQuestion[] = [];
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: yes,
       hasFinishedPrograms: true,
@@ -804,7 +806,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
 
   it('c1: a typed top OUTSIDE the band is refused, and nothing was moved', async () => {
     const z1 = fakeZ1({ actual: BLANK });
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: yes,
       hasFinishedPrograms: true,
@@ -817,7 +819,7 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
 
   it('c1: “use the bracket’s own top” continues from it, with no motion', async () => {
     const z1 = fakeZ1({ actual: BLANK });
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: z1.console,
       operator: yes,
       hasFinishedPrograms: true,
@@ -832,11 +834,11 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
 
   it('c1: “touch it again” is today’s seek — transcript byte-identical', async () => {
     const plainZ = fakeZ1({ actual: SHIFTED });
-    const plain = await runRegistration(P25(), { console: plainZ.console, operator: yes });
+    const plain = await runRegistration(P25(), { liveClearanceZ: -3, console: plainZ.console, operator: yes });
     if (!plain.ok) throw new Error(plain.reason);
     const askedZ = fakeZ1({ actual: SHIFTED });
     let asked = 0;
-    const r = await runRegistration(P25(), {
+    const r = await runRegistration(P25(), { liveClearanceZ: -3,
       console: askedZ.console,
       operator: yes,
       hasFinishedPrograms: true,
@@ -858,12 +860,12 @@ describe('#1166 the bracket’s derived top where finished programs have cut', (
       return { kind: 'seek' };
     };
     const a = fakeZ1({ actual: BLANK });
-    await runRegistration(P25(), { console: a.console, operator: yes, askTop });
+    await runRegistration(P25(), { liveClearanceZ: -3, console: a.console, operator: yes, askTop });
     const v = fakeZ1({ actual: BLANK });
-    await runRegistration(plan('vise'), { console: v.console, operator: yes, hasFinishedPrograms: true, askTop });
+    await runRegistration(plan('vise'), { liveClearanceZ: -3, console: v.console, operator: yes, hasFinishedPrograms: true, askTop });
     const seatSeek = { ...P25(), surfacePoint: { x: -30, y: -30 } };
     const s = fakeZ1({ actual: BLANK });
-    await runRegistration(seatSeek, { console: s.console, operator: yes, hasFinishedPrograms: true, askTop });
+    await runRegistration(seatSeek, { liveClearanceZ: -3, console: s.console, operator: yes, hasFinishedPrograms: true, askTop });
     expect(calls).toEqual([]);
   });
 });
@@ -902,7 +904,7 @@ describe('#599 the mount tap', () => {
   it('the tap precedes the surface seek and its reading is on the result', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     const tapIdx = z1.lines.indexOf('G53 G0 X-186.2 Y-180');
@@ -917,7 +919,7 @@ describe('#599 the mount tap', () => {
   it('a tap miss stops with the mount named', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('no jaw top');
   });
@@ -947,7 +949,7 @@ describe('#599 the mount tap', () => {
   it('#642 runs a bracket-seat tap: the floor is expectZ − 2 and the reading is on the result', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: BRACKET_TAP.x, y: BRACKET_TAP.y, z: BRACKET_TAP.expectZ } });
     const p = bracketTapPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     expect(r.mountTap).toEqual({ z: BRACKET_TAP.expectZ, at: { x: BRACKET_TAP.x, y: BRACKET_TAP.y } });
@@ -961,7 +963,7 @@ describe('#599 the mount tap', () => {
   it('#642 a bracket-seat tap miss names the arm and the stored top', async () => {
     // No `tap` in the fake: both stages find nothing, so the reading is a miss.
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(bracketTapPlan(), { console: z1.console, operator: yes });
+    const r = await runRegistration(bracketTapPlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('no touch at the bracket’s front arm (-186.2, -180) down to machine Z -50.9');
@@ -975,7 +977,7 @@ describe('#599 the mount tap', () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
     const seen: LiveTouch[] = [];
-    const r = await runRegistration(p, {
+    const r = await runRegistration(p, { liveClearanceZ: -3,
       console: z1.console,
       operator: yes,
       onTouch: (t) => seen.push(t),
@@ -1010,7 +1012,7 @@ describe('#599 the mount tap', () => {
   it('a tap with an expected Z seeks fast, then touches at the touch feed', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const taps = z1.lines.filter((l) => l.startsWith('G38.3 Z-')).slice(0, 2);
     expect(taps).toEqual(['G38.3 Z-50.82 F300', 'G38.3 Z-5 F150']);
@@ -1043,7 +1045,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     const p = sidePlan();
     const seen: LiveTouch[] = [];
-    const r = await runRegistration(p, { console: z1.console, operator: yes, onTouch: (t) => seen.push(t) });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes, onTouch: (t) => seen.push(t) });
     if (!r.ok) throw new Error(r.reason);
 
     // Exactly one sideways line, and it is on Y: a vise's X edges are the jaws' own faces.
@@ -1070,7 +1072,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     // The stock sits 6 mm toward the front edge, so the front scan's 5 mm outward limit is OVER it.
     const reachesTheLimit = { ...BLANK, yMin: -6, yMax: 70.2 };
     const z1 = fakeZ1({ actual: reachesTheLimit, tap: { x: TAP3.x, y: TAP3.y, z: JAW3.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
-    const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+    const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     // The descent at the limit PROBED; it never rapid-moved down into the stock.
     expect(z1.plunged()).toBe(false);
     if (!r.ok) throw new Error(r.reason);
@@ -1095,7 +1097,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     );
     if (!planned.ok) throw new Error(planned.reason);
     const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
-    const r = await runRegistration(planned.plan, { console: z1.console, operator: yes });
+    const r = await runRegistration(planned.plan, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     // Two lines per edge, and each axis takes two.
@@ -1125,7 +1127,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
       stylusStaysDown: true,
       headAtTravelForScans: true,
     });
-    const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+    const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     // The sideways move ran at the scan's own depth (the surface less the ball's touch depth).
     expect(z1.sideProbeZ()).not.toBeNull();
@@ -1157,7 +1159,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
 
     it('releases EVERY triggered reading before any rapid; the sideways one reverses its own axis', async () => {
       const z1 = armed();
-      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
       if (!r.ok) throw new Error(r.reason);
       expect(z1.alarmed()).toBe(false);
       const lines = z1.lines;
@@ -1177,7 +1179,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
 
     it('site 5 (the mount tap) releases before its G0 Z3, and site 4 (the fast seek) before its G0 Z1', async () => {
       const z1 = armed();
-      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
       if (!r.ok) throw new Error(r.reason);
       const lines = z1.lines;
       const probes = z1.triggeredAt();
@@ -1197,7 +1199,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
       // move) meets it — the #643 case. Without the release the retract alarms (`armed`).
       const reachesTheLimit = { ...BLANK, yMin: -6, yMax: 70.2 };
       const z1 = armed(reachesTheLimit);
-      const r = await runRegistration(sidePlan(), { console: z1.console, operator: yes });
+      const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
       if (!r.ok) throw new Error(r.reason);
       expect(z1.alarmed()).toBe(false);
       expect(z1.lines.filter((l) => /^G38\.3 Y/.test(l))).toHaveLength(0);
@@ -1206,7 +1208,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
 
     it('a wired-probe plan sends no release at all — its stream is what it was before #932', async () => {
       const z1 = fakeZ1({ actual: SHIFTED });
-      const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+      const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
       if (!r.ok) throw new Error(r.reason);
       expect(z1.lines.some((l) => l.startsWith('G38.5'))).toBe(false);
     });
@@ -1245,7 +1247,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
 describe('#599 the standalone mount tap', () => {
   it('taps the jaw without a datum and returns the reading', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: -186.2, y: -180, z: -56.82 } });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { liveClearanceZ: -3, console: z1.console, operator: yes }, -100);
     if (!r.ok) throw new Error(r.reason);
     expect(r.z).toBe(-56.82);
     expect(r.at).toEqual({ x: -186.2, y: -180 });
@@ -1258,7 +1260,7 @@ describe('#599 the standalone mount tap', () => {
 
   it('a miss stops with the mount named', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { liveClearanceZ: -3, console: z1.console, operator: yes }, -100);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('no jaw top');
   });
@@ -1268,7 +1270,7 @@ describe('#599 the standalone mount tap', () => {
     // must stop there — not at the work-envelope floor — so a probe that never triggers is a miss
     // at the PLAN's floor, with that floor in the sentence.
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100, 'bracket', null, 11);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { liveClearanceZ: -3, console: z1.console, operator: yes }, -100, 'bracket', null, 11);
     expect(r.ok).toBe(false);
     expect(z1.lines.filter((l) => l.startsWith('G38.3 Z-'))).toEqual(['G38.3 Z-11 F150']);
     if (!r.ok) {
@@ -1280,7 +1282,7 @@ describe('#599 the standalone mount tap', () => {
 
   it('#1070 — a triggered tap on the wired probe is released with G38.5 before the lift', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: -186.2, y: -180, z: -56.82 } });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: yes }, -100);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { liveClearanceZ: -3, console: z1.console, operator: yes }, -100);
     if (!r.ok) throw new Error(r.reason);
     const lift = z1.lines.indexOf('G0 Z3');
     expect(lift).toBeGreaterThan(0);
@@ -1289,7 +1291,7 @@ describe('#599 the standalone mount tap', () => {
 
   it('stops before any move when the probe is not fitted', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, tap: { x: -186.2, y: -180, z: -56.82 } });
-    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { console: z1.console, operator: async () => false }, -100);
+    const r = await runMountTap({ x: -186.2, y: -180 }, -3, S, { liveClearanceZ: -3, console: z1.console, operator: async () => false }, -100);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('probe was not fitted');
     // #588 — the stop reads the State back (`?`) before deciding nothing more to send.
@@ -1298,9 +1300,35 @@ describe('#599 the standalone mount tap', () => {
 });
 
 describe('#430 the executor, on a fake machine', () => {
-  it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at park, never below the cap', async () => {
+  it('#1199 — a plan whose travel height is a band approach (−81.25) refuses before ANY line: the datum is the machine', async () => {
+    // The bench's plan shape: a seat band's approach named as the seek start. The machine's own
+    // clearance is −3, so the executor must refuse instead of handing the guard a floor of −81.25.
+    const bad = { ...plan('bracket'), seek: { ...plan('bracket').seek, fromMachineZ: -81.25 }, machineClearanceZ: -3 };
     const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(bad, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('below the machine');
+    expect(z1.lines).toEqual([]);
+  });
+
+  it('#1199 item 2 — a planner-built plan is refused when the LIVE machine clearance was raised after planning', async () => {
+    // The plan was built against −3 (its own recorded clearance); the machine's profile now says
+    // −1 (for example, a calibration changed after the plan was approved). The executor must read
+    // the live value, refuse, and send nothing — a plan's field compared with itself can never
+    // catch this.
+    const p = plan('vise');
+    const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
+    const r = await runRegistration(p, { console: z1.console, operator: yes, liveClearanceZ: -1 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('below the machine');
+    expect(z1.lines).toEqual([]);
+  });
+
+  it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at the clearance, never below the cap', async () => {
+    const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     expect(z1.lines.slice(0, 6)).toEqual(['?', '$H', 'G54', 'G92.1', 'M831', 'M119']);
@@ -1311,10 +1339,11 @@ describe('#430 the executor, on a fake machine', () => {
     z1.lines.forEach((l, i) => {
       if (l.startsWith('G38.3')) expect(z1.lines.slice(0, i).filter((x) => x !== 'G91').at(-1)).toBe('?');
     });
-    // Every XY move after the surface happens at the park height (surface + 3), the first at Z −3.
-    const park = SURFACE + S.parkAboveSurfaceMm;
-    expect(z1.xyMovesAtZ[0]).toBe(-3);
-    for (const z of z1.xyMovesAtZ.slice(1)) expect(z).toBeCloseTo(park, 6);
+    // #1199 — EVERY XY move is taken at the machine's clearance (Z −3): the park height is a
+    // descent at the point, never a traverse. The old pin expected the scans to step over at the
+    // park, safe only by value; the guard now refuses that, and this is the contract it enforces.
+    expect(z1.xyMovesAtZ.length).toBeGreaterThan(1);
+    for (const z of z1.xyMovesAtZ) expect(z).toBe(-3);
     expect(z1.lowest()).toBeGreaterThanOrEqual(SURFACE - S.capBelowSurfaceMm - 1e-9);
 
     // #594 — each scan brackets the edge and bisects: it holds both an on and an off touch, and the
@@ -1338,13 +1367,13 @@ describe('#430 the executor, on a fake machine', () => {
 
   it('writes the corrected origin only after confirmation, in #387’s order', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
-    expect((await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: false })).ok).toBe(false);
+    expect((await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: false })).ok).toBe(false);
     const before = z1.lines.length;
     const applied = await applyCorrection(
       r.outcome,
-      { console: z1.console, operator: async (s) => (s.kind === 'fit-cutter' && z1.fitCutter(), true) },
+      { liveClearanceZ: -3, console: z1.console, operator: async (s) => (s.kind === 'fit-cutter' && z1.fitCutter(), true) },
       { confirmed: true },
     );
     if (!applied.ok) throw new Error(applied.reason);
@@ -1359,13 +1388,13 @@ describe('#430 the executor, on a fake machine', () => {
   // maintainer's ruling 2026-11-09, pending 0f's machine test.
   it('#1123 items 31/34 — records the cutter’s tool number and names the cutter in the fit step', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const before = z1.lines.length;
     const asked: string[] = [];
     const applied = await applyCorrection(
       r.outcome,
-      {
+      { liveClearanceZ: -3,
         console: z1.console,
         operator: async (s) => {
           asked.push(s.text);
@@ -1382,30 +1411,30 @@ describe('#430 the executor, on a fake machine', () => {
   it('refuses to write an origin from a measurement that is not whole', async () => {
     // Moved 6 mm left: the left scan starts off the stock; X is not measured.
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: -6, xMax: 32.1 } });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.usable).toBe(false);
     expect(summarizeOutcome(r.outcome)).toContain('not usable');
     const n = z1.lines.length;
-    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     expect(applied.ok).toBe(false);
     expect(z1.lines.length).toBe(n);
   });
 
   it('a touch that landed somewhere else makes the measurement unusable', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, landShift: 0.3 });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.usable).toBe(false);
     expect(r.outcome.problems.join(' ')).toContain('not where it was sent');
     const n = z1.lines.length;
-    expect((await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true })).ok).toBe(false);
+    expect((await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true })).ok).toBe(false);
     expect(z1.lines.length).toBe(n);
   });
 
   it('#517 a stock below the jaw tops: the jaw reads high, the edge is found there, nothing alarms', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, jawAbove: 1.6 });
-    const r = await runRegistration(plan('vise', { fixtureBelowSurfaceMm: -1.6 }), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise', { fixtureBelowSurfaceMm: -1.6 }), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const left = r.data.scans[0]!;
     expect(left.scan.aboveIsEdge).toBe(true);
@@ -1420,7 +1449,7 @@ describe('#430 the executor, on a fake machine', () => {
 
   it('a clamp above the surface stops its scan and is named', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, clamp: { xMin: 0.4, xMax: 0.6 } });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.usable).toBe(false);
     expect(r.outcome.problems.join(' ')).toContain('higher than the stock');
@@ -1428,14 +1457,14 @@ describe('#430 the executor, on a fake machine', () => {
 
   it('refuses a surface outside the expected band', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE + 4 });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('outside the expected');
   });
 
   it('a rotation beyond the margin is not within it', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(plan('tape'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('tape'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const turned = computeOutcome(plan('tape'), {
       ...r.data,
@@ -1447,7 +1476,7 @@ describe('#430 the executor, on a fake machine', () => {
 
   it('moves nothing on a machine that is not Idle', async () => {
     const z1 = fakeZ1({ actual: BLANK, idle: false });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     // #588 — nothing moves: only the initial `?` and the stop's own State read back.
     expect(z1.lines).toEqual(['?', '?']);
@@ -1455,7 +1484,7 @@ describe('#430 the executor, on a fake machine', () => {
 
   it('#599 the probe reading touched at rest stops before any Z move', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, probeTouched: true });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('touched at rest');
     // #789 — the rest check runs with the supply ON, and the stop switches it OFF again.
@@ -1469,14 +1498,16 @@ describe('#430 the executor, on a fake machine', () => {
         return { kind: 'sent', line, text: '<Alarm|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
       },
     };
-    const r = await runRegistration(plan('vise', { seekFromMachineZ: -10 }), { console: alarmed, operator: yes });
+    // #1199 — the live clearance is the machine's: −10 here, so the plan seeking from −10 is legal
+    // and the recovery sentence still names −10 rather than a baked-in −3.
+    const r = await runRegistration(plan('vise', { seekFromMachineZ: -10 }), { liveClearanceZ: -10, console: alarmed, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('lift with G53 G0 Z-10 before any XY move');
   });
 
   it('stops at a failure at ANY step, sends nothing more than a State read and G90', async () => {
     const clean = fakeZ1({ actual: SHIFTED });
-    const full = await runRegistration(plan('vise'), { console: clean.console, operator: yes });
+    const full = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: clean.console, operator: yes });
     if (!full.ok) throw new Error(full.reason);
     const count = clean.lines.length;
     for (let k = 1; k < count; k++) {
@@ -1494,7 +1525,7 @@ describe('#430 the executor, on a fake machine', () => {
           return z1.console.send(line);
         },
       };
-      const r = await runRegistration(plan('vise'), { console: flaky, operator: yes });
+      const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: flaky, operator: yes });
       expect(r.ok, `step ${k}`).toBe(false);
       // #588 — a timeout is an unknown state, not an alarm: the stop reads the machine's State, and
       // an Idle answer sends no `$X` and no recovery advice.
@@ -1520,7 +1551,7 @@ describe('#430 the executor, on a fake machine', () => {
         return timedOutClose.console.send(line);
       },
     };
-    const stillOk = await runRegistration(plan('vise'), { console: closesFlaky, operator: yes });
+    const stillOk = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: closesFlaky, operator: yes });
     expect(stillOk.ok).toBe(true);
     expect(closeAsked).toBe(true);
   });
@@ -1541,7 +1572,7 @@ describe('#430 the executor, on a fake machine', () => {
         return z1.console.send(line);
       },
     };
-    const r = await runRegistration(plan('vise'), { console: faulty, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: faulty, operator: yes });
     expect(r.ok).toBe(false);
     // #789 — and the supply's OFF is the last line, after the recovery.
     expect(z1.lines.slice(-3)).toEqual(['$X', 'G90', 'M832']);
@@ -1553,7 +1584,7 @@ describe('#430 the executor, on a fake machine', () => {
   it('#587 narrates each step through onStep', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const steps: string[] = [];
-    const r = await runRegistration(plan('vise'), {
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3,
       console: z1.console,
       operator: yes,
       onStep: (sentence) => steps.push(sentence),
@@ -1568,7 +1599,7 @@ describe('#430 the executor, on a fake machine', () => {
     const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
     // 1.06 mm above the band's ceiling — a blank standing prouder than the ledge estimate, not a miss.
     const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE + S.surfaceToleranceMm + 1.06 });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.notes.some((n) => n.includes('proud'))).toBe(true);
@@ -1579,7 +1610,7 @@ describe('#430 the executor, on a fake machine', () => {
     const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
     const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
     const z1 = fakeZ1({ actual: SHIFTED, surface: DATUM.jawTopZ - S.surfaceToleranceMm - 1 });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('found nothing down to machine Z');
   });
@@ -1596,7 +1627,7 @@ describe('#430 the executor, on a fake machine', () => {
         return z1.console.send(line);
       },
     };
-    const r = await runRegistration(plan('vise'), { console: flaky, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: flaky, operator: yes });
     expect(r.ok).toBe(false);
     // Three probes and their misses went by with no `$X`. The stop's State read answers Idle (the
     // machine is only relative, never alarmed), so it sends `G90` alone — no `$X` on suspicion.
@@ -1611,7 +1642,7 @@ describe('#430 the executor, on a fake machine', () => {
     const z1 = fakeZ1({ actual: { ...BLANK, xMin: 200, xMax: 238 } });
     // #585 — the typed path now offers ONE guarded search lower; the operator confirms it and the
     // stock is still absent, so the stop names the cap (2 mm below the typed seat), not the band.
-    const r = await runRegistration(plan('vise', { stockThicknessMm: 3.81 }), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise', { stockThicknessMm: 3.81 }), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toContain('found nothing down to machine Z -61.982');
@@ -1628,7 +1659,7 @@ describe('#430 the executor, on a fake machine', () => {
     for (const bad of [{ surfaceSlowSeekMm: 1 }, { surfaceSlowSeekMm: 2.5 }, { idlePollLimit: 0 }]) {
       const z1 = fakeZ1({ actual: SHIFTED });
       const p = { ...plan('vise'), settings: { ...S, ...bad } };
-      const r = await runRegistration(p, { console: z1.console, operator: yes });
+      const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
       expect(r.ok, JSON.stringify(bad)).toBe(false);
       if (!r.ok) {
         expect(r.reason).toMatch(/^nothing was sent: /);
@@ -1650,7 +1681,7 @@ describe('#430 the executor, on a fake machine', () => {
         return z1.console.send(line);
       },
     };
-    const r = await runRegistration(plan('vise'), { console: cut, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: cut, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain(`as low as ${S.surfaceSlowSeekMm - 1} mm below the fast touch's reading (the slow surface touch)`);
     // Relative mode at the stop, but the State read answers Idle: `G90` alone, no `$X` on suspicion.
@@ -1671,7 +1702,7 @@ describe('#430 the executor, on a fake machine', () => {
         return r;
       },
     };
-    const r = await runRegistration(plan('vise'), { console: noisy, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: noisy, operator: yes });
     expect(r.ok).toBe(false);
     expect(z1.lines.slice(-2)).toEqual(['G92.1', '?']);
   });
@@ -1722,7 +1753,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       bracketOrigin: { x: -181.55, y: -184.8, from: 'the bench’s G54', offsetMeasured: true },
     });
     const z1 = replay();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceZ).toBe(-56.116);
     expect(r.outcome.probeRefZ).toBe(-76.061);
@@ -1731,7 +1762,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     // Nothing was sent in the G54 in force, so none is reported; XY is the bracket's, not checked.
     expect(r.outcome.currentG54).toBeNull();
     expect(r.outcome.xyChecked).toBe(false);
-    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     if (!applied.ok) throw new Error(applied.reason);
     expect(applied.cutterRefZ).toBe(-79.158);
     expect(applied.line).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.213');
@@ -1762,7 +1793,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       expectedSurface: { machineZ: -56.1, from: 'the bench' },
       bracketOrigin: { x: -181.55, y: -184.8, from: 'the bench’s G54', offsetMeasured: true },
     });
-    const r = await runRegistration(p, { console: replay().console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: replay().console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     return { p, outcome: r.outcome };
   }
@@ -1772,14 +1803,14 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     // The first probe read −56.116; the skim was posted to take 0.5 mm, so the top is expected at
     // −56.616. It measured −56.666 — 0.05 mm deeper than asked, which is the whole reason for a touch.
     const z1 = retouchZ1(-56.666);
-    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!rt.ok) throw new Error(rt.reason);
     expect(rt.surface.z).toBe(-56.666);
     // The seek's fast touch travels to the BAND's floor (expected − tolerance), not the first run's.
     // From the travel height −3 down to the band's floor −56.866, not the first run's −56.422.
     expect(z1.lines).toContain('G38.3 Z-53.866 F300');
     expect(rt.outcome.surfaceZ).toBe(-56.666);
-    const applied = await applyCorrection(rt.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(rt.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     if (!applied.ok) throw new Error(applied.reason);
     // −56.666 + (−79.158 − −76.061) = −59.763: the measurement, not the nominal −56.616's −59.713.
     expect(applied.line).toBe('G10 L2 P1 X-181.550 Y-184.800 Z-59.763');
@@ -1792,7 +1823,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
     // Expected −56.616 ± 0.25; a reading of −57.2 means the top is not where this skim could have
     // left it — the facing pass did not run, or did not remove what it was posted to.
     const z1 = retouchZ1(-57.2);
-    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    const rt = await retouchSurface(p, outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(rt.ok).toBe(false);
     if (rt.ok) return;
     expect(rt.reason).toContain('outside the expected -56.866 to -56.366');
@@ -1802,7 +1833,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
   it('refuses a re-touch with no depth to expect, before it sends anything', async () => {
     const { p, outcome } = await registered();
     const z1 = retouchZ1(-56.666);
-    const rt = await retouchSurface(p, outcome, { removedMm: 0, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    const rt = await retouchSurface(p, outcome, { removedMm: 0, toleranceMm: 0.25 }, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(rt.ok).toBe(false);
     expect(z1.lines).toEqual([]);
   });
@@ -1822,7 +1853,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       p,
       outcome,
       { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
-      { console: z1.console, operator },
+      { liveClearanceZ: -3, console: z1.console, operator },
       { confirmed: true },
     );
     if (!r.ok) throw new Error(r.reason);
@@ -1857,7 +1888,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       p,
       outcome,
       { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
-      { console: narrow.console, operator: yes },
+      { liveClearanceZ: -3, console: narrow.console, operator: yes },
       { confirmed: true },
     );
     expect(denied.ok).toBe(false);
@@ -1874,7 +1905,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       p,
       outcome,
       { removedMm: 0.5, defaults: wider, engravingCutter: 'flat-1.0' },
-      { console: wide.console, operator: yes },
+      { liveClearanceZ: -3, console: wide.console, operator: yes },
       { confirmed: true },
     );
     if (!accepted.ok) throw new Error(accepted.reason);
@@ -1889,7 +1920,7 @@ describe('#430 a Z-chain replay of the bench’s own answers (2026-10-15)', () =
       p,
       outcome,
       { removedMm: 0.5, defaults: DEFAULTS, engravingCutter: 'flat-1.0' },
-      { console: z1.console, operator: yes },
+      { liveClearanceZ: -3, console: z1.console, operator: yes },
       { confirmed: false },
     );
     expect(r.ok).toBe(false);
@@ -1937,7 +1968,7 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
     const p = plan('bracket');
     expect(p.scans).toEqual([]);
     const z1 = fakeZ1({ actual: SEATED });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(z1.lines).toContain('G53 G0 X-162.5 Y-146.7');
     expect(z1.lines.some((l) => /^G0 X/.test(l))).toBe(false);
@@ -1950,10 +1981,10 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   it('a stale G54 several mm off the bracket changes nothing: the touches land on the stock and the bracket’s origin is written', async () => {
     const p = confirm();
     const z1 = fakeZ1({ actual: SEATED, g54: { x: G54.x + 6, y: G54.y - 4 } });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.usable).toBe(true);
-    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     expect(applied.ok && applied.line).toMatch(/^G10 L2 P1 X-181\.550 Y-184\.800 /);
   });
 
@@ -2018,11 +2049,11 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   it('the operator confirms the clamps before anything moves sideways; a no stops it', async () => {
     asked.length = 0;
     const z1 = fakeZ1({ actual: SEATED });
-    const r = await runRegistration(confirm(), { console: z1.console, operator });
+    const r = await runRegistration(confirm(), { liveClearanceZ: -3, console: z1.console, operator });
     expect(r.ok).toBe(true);
     expect(asked[1]).toContain('confirm-mount: Check the clamps before the probe moves: the plan assumes the clamp on the back edge');
     const z2 = fakeZ1({ actual: SEATED });
-    const no = await runRegistration(confirm(), { console: z2.console, operator: async (st) => st.kind !== 'confirm-mount' });
+    const no = await runRegistration(confirm(), { liveClearanceZ: -3, console: z2.console, operator: async (st) => st.kind !== 'confirm-mount' });
     expect(no).toMatchObject({ ok: false, reason: expect.stringContaining('clamps were not confirmed') });
     expect(z2.lines.some((l) => /^G53 G0 X/.test(l))).toBe(false);
   });
@@ -2030,7 +2061,7 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   it('every scan starts at the seek height and every other scan move is at the park height', async () => {
     const p = confirm();
     const z1 = fakeZ1({ actual: SEATED });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const parkZ = r.data.surface.z + S.parkAboveSurfaceMm;
     // XY moves: the surface point, then each scan's touches in order.
@@ -2050,7 +2081,7 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
 
   it('a seated stock confirms; the origin stays the bracket’s', async () => {
     const z1 = fakeZ1({ actual: SEATED });
-    const r = await runRegistration(confirm(), { console: z1.console, operator: yes });
+    const r = await runRegistration(confirm(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome).toMatchObject({ usable: true, xyChecked: true, withinMargin: true, correctedG54: G54 });
     expect(Math.abs(r.outcome.bracketCheck!.x!)).toBeLessThanOrEqual(0.3);
@@ -2061,11 +2092,11 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   it('a stock not pushed into the corner is caught, and no origin is written', async () => {
     const off = { ...SEATED, xMin: 1.5, xMax: 39.6 };
     const z1 = fakeZ1({ actual: off });
-    const r = await runRegistration(confirm(), { console: z1.console, operator: yes });
+    const r = await runRegistration(confirm(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.usable).toBe(false);
     expect(r.outcome.problems.join(' ')).toContain('push the stock into the bracket’s corner');
-    const applied = await applyCorrection(r.outcome, { console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     expect(applied.ok).toBe(false);
   });
 });
@@ -2075,7 +2106,7 @@ describe('#633 the datum path widens its own seek, never the re-touch band', () 
     const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
     const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     // The skim never ran: the re-touch meets the UNFACED top again. That reading is outside the
@@ -2089,7 +2120,7 @@ describe('#633 the datum path widens its own seek, never the re-touch band', () 
     expect(unfaced).toBeGreaterThan(max);
     expect(unfaced).toBeLessThan(widened);
 
-    const rt = await retouchSurface(p, r.outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { console: z1.console, operator: yes });
+    const rt = await retouchSurface(p, r.outcome, { removedMm: 0.5, toleranceMm: 0.25 }, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(rt.ok).toBe(false);
     if (rt.ok) return;
     expect(rt.reason).toContain(`outside the expected ${min} to ${max}`);
@@ -2136,7 +2167,7 @@ describe('#743 a disc registers on its rim (D-2)', () => {
       disc: { centre: { x: 13.8, y: 15 }, radius: 15 },
     });
     const p = discPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const o = computeOutcome(p, r.data);
     expect(o.problems).toEqual([]);
@@ -2160,7 +2191,7 @@ describe('#743 a disc registers on its rim (D-2)', () => {
       disc: { centre: { x: 15, y: 15 }, radius: 15.21 },
     });
     const p = discPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const o = computeOutcome(p, r.data);
     // #743 — a different-sized piece is never a problem: the origin is written from the measured
@@ -2188,7 +2219,7 @@ describe('#743 a disc registers on its rim (D-2)', () => {
       disc: { centre: { x: 15, y: 15 }, radius: 14.7 },
     });
     const p = discPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const o = computeOutcome(p, r.data);
     expect(o.problems).toEqual([]);
@@ -2205,7 +2236,7 @@ describe('#743 a disc registers on its rim (D-2)', () => {
       disc: { centre: { x: 15, y: 15 }, radius: 15.1 },
     });
     const p = discPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const o = computeOutcome(p, r.data);
     expect(o.problems).toEqual([]);
@@ -2224,7 +2255,7 @@ describe('#743 a disc registers on its rim (D-2)', () => {
       disc: { centre: { x: 15, y: 15 }, radius: 15.3, radiusY: 14.76 },
     });
     const p = discPlan();
-    const r = await runRegistration(p, { console: z1.console, operator: yes });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const o = computeOutcome(p, r.data);
     expect(o.problems).toEqual([]);
@@ -2259,7 +2290,7 @@ describe('#933 the run stops in seconds', () => {
 
   it('polls `?` on the 3 s status window, and a machine that never reads Idle stops in polls, not minutes', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const polls = z1.timings().filter((t) => t.line === '?');
     expect(polls.length).toBeGreaterThan(0);
@@ -2276,7 +2307,7 @@ describe('#933 the run stops in seconds', () => {
       answered += 1;
       return { kind: 'sent', line, text: answered === 1 ? '<Idle|MPos:0,0,0>' : '<Run|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
     });
-    const r2 = await runRegistration(plan('vise'), { console: busy, operator: yes });
+    const r2 = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: busy, operator: yes });
     expect(r2.ok).toBe(false);
     if (!r2.ok) expect(r2.reason).toContain('did not read Idle in');
     const polls2 = z1.timings().filter((t) => t.line === '?');
@@ -2289,7 +2320,7 @@ describe('#933 the run stops in seconds', () => {
     const lateHome = around(z1, (line) =>
       line === '$H' ? ((homes += 1), { kind: 'timeout', line, detail: 'no answer yet', text: '' }) : null,
     );
-    const r = await runRegistration(plan('vise'), { console: lateHome, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: lateHome, operator: yes });
     // Every home in this run answered late; the run read the State and carried on.
     if (!r.ok) throw new Error(r.reason);
     expect(homes).toBeGreaterThan(0);
@@ -2306,7 +2337,7 @@ describe('#933 the run stops in seconds', () => {
       if (line === '?' && homeSent) return { kind: 'sent', line, text: '<Alarm|MPos:0,0,0>', frames: 1, elapsedMs: 1 };
       return null;
     });
-    const r = await runRegistration(plan('vise'), { console: alarmAfterHome, operator: yes });
+    const r = await runRegistration(plan('vise'), { liveClearanceZ: -3, console: alarmAfterHome, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('in alarm after homing');
   });
@@ -2339,7 +2370,7 @@ describe('#933 the run stops in seconds', () => {
     // fixture, so the second probe line is the touch): the very next line — the touch's release —
     // is refused by the flag, and the stop path must send it.
     const stopRequested = () => z1.lines.filter((l) => l.startsWith('G38.3')).length >= 2;
-    const r = await runRegistration(made.plan, { console: z1.console, operator: yes, stopRequested });
+    const r = await runRegistration(made.plan, { liveClearanceZ: -3, console: z1.console, operator: yes, stopRequested });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('the operator pressed Stop');
@@ -2382,7 +2413,7 @@ describe('#933 the run stops in seconds', () => {
         return z1.console.send(line, timing);
       },
     };
-    const r = await runRegistration(made.plan, { console, operator: yes, stopRequested: () => probed });
+    const r = await runRegistration(made.plan, { liveClearanceZ: -3, console, operator: yes, stopRequested: () => probed });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('the operator pressed Stop');
@@ -2431,7 +2462,7 @@ describe('#933 the run stops in seconds', () => {
         return z1.console.send(line, timing);
       },
     };
-    const r = await runRegistration(made.plan, { console, operator: yes, stopRequested: () => probed });
+    const r = await runRegistration(made.plan, { liveClearanceZ: -3, console, operator: yes, stopRequested: () => probed });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('may be in alarm');
@@ -2452,7 +2483,7 @@ describe('#933 the run stops in seconds', () => {
           ? { kind: 'sent', line, text: `<Idle|MPos:${off.x},${off.y},0|WPos:0,0,0>`, frames: 1, elapsedMs: 1 }
           : null,
       );
-    const good = await runRegistration(plan('vise'), {
+    const good = await runRegistration(plan('vise'), { liveClearanceZ: -3,
       console: status({ x: -150.25, y: -160.5 }),
       operator: yes,
       expectedG54: { x: -150, y: -160.5 },
@@ -2467,7 +2498,7 @@ describe('#933 the run stops in seconds', () => {
         ? { kind: 'sent', line, text: `<Idle|MPos:${-170},${-160.5},0|WPos:0,0,0>`, frames: 1, elapsedMs: 1 }
         : null,
     );
-    const bad = await runRegistration(plan('vise'), {
+    const bad = await runRegistration(plan('vise'), { liveClearanceZ: -3,
       console: stale,
       operator: yes,
       expectedG54: { x: -150, y: -160.5 },
@@ -2539,7 +2570,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['20,50', SURFACE],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { liveClearanceZ: -3, console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.data.surfaceAt).toEqual({ x: 5, y: 5 });
     expect(r.data.surface.z).toBeCloseTo(SURFACE, 3);
@@ -2558,7 +2589,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['20,50', SURFACE + LOW],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS.slice(0, 3)), { liveClearanceZ: -3, console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
     expect(r.outcome.surfaceChecks![2]!.impliedMachineZ).toBeCloseTo(SURFACE + LOW, 3);
@@ -2574,7 +2605,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['60,5', SURFACE],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS), { liveClearanceZ: -3, console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceChecks).toHaveLength(4);
     expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
@@ -2588,7 +2619,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['60,5', SURFACE],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS), { liveClearanceZ: -3, console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     // The lone chip keeps pulling touches until the five-candidate cap; the answer is the level
     // three checks agree on, and the record names the chip it did not use.
@@ -2606,7 +2637,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['15,30', null],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS), { liveClearanceZ: -3, console, operator: yes });
     if (r.ok) throw new Error('expected the five readings not to prove a top');
     expect(r.reason).toContain('could not be proved');
     expect(r.reason).toContain('found nothing');
@@ -2624,7 +2655,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
       ['33,10', SURFACE - FLOOR],
     ]);
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(floorChecks), { console, operator: yes });
+    const r = await runRegistration(withChecks(floorChecks), { liveClearanceZ: -3, console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.outcome.surfaceZ).toBeCloseTo(SURFACE, 3);
     expect(r.outcome.surfaceChecks![0]!.machineZ).toBeCloseTo(SURFACE - FLOOR, 3);
@@ -2635,7 +2666,7 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
     const deltas = [0.25, 0.1, -0.05, -0.2, -0.35];
     const map = new Map(PTS.map((p, i) => [`${p.x},${p.y}`, SURFACE + deltas[i]!]));
     const { console } = pointedConsole(map);
-    const r = await runRegistration(withChecks(PTS), { console, operator: yes });
+    const r = await runRegistration(withChecks(PTS), { liveClearanceZ: -3, console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.reason).toContain('no two implied tops agree');
@@ -2646,10 +2677,10 @@ describe('#1179 B the cut blank’s top is measured on known depths, never asked
 
   it('a fresh blank (no check points) keeps the single-touch transcript byte-identical', async () => {
     const plain = fakeZ1({ actual: SHIFTED });
-    const control = await runRegistration(P(), { console: plain.console, operator: yes });
+    const control = await runRegistration(P(), { liveClearanceZ: -3, console: plain.console, operator: yes });
     if (!control.ok) throw new Error(control.reason);
     const empty = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(withChecks([]), { console: empty.console, operator: yes });
+    const r = await runRegistration(withChecks([]), { liveClearanceZ: -3, console: empty.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.transcript).toEqual(control.transcript);
     expect(r.data.surfaceChecks).toBeUndefined();

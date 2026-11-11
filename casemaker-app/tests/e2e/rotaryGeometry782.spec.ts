@@ -11,7 +11,7 @@
 //   CASEMAKER_PORT=5402 npx playwright test tests/e2e/rotaryGeometry782.spec.ts
 
 import type { TestInfo } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { fakeRotaryHouse } from './fixtures/rotaryHouse';
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -35,6 +35,7 @@ test('#782 the Holding front view shows the module and a rod in the four-jaw chu
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket needs no field and is the walk's stand-in.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-form-rod').click();

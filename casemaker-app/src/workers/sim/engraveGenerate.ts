@@ -84,6 +84,8 @@ import { GOAL_BAND_CLEARANCE_MM, goalReachFindings, knownReach, reachCutterFor }
 import { undersideFloorZ } from '@/engine/cnc/engrave/goalUnderside';
 import { goalFlipFindings } from '@/engine/cnc/engrave/goalFlipFindings';
 import { flipHoldCheck } from '@/engine/cnc/engrave/goalFlipSetups';
+// #1193 — the run's own cycle over every posted program (and the shop's rule its changes price by).
+import { runBitChangeRule, runCycleOf, type RunCycle } from '@/engine/cnc/engrave/runTotals';
 import { jobTopFace, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/catalogueTool';
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
@@ -795,6 +797,15 @@ export interface EngraveGenerated {
    * skipped, and the card has no tradeoff to state. Absent on the old heightfield path.
    */
   planIdeal?: ModelPlanOutput | null;
+  /**
+   * #1193 — THE RUN'S OWN CYCLE, over every POSTED program (all setups, the locating program) plus
+   * the bit changes between consecutive programs. The first side's `plan.outcome.cycleSeconds` is
+   * only that side; this is what §2, the Cut card and the receipt state as the run's cycle. A
+   * single-side goal run gets its own total; a multi-side seam overrides it with the whole list.
+   * Absent on results that post no program with a cycle (and on older stored results), where
+   * readers fall back to the plan outcome as before.
+   */
+  runCycle?: RunCycle | null;
   /**
    * #961 (the card slice) — THE MATERIAL TRADEOFF between the two plans, in outcome terms
    * (`comparePlanOutcomes`): `material` is true only when coverage, the deepest cut, the cycle or
@@ -6391,7 +6402,27 @@ export async function generateGoalProgram(
   );
   // #1151 — the deferred flag rides OUTSIDE the plan: the plan/programs above are the owned plan's,
   // final; the caller owes the ideal half and a tradeoff update.
-  return idealDeferred ? { ...posted, idealDeferred: true } : posted;
+  // #1193 — ONE SIDE'S PROGRAMS: the run total over what THIS result posts. A multi-side run
+  // overrides it in `generateGoalPrograms` with the whole posted list.
+  return attachRunCycle(idealDeferred ? { ...posted, idealDeferred: true } : posted, { setupCount: 1, flip: false });
+}
+
+/**
+ * #1193 — THE RUN'S CYCLE, ATTACHED WHERE THE PROGRAM LIST IS WHOLE. `generateGoalProgram` sees one
+ * side's posts; the multi-side seam sees every side plus the locating program and calls this again
+ * with the completed list. The result carries the total, or none when no program states a cycle.
+ */
+function attachRunCycle(result: EngraveGenerated, facts: { setupCount: number; flip: boolean }): EngraveGenerated {
+  const cycle = runCycleOf(
+    result.programs.map((program) => ({
+      seconds: program.cam?.estimatedSeconds ?? 0,
+      cutterKey: program.toolKey,
+      setupIndex: program.setupIndex,
+    })),
+    runBitChangeRule(),
+    facts,
+  );
+  return cycle === null ? result : { ...result, runCycle: cycle };
 }
 
 /**
@@ -6520,10 +6551,21 @@ async function generateGoalPrograms(
   for (const side of sides.slice(1)) {
     const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
     const sideList = sidePrograms(one, side);
-    if (sideList === null) return { ...one, programs };
+    // A side that failed stops the run: this result's `programs` are the run's so far, but no run
+    // total is stated for an incomplete run — `one`'s own side-total would read as the run's.
+    if (sideList === null) return { ...one, programs, runCycle: null };
     programs.push(...sideList);
   }
-  return { ...first, programs };
+  // #1193 — THE RUN'S CYCLE, from the programs it actually posts. Every side's plan priced only
+  // its own programs, and the locating program is posted by neither plan: this is the one place
+  // that sees the whole list, so the one place the run's total can be stated truthfully. The bit
+  // changes between consecutive programs are priced here by the shop's own rule — including the
+  // boundaries the plans could not see (side 1 → locating → side 2). The FLIP itself is not a
+  // timed act in this app; `flip` says so, and the sentence says it is untimed.
+  return attachRunCycle(
+    { ...first, programs },
+    { setupCount: sides.length, flip: sides.some((side) => side.setup.flip !== undefined) },
+  );
 }
 
 /**

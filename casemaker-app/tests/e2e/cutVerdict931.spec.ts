@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, openSignCard } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
@@ -52,8 +52,8 @@ async function toDefaultJob(page: Page): Promise<void> {
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await page.getByTestId('engrave-setup-what-engrave').click();
-  await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+  await openSignCard(page);
+  await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-stock-next').click();
   await page.getByTestId('engrave-setup-next').click();

@@ -24,7 +24,7 @@ import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { benchCutterFor, getTools } from '@/engine/cnc/toolRegistry';
 import { cutterSettled, settledCutterEntry } from '@/engine/cnc/engrave/cutterChecklist';
 import type { CutterChecklistEntry } from '@/types/engraveJob';
-import { postedCuttersFor, type PostedCutter } from './CutterList';
+import { postedCuttersFor, programsWords, type PostedCutter } from './CutterList';
 
 /** The machine's standard shank (the Z1's collets) — anything else states its shank. */
 const STANDARD_SHANK_MM = 3.175;
@@ -122,7 +122,7 @@ export function CutterChecklist({
           return (
             <li key={row.key} data-testid="engrave-cutter-row" style={ROW}>
               <span style={{ color: '#9aa4b0', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>
-                {row.programs.map((n) => `p${String(n).padStart(2, '0')}`).join(', ')}
+                {programsWords(row.programs)}
               </span>
               <span>
                 {row.name}

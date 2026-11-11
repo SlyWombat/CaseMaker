@@ -138,7 +138,7 @@ const yes = async () => true;
 describe('#827 runCentreFind on the bench counterbore', () => {
   it('finds the centre and ⌀8.88 from the four walls, and releases every touch before any G0', async () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
-    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }), { console: fake.console, operator: yes });
+    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     // The centre, work and machine: the bench's own figure.
     expect(result.centreWork.x).toBeCloseTo(10, 2);
@@ -191,7 +191,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
     if (!made.ok) throw new Error(made.reason);
     const result = await runCentreFind(
       { ...options({ kind: 'bore', radiusMm: 8.88 / 2 }), plan: made.plan, topTouchAt: { x: 24, y: 19.5 } },
-      { console: fake.console, operator: yes },
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     if (!result.ok) throw new Error(result.reason);
     expect(result.centreWork.x).toBeCloseTo(10, 2);
@@ -204,7 +204,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
 describe('#827 runCentreFind on a round part', () => {
   it('measures a ⌀30 boss centre from outside, with the top at its own centre', async () => {
     const fake = fakeMachine({ kind: 'boss', radiusMm: 15 });
-    const result = await runCentreFind(options({ kind: 'boss', radiusMm: 15 }), { console: fake.console, operator: yes });
+    const result = await runCentreFind(options({ kind: 'boss', radiusMm: 15 }), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.centreWork.x).toBeCloseTo(10, 2);
     expect(result.centreWork.y).toBeCloseTo(20, 2);
@@ -227,7 +227,7 @@ describe('#827 runCentreFind on a round part', () => {
     if (!made.ok) throw new Error(made.reason);
     const result = await runCentreFind(
       { ...options({ kind: 'boss', radiusMm: 15 }), plan: made.plan },
-      { console: fake.console, operator: yes },
+      { liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/increase the search radius/);
@@ -241,7 +241,7 @@ describe('#827 runCentreFind on a round part', () => {
 describe('#932 a zero release distance', () => {
   it('stops the run before a G38.5 is sent, naming the travel', async () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
-    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }, { releaseMm: 0 }), {
+    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }, { releaseMm: 0 }), { liveClearanceZ: -3,
       console: fake.console,
       operator: yes,
     });

@@ -15,6 +15,8 @@ import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useCncModeStore } from '@/store/cncModeStore';
 import { machineKey, resetMachineRunStore, runContextFor, useMachineRunStore } from '@/store/machineRunStore';
+import type { MachineStopReport } from '@/platform/machineStopReport';
+import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { Tool } from '@/engine/cnc/tool';
 import type { MachineObservation } from '@/platform/machineProbe';
@@ -27,8 +29,13 @@ const sent: string[] = [];
 /**
  * A controller: Idle before play; then `runFor` polls of Run before it finishes; Idle after abort.
  * #655 — `toolPolls` first answers the firmware's `Tool` state (a `T1 M6` waiting for `M490.2`).
+ * #1197 — `firstStatus` scripts the opening poll (an alarm, or a machine mid-job) and `abort` /
+ * `home` script those two lines' answers, so a transport failure is a scripted reply.
  */
-function client(runFor: number, opts: { toolPolls?: number } = {}): MachineConsoleClient {
+function client(
+  runFor: number,
+  opts: { toolPolls?: number; firstStatus?: string; abort?: ConsoleSend; home?: ConsoleSend } = {},
+): MachineConsoleClient {
   let played = false;
   let aborted = false;
   let polls = 0;
@@ -40,7 +47,8 @@ function client(runFor: number, opts: { toolPolls?: number } = {}): MachineConso
           sent.push(line);
           let text = 'ok';
           if (line === '?') {
-            if (!played || aborted) text = '<Idle|MPos:0,0,0>';
+            if (!played) text = opts.firstStatus ?? '<Idle|MPos:0,0,0>';
+            else if (aborted) text = '<Idle|MPos:0,0,0>';
             else if (toolLeft > 0) {
               toolLeft -= 1;
               text = '<Tool|MPos:-10.090,-12.830,-3.000|WPos:0,0,0|T:0,-9.757,1>';
@@ -54,7 +62,10 @@ function client(runFor: number, opts: { toolPolls?: number } = {}): MachineConso
             text = 'File size 10';
           } else if (line === 'abort') {
             aborted = true;
+            if (opts.abort !== undefined) return opts.abort;
             text = 'ok\nAborted playing or paused file.';
+          } else if (line === '$H' && opts.home !== undefined) {
+            return opts.home;
           }
           return { ok: true, line, text, frames: 1, elapsedMs: 1 };
         },
@@ -91,6 +102,7 @@ beforeEach(() => {
   sent.length = 0;
   resetRunConfirmStore();
   resetMachineRunStore();
+  __resetMachineStopReportStoreForTests();
   setMachineUploadLoader(async () => ({
     status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
     upload: async () => ({ ok: true, bytes: 4, packets: 1, alreadyPresent: false }),
@@ -236,6 +248,129 @@ describe('#423 the run panel, in the real tree', () => {
     // Consecutive repeats are dropped: the effect is keyed on the line, not on renders.
     for (let i = 1; i < lines.length; i += 1) expect(lines[i]).not.toBe(lines[i - 1]);
   }, 20000);
+});
+
+// #1197 — THE RUN PANEL'S STOPS CARRY THEIR OWN REPORT. #1187's rule is that every stop on a
+// transport or controller error offers one; the run's stop and its Home press are stops too, and
+// the end card is where the operator reads them.
+describe('#1197 — the run panel’s stop reports', () => {
+  async function startRun(): Promise<void> {
+    render(upload());
+    await uploadIt();
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+  }
+
+  it('offers the report when the abort failed on the transport, with this run’s own facts', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-run.json' };
+    });
+    setMachineConsoleLoader(async () =>
+      client(100, {
+        abort: {
+          ok: false,
+          reason: 'refused',
+          line: 'abort',
+          detail: 'read failed: Connection reset by peer (os error 104)',
+          text: '',
+        },
+      }),
+    );
+    await startRun();
+    await advanceUntil(() => expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20), {
+      timeoutMs: 6000,
+    });
+    fireEvent.click(screen.getByTestId('engrave-run-stop'));
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), {
+      timeoutMs: 12000,
+    });
+
+    // The card states the transport error, and this stop — not the previous session — is the report.
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toContain('read failed: Connection reset by peer');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('run');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await advanceUntil(() => expect(reports).toHaveLength(1));
+    const entry = useMachineRunStore.getState().runs[machineKey(TARGET)]!;
+    const report = reports[0]!;
+    expect(report.action).toBe('run');
+    expect(report.error).toBe('read failed: Connection reset by peer (os error 104)');
+    // The run log is the session's transcript, mapped as the store holds it (a string per line).
+    expect(report.transcript).toEqual(entry.lines.map((s) => ({ line: '', reply: s })));
+    // An upload outside the job flow names the file; there is no package to claim.
+    expect(report.job).toEqual({ id: 'job.nc', name: 'job.nc', packageHash: null });
+  }, 30000);
+
+  it('offers the home’s report when the Home press fails on the transport', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-home.json' };
+    });
+    setMachineConsoleLoader(async () =>
+      client(100, {
+        home: { ok: false, reason: 'timeout', line: '$H', detail: 'timeout — no reply within 60000 ms', text: '' },
+      }),
+    );
+    await startRun();
+    await advanceUntil(() => expect(useMachineRunStore.getState().runs[machineKey(TARGET)]?.progress?.percent).toBe(20), {
+      timeoutMs: 6000,
+    });
+    fireEvent.click(screen.getByTestId('engrave-run-stop'));
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), {
+      timeoutMs: 12000,
+    });
+    fireEvent.click(screen.getByTestId('engrave-run-home'));
+
+    await advanceUntil(() => screen.getByTestId('engrave-run-home-note'));
+    expect(screen.getByTestId('engrave-run-home-note').textContent).toBe(
+      'Home was not sent: timeout — no reply within 60000 ms',
+    );
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('home');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await advanceUntil(() => expect(reports).toHaveLength(1));
+    const entry = useMachineRunStore.getState().runs[machineKey(TARGET)]!;
+    expect(reports[0]!.action).toBe('home');
+    expect(reports[0]!.error).toBe('timeout — no reply within 60000 ms');
+    expect(reports[0]!.transcript).toEqual(entry.lines.map((s) => ({ line: '', reply: s })));
+    expect(reports[0]!.job).toEqual({ id: 'job.nc', name: 'job.nc', packageHash: null });
+  }, 30000);
+
+  it('offers the report when the controller refuses to start in an alarm', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-alarm.json' };
+    });
+    setMachineConsoleLoader(async () => client(0, { firstStatus: '<Idle|MPos:0,0,0>\nALARM: Probe fail' }));
+    await startRun();
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('refused'), {
+      timeoutMs: 8000,
+    });
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toContain('ALARM: Probe fail');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('run');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await advanceUntil(() => expect(reports).toHaveLength(1));
+    expect(reports[0]!.action).toBe('run');
+    expect(reports[0]!.error).toContain('ALARM: Probe fail');
+  }, 30000);
+
+  it('never offers a report for the app’s own refusal', async () => {
+    setMachineConsoleLoader(async () => client(0, { firstStatus: '<Run|MPos:0,0,0|P:10,20,5>' }));
+    await startRun();
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('refused'), {
+      timeoutMs: 8000,
+    });
+    expect(screen.getByTestId('engrave-run-outcome').textContent).toContain('not Idle');
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
+  }, 15000);
 });
 
 // #442 (#414/#464) — what the engrave panel hands the run, built once and tested here rather than

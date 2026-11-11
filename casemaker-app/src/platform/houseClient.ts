@@ -893,6 +893,22 @@ export async function houseRemoveItem(
  */
 export type CrashSend = { kind: 'ok'; path: string } | HouseFailure;
 
+/**
+ * #1187 — a failed report send in one sentence, whichever failure shape it arrived as. Shared by the
+ * crash banner and a stopped machine action's report, so the two never word the same failure
+ * differently.
+ */
+export function houseSendFailureWords(answer: HouseFailure): string {
+  switch (answer.kind) {
+    case 'absent':
+      return `no house service answered (${answer.reason})`;
+    case 'refused':
+      return `the house service refused it: ${answer.message}`;
+    case 'error':
+      return `the send failed: ${answer.detail}`;
+  }
+}
+
 export async function houseSendCrashReport(
   report: unknown,
   opts?: HouseRequestOptions,

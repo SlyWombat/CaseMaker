@@ -4,6 +4,7 @@
  */
 
 import { probeInstrumentOf, type RegistrationPlan } from './plan';
+import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import type { RegistrationOutcome } from './outcome';
 
 const n = (v: number) => String(Math.round(v * 100) / 100);
@@ -13,10 +14,28 @@ export function summarizePlan(plan: RegistrationPlan): string {
   // #640 — the probe the plan will actually use: the 3D probe touches edges sideways, so the
   // narration must not send the operator to fit the wired one.
   const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? 'the 3D probe' : 'the wired probe';
+  // #1201 — A GUARDED TOP SEEK has no expected surface: the card names BOTH points before the
+  // press and the floor under them, so the operator can clear the spots and see where the probe
+  // will stop if the blank is not there.
+  if (plan.guarded !== undefined) {
+    const points = (plan.surfaceChecks ?? [])
+      .map((check) => `(${n(check.x)}, ${n(check.y)})`)
+      .join(' and ');
+    const floor = plan.guarded.floorMachineZ + plan.guarded.marginMm;
+    const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
+    const assumes =
+      plan.mount === 'bracket'
+        ? ` It assumes ${clamps.length === 0 ? 'no clamps on the stock' : clamps.join('; ')} — you confirm that before the probe moves.`
+        : '';
+    return (
+      `Home, fit ${probeWords} and measure it (M491); touch the TOP OF THE BLANK at ${points} — ` +
+      `two touches that must agree, each seek stopping above the bed at machine Z ${n(floor)}; home when finished.${assumes}`
+    );
+  }
   if (plan.references) {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (
-      `Home, fit ${probeWords} and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
+      `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
       `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
       `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.`
     );
@@ -62,7 +81,7 @@ export function summarizePlan(plan: RegistrationPlan): string {
         `each kept within ±${n(s.edgeBandMm)} mm of where its edge is expected, stopping at the first touch off the stock, ` +
         `every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
   return (
-    `Home, fit ${probeWords} and measure it (M491);${tap}` +
+    `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}`
   );

@@ -29,6 +29,13 @@ export const WORK_STOCK_SKIN_MM = 1;
 export const HOUSE_PLATE_THICKNESS_MM = 12;
 
 /**
+ * #1100 — the margin a preset's cut-out or pocket leaves each side, mm. Ten, not the mesh rule's
+ * five: the profile needs room for the cutter beside the part and for the clamps that hold the
+ * offcut. (Mockup/acceptance: a 60 × 40 shape proposes 80 × 60.)
+ */
+export const PRESET_STOCK_MARGIN_MM = 10;
+
+/**
  * The material the work proposes for a blank it sized itself: the house default (#879 — the
  * hardwood name plate). READ from the default rather than written a second time, so the proposal
  * and the job the app opens cannot drift apart.
@@ -50,6 +57,12 @@ export type WorkShape =
    * choice (a profile needs a plate the cut can free); Pocket it and Carve it leave it false.
    */
   | { kind: 'outline'; length: number; width: number; through: boolean }
+  /** #1100 — a shape cut through the blank (Cut out a shape). */
+  | { kind: 'cutout'; length: number; width: number }
+  /** #1100 — a flat-floored recess (A pocket or tray). */
+  | { kind: 'pocket'; length: number; width: number; depth: number }
+  /** #1107 — a ROD answer (a rotary intent): the blank is the rod the chuck takes. */
+  | { kind: 'rod'; diameter: number; length: number }
   | { kind: 'none' };
 
 export interface StockProposal {
@@ -87,6 +100,15 @@ export function proposedThickness(work: WorkShape): number | null {
       // #1098 — a through cut frees the part from a plate; Pocket it and Carve it bite into one.
       // Both start on the house's plate (12 mm; the shelf's own plate wins in the step).
       return HOUSE_PLATE_THICKNESS_MM;
+    case 'cutout':
+      // #1100 — the cut frees the part, so the blank is a plate the profile can go through.
+      return HOUSE_PLATE_THICKNESS_MM;
+    case 'pocket':
+      // #1100 — the floor needs its depth plus six millimetres of body under it.
+      return round1(Math.max(work.depth + 6, HOUSE_PLATE_THICKNESS_MM));
+    case 'rod':
+      // #1107 — a rod's "thickness" is its own length in the standing box.
+      return round1(work.length);
     default:
       return null;
   }
@@ -157,6 +179,44 @@ export function proposeStock(work: WorkShape): StockProposal | null {
         thickness,
         finish: 'rough',
         sentence: `Sized from the outline: ${n(work.length)} × ${n(work.width)} mm, plus ${m} mm each side.`,
+      };
+    }
+    case 'cutout': {
+      // #1100 — the shape's extent plus the preset margin (10 mm each side).
+      const m = PRESET_STOCK_MARGIN_MM;
+      return {
+        form: 'plate',
+        material: WORK_STOCK_MATERIAL,
+        length: round1(work.length + 2 * m),
+        width: round1(work.width + 2 * m),
+        thickness,
+        finish: 'rough',
+        sentence: `Sized from the cut-out: ${n(work.length)} × ${n(work.width)} mm, plus ${m} mm each side.`,
+      };
+    }
+    case 'pocket': {
+      const m = PRESET_STOCK_MARGIN_MM;
+      return {
+        form: 'plate',
+        material: WORK_STOCK_MATERIAL,
+        length: round1(work.length + 2 * m),
+        width: round1(work.width + 2 * m),
+        thickness,
+        finish: 'rough',
+        sentence: `Sized from the pocket: ${n(work.length)} × ${n(work.width)} mm, plus ${m} mm each side; ${n(work.depth)} mm deep with ${n(thickness - work.depth)} mm under it.`,
+      };
+    }
+    case 'rod': {
+      // #1107 — the house's dowel: the starter's own ⌀20 × 100, in the STANDING box the stock
+      // step asks a rod's numbers in (diameter as length and width, the rod's length as thickness).
+      return {
+        form: 'rod',
+        material: WORK_STOCK_MATERIAL,
+        length: round1(work.diameter),
+        width: round1(work.diameter),
+        thickness: round1(work.length),
+        finish: 'rough',
+        sentence: `Sized for the rotary chuck: a ⌀${n(work.diameter)} × ${n(work.length)} mm rod.`,
       };
     }
     default:

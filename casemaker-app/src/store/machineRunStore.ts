@@ -28,6 +28,7 @@
 import { create } from 'zustand';
 import { attachConsole } from '@/platform/machineConsole';
 import { programHash, programOwnsVacuum, runProgram, type Progress, type RunOutcome, type RunSettings, type VacuumSpan } from '@/platform/machineRun';
+import { buildProgramCutMap } from '@/engine/cnc/engrave/cutMap';
 import { acquireStatusPoll, noteRunStatus } from '@/platform/machineStatusPoller';
 import type { PauseAction } from '@/platform/machinePause';
 import { copyInMachine, offcutOffer, programCuts, runtimeOf, wearKey, weighRuntime, withRuntime } from '@/engine/cnc/runEnd';
@@ -135,6 +136,12 @@ export interface RunContext {
    * words would be a lie: the spindle is not rehearsing anything).
    */
   maintenance?: 'airwalk' | 'clean';
+  /**
+   * #1170 — THIS RUN REPLAYS ONE FINISHED PROGRAM ON PURPOSE (the tab-release pass after the job
+   * ended, from the end card). The motion is real, but the job's bookkeeping is already done: its
+   * end records no finished hash, consumes no stock, adds no cutter runtime and offers no offcut.
+   */
+  rerun?: true;
 }
 
 /**
@@ -260,6 +267,23 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
     }
     return { kind: 'nothing', lines: [`${what} did not finish: nothing was recorded.`], offcut: null, stockQuestion: null };
   }
+  // #1170 — a deliberate replay of one finished program (the tab-release pass) is real motion, but
+  // the job's end has already been recorded: do not record the hash again, consume the blank a
+  // second time, count the cutter's runtime twice or offer the offcut a second time.
+  if (ctx?.rerun === true) {
+    if (outcome.kind === 'finished') {
+      return {
+        kind: 'finished',
+        lines: ['The tab release was cut again: nothing was recorded — the part was already finished.'],
+        offcut: null,
+        stockQuestion: null,
+      };
+    }
+    if (outcome.kind === 'aborted' || outcome.kind === 'stopped-unconfirmed') {
+      return { kind: 'stopped', lines: ['The tab-release replay was stopped: nothing was recorded.'], offcut: null, stockQuestion: null };
+    }
+    return { kind: 'nothing', lines: ['The tab-release replay did not finish: nothing was recorded.'], offcut: null, stockQuestion: null };
+  }
   // #547 — a dry run rehearses the path with the spindle off and nothing clamped. Its end must not
   // touch the finished-program record, the shelf, the cutter runtime or the offcut: nothing was cut.
   if (ctx?.dryRun === true) {
@@ -309,6 +333,20 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
       lines.push('The finished program was not recorded: this machine is not one of the location’s.');
     } else {
       // #1179 — the record beside the hash: what was cut, under which package and registration.
+      // The cut-map entry is built first (synchronously, from the run's own NC and face facts).
+      const cutEntry: import('@/platform/locationClient').FinishedSetupCutMap | null =
+        ctx.stockXY === undefined || ctx.setupIndex === undefined
+          ? null
+          : (() => {
+              const fit = buildProgramCutMap({
+                nc: ctx.nc,
+                stock: { x: ctx.stockXY!.x, y: ctx.stockXY!.y },
+                ...(ctx.toolRadius === undefined ? {} : { toolRadius: ctx.toolRadius }),
+              });
+              return fit.kind === 'map'
+                ? { setupIndex: ctx.setupIndex!, state: 'complete' as const, map: fit.map }
+                : { setupIndex: ctx.setupIndex!, state: 'unknown' as const, unknownReason: fit.reason };
+            })();
       const run: import('@/platform/locationClient').FinishedRun = {
         hash,
         ...(ctx.jobId === undefined ? {} : { jobId: ctx.jobId }),
@@ -329,6 +367,10 @@ export async function endOfRun(target: { host: string; port: number }, outcome: 
               },
             }),
         ...(ctx.registration === undefined ? {} : { registration: ctx.registration }),
+        // #1179 step 3 — what this program cut on ITS OWN face. One entry per setup (#1179's
+        // ruling, comment 6775024844); the store merges it with the same setup's entry on the
+        // newest record for this blank. A run that states no setup has no face to key a map to.
+        ...(cutEntry === null ? {} : { cutMaps: [cutEntry] }),
       };
       const r = await io.recordFinishedProgram(machineId, hash, run);
       lines.push(

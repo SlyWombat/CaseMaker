@@ -4,6 +4,7 @@ import { useProjectStore } from '@/store/projectStore';
 import { useViewportStore, type SidebarSectionId } from '@/store/viewportStore';
 import { derivedKind, type Archetype } from '@/engine/compiler/archetype';
 import { MachinePin } from './MachinePin';
+import { useSidebarCollapsed } from './useSidebarCollapsed';
 
 /** Phone breakpoint, matching the welcome screen's ≤640px block. Below it the
  *  left rail is an off-canvas drawer instead of a fixed 320px column, which
@@ -95,6 +96,43 @@ const SHELL_SECTION_IDS: SidebarSectionId[] = SECTIONS.map((s) => s.id).filter(
   (id) => id !== 'part',
 );
 
+/**
+ * #1123-59 — THE CNC WORKSPACE'S RAIL: the machine pin (rendered above the list), the job, and its
+ * simulation. Nothing of the case designer's menu belongs beside a blank in the machine — a
+ * cutting job opened from a file used to sit on a placeholder board project and show Board, Case,
+ * HATs, Features, assets and Export. Home (item 48) is the way to the other workspaces.
+ */
+/**
+ * #1123-59 review (the analyst's ruling, #1123 comment 6782275435) — WHAT THE CNC RAIL KEEPS OF
+ * THE PROJECT. The bench's complaint was the SHELL's menu (Board, Case parameters, the ports,
+ * HATs, features and assets of the placeholder board project) beside a blank in the machine. But
+ * a blank's or an imported part's own geometry has exactly one editor — the Part panel (#282:
+ * the corner radius is unreachable by any other route) — and its Export is the project's product.
+ * So the CNC rail is the machine pin + the project's OWN-PART editor (the archetype's own
+ * section, never the shell's) + Job + Simulate + Export. A BOARD CASE has no part editor of its
+ * own (and a job opened from a file sits on the placeholder board project), so its CNC rail is
+ * the machine pin + Job + Simulate, with no Export.
+ */
+const CNC_OWN_PART_SECTIONS: Record<Archetype, SidebarSectionId[]> = {
+  shell: [],
+  // A stand has no own-part editor either: its parameters live in the shell's Case sections.
+  stand: [],
+  rack: ['rack'],
+  insert: ['insert'],
+  toolbox: ['toolbox'],
+  badge: ['part'],
+  blank: ['part'],
+};
+
+function cncSectionIds(archetype: Archetype): SidebarSectionId[] {
+  return [
+    ...CNC_OWN_PART_SECTIONS[archetype],
+    ...(archetype === 'shell' ? ([] as SidebarSectionId[]) : (['export'] as SidebarSectionId[])),
+    'cnc-engrave',
+    'cnc-sim',
+  ];
+}
+
 /** The section ids the current archetype offers. */
 function sectionIdsFor(archetype: Archetype): SidebarSectionId[] {
   if (archetype === 'rack') return RACK_SECTION_IDS;
@@ -120,10 +158,15 @@ export function Sidebar() {
   const welcomeMode = useProjectStore((s) => s.welcomeMode);
   const archetype = useProjectStore((s) => derivedKind(s.project));
   const activeSection = useViewportStore((s) => s.activeSidebarSection);
+  // #1123-59 — the workspace decides the rail, not the placeholder project behind a cutting job.
+  const workspace = useViewportStore((s) => s.workspace);
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // Phone-width drawer (issue #134). Mirrors ContextPanel's compact pattern:
   // the rail leaves the grid, a fixed handle toggles it, and a section tap
   // hands off to the right-rail drawer (which auto-opens on the same change).
+  // #1123-47 — the rail collapses to its icons (desktop/tablet only; the phone drawer is
+  // unchanged). Persisted per browser; display state only.
+  const { collapsed, toggle, expand } = useSidebarCollapsed();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isCompact, setIsCompact] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth <= COMPACT_MAX_W : false,
@@ -137,15 +180,16 @@ export function Sidebar() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const allowedIds = sectionIdsFor(archetype);
+  const allowedIds = workspace === 'cnc' ? cncSectionIds(archetype) : sectionIdsFor(archetype);
 
   // A stale active section (e.g. HATs was open when the rack got enabled)
   // would leave the right rail showing an inapplicable panel.
   useEffect(() => {
     if (activeSection && !allowedIds.includes(activeSection)) {
-      setSection(homeSectionFor(archetype));
+      // In the CNC workspace the rail's own home is the job; anywhere else the archetype's.
+      setSection(workspace === 'cnc' ? 'cnc-engrave' : homeSectionFor(archetype));
     }
-  }, [allowedIds, archetype, activeSection, setSection]);
+  }, [allowedIds, archetype, workspace, activeSection, setSection]);
   if (welcomeMode) {
     return <aside className="sidebar" />;
   }
@@ -162,10 +206,12 @@ export function Sidebar() {
     // drawer on the other edge, so leaving the rail up would bury the scene.
     if (isCompact) setDrawerOpen(false);
   };
+  const icons = collapsed && !isCompact;
   const className = [
     'sidebar',
     isCompact ? 'sidebar--drawer' : '',
     isCompact ? (drawerOpen ? 'sidebar--open' : 'sidebar--closed') : '',
+    icons ? 'sidebar--icons' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -185,10 +231,26 @@ export function Sidebar() {
         </button>
       )}
       <aside className={className} data-testid="sidebar" aria-label="Sections" style={{ padding: 8 }}>
+        {/* #1123-47 — the collapse control, at the rail's top edge. Desktop and tablet only: the
+            phone drawer keeps its own handle (the analyst's fields). */}
+        {!isCompact && (
+          <button
+            type="button"
+            data-testid="sidebar-collapse"
+            className="sidebar__collapse"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand the sections' : 'Collapse the sections'}
+            title={collapsed ? 'Expand the sections' : 'Collapse the sections'}
+            onClick={toggle}
+          >
+            {collapsed ? '▸' : '◂'}
+          </button>
+        )}
         {/* #556 / #555 — the machine, pinned above the section index so it stays in the frame while
             designing, simulating and cutting, not only on the Manage screen. Gated on the CNC UI
-            (`featureSim`) with the rest of the machine surface; the pin renders its own states. */}
-        {featureSim && <MachinePin />}
+            (`featureSim`) with the rest of the machine surface; the pin renders its own states.
+            #1123-47 — collapsed, it is its state dot alone, and a click expands the rail. */}
+        {featureSim && <MachinePin collapsed={icons} onExpand={expand} />}
         {sections.map((s) => {
           const isActive = activeSection === s.id;
           return (
@@ -198,13 +260,15 @@ export function Sidebar() {
               onClick={() => onSelect(s.id, isActive)}
               data-testid={`sidebar-button-${s.id}`}
               aria-pressed={isActive}
+              aria-label={`${s.label} — ${s.hint}`}
               title={s.hint}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
+                justifyContent: icons ? 'center' : 'flex-start',
+                gap: icons ? 0 : 10,
                 width: '100%',
-                padding: '10px 12px',
+                padding: icons ? '10px 0' : '10px 12px',
                 marginBottom: 4,
                 background: isActive ? '#243042' : '#1a1f25',
                 border: `1px solid ${isActive ? '#3a5a7a' : '#2a2f36'}`,
@@ -217,7 +281,7 @@ export function Sidebar() {
               }}
             >
               <span aria-hidden style={{ fontSize: 16 }}>{s.icon}</span>
-              <span>{s.label}</span>
+              {!icons && <span>{s.label}</span>}
             </button>
           );
         })}

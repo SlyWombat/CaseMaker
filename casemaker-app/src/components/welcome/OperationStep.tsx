@@ -31,6 +31,16 @@ import { OperationPicker } from '@/components/panels/OperationPicker';
 import { SELECTED_FILL, useSelectionChipGrid } from '@/components/selectionChip';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { RotaryOperationPicker } from './RotaryOperationPicker';
+import { PresetArt } from './PresetArt';
+import {
+  LETTER_SIZES,
+  WIZARD_PRESETS,
+  defaultPresetAnswers,
+  letterSizeMm,
+  presetChoice,
+  type PresetAnswers,
+  type PresetId,
+} from './presets';
 import { WizardDropZone } from './WizardDropZone';
 import { WizardFileField } from './WizardFileField';
 import { WizardThumbnail } from './WizardThumbnail';
@@ -40,7 +50,7 @@ import { isSideGoal, jobHasItems, jobSetups, jobTargetObjects, jobTool, sideSetu
 import { defaultFaceOperation } from '@/engine/cnc/rotary/faceOps';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { RotaryOperationId } from './rotaryOperations';
-import type { OperationTypeId } from '@/components/panels/operationTypes';
+import { operationType, type OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
 
@@ -95,6 +105,42 @@ function boxFact(size: { x: number; y: number; z: number }): string {
   return `${n(size.x)} × ${n(size.y)} × ${n(size.z)} mm`;
 }
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: '6px 0 0' };
+/** #1183 — a secondary action at LINK weight: never a second primary, never a card. */
+const LINK: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  fontSize: 12,
+  color: '#8ab4f8',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+};
+/** #1100 — the preset cards: a picture, a title, and a blurb that is never a tooltip. */
+const PRESET: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: 3,
+  textAlign: 'left',
+  padding: '7px 9px',
+  borderRadius: 8,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: '#2a2f36',
+  background: '#121a24',
+  color: '#c8d3de',
+  cursor: 'pointer',
+  font: 'inherit',
+};
+const PRESET_ON: CSSProperties = { ...PRESET, borderColor: '#4f8ef7', background: '#152238' };
+
+/** #1107 — the three rod intents, as cards in the question's own list. */
+const ROD_INTENTS: readonly { id: string; pick: RotaryOperationId; art: PresetId; title: string; blurb: string }[] = [
+  { id: 'dowel', pick: 'engrave', art: 'rod-dowel', title: 'Name on a dowel', blurb: 'Text around or along a rod' },
+  { id: 'faces', pick: 'faces-all-round', art: 'rod-faces', title: 'Faces on a rod', blurb: 'Evenly spaced flats, indexed' },
+  { id: 'relief', pick: 'relief', art: 'rod-relief', title: 'A relief on a rod', blurb: 'A mesh wrapped on the surface' },
+];
 /** #723 P2-3 — one side of a part cut from several sides, as a choice. */
 // Longhands, not the `border` shorthand: the ON fill names `borderColor` (#874).
 const SIDE_CHIP: CSSProperties = { fontSize: 11, padding: '4px 8px', borderRadius: 4, borderWidth: 1, borderStyle: 'solid', borderColor: '#2a2f36', background: 'transparent', color: '#c8d3de', cursor: 'pointer' };
@@ -114,8 +160,27 @@ const SIDE_CHIP_ON: CSSProperties = { ...SIDE_CHIP, ...SELECTED_FILL };
  * order they were made.
  */
 export type OperationChoice =
-  | { type: 'engrave'; text: string; depth: number; font: TextFont; reads?: 'along' | 'around' }
-  | { type: 'surface'; target: EngraveTargetObject | null; /** #723 P2-3 — the side it is written to. */ setupId?: string }
+  | {
+      type: 'engrave';
+      text: string;
+      depth: number;
+      font: TextFont;
+      reads?: 'along' | 'around';
+      /** #1100 — the sign preset's letter size (cap height, mm), which sizes the blank. */
+      sizeMm?: number;
+      /** #1107 — the answer is for a ROD: the blank is proposed as one and the chuck pre-selected. */
+      frame?: 'rotary';
+    }
+  /** #1100 — Cut out a shape: a rectangle or circle through the blank, held by tabs. */
+  | { type: 'cutout'; shape: 'rect' | 'circle'; length: number; width: number; radius: number }
+  | {
+      type: 'surface';
+      target: EngraveTargetObject | null;
+      /** #723 P2-3 — the side it is written to. */
+      setupId?: string;
+      /** #1107 — a relief ON A ROD (a rotary intent from the question step). */
+      frame?: 'rotary';
+    }
   /**
    * #874 — a circuit board, from its Gerber and drill files. `imported` is whether the set has
    * READ: the files write the job's items themselves, so Create adds nothing and waits only for
@@ -130,7 +195,7 @@ export type OperationChoice =
   /** #241 slice 2 — a flat on a face: the index and the depth. */
   | { type: 'flat'; a: number; depth: number }
   /** #241 slice 2 — evenly spaced flats: the first index, the count, and the across-flats. */
-  | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number }
+  | { type: 'faces-all-round'; a: number; count: number; acrossFlats: number; frame?: 'rotary' }
   /** #241 slice 2 — a cross-hole: the index and the diameter. */
   | { type: 'cross-hole'; a: number; diameter: number }
   /**
@@ -139,7 +204,19 @@ export type OperationChoice =
    * region — the job's cutter decides the V, exactly as the panel's own chips do).
    */
   | { type: 'outline'; outline: OutlineImport; use: 'profile' | 'pocket' | 'v-carve'; depth?: number }
-  | { type: Exclude<OperationTypeId, 'engrave' | 'surface' | 'pcb'>; text?: string; lengthMm?: number };
+  | {
+      type: Exclude<OperationTypeId, 'engrave' | 'surface' | 'pcb'>;
+      text?: string;
+      lengthMm?: number;
+      /**
+       * #1100 — A pocket or tray, when the preset card's numbers ride on the choice. A bare
+       * `{ type: 'pocket' }` is still the picker's chip (an unplaced rect the panel sizes).
+       */
+      length?: number;
+      width?: number;
+      depth?: number;
+      radius?: number;
+    };
 
 export interface OperationStepProps {
   job: EngraveJob;
@@ -159,6 +236,19 @@ export interface OperationStepProps {
   initial?: OperationChoice | null;
   /** The step's current answer; the SHELL owns the footer, so the step reports rather than acts. */
   onChoiceChange: (choice: OperationChoice | null) => void;
+  /**
+   * #1107 — WHAT THE ROTARY IS, from the shell: whether the house OWNS one (the intents are
+   * offered) and whether it is on the pins now (the intents are listed first). A new run used to
+   * meet the rotary only after step 4, so the rod path was unreachable.
+   */
+  rotaryFacts?: { owned: boolean; onPins: boolean };
+  /**
+   * #1183 — THE EMPTY JOB'S OWN DOOR. A secondary, link-weight action under the presets and the
+   * file zone, on a NEW run only (`fresh`): the shell creates the empty job (asking first when
+   * the open job carries work) and walks on to Stock exactly as a pick does. It is not the
+   * primary: the primary keeps #1107's refusal when nothing is picked.
+   */
+  onStartEmptyJob?: () => void;
 }
 
 /** A flat-job picker id, or null for a choice only the rotary picker draws (or no choice). */
@@ -196,6 +286,8 @@ export function OperationStep({
   fresh = false,
   initial = null,
   onChoiceChange,
+  rotaryFacts = { owned: false, onPins: false },
+  onStartEmptyJob,
 }: OperationStepProps): JSX.Element {
   // #897 — a re-mounted step starts from the answer the shell holds: Back is an edit, not a reset.
   const seed = initial;
@@ -211,7 +303,35 @@ export function OperationStep({
   // #752 R-UI-4 — on a rod in the chuck the step is the rotary one (§3.6): its own three groups,
   // and each operation's one field. `rotaryPicked` is null on a job that already has work, so
   // Create finishes without adding a duplicate — the same rule the flat picker follows.
-  const rotary = rotaryMapOf(job) !== null;
+  //
+  // #1107 — AND A NEW FLAT RUN CAN CHOOSE THE ROD: picking a rod intent turns the same step into
+  // the rotary one, so the answer states its frame and the blank/Holding follow it.
+  const rotaryJob = rotaryMapOf(job) !== null;
+  const [frameRotary, setFrameRotary] = useState(seed !== null && 'frame' in seed && seed.frame === 'rotary');
+  /** #1107 — the named sentence a FRAME CHANGE leaves when the pick does not exist in the other. */
+  const [droppedPick, setDroppedPick] = useState<string | null>(null);
+  const rotary = rotaryJob || frameRotary;
+  /** #1107 — the rod intents: an entry to the rotary step from a job that is not one yet. */
+  const startRotary = (pick: RotaryOperationId): void => {
+    // A flat pick that the rotary step does not know is dropped BY NAME, never silently.
+    const ROTARY_COMPATIBLE: readonly OperationTypeId[] = ['engrave', 'surface', 'pocket', 'v-carve', 'flute'];
+    const flatLabel = picked === null ? null : operationType(picked).label;
+    setDroppedPick(
+      picked !== null && !ROTARY_COMPATIBLE.includes(picked) && flatLabel !== null
+        ? `${flatLabel} is a flat-stock operation — on a rod, choose again.`
+        : outline !== null
+          ? 'Your drawing is a flat-stock operation — on a rod, choose again.'
+          : null,
+    );
+    setFrameRotary(true);
+    setRotaryPicked(pick);
+    setPickedByOperator(true);
+    setPicked(null);
+    setOutline(null);
+    setOutlineFileName(null);
+    setOutlineError(null);
+    setDropError(null);
+  };
   const rotaryPickOf = (choice: OperationChoice | null): RotaryOperationId | null => {
     if (choice === null) return null;
     switch (choice.type) {
@@ -238,6 +358,31 @@ export function OperationStep({
   // finishes with the empty job instead of waiting for invented text. Picking the chip keeps the
   // amber sentence and the hold.
   const [pickedByOperator, setPickedByOperator] = useState(seed !== null);
+  // #1100 — WHAT ARE YOU MAKING? The eight preset cards are the step's first question; the
+  // sixteen chip picker lives under *Something else…*.
+  const [preset, setPreset] = useState<PresetId | null>(() =>
+    seed?.type === 'engrave' ? 'sign' : seed?.type === 'cutout' ? 'cutout' : seed?.type === 'pocket' ? 'pocket' : null,
+  );
+  const [answers, setAnswers] = useState<PresetAnswers>(() => ({
+    ...defaultPresetAnswers(),
+    ...(seed?.type === 'engrave' ? { text: seed.text, font: seed.font } : {}),
+    ...(seed?.type === 'cutout'
+      ? { shape: seed.shape, lengthMm: seed.length, widthMm: seed.width, radiusMm: seed.radius }
+      : {}),
+    ...(seed?.type === 'pocket' && seed.length !== undefined
+      ? { lengthMm: seed.length, widthMm: seed.width ?? 0, depthMm: seed.depth ?? 6, radiusMm: seed.radius ?? 0 }
+      : {}),
+  }));
+  const choosePreset = (id: PresetId): void => {
+    setPreset(id);
+    setDropError(null);
+    if (id === 'part-3d') pickFlat('surface');
+    else if (id === 'pcb') pickFlat('pcb');
+    else if (id === 'dowel') setRotaryPicked('engrave');
+    else setPicked(null);
+    // The card's own selection lands after any picker reset the branch above performed.
+    setPreset(id);
+  };
   // #1098 — THE FILE FIRST. An SVG/DXF read here is the step's answer even though the picker has
   // no chip for it: the format chose the operation. A chip click puts the drawing away again.
   // #897's rule applies to the drawing too: Back from the stock step is an edit, not a reset.
@@ -255,7 +400,25 @@ export function OperationStep({
   const [outlineError, setOutlineError] = useState<string | null>(null);
   /** #1098 — the drop zone's one-sentence refusal for a file the app does not read. */
   const [dropError, setDropError] = useState<string | null>(null);
-  const pickFlat = (id: OperationTypeId): void => {
+  const pickFlat = (id: OperationTypeId, keepFold = false): void => {
+    // #1100 — a FILE (or a card) is an alternative to the fold; a chip clicked INSIDE the fold
+    // keeps it open, so the picker does not disappear under the operator's next click.
+    if (!keepFold) setPreset(null);
+    // #1107 — a flat chip is the way back to flat stock; a rod pick it cannot carry is named.
+    if (frameRotary) {
+      const ROD_LABEL: Partial<Record<RotaryOperationId, string>> = {
+        flat: 'The flat on a face',
+        'faces-all-round': 'Faces all round',
+        'cross-hole': 'The cross-hole',
+      };
+      const carried = rotaryPicked === 'engrave' || rotaryPicked === 'v-carve' || rotaryPicked === 'pocket' || rotaryPicked === 'flute' || rotaryPicked === 'relief';
+      setDroppedPick(
+        !carried && rotaryPicked !== null
+          ? `${ROD_LABEL[rotaryPicked] ?? 'Your rod answer'} is a rod operation — on flat stock, choose again.`
+          : null,
+      );
+    }
+    setFrameRotary(false);
     // #1098 — the picker is the alternative to the file; clicking a chip clears the drawing.
     setOutline(null);
     setOutlineFileName(null);
@@ -352,15 +515,18 @@ export function OperationStep({
   // #743 P-8 — a two-sided board whose holes the fitted probe cannot read, with its one-click offer.
   const [pcbAlignment, setPcbAlignment] = useState<PcbAlignmentOffer | null>(null);
 
+  // #1107 — the answer's frame, when the rod intents chose it.
+  const frame = frameRotary ? ({ frame: 'rotary' } as const) : {};
   const surfaceChoice: OperationChoice = {
     type: 'surface',
     target:
       surface === null || !makeMold || surface.format === 'png' ? surface : { ...surface, goalMode: 'mold' },
     ...(selectedSide === null ? {} : { setupId: selectedSide }),
+    ...frame,
   };
   const choice: OperationChoice | null = rotary
     ? rotaryPicked === 'engrave'
-      ? { type: 'engrave', text, depth, font, reads }
+      ? { type: 'engrave', text, depth, font, reads, ...frame }
       : rotaryPicked === 'v-carve'
         ? { type: 'v-carve', text: vcarveText }
         : rotaryPicked === 'pocket'
@@ -372,11 +538,16 @@ export function OperationStep({
               : rotaryPicked === 'flat'
                 ? { type: 'flat', a: faceAngle, depth: faceDepth }
                 : rotaryPicked === 'faces-all-round'
-                  ? { type: 'faces-all-round', a: faceAngle, count: facesCount, acrossFlats: facesAcross }
+                  ? { type: 'faces-all-round', a: faceAngle, count: facesCount, acrossFlats: facesAcross, ...frame }
                   : rotaryPicked === 'cross-hole'
                     ? { type: 'cross-hole', a: faceAngle, diameter: holeDiameter }
                     : null
-    : outline !== null
+    : preset === 'sign'
+      ? // #1100 — the sign's depth is the job's stock-aware default, as every engrave entry's is.
+        { type: 'engrave', text: answers.text, depth: newItemDepthFor(job), font: answers.font, sizeMm: letterSizeMm(answers.letterSize) }
+      : preset === 'cutout' || preset === 'pocket'
+      ? presetChoice(preset, answers)
+      : outline !== null
       ? { type: 'outline', outline, use: outlineUse, ...(outlineUse === 'pocket' ? { depth: outlineDepth } : {}) }
       : picked === 'engrave'
       ? { type: 'engrave', text, depth, font }
@@ -405,7 +576,9 @@ export function OperationStep({
       proposal.form === 'plate' ? 'plate' : proposal.form
     } — change on the next step.`;
   }, [reportedChoice, job]);
-  const unblock = operationCreateBlocked(reportedChoice);
+  // #1107 — a NULL choice is the SHELL's rule (a new run is refused, a re-entry's Done is not),
+  // so its sentence belongs in the footer, not in a field that does not exist.
+  const unblock = reportedChoice === null ? null : operationCreateBlocked(reportedChoice);
   // #874 — the sentence names the FIELD it is about, so it renders in that chip's own field box,
   // directly under the field, never at the foot of the step 300 px away from the Text input.
   const unblockLine =
@@ -427,7 +600,7 @@ export function OperationStep({
   useLayoutEffect(() => {
     onChoiceChange(reportedChoice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked, pickedByOperator, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, outline, outlineUse, outlineDepth, onChoiceChange]);
+  }, [picked, pickedByOperator, text, depth, font, surface, makeMold, pcbImported, pcbBoard, rotary, rotaryPicked, reads, vcarveText, fluteLengthMm, selectedSide, faceAngle, faceDepth, facesCount, facesAcross, holeDiameter, outline, outlineUse, outlineDepth, preset, answers, onChoiceChange]);
 
   async function readPcbSet(files: File[]): Promise<void> {
     setPcbSummary(null);
@@ -530,6 +703,7 @@ export function OperationStep({
         dxfChordToleranceMm: shopDefault('import.dxfChordToleranceMm').value,
       });
       if (result.ok) {
+        setPreset(null);
         setOutline(result.outline);
         setOutlineUse('profile');
         setOutlineDepth(newItemDepthFor(job));
@@ -548,7 +722,9 @@ export function OperationStep({
     }
   }
 
-  const engraveField = rotary ? rotaryPicked === 'engrave' : picked === 'engrave';
+  // #1100 — on a flat job the sign CARD owns the text question; the raw chip's field belongs to
+  // the *Something else…* fold (a rotary job keeps its own engrave field as before).
+  const engraveField = rotary ? rotaryPicked === 'engrave' : preset === 'something-else' && picked === 'engrave';
   const surfaceField = rotary ? rotaryPicked === 'relief' : picked === 'surface';
   // #874 — the board is the second file chip, so its field is the chosen chip's box like any other.
   const pcbField = !rotary && picked === 'pcb';
@@ -558,6 +734,29 @@ export function OperationStep({
   // #241 slice 2 — the face group: each operation's one field, and the index it is cut at.
   const faceField = rotary && (rotaryPicked === 'flat' || rotaryPicked === 'faces-all-round' || rotaryPicked === 'cross-hole');
   const sideGrid = useSelectionChipGrid();
+  // #1107 — the rod intents as cards in the question's own list.
+  const rodCards = (
+    <div data-testid="start-wizard-rotary-intents" role="group" aria-label="On a rod" style={{ margin: '0 0 8px' }}>
+      <div style={FIELD_HEADING}>On a rod</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 4 }}>
+        {ROD_INTENTS.map((intent) => (
+          <button
+            key={intent.id}
+            type="button"
+            data-testid={`start-wizard-rotary-intent-${intent.id}`}
+            onClick={() => startRotary(intent.pick)}
+            style={PRESET}
+          >
+            <span style={{ color: '#c9d4e2', lineHeight: 0 }}>
+              <PresetArt id={intent.art} />
+            </span>
+            <b style={{ fontSize: 12, fontWeight: 600 }}>{intent.title}</b>
+            <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{intent.blurb}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -680,6 +879,12 @@ export function OperationStep({
           </div>
         </div>
       )}
+      {/* #1107 — a frame change's dropped pick is named here, in amber, whichever frame follows. */}
+      {droppedPick !== null && (
+        <p style={UNBLOCK} data-testid="start-wizard-rotary-dropped">
+          {droppedPick}
+        </p>
+      )}
       {rotary ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
@@ -687,13 +892,200 @@ export function OperationStep({
           testidFor={(id) => `start-wizard-op-rotary-${id}`}
         />
       ) : (
-        <OperationPicker
-          mode="select"
-          testidFor={(id) => `engrave-setup-what-${id}`}
-          onPick={pickFlat}
-          surfaceAllowed={fresh || !jobHasItems(job)}
-          selected={picked}
-        />
+        <>
+          {/* #1107 — the rod intents are CARDS IN THE SAME LIST: first when the rotary is on the
+              pins, after the flat intents otherwise. One door into the question, not two. */}
+          {rotaryFacts.owned && rotaryFacts.onPins && rodCards}
+          {/* #1100 — WHAT ARE YOU MAKING? Eight intents, each with a visible blurb; the sixteen
+              engine chips are under Something else…, where the panel's vocabulary belongs. */}
+          <div
+            data-testid="start-wizard-presets"
+            role="group"
+            aria-label="What are you making?"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, margin: '4px 0 8px' }}
+          >
+            {WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                data-testid={`start-wizard-preset-${p.id}`}
+                aria-pressed={preset === p.id}
+                onClick={() => choosePreset(p.id)}
+                style={preset === p.id ? PRESET_ON : PRESET}
+              >
+                <span style={{ color: preset === p.id ? '#8ab4f8' : '#c9d4e2', lineHeight: 0 }}>
+                  <PresetArt id={p.id} />
+                </span>
+                <b style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</b>
+                <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{p.blurb}</span>
+              </button>
+            ))}
+          </div>
+          {rotaryFacts.owned && !rotaryFacts.onPins && rodCards}
+          {preset === 'something-else' && (
+            <OperationPicker
+              mode="select"
+              testidFor={(id) => `engrave-setup-what-${id}`}
+              onPick={(id) => pickFlat(id, true)}
+              surfaceAllowed={fresh || !jobHasItems(job)}
+              selected={picked}
+            />
+          )}
+        </>
+      )}
+
+      {/* #1100 — the selected card's questions, in place under its picture. */}
+      {!rotary && preset === 'sign' && (
+        <div data-testid="start-wizard-preset-questions" style={FIELD_BOX}>
+          <label style={{ ...FIELD_STACK, marginBottom: 4 }}>
+            <span>Text</span>
+            <input
+              type="text"
+              data-testid="start-wizard-preset-text"
+              aria-label="Sign text"
+              value={answers.text}
+              onChange={(e) => setAnswers({ ...answers, text: e.target.value })}
+            />
+          </label>
+          <div style={FIELDS} role="radiogroup" aria-label="Letter size">
+            {LETTER_SIZES.map((s) => (
+              <label key={s.id} style={FIELD_LABEL}>
+                <input
+                  type="radio"
+                  name="start-wizard-preset-letter"
+                  checked={answers.letterSize === s.id}
+                  data-testid={`start-wizard-preset-letter-${s.id}`}
+                  onChange={() => setAnswers({ ...answers, letterSize: s.id })}
+                />
+                <span>
+                  {s.label} · {s.mm} mm
+                </span>
+              </label>
+            ))}
+          </div>
+          <label style={FIELD_STACK} data-testid="start-wizard-preset-font">
+            <span>Font</span>
+            <FontPicker value={answers.font} onChange={(font) => setAnswers({ ...answers, font })} aria-label="Font" />
+          </label>
+          {unblockLine}
+        </div>
+      )}
+      {!rotary && preset === 'cutout' && (
+        <div data-testid="start-wizard-preset-questions" style={FIELD_BOX}>
+          <div style={FIELDS} role="radiogroup" aria-label="Shape">
+            <label style={FIELD_LABEL}>
+              <input
+                type="radio"
+                name="start-wizard-preset-shape"
+                checked={answers.shape === 'rect'}
+                data-testid="start-wizard-preset-shape-rect"
+                onChange={() => setAnswers({ ...answers, shape: 'rect' })}
+              />
+              <span>Rectangle</span>
+            </label>
+            <label style={FIELD_LABEL}>
+              <input
+                type="radio"
+                name="start-wizard-preset-shape"
+                checked={answers.shape === 'circle'}
+                data-testid="start-wizard-preset-shape-circle"
+                onChange={() => setAnswers({ ...answers, shape: 'circle' })}
+              />
+              <span>Circle</span>
+            </label>
+          </div>
+          <div style={FIELDS}>
+            <label style={FIELD_LABEL}>
+              <span>{answers.shape === 'circle' ? 'Diameter' : 'Length'}</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                style={FIELD}
+                data-testid="start-wizard-preset-length"
+                aria-label="Shape length"
+                value={answers.lengthMm}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v)) setAnswers({ ...answers, lengthMm: v });
+                }}
+              />
+              <span style={MUTED}>mm</span>
+            </label>
+            {answers.shape === 'rect' && (
+              <>
+                <label style={FIELD_LABEL}>
+                  <span>Width</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    style={FIELD}
+                    data-testid="start-wizard-preset-width"
+                    aria-label="Shape width"
+                    value={answers.widthMm}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) setAnswers({ ...answers, widthMm: v });
+                    }}
+                  />
+                  <span style={MUTED}>mm</span>
+                </label>
+                <label style={FIELD_LABEL}>
+                  <span>Corner radius</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    style={FIELD}
+                    data-testid="start-wizard-preset-radius"
+                    aria-label="Corner radius"
+                    value={answers.radiusMm}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) setAnswers({ ...answers, radiusMm: v });
+                    }}
+                  />
+                  <span style={MUTED}>mm</span>
+                </label>
+              </>
+            )}
+          </div>
+          {unblockLine}
+        </div>
+      )}
+      {!rotary && preset === 'pocket' && (
+        <div data-testid="start-wizard-preset-questions" style={FIELD_BOX}>
+          <div style={FIELDS}>
+            {(
+              [
+                ['lengthMm', 'Length', 'start-wizard-preset-length'],
+                ['widthMm', 'Width', 'start-wizard-preset-width'],
+                ['depthMm', 'Depth', 'start-wizard-preset-depth'],
+                ['radiusMm', 'Corner radius', 'start-wizard-preset-radius'],
+              ] as const
+            ).map(([key, label, testid]) => (
+              <label key={key} style={FIELD_LABEL}>
+                <span>{label}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  style={FIELD}
+                  data-testid={testid}
+                  aria-label={label}
+                  value={answers[key]}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v)) setAnswers({ ...answers, [key]: v });
+                  }}
+                />
+                <span style={MUTED}>mm</span>
+              </label>
+            ))}
+          </div>
+          {unblockLine}
+        </div>
       )}
 
       {engraveField && (
@@ -705,6 +1097,8 @@ export function OperationStep({
                 type="text"
                 data-testid="start-wizard-op-text"
                 aria-label="Engrave text"
+                // #1107 — the dowel starter opens here to be typed into.
+                autoFocus={seed?.type === 'engrave' && seed.frame === 'rotary'}
                 style={{ width: '100%', boxSizing: 'border-box' }}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -1000,6 +1394,15 @@ export function OperationStep({
               right way round. One side only: a part with undercuts needs a two-part mould.
             </p>
           )}
+          {/* #1107 / #1164 — the reliefs' depth limit, stated plainly until the fix lands.
+              (Delete this block in one line when #1164 is in.) */}
+          {rotary && rotaryPicked === 'relief' && (
+            <p style={MUTED} data-testid="start-wizard-rotary-relief-depth-note">
+              A relief on the rod can be planned and previewed here, but do not cut it yet. Where
+              the shape goes deep towards the rod&apos;s centre, this build can take the cutter up
+              to about 1 mm into the design; a fix is on its way.
+            </p>
+          )}
           {unblockLine}
         </div>
       )}
@@ -1084,6 +1487,17 @@ export function OperationStep({
           </div>
           {unblockLine}
         </div>
+      )}
+
+      {/* #1183 — THE EMPTY JOB'S DOOR. Under everything the question offers, at link weight:
+          starting from nothing is deliberate, never the default press. A NEW run only — a
+          re-entry's Done already finishes an existing job. */}
+      {fresh && !rotary && onStartEmptyJob !== undefined && (
+        <p style={{ margin: '12px 0 2px' }} data-testid="start-wizard-empty-job-row">
+          <button type="button" data-testid="start-wizard-empty-job" onClick={onStartEmptyJob} style={LINK}>
+            Start with an empty job
+          </button>
+        </p>
       )}
     </div>
   );

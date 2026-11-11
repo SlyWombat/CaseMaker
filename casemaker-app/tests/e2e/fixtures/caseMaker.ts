@@ -19,7 +19,11 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
       page,
       async ready() {
         await page.goto('/', { waitUntil: 'domcontentloaded' });
-        await page.waitForLoadState('networkidle', { timeout: 30_000 });
+        // #1181 — NO `networkidle`. It waits on every connection, and a cold Vite transform graph
+        // under four workers can keep them open past its 30 s timeout: three bedDefects725 tests
+        // failed exactly this way on a first parallel run and passed on the immediate rerun. The
+        // app's own ready signal is the next line (the test API exists), and `waitForIdle` below
+        // drains its work; neither needs the network to fall silent.
         await page.waitForFunction(() => Boolean(window.__caseMaker?.apiVersion === 1), undefined, {
           timeout: 30_000,
         });
@@ -36,6 +40,20 @@ export const test = base.extend<{ cm: CaseMakerHandle }>({
 });
 
 export { expect } from '@playwright/test';
+
+/**
+ * #1100 — THE QUESTION STEP OPENS ON THE EIGHT PRESET CARDS. A flow that wants one of the sixteen
+ * engine chips opens *Something else…* first; a text job starts on the sign card, whose text field
+ * is `start-wizard-preset-text`. A ROTARY job keeps its rotary picker and needs neither.
+ */
+export async function openSomethingElse(page: Page): Promise<void> {
+  await page.getByTestId('start-wizard-preset-something-else').click();
+}
+
+/** #1100 — the sign card, for a flow that types a line of text. */
+export async function openSignCard(page: Page): Promise<void> {
+  await page.getByTestId('start-wizard-preset-sign').click();
+}
 
 /**
  * #798 — the Cutter group defaults CLOSED. Open it (its summary, or the Job card's `›`) before

@@ -21,6 +21,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { clampPlacementsFor } from '@/engine/cnc/engrave/jobSetup';
 import { bracketObstacles, bracketSettings, clampObstacles, defaultClampPlacements } from '@/engine/cnc/mounts/bracket';
 import { headEnvelopeOf, Z1 } from '@/engine/cnc/machine';
+import { jobMachine } from '@/engine/cnc/calibration';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { registrationTouches } from '@/engine/cnc/plan';
 import { seatSeekFor } from '@/engine/cnc/registration/footprintJob';
@@ -28,11 +29,13 @@ import { planRegistrationAttempt } from '@/components/panels/registrationAttempt
 import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 import type { Setup } from '@/engine/cnc/setups';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCATION = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
   machines: { calibration: MachineCalibration }[];
+  defaults: ShopDefaults;
 };
 const CALIBRATION = LOCATION.machines[0]!.calibration;
 
@@ -84,7 +87,7 @@ function setupFor(job: EngraveJob): Setup {
 
 function attemptFor(
   job: EngraveJob,
-  seat: { value: number; what: 'bracket seat'; measuredAt: string } | null,
+  seat: { value: number; what: 'bracket seat'; measuredAt: string; probeRefZ?: number | null } | null,
   over: Partial<Parameters<typeof planRegistrationAttempt>[0]> = {},
 ) {
   return planRegistrationAttempt({
@@ -106,7 +109,7 @@ function attemptFor(
   });
 }
 
-const MEASURED_SEAT = { value: -85.788, what: 'bracket seat' as const, measuredAt: '2026-11-09T17:00:00.000Z' };
+const MEASURED_SEAT = { value: -85.788, what: 'bracket seat' as const, measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 };
 
 describe('#1133 a bracket hold plans one top touch', () => {
   it('with a measured seat: one Z touch, no edge finds, and no tap at all', () => {
@@ -126,21 +129,6 @@ describe('#1133 a bracket hold plans one top touch', () => {
     // #1123 item 29 + #1133 — no scans means the sentence names none.
     expect(attempt.summary).toContain("touch the surface at the cut area's centre");
     expect(attempt.summary).not.toContain('then scan');
-  });
-
-  it('#1166 with NO measured seat: there is no stock top to derive — the card plans the seat seek', () => {
-    // The derived-top press's number IS the bracket's own top (seat + the stock's thickness). With
-    // no measured seat there is no such top, so today's behaviour stays: the card plans the ONE
-    // bounded seat seek beside the blank, and its surface point is NOT on the stock (the executor's
-    // own guard for it — see registrationPlanner's #1166 suite).
-    const attempt = attemptFor(bracketJob(), null);
-    expect(attempt.kind).toBe('plan');
-    if (attempt.kind !== 'plan') return;
-    expect(attempt.summary).toContain('Measure the bracket seat');
-    const p = attempt.plan.surfacePoint;
-    const onStock =
-      p.x > attempt.plan.stock.xMin && p.x < attempt.plan.stock.xMax && p.y > attempt.plan.stock.yMin && p.y < attempt.plan.stock.yMax;
-    expect(onStock).toBe(false);
   });
 
   it('the Z1 states a head envelope with its provenance (a product constant, not a knob)', () => {
@@ -321,5 +309,87 @@ describe('#1179 B — a later setup’s check points are its OWN face’s (analy
       expect(check.y).toBeGreaterThan(stock.yMin);
       expect(check.y).toBeLessThan(stock.yMax);
     }
+  });
+});
+
+// #1201 — NO TRUSTED SEAT IS NOT A BLOCKER. The top is measured ON THE BLANK, as Makera does:
+// two touches inside the stock footprint (the machining area's path origin, inset, and the area's
+// centre), a guarded seek from the machine's clearance that accepts contact above the bed's known
+// floor + a margin. The seat is a BED-SETUP datum; a job plan never taps it.
+describe('#1201 a bracket hold with no trusted seat measures the top on the blank', () => {
+  it('with NO seat: a guarded seek, two points on the stock, and no seat tap', () => {
+    const job = bracketJob();
+    const attempt = attemptFor(job, null);
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    const plan = attempt.plan;
+    // The guarded contract: no expected top, no mount tap, no scans.
+    expect(plan.guarded, 'the plan is not a guarded top seek').toBeDefined();
+    expect(plan.guarded!.seatIgnored).toBe('absent');
+    expect(plan.mountTap).toBeNull();
+    expect(plan.scans).toEqual([]);
+    // TWO touches at depth 0, both strictly inside the stock footprint.
+    const checks = plan.surfaceChecks ?? [];
+    expect(checks).toHaveLength(2);
+    for (const c of checks) {
+      expect(c.depthMm).toBe(0);
+      expect(c.x).toBeGreaterThan(0);
+      expect(c.x).toBeLessThan(job.stock.length);
+      expect(c.y).toBeGreaterThan(0);
+      expect(c.y).toBeLessThan(job.stock.width);
+    }
+    // The first is the machining area's path origin, inset by the edge margin + the tip; the
+    // second is the area's centre. The area is the tray shape's rectangle: x 40..140, y 18..108.
+    const inset = Math.max(1, SETTINGS.tipRadiusMm + job.edgeMargin);
+    expect(checks[0]!.x).toBeCloseTo(40 + inset, 3);
+    expect(checks[0]!.y).toBeCloseTo(18 + inset, 3);
+    expect(checks[1]!.x).toBeCloseTo(90, 3);
+    expect(checks[1]!.y).toBeCloseTo(63, 3);
+    // The guarded band: contact is accepted above the bed's known floor + margin, up to the
+    // machine's clearance less the park height.
+    const floor = jobMachine(job, CALIBRATION).envelope.z.min;
+    expect(plan.guarded!.floorMachineZ).toBeCloseTo(floor, 3);
+    expect(plan.seek.band.min).toBeCloseTo(floor + plan.guarded!.marginMm, 3);
+    expect(plan.seek.band.max).toBeCloseTo(plan.seek.fromMachineZ - SETTINGS.parkAboveSurfaceMm, 3);
+  });
+
+  // #1207 — the guarded seek's floor margin is a REGISTRY value, read at the call site: a location
+  // that raises it moves the band's floor. Before the registry change it was the literal `1`, and
+  // this test fails against it. (The check points' edge inset is D's shared `topTouchEdgeMarginMm`,
+  // not a second default here.)
+  it('reads the floor margin from the shop defaults (#1207)', () => {
+    const job = bracketJob();
+    const tuned: ShopDefaults = {
+      ...LOCATION.defaults,
+      'registration.guardedFloorMarginMm': { ...LOCATION.defaults['registration.guardedFloorMarginMm']!, value: 2.5 },
+    };
+    const attempt = attemptFor(job, null, { defaults: tuned });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    const plan = attempt.plan;
+    const floor = jobMachine(job, CALIBRATION).envelope.z.min;
+    expect(plan.guarded!.marginMm).toBeCloseTo(2.5, 3);
+    expect(plan.seek.band.min).toBeCloseTo(floor + 2.5, 3);
+  });
+
+  it('with a LEGACY seat: still guarded, and the seat is stated as not used', () => {
+    const job = bracketJob();
+    const attempt = attemptFor(job, { value: -85.788, what: 'bracket seat', measuredAt: '2026-11-01T00:00:00.000Z', probeRefZ: null });
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.guarded).toBeDefined();
+    expect(attempt.plan.guarded!.seatIgnored).toBe('legacy');
+    // The legacy reading can only LOWER the floor bound; it never certifies a top.
+    expect(attempt.plan.guarded!.floorMachineZ).toBeCloseTo(-85.788, 3);
+    expect(attempt.summary).toContain('TOP OF THE BLANK');
+  });
+
+  it('with a trusted seat: unchanged — the tight band, one touch, no guarded seek', () => {
+    const attempt = attemptFor(bracketJob(), MEASURED_SEAT);
+    expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.guarded).toBeUndefined();
+    expect(attempt.plan.surfaceChecks).toBeUndefined();
+    expect(attempt.plan.seek.band.max).toBeCloseTo(MEASURED_SEAT.value + 25 + SETTINGS.surfaceToleranceMm, 3);
   });
 });

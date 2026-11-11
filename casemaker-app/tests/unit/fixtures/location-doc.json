@@ -1731,12 +1731,26 @@
       "unit": "mm",
       "note": "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank"
     },
+    "probe.colletMatchMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a probe unit's recorded shank within this of a post's nominal diameter (1/8\" = 6.35 mm, 6 mm) is that post's collet, and the fit-probe prompts name it; the bench's posts are nominal"
+    },
     "reach.marginMm": {
       "value": 1.0,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
       "note": "recommended, not measured: the reach margin a cutter's own flute must clear past the deepest cut it serves (the Z-datum class and the unmeasured jaw tops)"
+    },
+    "routines.recordLimit": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "entries",
+      "note": "recommended, not measured: how many completed motion-routine shapes one machine record keeps (#1202); oldest fall off first"
     },
     "bitChange.attendedMinutes": {
       "value": 5.0,
@@ -1779,6 +1793,20 @@
       "setAt": null,
       "unit": "mm",
       "note": "#1179 D \u2014 a measured top may imply a thickness up to this far from the job\u2019s before the Register note says so"
+    },
+    "registration.cutBlankAboveBandMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "#1179 amendment (2026-11-10) \u2014 a check reading may stand this far above the band (chips); beyond it, a clamp stops the run"
+    },
+    "registration.guardedFloorMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far above the bed\u2019s known floor a guarded top seek may accept contact; it only stops a seek over a missing blank"
     }
   },
   "accessories": [

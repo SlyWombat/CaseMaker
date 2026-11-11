@@ -48,13 +48,18 @@ import {
 import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
+import { openMachineChange } from '@/components/machine-change';
 import { currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem } from './holdingMounts';
+import { accessoryFor } from '@/platform/machineChange';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
+import { readLastMachineId, writeLastMachineId } from './lastMachine';
+import type { MachineRecord } from '@/platform/locationClient';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -265,11 +270,25 @@ export function StartWizard(): JSX.Element {
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // #682 — step 1 wears the location's machine (name, nickname and address) without a picker.
   const machines = useLocationStore((s) => s.location?.machines ?? null);
+  // #1106 item 1 — the SELECTED ROW is a location record held here; the job holds only its profile
+  // id. Until a row is chosen: the last-used machine's record if it exists, else the only record,
+  // else the first record whose profile is the job's.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   // #930 — the stock step judges whether a facing pass can clear the jaws, which needs the
   // machine's own state: the vise's jaw tops only matter while the vise is what is on the pins.
   const location = useLocationStore((s) => s.location);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
   const job = useEngraveJobStore((s) => s.job);
+  const selectedMachine = ((): MachineRecord | null => {
+    if (machines === null || machines.length === 0) return null;
+    const chosen = selectedRecordId === null ? undefined : machines.find((m) => m.id === selectedRecordId);
+    if (chosen !== undefined) return chosen;
+    const last = readLastMachineId();
+    const lastUsed = last === null ? undefined : machines.find((m) => m.id === last);
+    if (lastUsed !== undefined) return lastUsed;
+    if (machines.length === 1) return machines[0] ?? null;
+    return machines.find((m) => m.profileId === job.machineId) ?? null;
+  })();
 
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
@@ -350,6 +369,15 @@ export function StartWizard(): JSX.Element {
     const now = machineNow(machineForJob(location, job.machineId));
     return now === null || now.mount === 'vise';
   }, [location, job.machineId]);
+  // #1107 — the ROTARY facts the question step offers its rod intents from: whether the house
+  // owns one (the location's accessories) and whether it is on the pins (the machine's state).
+  const rotaryFacts = useMemo(() => {
+    const now = machineNow(machineForJob(location, job.machineId));
+    return {
+      owned: accessoryFor(location?.accessories ?? [], 'rotary') !== null,
+      onPins: now?.mount === 'rotary',
+    };
+  }, [location, job.machineId]);
   // The material the proposal's blank opens on: the house's, the job's own, or the board's.
   const proposalMaterial = useMemo(
     () => (proposal === null ? null : proposedMaterialFor(proposal, job)),
@@ -414,7 +442,18 @@ export function StartWizard(): JSX.Element {
       }
       clearStockEntry();
       noteJobStarted();
-      enterHolding();
+      // #1107 — the starter ASKS ITS QUESTION: step 2 with the dowel intent selected and the text
+      // field waiting. Create with nothing typed is refused, so the empty job is impossible; the
+      // rod stock and chuck are already seeded, so Stock and Holding pass straight through.
+      setOperationChoice({
+        type: 'engrave',
+        text: '',
+        depth: newItemDepthFor(useEngraveJobStore.getState().job),
+        font: DEFAULT_FONT_ID,
+        reads: 'along',
+        frame: 'rotary',
+      });
+      setStep('operation');
       if (project !== null) await scheduleImmediate(project);
       return;
     }
@@ -482,6 +521,13 @@ export function StartWizard(): JSX.Element {
 
   /** Holding is always seeded from the job as it now stands, so Back and forth cannot go stale. */
   function enterHolding(): void {
+    // #1107 — a ROD answer pre-selects the chuck: the frame the question chose is the hold the
+    // job needs, and the operator sees it already selected (the chuck must be the house's).
+    const store = useEngraveJobStore.getState();
+    if (operationChoice !== null && 'frame' in operationChoice && operationChoice.frame === 'rotary' && rotaryMapOf(store.job) === null) {
+      const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
+      store.setRotaryHolding(defaultRotaryChuck(store.job, grip), jobVise(store.job));
+    }
     setAnswers(defaultSetupAnswers(useEngraveJobStore.getState().job));
     setMountBlocked(null);
     setStep('holding');
@@ -794,10 +840,12 @@ export function StartWizard(): JSX.Element {
   }
 
   /**
-   * #1123 item 3 — THE EMPTY JOB. Nothing was picked on the question, so there is no operation to
-   * make: the wizard creates the job with an empty design and closes onto the Job panel, where
-   * Open job… and Add operation are. A job that already carries real work is asked first — the same
-   * replacement question (and sentence) the stock step raises.
+   * #1183 — START WITH AN EMPTY JOB, from the question step's secondary action. This is #1123
+   * item 3's door, given its own deliberate control: the primary with nothing picked stays
+   * refused (#1107), and this link-weight action makes the empty job instead. The job is made
+   * empty NOW, so the Stock step — and Back from it — see the job it will be; the wizard then
+   * walks on to Stock exactly as a pick does. A job that already carries real work is asked
+   * first — the same replacement question (and sentence) the stock step raises.
    */
   function createEmptyJob(): void {
     const items = jobItemCount(useEngraveJobStore.getState().job);
@@ -817,18 +865,15 @@ export function StartWizard(): JSX.Element {
     store.setMachine(machineId);
     const fresh = useEngraveJobStore.getState().job;
     useEngraveJobStore.getState().replace({ ...fresh, labels: [], shapes: [] });
-    const job = useEngraveJobStore.getState().job;
-    const project = blankProjectForStock(job.stock);
-    if (project === null) {
-      setStartError('the blank template is missing from this build');
-      return;
-    }
-    setProject(project); // also flips welcomeMode off
-    clearHistory();
-    setSection('cnc-engrave');
-    noteJobStarted();
-    closeWizard();
-    void scheduleImmediate(project);
+    // No project, no history and no close here: the stock step creates the job's project from
+    // the blank it settles (startFromStock), exactly as it does after a pick. Any answer picked
+    // BEFORE the door is not the empty job's: left standing, Stock would size from it and the
+    // last step would create it — so it is cleared (and the stock step starts from its proposal).
+    setOperationChoice(null);
+    setPending(null);
+    setStockEdited(false);
+    setStartError(null);
+    setStep('stock');
   }
 
   /** The last step's Create: make the operation, open its row and land in Design. */
@@ -884,6 +929,36 @@ export function StartWizard(): JSX.Element {
             [choice.lengthMm / 2, 0],
           ],
         });
+      } else if (choice.type === 'cutout') {
+        // #1100 — Cut out a shape: the region item the panel's shape tools write, plus the
+        // profile that frees it (the shop's tabs), centred on the blank like every new item.
+        const store = useEngraveJobStore.getState();
+        const shapeId = store.addShape(choice.shape === 'circle' ? 'circle' : 'rect');
+        store.updateShape(
+          shapeId,
+          choice.shape === 'circle'
+            ? { diameter: choice.length }
+            : { width: choice.length, height: choice.width, cornerRadius: choice.radius },
+        );
+        const cutout = useEngraveJobStore.getState().addCutout();
+        useEngraveJobStore.getState().updateCutout(cutout, { of: shapeId, side: 'outside', inset: 0 });
+        id = shapeId;
+      } else if (
+        choice.type === 'pocket' &&
+        choice.length !== undefined &&
+        choice.width !== undefined &&
+        choice.depth !== undefined
+      ) {
+        // #1100 — A pocket or tray: one rect region with the card's size, corner radius and floor.
+        const store = useEngraveJobStore.getState();
+        const shapeId = store.addShape('rect');
+        store.updateShape(shapeId, {
+          width: choice.length,
+          height: choice.width,
+          cornerRadius: choice.radius ?? 0,
+          depth: choice.depth,
+        });
+        id = shapeId;
       } else if (choice.type === 'outline') {
         // #1098 — the drawing becomes the items the panel's own outline import writes: the closed
         // rings as one vector region and every open path as a line, both centred on the settled
@@ -953,11 +1028,11 @@ export function StartWizard(): JSX.Element {
         setStep('operation');
         break;
       case 'operation':
-        // #1123 item 3 — nothing picked: an existing job finishes (adds nothing), a new run creates
-        // the empty job. The question must not demand invented work to be passable.
+        // #1107 — a NEW run with nothing picked cannot get here: its primary is disabled with
+        // "Pick what to make first." and the empty job has its own door (#1183). A re-entry's
+        // Done finishes the job as it is, adding nothing.
         if (operationChoice === null) {
           if (jobStarted) createOperation(null);
-          else createEmptyJob();
           break;
         }
         setStep('stock');
@@ -994,6 +1069,23 @@ export function StartWizard(): JSX.Element {
           onCheck={(host) => {
             void runCheck(host);
           }}
+          // #1106 — the step is a picker: the job's machine is the selected row, the last used is
+          // first, and the bed is changed from here.
+          // The rows are LOCATION RECORDS; the job carries the record's PROFILE id (item 1).
+          selectedMachineId={selectedMachine?.id ?? null}
+          lastMachineId={readLastMachineId()}
+          onSelectMachine={(id) => {
+            setSelectedRecordId(id);
+            const record = machines?.find((m) => m.id === id);
+            if (record?.profileId) useEngraveJobStore.getState().setMachine(record.profileId);
+            writeLastMachineId(id);
+          }}
+          onChangeBed={() =>
+            openMachineChange({
+              forJob: { name: job.name, holding: job.workholding.kind },
+              onDone: () => undefined,
+            })
+          }
         />
       )}
 
@@ -1030,7 +1122,9 @@ export function StartWizard(): JSX.Element {
           hasOperations={hasOperations}
           fresh={!jobStarted}
           initial={operationChoice}
+          rotaryFacts={rotaryFacts}
           onChoiceChange={onOperationChoice}
+          onStartEmptyJob={createEmptyJob}
         />
       )}
     </>
@@ -1038,6 +1132,12 @@ export function StartWizard(): JSX.Element {
 
   const stockUnblock =
     step === 'stock' && pending === null && confirmReplace === null && startError === null && !starting;
+  // #1107 — the question's only footer sentence: a NEW run with nothing picked. (A picked but
+  // incomplete answer draws its sentence inside its own field, as before.)
+  const operationUnblock =
+    step === 'operation' && operationChoice === null
+      ? operationCreateBlocked(null, { reEntry: jobStarted })
+      : null;
 
   // #713 review — a rod longer than the vise's grip has no vise mount, so the wizard must not let
   // the job LEAVE Holding held in one: while the answers are in a vise seat and the stock is a rod
@@ -1139,6 +1239,11 @@ export function StartWizard(): JSX.Element {
             `<select>`'s popup paints over what is under it, so the buttons get clearance. #870 — the
             step-wide sentence sits directly above them, pinned with the footer. */}
         <div className="sw-foot" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          {operationUnblock !== null && (
+            <p style={UNBLOCK} data-testid="start-wizard-operation-unblock">
+              {operationUnblock}
+            </p>
+          )}
           {stockUnblock && (
             <p style={ARRIVAL} data-testid="start-wizard-stock-unblock">
               Choose the stock: a size you type, a piece on the shelf, or a file.
@@ -1202,7 +1307,8 @@ export function StartWizard(): JSX.Element {
                 disabled={
                   holdingBlock !== null ||
                   mountBlocked !== null ||
-                  operationCreateBlocked(operationChoice) !== null
+                  // #1107 — a NEW run must have picked something; a re-entry's Done is unchanged.
+                  operationCreateBlocked(operationChoice, { reEntry }) !== null
                 }
                 onClick={next}
               >
@@ -1219,7 +1325,15 @@ export function StartWizard(): JSX.Element {
                 type="button"
                 className="sw-btn sw-btn--primary"
                 data-testid="start-wizard-operation-next"
-                disabled={operationChoice !== null && operationCreateBlocked(operationChoice) !== null}
+                // #1107 — nothing picked on a NEW run is refused (the dowel starter's old trap);
+                // a re-entry's Done finishes without adding an item. #1123's empty job remains for
+                // the re-entry door only. The reason is the button's own title: with nothing
+                // picked the step draws no sentence (its line speaks for a picked item), so a
+                // disabled control would otherwise say nothing at all.
+                disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
+                title={
+                  operationCreateBlocked(operationChoice, { reEntry: jobStarted }) ?? undefined
+                }
                 onClick={next}
               >
                 {operationChoice === null

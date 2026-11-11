@@ -152,6 +152,9 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     // #1179 B — two touches on a blank that has been cut must agree to this, mm (the analyst's
     // 0.1): a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm.
     ("registration.cutBlankAgreeMm", 0.1, "mm"),
+    // #1179 amendment (2026-11-10) — a check reading may stand this far above the band and still be
+    // a reading (chips on the blank); beyond it, it is a clamp or fixture and stops the run.
+    ("registration.cutBlankAboveBandMm", 5.0, "mm"),
     // #1179 D — a measured top may imply a thickness up to this far from the job's before the
     // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
     ("registration.thicknessNoteMm", 0.1, "mm"),
@@ -189,6 +192,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         12.0,
         "mm",
         "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank",
+    ),
+    (
+        "probe.colletMatchMm",
+        0.05,
+        "mm",
+        "chosen, not measured: a probe unit's recorded shank within this of a post's nominal diameter (1/8\" = 6.35 mm, 6 mm) is that post's collet, and the fit-probe prompts name it; the bench's posts are nominal",
     ),
     (
         "bracket.originOffsetXMm",
@@ -412,6 +421,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("registration.idlePollLimit", 30.0, "polls", "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"),
     ("registration.scanMissMarginMm", 1.0, "mm", "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"),
     ("registration.readingResolutionMm", 0.05, "mm", "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"),
+    // #1201/#1207 — the guarded top seek's floor margin (a job whose seat is not trusted measures
+    // the top ON the blank, like the vendor). Chosen, not measured. The check points' edge inset is
+    // D's shared `topTouchEdgeMarginMm` (the footprint slice), not a second default here.
+    ("registration.guardedFloorMarginMm", 1.0, "mm", "chosen, not measured: how far above the bed's known floor a guarded top seek may accept contact; it only stops a seek over a missing blank, and the probe still stops on the blank above it"),
     // ── #451 probe residuals (begin) — what a touch leaves and what each fixture already holds.
     // The 3D probe's 0.02 is still an assumption; the chuck and jaw figures are provisional stubs
     // (#208), and the wired probe's measured Z figure is in MEASURED_SEEDS.
@@ -465,6 +478,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // price depends on the program before it — attended while the operator is there, a return once
     // they have walked away. All four are RECOMMENDATIONS (the thresholds rule); `bitChange.ts` and
     // `defaultsClient.ts` state the same curve, bounds and fallbacks.
+    ("routines.recordLimit", 60.0, "entries", "recommended, not measured: how many completed motion-routine shapes one machine record keeps (#1202); oldest fall off first"),
     ("bitChange.attendedMinutes", 5.0, "min", "recommended, not measured: a program up to this long leaves the operator at the machine, so the change after it costs only the attended change"),
     ("bitChange.attendedChangeSeconds", 120.0, "s", "recommended, not measured: what a bit change costs while the operator is still at the machine — fit by hand plus the M491 touch, rounded to two minutes"),
     ("bitChange.walkAwayMinutes", 30.0, "min", "recommended, not measured: a program at least this long means the operator has left; the maintainer's own number for when people walk away"),
@@ -714,6 +728,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         // #1114 — the four bit-change numbers. Zero is allowed on every one (a shop may make the
         // change free, or attend every program); the upper bounds are well past any bench
         // observation. `bitChange.ts` handles thresholds that meet or invert.
+        // #1202 — a whole number of entries, 1 to 500.
+        "routines.recordLimit" => Some(need(
+            n.is_some_and(|v| (1.0..=500.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of entries, 1 to 500",
+        )),
         "bitChange.attendedMinutes" => Some(need(
             n.is_some_and(|v| (0.0..=240.0).contains(&v)),
             "0 to 240 minutes",
@@ -764,6 +783,15 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.cutBlankAgreeMm" => Some(need(
             n.is_some_and(|v| (0.01..=1.0).contains(&v)),
             "0.01 to 1 mm",
+        )),
+        "registration.cutBlankAboveBandMm" => Some(need(
+            n.is_some_and(|v| (0.5..=50.0).contains(&v)),
+            "0.5 to 50 mm",
+        )),
+        // #1201/#1207 — the guarded top seek's chosen floor margin.
+        "registration.guardedFloorMarginMm" => Some(need(
+            n.is_some_and(|v| (0.1..=5.0).contains(&v)),
+            "0.1 to 5 mm",
         )),
         "registration.thicknessNoteMm" => Some(need(
             n.is_some_and(|v| (0.01..=2.0).contains(&v)),
@@ -824,6 +852,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "clean.rowSpacingMm" => Some(need(
             n.is_some_and(|v| (2.0..=50.0).contains(&v)),
             "2 to 50 mm",
+        )),
+        // #1207 / #1203 — the collet match tolerance (`defaultsClient.ts` states the same).
+        "probe.colletMatchMm" => Some(need(
+            n.is_some_and(|v| (0.001..=0.5).contains(&v)),
+            "0.001 to 0.5 mm",
         )),
         // ── #448 (end)
         "run.pollMs" => Some(need(

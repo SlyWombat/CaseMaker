@@ -22,14 +22,15 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
-import { cutBlankCandidates, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
+import { cutRegionOf, mountObstaclesFor } from '@/engine/cnc/registration/footprintJob';
+import { cutBlankCandidates, cutBlankCandidatesFromMap, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
+import type { FinishedCutMap } from '@/platform/locationClient';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 
@@ -39,6 +40,9 @@ import type { RegistrationAttempt } from './EngraveSetupRow';
  * inventing a measurement (decision 28).
  */
 const STOCK_CORNER_RADIUS_MM = 0;
+
+/** Millimetres to three decimals — the plans' own rounding. */
+const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 function expectedWords(plan: RegistrationPlan): string {
   const z = `Z from the surface touch, within ±${plan.settings.surfaceToleranceMm} mm`;
@@ -67,6 +71,7 @@ function cutBlankCheckPoints(
   largestOwnedDiameterMm: number,
   finishedHashes: readonly string[],
   setupIndex: number,
+  blankMap: FinishedCutMap | null,
 ): { points: { x: number; y: number; depthMm: number }[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const raster = stockRaster(plan.stock);
   const fallbackRadiusMm = (Number.isFinite(largestOwnedDiameterMm) && largestOwnedDiameterMm > 0 ? largestOwnedDiameterMm : 0) / 2;
@@ -85,6 +90,28 @@ function cutBlankCheckPoints(
         shape: tool?.shape ?? 'unknown',
       };
     });
+  // #1179 stage 2 — THE BLANK'S OWN MAP WINS WHEN IT IS COMPLETE. It is the measured state of
+  // THIS face (per setup), at its stored pitch; the package raster below is the fallback for a
+  // blank with no id or an `unknown` map (the unknown-cuts footprint path).
+  const probe = {
+    tipRadiusMm: plan.settings.tipRadiusMm,
+    tipLengthMm: plan.probe?.tipLengthMm ?? null,
+    bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+    // #1200 — the unit's stated lateral uncertainty, so a top touch keeps clear of the edges.
+    tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? null,
+  };
+  const obstacles = plan.mountObstacles.map((o) => ({ min: o.min, max: o.max }));
+  if (blankMap !== null) {
+    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles });
+    if (fromMap !== null) {
+      return { points: fromMap.points, earlierCutsKnown: true, floorsRestricted: fromMap.floorsRestricted };
+    }
+    // A map that does not decode is not trusted: the unknown-cuts path, never a half-read map.
+    return {
+      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true }),
+      earlierCutsKnown: false,
+    };
+  }
   return cutBlankCandidates({
     raster,
     programs,
@@ -92,6 +119,8 @@ function cutBlankCheckPoints(
       tipRadiusMm: plan.settings.tipRadiusMm,
       tipLengthMm: plan.probe?.tipLengthMm ?? null,
       bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
+      // #1200 — the same top-touch floor on the raster fallback path.
+      tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? null,
     },
     fallbackRadiusMm,
     obstacles: plan.mountObstacles.map((o) => ({ min: o.min, max: o.max })),
@@ -109,8 +138,9 @@ export function planRegistrationAttempt(args: {
   mountDatumMismatch: string | null;
   /** #640 — the same probe, by NAME, for the sentence (the id stays for the wiring). */
   mountDatumMismatchName: string | null;
-  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate. */
-  surfaceTopZ: { value: number } | null;
+  /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate.
+   *  #1189 — with the probe's reference it was measured at. */
+  surfaceTopZ: { value: number; probeRefZ?: number | null } | null;
   /** #509 — the active bed profile's seat beside the bracket (its bracket seat, else its surface top). */
   bracketSeat: BracketSeatDatum | null;
   /**
@@ -138,6 +168,12 @@ export function planRegistrationAttempt(args: {
    */
   largestOwnedDiameterMm?: number;
   /**
+   * #1179 stage 2 — THE BLANK'S OWN CUT MAP for the setup being registered, when the record has a
+   * `complete` entry for it. The candidates come from the map at its stored pitch; absent, the
+   * package footprint's unknown-cuts path runs exactly as before.
+   */
+  cutBlankMap?: FinishedCutMap | null;
+  /**
    * #1179 B — the machine's finished-program hashes (`finishedProgramsFor(target)`): a program of
    * THIS package that is among them is finished, and only finished programs' floors are known.
    */
@@ -161,10 +197,14 @@ export function planRegistrationAttempt(args: {
   // #934 — THE BRANCHES THE BENCH HAS NOT RUN are refused HERE, at the operator seam, not inside
   // the pure planner: the engine's own specs are the regression suite for the code we keep, and
   // the operator path cannot reach these inputs once this refuses them.
-  if (args.probe?.instrument === 'xyz') {
+  // #1200 — a 3D unit RESTRICTED TO TOP TOUCHES is a registration instrument: it plans the
+  // Z-only routine the wired V2 gets, so nothing about the bench's unrun side-touch branch is
+  // reached. An UNRESTRICTED 3D unit stays refused by name (that branch has not been run).
+  if (args.probe?.instrument === 'xyz' && args.probe.touches !== 'z-only') {
     return {
       kind: 'refused',
-      reason: 'the 3D probe is not a registration instrument on this machine yet — fit the wired V2 probe and register again',
+      reason:
+        'the 3D probe is not a registration instrument on this machine yet — restrict it to top touches in Manage › Accessories, or fit the wired V2 probe and register again',
     };
   }
   if (job.stock.shape === 'disc') {
@@ -223,44 +263,104 @@ export function planRegistrationAttempt(args: {
     const dims0 = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
     const under0 = mount.board === true ? (job.sacrificial?.under?.thickness ?? 0) : 0;
     const expected0 = bracketExpectedSurface(defaults, dims0.z, under0, args.bracketSeat);
-    if (!expected0.ok) {
-      // The seat point is measured from the plan's own seed — a placed bracket's placement, else the anchor.
-      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe, origin: datum });
-      if (!seat.ok) return { kind: 'refused', reason: seat.reason };
+    // #1189 — A DATUM MEASURED BEFORE THE PROBE WAS LAST FITTED IS NOT TRUSTED ACROSS THE REFIT.
+    // The seat is a raw machine Z: a probe refitted (the bench, 2026-11-10) makes every surface
+    // trigger by the seating difference, so the old number can stop a good blank or accept a
+    // wrong one. The card does NOT plan the registration touch on it: it asks for the SEAT to be
+    // measured again — the same one-touch seat-seek plan a machine with no seat gets — and that
+    // press writes the seat with the probe's reference, after which registration plans normally.
+    // #1201 — NO TRUSTED SEAT IS NOT A BLOCKER. A seat measured before the probe's last fitting
+    // (#1189) is not used for the band; the top is measured ON THE BLANK, as the vendor does. The
+    // seat itself is a BED-SETUP datum now (Manage > the machine's bed, with the bed clear); the
+    // Register card never offers that touch.
+    const trustedSeat = expected0.ok && expected0.expectedSurface.probeRefZ !== null;
+    if (!trustedSeat) {
+      // The bed's known floor: the seat on file if any (even a legacy one — as a FLOOR it can only
+      // stop the seek early, never certify a top), else the bed's surface top, else the machine's
+      // own work floor. The seek accepts contact anywhere above floor + margin.
+      const floorDatum =
+        args.bracketSeat !== null
+          ? args.bracketSeat.value
+          : args.surfaceTopZ !== null
+            ? args.surfaceTopZ.value
+            : jobMachine(job, calibration).envelope.z.min;
+      // #1207 — a chosen figure, not a literal: the shop default's recommendation bounds a seek
+      // that misses the blank; the probe still stops on the blank above it.
+      const marginMm = readDefault(defaults, 'registration.guardedFloorMarginMm').value;
+      const clearance = clearanceZOf(jobMachine(job, calibration)) ?? 0;
+      const floorMin = r3(floorDatum + marginMm);
+      const ceiling = r3(clearance - args.settings.parkAboveSurfaceMm);
+      if (!Number.isFinite(clearance) || !(floorMin < ceiling)) {
+        return {
+          kind: 'refused',
+          reason: 'the machine’s clearance does not bound a top seek above the bed — check the machine frame, then register again',
+        };
+      }
+      // The GUARDED seek's bound is the floor itself, not the expected-top seek's travel cap: the
+      // probe is over the stock and stops on contact; the floor only stops a missing blank. The
+      // card states the floor, so a long descent is a stated one.
+      // THE TWO TOUCH POINTS, both INSIDE the stock footprint (the #1199 guard's rule): the
+      // machining area's path-origin corner, inset by the edge margin + the probe tip, and the
+      // area's centre. The area is the cut region when the job states one, else the blank.
+      const region = cutRegionOf(job);
+      const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
+      // #1207 — the 1 mm floor here is D's shared `topTouchEdgeMarginMm` (the footprint slice); it
+      // is not a second local default.
+      const inset = Math.max(1, args.settings.tipRadiusMm + job.edgeMargin);
+      const ix = Math.min(inset, Math.max(0.001, (area.maxX - area.minX) / 2));
+      const iy = Math.min(inset, Math.max(0.001, (area.maxY - area.minY) / 2));
+      const clampToStock = (x: number, y: number): { x: number; y: number } => ({
+        x: r3(Math.min(Math.max(x, 0.001), dims0.x - 0.001)),
+        y: r3(Math.min(Math.max(y, 0.001), dims0.y - 0.001)),
+      });
+      const originPoint = clampToStock(area.minX + ix, area.minY + iy);
+      let centrePoint = clampToStock((area.minX + area.maxX) / 2, (area.minY + area.maxY) / 2);
+      if (Math.abs(centrePoint.x - originPoint.x) < 1 && Math.abs(centrePoint.y - originPoint.y) < 1) {
+        centrePoint = clampToStock(originPoint.x + Math.min(1, (dims0.x - originPoint.x) / 2), originPoint.y);
+      }
+      // The plan's frame comes from the ordinary builder with the floor as a NOMINAL seat (its
+      // expected surface is discarded below); the guarded band and the checks are this branch's.
+      const built = registrationFor(
+        setup,
+        mount,
+        {
+          // #1201 — THE GUARDED CONTRACT: no expected surface, a floor and a margin.
+          guarded: { floorMachineZ: r3(floorDatum), marginMm, seatIgnored: args.bracketSeat !== null ? 'legacy' : 'absent' },
+          seekFromMachineZ: clearance,
+          cornerRadius: 0,
+          bracketOrigin: datum,
+          mountObstacles: obstacles,
+          mountTap: null,
+          probe: args.probe,
+          cutCentre: { x: centrePoint.x, y: centrePoint.y },
+        },
+        args.settings,
+      ).plan;
+      if (!built.ok) return { kind: 'refused', reason: built.reason };
+      const seatIgnored: 'legacy' | 'absent' = args.bracketSeat !== null ? 'legacy' : 'absent';
+      const seatWord =
+        seatIgnored === 'legacy'
+          ? 'the seat on file was measured before the probe’s last fitting and is not used'
+          : 'the bed states no seat';
       const plan: RegistrationPlan = {
-        mount: 'bracket',
-        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-        stockThicknessMm: dims0.z,
-        surfacePoint: { x: seat.seek.workX, y: seat.seek.workY },
-        seek: {
-          fromMachineZ: seat.seek.fromMachineZ,
-          travelMm: Math.round((seat.seek.fromMachineZ - (seat.seek.band.min - args.settings.scanReachMm)) * 1000) / 1000,
-          band: seat.seek.band,
-        },
-        mountDatum: null,
-        probe: args.probe,
-        mountTap: {
-          x: seat.seek.x,
-          y: seat.seek.y,
-          fromMachineZ: seat.seek.fromMachineZ,
-          label: 'the wasteboard beside the blank (the bracket seat)',
-          reference: 'bracket-seat',
-          expectZ: seat.seek.expectZ,
-          // The reading IS the seat: the touch is on the wasteboard, not the arm.
-          datumOffsetMm: 0,
-        },
-        scans: [],
-        bracketOrigin: { x: datum.x, y: datum.y, from: datum.from, offsetMeasured: datum.offsetMeasured },
-        mountObstacles: obstacles,
-        settings: args.settings,
-        notes: seat.seek.notes,
+        ...built.plan,
+        surfacePoint: originPoint,
+        surfaceChecks: [
+          { x: originPoint.x, y: originPoint.y, depthMm: 0 },
+          { x: centrePoint.x, y: centrePoint.y, depthMm: 0 },
+        ],
+        mountTap: null,
+        notes: [
+          ...built.plan.notes,
+          `${seatWord}; the top is measured on the blank at two points, and the bed’s floor at machine Z ${r3(floorDatum)} bounds the seek`,
+        ],
       };
       return {
         kind: 'plan',
         method: 'bracket',
         plan,
-        summary: 'Measure the bracket seat — one Z seek on the wasteboard beside the blank',
-        expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
+        summary: summarizePlan(plan),
+        expected: 'the top on the blank, from two touches that must agree',
       };
     }
     // #1133 — THE PLAN IS THE SURFACE TOUCH. A bracket hold fixes X, Y and rotation (repeat
@@ -278,6 +378,10 @@ export function planRegistrationAttempt(args: {
         // `registrationFor` adds the stock's height this way up to the seat; take it back off the
         // expected surface so the two statements cannot drift.
         seatMachineZ: expected0.expectedSurface.machineZ - dims0.z,
+        // #1189 — the seat datum's reference, so the executor corrects the band once the probe's
+        // M491 is known (the bench's refit shift).
+        seatProbeRefZ: expected0.expectedSurface.probeRefZ,
+        seatProbeRefLabel: 'the seat',
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
         cornerRadius: 0,
         bracketOrigin: datum,
@@ -294,7 +398,7 @@ export function planRegistrationAttempt(args: {
     // the bracket's own top — the derived path, the last resort.
     const checks =
       args.cutBlank === true
-        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1)
+        ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1, args.cutBlankMap ?? null)
         : { points: [], earlierCutsKnown: true, floorsRestricted: null };
     const plan =
       checks.points.length === 0
@@ -327,6 +431,25 @@ export function planRegistrationAttempt(args: {
     // mount tap needs the fixed jaw's machine XY; without a frame there is nothing to tap.
     if (args.mountTap === null) {
       return { kind: 'refused', reason: 'place the vise, or register once from the fixed jaw, so the app knows where it is' };
+    }
+    // #1189 — a datum measured before the probe was last fitted cannot anchor the band. The
+    // surface top is the expected top when present; the jaw top is the seek's floor and ceiling
+    // datum, so BOTH have to carry a reference. Ask for the one-touch re-measure and stop.
+    if (args.surfaceTopZ !== null && args.surfaceTopZ.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the surface top on file was measured before the probe was last fitted, so it cannot anchor a surface band now — ' +
+          'measure it again with the probe as it sits (Manage › the machine › Run a surface registration), then register again',
+      };
+    }
+    if (args.mountDatum.probeRefZ == null) {
+      return {
+        kind: 'refused',
+        reason:
+          'the jaw top on file was measured before the probe was last fitted, so it cannot bound the surface seek now — ' +
+          'tap the fixed jaw again with the probe as it sits (Manage › the machine › Tap the fixed jaw), then register again',
+      };
     }
     input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
   } else {

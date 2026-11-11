@@ -557,7 +557,9 @@ test('a part wider than the rod is clipped to it, warned on the run sheet, and S
   await expect(goalLine).toHaveAttribute('data-state', 'coverage');
   await expect(goalLine).toContainText(/Covers [\d.]+ % of the design’s top surface \(the pass line is 95 %\)/);
   await expect(page.getByTestId('engrave-cut-goal-raw')).toContainText(/0 % cut-into/);
-  await page.getByTestId('engrave-cut-details').locator('summary').click();
+  // #1180 — the fold's OWN summary is the first one: the preflight's Know fold (#1128) nests a
+  // second `<summary>` (its count) inside the cut details, and a bare locator matches both.
+  await page.getByTestId('engrave-cut-details').locator('summary').first().click();
   const warning = page.locator('[data-testid$="-goal-rotary-oversize"]');
   await expect(warning).toBeVisible();
   await expect(warning).toContainText(/reaches r 12 mm/i);

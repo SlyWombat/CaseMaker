@@ -362,7 +362,28 @@ const CHAMFER3175: Tool = {
   typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, diameter: 3.175, cornerRadius: 0, angle: 90, halfAngle: 45,
 };
 
-async function realPartViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }> {
+/**
+ * #1180 — THE REAL TRAY IS PLANNED ONCE. Both tests below call this with the identical tuple
+ * (same STEP, centre, top and stock), and the plan is the file's whole cost; the memo makes the
+ * second case read the first's plan. Assertions stay where they are.
+ */
+const violationsCache = new Map<string, Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }>>();
+function realPartViolations(
+  stepPath: string,
+  centre: [number, number],
+  topZ: number,
+  stockWH: [number, number],
+): Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }> {
+  const key = `${stepPath}|${centre[0]},${centre[1]}|${topZ}|${stockWH[0]}x${stockWH[1]}`;
+  let hit = violationsCache.get(key);
+  if (hit === undefined) {
+    hit = computeViolations(stepPath, centre, topZ, stockWH);
+    violationsCache.set(key, hit);
+  }
+  return hit;
+}
+
+async function computeViolations(stepPath: string, centre: [number, number], topZ: number, stockWH: [number, number]): Promise<{ edge: EdgeViolation[]; depth: DepthViolation[] }> {
   const read = await loadStepMesh(stepPath);
   const lo: [number, number, number] = [Infinity, Infinity, Infinity];
   const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity];

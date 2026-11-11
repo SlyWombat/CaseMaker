@@ -29,6 +29,13 @@ body, html, #root {
      `.app-main`, whose three-column grid then shifted the sidebar, canvas and context panel
      one cell along; it is a shell row now, so it cannot touch that grid at all. */
   grid-template-rows: 48px auto 1fr 28px;
+  /* #134 (2026-11-10) — ONE COLUMN, AND ITS ITEMS MAY SHRINK. A grid item's default
+     `min-width: auto` floors the column at the item's min-content: the header's toolbar row
+     (six controls at phone width) measured 409 px and the whole shell's rows stretched to it
+     — the Manage surface's pane reported 409 against a 390 px window, and the ⋯ toggle's right
+     edge 393. `minmax(0, 1fr)` plus the items' own `min-width: 0` below lets the column be the
+     window; what must then fit inside it is each row's own content. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
 }
 
@@ -42,6 +49,8 @@ body, html, #root {
   padding: 0 var(--cm-space-4);
   background: var(--cm-color-surface-container);
   border-bottom: var(--cm-border-1);
+  /* #134 — see `.app-shell`: the row is the window's width, not its content's. */
+  min-width: 0;
 }
 /* Tablets (#134): the header must never be a scroll container. `overflow-x:
    auto` computes `overflow-y: auto` as well, and the settings popover (267px)
@@ -60,6 +69,9 @@ body, html, #root {
   line-height: 0;
   padding: 6px 0;
 }
+/* #1123-48 — scoped under the logo so it outranks `.app-header__logo img` below (it did not, as a bare
+   class, and the mark showed beside the wordmark at every width). */
+.app-header__logo .app-header__mark { display: none; }
 .app-header__logo img {
   display: block;
   height: 36px;
@@ -69,6 +81,9 @@ body, html, #root {
 .app-main {
   grid-row: 3;
   display: grid;
+  /* #134 — the workspace row may shrink to the window like the header (see `.app-shell`): the
+     Manage surface's min-content must not stretch every row of the shell past the device. */
+  min-width: 0;
   /* Issue #93 Phase 4a — three-panel layout: left domain rail, center canvas, right
      context rail. Below 1024 px (#355) the right rail collapses to a drawer (handled in JS
      via a media query) so the grid drops back to two columns. 1024 is where sharing stops
@@ -76,14 +91,16 @@ body, html, #root {
      overlay costs less than a canvas of 220 px or less would. */
   /* #558 — the right column is the operator's width (default 360px), driven by the custom
      property AppShell sets from the persisted value. */
-  grid-template-columns: 320px 1fr var(--context-panel-width, 360px);
+  /* #1123-47 — the left column is the operator's collapse state (AppShell sets the property;
+     320 px expanded, 48 px as icons). */
+  grid-template-columns: var(--sidebar-width, 320px) 1fr var(--context-panel-width, 360px);
   min-height: 0;
   /* The drag handle's containing block (it is absolutely positioned over the right grid line). */
   position: relative;
 }
 @media (max-width: 1023px) {
   .app-main {
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: var(--sidebar-width, 320px) 1fr;
   }
   /* #558 — below the rail/drawer edge the panel is a fixed drawer, not a grid column, so there
      is no boundary for the resize handle to straddle. */
@@ -99,6 +116,29 @@ body, html, #root {
      the collapsed ⋯ toolbar; below 640px the two together would push the ⋯
      menu off-screen, so the wordmark goes. */
   .app-header__logo { display: none; }
+  /* #1123-48 — THE HOME BAR ON A PHONE. Walked on land18 42bc22f03: the slim bar's controls were
+     squeezed until each wrapped to two lines, 50 px tall in the 48 px header (top and bottom
+     clipped), and the brand was gone. On the welcome bar only, the controls stay on one line at
+     the body size with the tighter space token, and the brand returns as the mark (the wordmark
+     is the wide part). The full toolbar's phone rules above are untouched. */
+  .app-header:has(.toolbar-buttons--welcome) .app-header__logo { display: flex; }
+  .app-header:has(.toolbar-buttons--welcome) .app-header__wordmark { display: none; }
+  .app-header:has(.toolbar-buttons--welcome) .app-header__logo .app-header__mark { display: block; }
+  .toolbar-buttons--welcome { gap: var(--cm-space-1); }
+  /* Load and Docs drop their word as Home does (the icon carries them; the aria-label and the
+     title keep the name): five controls plus the mark do not fit 358 px otherwise. */
+  .toolbar-buttons--welcome > button[data-testid='load-project'] .btn-label,
+  .toolbar-buttons--welcome > button[data-testid='docs-open'] .btn-label { display: none; }
+  .toolbar-buttons--welcome > button {
+    white-space: nowrap;
+    font-size: var(--cm-text-body-size);
+    padding: var(--cm-space-1) var(--cm-space-2);
+  }
+  /* #1123-48 + #134 (2026-11-10) — Home stays ONE TAP away on a phone, but its word does not:
+     the six labelled controls measured 377 px in the bar's 358, and its min-content stretched
+     the whole shell to 409. The icon carries the control, as the laptop band's icon controls
+     already drop their words. */
+  .toolbar-buttons > button[data-testid='home'] .btn-label { display: none; }
   /* The 360px drawer plus its padding is 393px wide — 3px past a 390px screen.
      At phone width it should just fill the screen (the doubled class beats the
      base rule, which is declared later in this file). */
@@ -112,6 +152,27 @@ body, html, #root {
   padding: var(--cm-space-3);
   background: var(--cm-color-surface-container-low);
   border-right: var(--cm-border-1);
+}
+
+/* #1123-47 — collapsed to the icons: the rail narrows (the grid column follows
+   `--sidebar-width`) and the padding tightens so a 16 px icon fits the 48 px column. */
+.sidebar--icons {
+  padding: 8px 6px;
+}
+.sidebar__collapse {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px;
+  background: #1a1f25;
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  color: #9aa4b0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar--icons .sidebar__collapse {
+  padding: 6px 0;
 }
 
 /* Phones (#134) — the left section rail becomes an off-canvas drawer, the
@@ -163,8 +224,11 @@ body, html, #root {
   padding: var(--cm-space-4);
 }
 .context-panel--rail {
-  /* In rail mode the grid handles width; full height. */
+  /* In rail mode the grid handles width; full height. #1123 (walk row 4): border-box, so the
+     panel's own padding is INSIDE that height — a content-box `100%` plus 32 px of padding ran the
+     rail 32 px past its row, over the status bar and the engine stats on it. */
   height: 100%;
+  box-sizing: border-box;
 }
 .context-panel--drawer {
   position: fixed;
@@ -1395,6 +1459,41 @@ body, html, #root {
 .wb-cap--racks { --cap-accent: var(--cm-color-secondary); --cap-accent-strong: var(--cm-color-secondary); }
 .wb-cap--toolboxes { --cap-accent: var(--cm-color-tertiary); --cap-accent-strong: var(--cm-color-tertiary); }
 .wb-cap--cnc { --cap-accent: #e9a0ff; --cap-accent-strong: #c86bff; }
+.wb-continue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cm-space-4);
+  margin: var(--cm-space-4) 0;
+  padding: var(--cm-space-4);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--cm-color-primary) 9%, transparent), transparent 55%),
+    var(--cm-color-surface-container-low);
+  border: 1px solid color-mix(in srgb, var(--cm-color-primary) 28%, var(--cm-color-outline-variant));
+  border-radius: 14px;
+  box-shadow: var(--wb-shadow);
+}
+.wb-continue__text { min-width: 0; display: flex; flex-direction: column; gap: var(--cm-space-1); }
+.wb-continue h2 {
+  margin: 0;
+  font-family: var(--cm-font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--cm-color-on-surface);
+}
+.wb-continue p {
+  margin: 0;
+  color: var(--cm-color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.wb-continue__action { flex: 0 0 auto; }
+/* The button goes under the text on a phone, full width like the other tiles' actions. */
+@media (max-width: 640px) {
+  .wb-continue { flex-direction: column; align-items: stretch; }
+}
 .wb-cap h2 {
   margin: 0;
   font-family: var(--cm-font-display);
@@ -2999,6 +3098,22 @@ button:disabled {
 }
 .manage .tbl th.num {
   text-align: right;
+}
+/* #1172 item 2 — a sortable header is a button; it keeps the th's type and adds the mark. */
+.manage .tbl__sort {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+.manage .tbl__sort:hover {
+  color: var(--cm-color-primary);
 }
 .manage .tbl td.dim {
   color: var(--cm-color-on-surface-muted);

@@ -56,6 +56,8 @@ export interface MountUnitReading {
   by: string;
   at: [number, number] | null;
   machineId: string;
+  /** #1189 — the probe's `M491` reference at the tap that wrote this reading; absent on older ones. */
+  probeRefZ?: number | null;
 }
 
 /** Read a mount's unit entry when it has the shape a tap writes; anything else is not a reading. */
@@ -70,7 +72,9 @@ export function mountUnitReading(v: unknown): MountUnitReading | null {
     Array.isArray(r.at) && r.at.length === 2 && mountNum(r.at[0]) !== null && mountNum(r.at[1]) !== null
       ? ([mountNum(r.at[0])!, mountNum(r.at[1])!] as [number, number])
       : null;
-  return { value, measuredAt: r.measuredAt, by: r.by, at, machineId: r.machineId };
+  // #1189 — the reference is optional (a reading written before the key): absent reads as null,
+  // which the card treats as "measure it again before trusting it across a fitting".
+  return { value, measuredAt: r.measuredAt, by: r.by, at, machineId: r.machineId, probeRefZ: mountNum(r.probeRefZ) };
 }
 
 /**
@@ -96,10 +100,22 @@ export function probeFor(machine: MachineRecord | null): ProbeSpec | null {
   // entered by the body, and only then is it a candidate for a cut blank's check.
   const tipLengthMm = mountNum(acc.unit.tipLengthMm);
   const bodyDiameterMm = mountNum(acc.unit.bodyDiameterMm);
+  // #1200 — the operator's touch restriction, and the tip's stated lateral uncertainty. The
+  // DEFAULT is the unit's own: `all` for the 3D variant, `z-only` for the wired V2 (the issue's
+  // ruling); an explicit stored value wins. The uncertainty rides the open `unit` map (no schema
+  // change; 0 when unstated, which keeps today's inset rule exactly).
+  const touches = acc.touches ?? (probeInstrument(variant) === 'xyz' ? 'all' : 'z-only');
+  const tipLateralUncertaintyMm = mountNum(acc.unit.tipLateralUncertaintyMm) ?? 0;
+  // #1203 — the fitted post's shank diameter, so every fit-probe prompt can name the collet. Null
+  // when the record states none (an older record): the prompts then say to check it.
+  const shankMm = mountNum(acc.unit.shankMm);
   return {
     id: acc.id,
     variant,
     instrument: probeInstrument(variant),
+    touches,
+    tipLateralUncertaintyMm,
+    shankMm,
     tip,
     ...(tipLengthMm === null ? {} : { tipLengthMm }),
     ...(bodyDiameterMm === null ? {} : { bodyDiameterMm }),
@@ -164,6 +180,8 @@ export async function recordMountReading(
   kind: TappableMountKind,
   reading: { z: number; at: { x: number; y: number } },
   probeId: string | null,
+  /** #1189 — the probe's `M491` at this tap (the run's `probe.lengthZ`), stored with the reading. */
+  probeRefZ: number | null = null,
 ): Promise<void> {
   if (machine === null) return;
   const acc = accessoriesFor(machine).find((a) => a.kind === kind);
@@ -177,6 +195,7 @@ export async function recordMountReading(
     by,
     at: [reading.at.x, reading.at.y],
     machineId: machine.id,
+    ...(probeRefZ === null ? {} : { probeRefZ }),
   };
   const instrument = probeId === null ? 'the wired probe' : accessoryNameFor(probeId);
   await useLocationStore.getState().saveAccessory({
@@ -198,7 +217,7 @@ function viseUnitDatum(machine: MachineRecord): MountDatum | null {
   if (reading === null || reading.machineId !== machine.id) return null;
   const checkedOut = probeFor(machine)?.id ?? null;
   if (checkedOut !== null && reading.by !== checkedOut) return null;
-  return { jawTopZ: reading.value, measuredAt: reading.measuredAt, by: reading.by };
+  return { jawTopZ: reading.value, measuredAt: reading.measuredAt, by: reading.by, probeRefZ: reading.probeRefZ ?? null };
 }
 
 /**
@@ -220,7 +239,7 @@ export function mountDatumFor(machine: MachineRecord | null): MountDatum | null 
   // compare against, so the datum stands.
   const checkedOut = probeFor(machine)?.id ?? null;
   if (checkedOut !== null && datum.by !== checkedOut) return null;
-  return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by };
+  return { jawTopZ: datum.value, measuredAt: datum.measuredAt, by: datum.by, probeRefZ: datum.probeRefZ ?? null };
 }
 
 /**
@@ -257,7 +276,15 @@ export function mountDatumMismatch(machine: MachineRecord | null): string | null
  */
 export function surfaceTopDatumFor(
   machine: MachineRecord | null,
-): { value: number; measuredAt: string; by: string; at: [number, number] | null; surface: BedProfile['surface']['kind'] } | null {
+): {
+  value: number;
+  measuredAt: string;
+  by: string;
+  at: [number, number] | null;
+  surface: BedProfile['surface']['kind'];
+  /** #1189 — the probe's reference at this measurement (absent on an older datum). */
+  probeRefZ?: number | null;
+} | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
   const datum = profile?.datums.surfaceTopZ ?? null;
@@ -310,7 +337,11 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   value: number;
   what: 'bracket seat' | 'surface top';
   measuredAt: string | null;
+  /** #1189 — the machine XY it was measured at, when the datum named one. */
+  at?: [number, number] | null;
   restsOnStock?: boolean;
+  /** #1189 — the probe's reference at this measurement (absent on an older datum). */
+  probeRefZ?: number | null;
 } | null {
   if (machine === null || machine.bedProfiles === undefined || machine.activeBedProfileId === undefined) return null;
   const profile = machine.bedProfiles.find((p) => p.id === machine.activeBedProfileId);
@@ -323,9 +354,26 @@ export function bracketSeatDatumFor(machine: MachineRecord | null): {
   const seat = profile.datums.bracketSeatZ ?? null;
   // #1070 (C8) — the statement travels WITH the datum: a seat written by the press says it is the
   // surface the stock rests on (no under-board added again); the surface-top fallback never says so.
-  if (usable(seat)) return { value: seat!.value, what: 'bracket seat', measuredAt: seat!.measuredAt, ...(seat!.restsOnStock === true ? { restsOnStock: true } : {}) };
+  if (usable(seat)) {
+    return {
+      value: seat!.value,
+      what: 'bracket seat',
+      measuredAt: seat!.measuredAt,
+      ...(seat!.restsOnStock === true ? { restsOnStock: true } : {}),
+      at: seat!.at ?? null,
+      probeRefZ: seat!.probeRefZ ?? null,
+    };
+  }
   const surface = profile.datums.surfaceTopZ ?? null;
-  if (usable(surface) && surfaceTopStandsForSeat(surface!, profile)) return { value: surface!.value, what: 'surface top', measuredAt: surface!.measuredAt };
+  if (usable(surface) && surfaceTopStandsForSeat(surface!, profile)) {
+    return {
+      value: surface!.value,
+      what: 'surface top',
+      measuredAt: surface!.measuredAt,
+      at: surface!.at ?? null,
+      probeRefZ: surface!.probeRefZ ?? null,
+    };
+  }
   return null;
 }
 
@@ -382,13 +430,16 @@ export function mountTapFor(
   const point = viseTapPoint(frame, { jawBarWidth, jawLength });
   // #607 — the reading IS the jaw-top datum, and the executor bounds the touch by the stored one
   // (null: no datum yet, so a plan that reaches here is on the typed-seat path and taps nothing).
+  const datum = mountDatumFor(machine);
   return {
     x: point.x,
     y: point.y,
     fromMachineZ: seekFromMachineZ,
     label: 'the vise fixed-jaw top',
     reference: 'vise-jaw-top',
-    expectZ: mountDatumFor(machine)?.jawTopZ ?? null,
+    expectZ: datum?.jawTopZ ?? null,
+    // #1189 — the datum's own reference: the executor corrects the expected jaw top for a refit.
+    ...(datum?.probeRefZ == null ? {} : { probeRefZ: datum.probeRefZ }),
     datumOffsetMm: 0,
   };
 }
@@ -434,6 +485,9 @@ export function bracketTapFor(args: {
     label: 'the bracket’s front arm (along the front edge, nearest you)',
     reference: 'bracket-seat',
     expectZ: bracketTopMachineZ(seat.value, armTop.value),
+    // #1189 — the seat's reference corrects the expected arm top once the probe is measured; a
+    // legacy seat (no reference) leaves the tap without a stale expectation.
+    ...(seat.probeRefZ == null ? {} : { probeRefZ: seat.probeRefZ }),
     datumOffsetMm: armTop.value,
   };
 }

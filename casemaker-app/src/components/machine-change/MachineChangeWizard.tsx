@@ -57,6 +57,8 @@ import {
   type SurfaceChange,
 } from '@/platform/machineChange';
 import { checkMachine, homeMachine, type MachineAnswer } from '@/platform/machineChangeRun';
+import { stopIsReportable } from '@/platform/machineStopReport';
+import { StopReportAction } from '@/components/panels/StopReportAction';
 import { toggleLight } from '@/platform/machineLight';
 import { useMachineChangeStore, type MachineChangeResult } from '@/store/machineChangeStore';
 import { formatStamp } from '../manage/display';
@@ -233,6 +235,10 @@ function Wizard({
   const [checking, setChecking] = useState(false);
 
   const [home, setHome] = useState<LineState>(NOT_DONE);
+  // #1205 / #1187 rule 3 — a Home that failed on the transport keeps the console's sentence for
+  // the report; the line's note above stays the operator's words.
+  const [homeFailure, setHomeFailure] = useState<string | null>(null);
+  const [finalHomeFailure, setFinalHomeFailure] = useState<string | null>(null);
   const [homing, setHoming] = useState(false);
   const [light, setLight] = useState<LineState>(NOT_DONE);
   const [lightBusy, setLightBusy] = useState(false);
@@ -375,6 +381,7 @@ function Wizard({
     setHoming(true);
     setError(null);
     const r = await homeMachine(address);
+    setHomeFailure(r.kind === 'homed' ? null : r.detail);
     if (r.kind === 'homed') {
       setHome({ done: true, meta: r.sent ? '$H · Idle · homed ✓' : 'Idle · homed ✓', note: null });
     } else setHome({ done: false, meta: null, note: `Home did not complete: ${r.detail}.` });
@@ -441,6 +448,7 @@ function Wizard({
     if (address === null) return;
     setFinalHoming(true);
     const r = await homeMachine(address);
+    setFinalHomeFailure(r.kind === 'homed' ? null : r.detail);
     if (r.kind === 'homed') {
       setFinalHome({ done: true, meta: r.sent ? '$H · Idle · homed ✓' : 'Idle · homed ✓', note: null });
     } else setFinalHome({ done: false, meta: null, note: `Home did not complete: ${r.detail}.` });
@@ -849,6 +857,9 @@ function Wizard({
                     {home.note}
                   </p>
                 ) : null}
+                {address !== null && homeFailure !== null && stopIsReportable(homeFailure) && (
+                  <StopReportAction action="home" target={address} error={homeFailure} transcript={[]} job={null} />
+                )}
 
                 {powerOff ? (
                   <div className="mc-line" data-done={poweredOff} data-testid="machine-change-power-line">
@@ -1191,6 +1202,9 @@ function Wizard({
                         {finalHome.note}
                       </p>
                     ) : null}
+                    {address !== null && finalHomeFailure !== null && stopIsReportable(finalHomeFailure) && (
+                      <StopReportAction action="home" target={address} error={finalHomeFailure} transcript={[]} job={null} />
+                    )}
                     {confirmed.refreeze ? (
                       <p className="mc-note" data-testid="machine-change-refreeze">
                         {refreezeSentence(job?.name ?? null, job?.frozenMount ?? null)}

@@ -65,9 +65,39 @@ export function postedCuttersFor(programs: readonly { toolKey: string }[]): Post
   );
 }
 
-/** `p01, p03` — the program numbers a row serves, in cut order. */
-function programListWords(programs: readonly number[]): string {
-  return programs.map((n) => `p${String(n).padStart(2, '0')}`).join(', ');
+/**
+ * `p01–p03, p05` — the program numbers a row serves, in cut order, with CONSECUTIVE runs
+ * collapsed to a range. #1170 review: a twenty-program job printed twenty ids in the checklist's
+ * 56 px column, which wrapped into a tall vertical list of `p01,` `p02,` … whose only visible part
+ * was the ids (the flip screenshot). A range is one line, and it says the same thing.
+ */
+export function programsWords(programs: readonly number[]): string {
+  const label = (n: number): string => `p${String(n).padStart(2, '0')}`;
+  const out: string[] = [];
+  let start: number | null = null;
+  let prev: number | null = null;
+  const flush = (): void => {
+    if (start === null || prev === null) return;
+    out.push(start === prev ? label(start) : `${label(start)}–${label(prev)}`);
+    start = null;
+    prev = null;
+  };
+  for (const n of programs) {
+    if (start === null || prev === null) {
+      start = n;
+      prev = n;
+      continue;
+    }
+    if (n === prev + 1) {
+      prev = n;
+      continue;
+    }
+    flush();
+    start = n;
+    prev = n;
+  }
+  flush();
+  return out.join(', ');
 }
 
 /** The visible list. Nothing before a run has posted cutters. */
@@ -85,7 +115,7 @@ export function CutterList({ cutters }: { cutters: readonly PostedCutter[] }): J
           style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}
         >
           <span style={{ color: '#9aa4b0', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11, minWidth: 56 }}>
-            {programListWords(cutter.programs)}
+            {programsWords(cutter.programs)}
           </span>
           <span>{cutter.name}</span>
         </li>

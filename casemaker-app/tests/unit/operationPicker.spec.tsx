@@ -109,6 +109,8 @@ function openOperationStep(): void {
     useStartWizardStore.getState().openWizard('operation');
   });
   render(<WizardHost />);
+  // #1100 — the step opens on the preset cards; the sixteen engine chips live under Something else…
+  fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
 }
 
 /**
@@ -153,7 +155,7 @@ describe('#685 — step 4, what are you cutting', () => {
     // #874 — the group says what its two operations share: they are files.
     expect(screen.getByTestId('operation-picker-group-file').textContent).toContain('From a file');
     const chips = within(screen.getByTestId('operation-picker')).getAllByRole('button');
-    expect(chips.map((chip) => chip.textContent)).toEqual([
+    expect(chips.map((chip) => chip.firstElementChild?.textContent)).toEqual([
       'Engrave text',
       'V-carve',
       'V-carve, variable depth',
@@ -178,20 +180,20 @@ describe('#685 — step 4, what are you cutting', () => {
     // the enabled-state sentence it used to draw told every new job the same non-fact.
     expect(screen.queryByTestId('operation-picker-surface-hint')).toBeNull();
 
-    // An empty job still opens WITH the Engrave text field, but no sentence: the press is live.
-    expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByTestId('start-wizard-op-field')).toBeTruthy();
+    // #1100 — arriving under Something else… picks nothing: no chip is pressed, so there is no
+    // orphaned field and the press finishes.
+    expect(screen.getByTestId('engrave-setup-what-engrave').getAttribute('aria-pressed')).toBe('false');
     const create = screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create.disabled).toBe(false);
     expect(screen.queryByTestId('start-wizard-create-unblock')).toBeNull();
 
-    // #1123 item 3 — PICKING the chip that needs its field turns the one sentence on and the
-    // press off; the way to act on it is the field in the same box.
+    // PICKING the chip that needs its field turns the one sentence on and the press off; the way
+    // to act on it is the field in the same box.
     fireEvent.click(screen.getByTestId('engrave-setup-what-engrave'));
     expect(create.disabled).toBe(true);
     // The ONE sentence that unblocks it, and the way to act on it is the field above.
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Type the text to engrave.',
+      'Type the text to engrave — for example, a name.',
     );
     // #874 — the sentence names the Text field, so it sits IN that field's box, under the field.
     expect(
@@ -219,7 +221,7 @@ describe('#685 — step 4, what are you cutting', () => {
     const text = screen.getByTestId('start-wizard-op-text') as HTMLInputElement;
     expect(create.disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Type the text to engrave.',
+      'Type the text to engrave — for example, a name.',
     );
 
     // A real browser's input event, outside act(): the field's commit is synchronous, but a passive
@@ -243,6 +245,8 @@ describe('#685 — step 4, what are you cutting', () => {
 
   it('makes the engraving with the text, depth and font that were given — never a placeholder', () => {
     openOperationStep();
+    // #1100 — the picker is open (Something else…), but no chip is picked on arrival.
+    fireEvent.click(screen.getByTestId('engrave-setup-what-engrave'));
     const depth = newItemDepthFor(useEngraveJobStore.getState().job);
 
     fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
@@ -297,7 +301,7 @@ describe('#685 — step 4, what are you cutting', () => {
     expect(input.getAttribute('accept')).toContain('.stl');
     expect((screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      'Choose the mesh to surface.',
+      'Pick the mesh to surface — a .stl or .step file.',
     );
 
     // The read is a real one (file bytes, then a hash), so every wait below is on the STATE it
@@ -375,7 +379,7 @@ describe('#685 — step 4, what are you cutting', () => {
     const create = (): HTMLButtonElement => screen.getByTestId('start-wizard-operation-next') as HTMLButtonElement;
     expect(create().disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-create-unblock').textContent).toBe(
-      "Choose the board's Gerber and drill files.",
+      "Pick the board's Gerber and drill files.",
     );
 
     const input = screen.getByTestId('start-wizard-op-pcb-files') as HTMLInputElement;

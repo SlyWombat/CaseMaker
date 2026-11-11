@@ -139,9 +139,16 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #1179 B — two touches on a blank that has been cut must agree to this; 0.1 is the analyst's
   // ruling (a cut floor, an old hole or a chip cannot agree with the real top to 0.1 mm).
   'registration.cutBlankAgreeMm': { label: 'agreement between two touches on a cut blank', unit: 'mm', rule: z.number().min(0.01).max(1), fallback: 0.1 },
+  // #1179 amendment (2026-11-10) — a check reading above the band is a reading (chips), and the
+  // run moves on; above the band by MORE than this it is a clamp or a fixture and still stops.
+  'registration.cutBlankAboveBandMm': { label: 'how far above the band a cut-blank reading may stand before it stops', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
   // #1179 D — a measured top may imply a thickness up to this far from the job's before the
   // Register step says so; 0.1 mm matches the touch-agreement rule beside it.
   'registration.thicknessNoteMm': { label: 'thickness difference the Register note states', unit: 'mm', rule: z.number().min(0.01).max(2), fallback: 0.1 },
+  // #1201/#1207 — THE GUARDED TOP SEEK's floor margin (chosen, not measured): a job whose seat is
+  // not trusted measures the top ON the blank, and the seek stops above the bed's known floor by
+  // this much. It only bounds a MISSING blank — the probe stops on contact above it.
+  'registration.guardedFloorMarginMm': { label: 'guarded top seek, margin above the bed floor (chosen)', unit: 'mm', rule: z.number().min(0.1).max(5), fallback: 1 },
   // #475 — the surface touches at the cut regions' extents. Five is the floor (a centre plus both
   // extents on each axis); the seed is the issue's own 5. The labelled fallback IS the seed.
   'registration.surfaceTouchCount': { label: 'surface touches across the cut', unit: 'touches', rule: z.number().int().min(5).max(9), fallback: 5 },
@@ -490,6 +497,14 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // long one. Four shop settings, all RECOMMENDATIONS (the thresholds rule); the curve is
   // `bitChange.ts`'s (smooth step between the two thresholds), and the model plan prices every
   // change with them. `defaults.rs` states the same bounds and fallbacks.
+  // #1202 / #1207 — how many completed motion-routine shapes one machine record keeps. A record
+  // bound, not a motion figure: the recommendation is the observatory value, a shop may change it.
+  'routines.recordLimit': {
+    label: 'how many completed routine shapes a machine record keeps (recommended 60)',
+    unit: 'entries',
+    rule: z.number().int().min(1).max(500),
+    fallback: 60,
+  },
   'bitChange.attendedMinutes': {
     label: 'a program up to this long leaves the operator at the machine (recommended 5 min)',
     unit: 'min',
@@ -605,6 +620,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // so a shop feed would be a number nothing reads (the manager's ruling, 2026-11-10).
   'clean.clearanceMm': { label: 'cleaning pass clearance above the highest fixture', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
   'clean.rowSpacingMm': { label: 'cleaning pass row pitch', unit: 'mm', rule: z.number().min(2).max(50), fallback: 12 },
+  // #1207 / #1203 — how close a probe unit's recorded shank must be to a post's nominal diameter
+  // (1/8" = 6.35 mm, 6 mm) for the fit-probe prompts to name that post's collet. A chosen
+  // tolerance, not a measured one: the bench's posts are nominal, and a slightly worn shank is
+  // still that collet.
+  'probe.colletMatchMm': { label: 'collet match tolerance for a probe’s recorded shank', unit: 'mm', rule: z.number().min(0.001).max(0.5), fallback: 0.05 },
 };
 
 /**

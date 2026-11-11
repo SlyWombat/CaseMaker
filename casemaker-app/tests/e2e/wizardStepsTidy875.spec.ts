@@ -7,7 +7,7 @@
 // "not read from a machine record" on every job without one.
 
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 400, height: 900 } });
 
@@ -17,6 +17,7 @@ async function toStock(page: Page): Promise<void> {
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
   // #897 — the question comes before the blank; a pocket needs no field.
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-pocket').click();
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');

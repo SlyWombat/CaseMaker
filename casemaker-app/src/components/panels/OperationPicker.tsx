@@ -73,6 +73,9 @@ export interface OperationPickerProps {
   importing?: boolean;
 }
 
+/** Why "Surface a mesh" is off on a job that has work: on the card's title AND in words on the screen. */
+const SURFACE_DISABLED_REASON = 'this job already has work — Surface a mesh starts a new, empty job';
+
 export function OperationPicker({
   mode,
   testidFor,
@@ -103,11 +106,15 @@ export function OperationPicker({
                   data-testid={testidFor(t.id)}
                   aria-pressed={mode === 'select' ? on : undefined}
                   disabled={disabled}
-                  title={t.blurb}
+                  title={disabled ? SURFACE_DISABLED_REASON : undefined}
                   style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
                   onClick={() => onPick(t.id)}
                 >
-                  {t.label}
+                  <span style={{ display: 'block' }}>{t.label}</span>
+                  {/* #1109 — the blurb is VISIBLE help, not a title: touch and keyboard see it. */}
+                  <span style={{ display: 'block', fontSize: 10, opacity: 0.75, lineHeight: 1.3, textAlign: 'left' }}>
+                    {t.blurb}
+                  </span>
                 </button>
               );
             })}
@@ -118,7 +125,7 @@ export function OperationPicker({
             // cannot pick it now. Nothing is said while it CAN be picked (#874): on a new job that
             // is every job, so the enabled sentence told no one anything.
             <div style={HINT} data-testid="operation-picker-surface-hint">
-              this job already has work — Surface a mesh starts a new, empty job
+              {SURFACE_DISABLED_REASON}
             </div>
           )}
           {mode === 'add' &&

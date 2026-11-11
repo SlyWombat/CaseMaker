@@ -52,7 +52,7 @@ export function houseStockProposal(): StockProposal {
     // as it is, so the first-job path does not face — and the post-facing re-touch, which this
     // milestone hides until its bench run, is not on it. The operator can still choose "as bought".
     finish: 'finished',
-    sentence: 'The house’s stock: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    sentence: 'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
   };
 }
 
@@ -67,7 +67,18 @@ export function proposedStockFor(
   proposed: StockProposal | null,
 ): StockProposal | null {
   // #1098 — a drawing is work that sizes its own blank, exactly as a mesh or a board does.
-  if (work.kind === 'mesh' || work.kind === 'pcb' || work.kind === 'outline') return proposed;
+  // #1100 — a cut-out and a pocket size their own too (the presets' proposals).
+  // #1107 — a rod answer sizes the rod.
+  if (
+    work.kind === 'mesh' ||
+    work.kind === 'pcb' ||
+    work.kind === 'outline' ||
+    work.kind === 'cutout' ||
+    work.kind === 'pocket' ||
+    work.kind === 'rod'
+  ) {
+    return proposed;
+  }
   if (rotaryMapOf(job) !== null) return proposed;
   return houseStockProposal();
 }
@@ -121,6 +132,16 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
   if (choice === null) return { kind: 'none' };
   // A ROD in the chuck is sized by its own start (the dowel/template flow), not by its goal's box.
   if (rotaryMapOf(job) !== null) return { kind: 'none' };
+  // #1107 — a ROD INTENT on a flat run: the blank the question asks for is the rod. A relief's
+  // diameter is the mesh's own section (the smaller side), not an invented 20 mm.
+  if ('frame' in choice && choice.frame === 'rotary') {
+    if (choice.type === 'surface' && choice.target !== null) {
+      const section = Math.min(choice.target.size.x, choice.target.size.y);
+      const diameter = Math.max(3, Math.round(section * 10) / 10);
+      return { kind: 'rod', diameter, length: 100 };
+    }
+    return { kind: 'rod', diameter: 20, length: 100 };
+  }
   switch (choice.type) {
     case 'surface':
       return choice.target === null ? { kind: 'none' } : { kind: 'mesh', size: choice.target.size };
@@ -138,6 +159,14 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
       // #1098 — the drawing's extent in mm, as the importer measured it. Cut it out is the one
       // use that needs the blank to be a plate the profile can free the part from.
       return { kind: 'outline', length: choice.outline.width, width: choice.outline.height, through: choice.use === 'profile' };
+    case 'cutout':
+      // #1100 — the shape the card drew, through the blank.
+      return { kind: 'cutout', length: choice.length, width: choice.width };
+    case 'pocket':
+      // A bare pocket chip carries no numbers (it keeps the house's stick); the preset's does.
+      return choice.length === undefined || choice.width === undefined || choice.depth === undefined
+        ? { kind: 'none' }
+        : { kind: 'pocket', length: choice.length, width: choice.width, depth: choice.depth };
     case 'engrave': {
       if (choice.text.trim() === '') return { kind: 'none' };
       // Measured where the face is up, and `inkBoxOf`'s documented upper-bound estimate until it is
@@ -147,7 +176,9 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
         choice.text,
         choice.font,
         'bold',
-        PROPOSED_TEXT_SIZE_MM,
+        // #1100 — the sign card's letter size is the size the blank is sized for; the other
+        // engrave entries keep the proposal's documented 10 mm cap.
+        choice.sizeMm ?? PROPOSED_TEXT_SIZE_MM,
         labelGlyphMeasure(job.customFonts ?? []),
       );
       return { kind: 'text', size: { length: box.width, width: box.height }, depth: choice.depth };

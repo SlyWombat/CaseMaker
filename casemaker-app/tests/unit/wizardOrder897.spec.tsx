@@ -168,15 +168,16 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('a line of text proposes the house’s stock, and the sentence says so', async () => {
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
-    fireEvent.change(screen.getByTestId('start-wizard-op-depth'), { target: { value: '2' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect(progress()).toContain('Stock');
     // #930 — THE HOUSE'S STOCK, not a plate sized from the line: the shop cuts 36 × 36 × 100 mm
     // hardwood sticks, and a first job keeps every default.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'The house’s stock: a 36 × 36 × 100 mm hardwood stick',
+      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
     );
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
     expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
@@ -194,7 +195,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
 
     const job = useEngraveJobStore.getState().job;
     expect(job.labels).toHaveLength(1);
-    expect(job.labels[0]).toMatchObject({ text: 'Hello', depth: 2 });
+    // #1100 — the sign card states no depth: the line takes the job's own stock-aware default.
+    expect(job.labels[0]).toMatchObject({ text: 'Hello' });
     expect(job.stock.material).toBe('hardwood');
     expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([36, 100, 36]);
     // …and a finished face is cut as it is: the first-job path does not face.
@@ -206,18 +208,22 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     // The proposal sizes the blank; it does not overrule the piece the job has named.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
     // …and because the step's answer still MATCHES the proposal, the sentence it came from stays.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The house’s stock');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {
     openWizard();
     toQuestion();
+    // #1100 — the engine chips live under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-surface'));
     const input = screen.getByTestId('start-wizard-op-surface-file') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([ASCII_STL], 'tet.stl')] } });
@@ -249,7 +255,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('an edited blank is kept when the operator goes back to the question and returns', () => {
     openWizard();
     toQuestion();
-    fireEvent.change(screen.getByTestId('start-wizard-op-text'), { target: { value: 'Hello' } });
+    // #1100 — a text job comes from the sign card now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '123' } });
@@ -266,6 +274,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
   it('a board proposes its outline plus the import’s scrap, and the items it wrote survive the blank', async () => {
     openWizard();
     toQuestion();
+    // #1100 — the engine chips live under Something else… now.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
     fireEvent.click(screen.getByTestId('engrave-setup-what-pcb'));
     const input = screen.getByTestId('start-wizard-op-pcb-files') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1, 2, 3])], 'practice-F_Cu.gbr')] } });

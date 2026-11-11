@@ -8,10 +8,19 @@
  * states a run's cycle from the plan outcome wherever it has one, and keeps the per-program
  * summary only as a fallback for a result that states no outcome (a refusal before the plan's
  * measurement, or an older result shape).
+ *
+ * #1193 — A FLIP'S PLAN OUTCOME IS ONE SIDE. Where the result carries the seam's own run total
+ * (`runCycle`, over every posted program — all setups plus the locating program, with the changes
+ * between them), THAT is the run's cycle; the plan outcome is one setup's plan and is only the
+ * fallback now. The tradeoff line remains a PLAN comparison and says whose cycle it is.
  */
+
+import type { RunCycle } from './runTotals';
 
 /** The two shapes a result can state its cycle in — structural, so the store/tests can hand in either. */
 export interface RunCycleSource {
+  /** #1193 — the run's own total over every posted program, when the seam computed one. */
+  runCycle?: RunCycle | null;
   /** The model plan's own outcome (`ModelPlanOutput.outcome`), when one was measured. */
   plan?: { outcome?: { cycleSeconds: number } | null } | null;
   /** The first posted program's summary — the fallback. */
@@ -19,10 +28,12 @@ export interface RunCycleSource {
 }
 
 /**
- * The run's cycle estimate, seconds — the PLAN outcome's number when the result carries one, else
- * the first program's summary. Null when neither states a positive number.
+ * The run's cycle estimate, seconds — the seam's run total when the result carries one, else the
+ * PLAN outcome's number, else the first program's summary. Null when none states a positive number.
  */
 export function runCycleSeconds(generated: RunCycleSource | null | undefined): number | null {
+  const run = generated?.runCycle?.totalSeconds;
+  if (typeof run === 'number' && Number.isFinite(run) && run > 0) return run;
   const plan = generated?.plan?.outcome?.cycleSeconds;
   if (typeof plan === 'number' && Number.isFinite(plan) && plan > 0) return plan;
   const cam = generated?.cam?.estimatedSeconds;

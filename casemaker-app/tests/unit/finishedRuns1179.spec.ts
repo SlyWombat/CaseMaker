@@ -18,6 +18,70 @@ describe('#1179 the finished-run record', () => {
     expect(parsed.finishedRuns).toEqual([]);
   });
 
+  it('a record the HOUSE served parses — its absent fields arrive as JSON null', () => {
+    // The service is Rust: every `Option` is serialised as null, and a Vec as []. A record it
+    // hands back therefore has nulls where the client's schema has optional keys; parsing must
+    // read null as "not stated" (the same rule the machine record's own nullable fields follow).
+    const base = MachineRecordSchema.parse(fixture.machine);
+    const goodMap = {
+      cellMm: 2,
+      cols: 80,
+      rows: 63,
+      x0Mm: 0,
+      y0Mm: 0,
+      stepMm: 0.05,
+      flat: { encoding: 'rle', data: '5040:1' },
+      depth: { encoding: 'rle', data: '5040:0' },
+    };
+    const served = MachineRecordSchema.parse({
+      ...base,
+      finishedRuns: [
+        {
+          hash: 'a1b2c3d4',
+          jobId: null,
+          jobName: null,
+          packageKey: null,
+          key8: null,
+          programIndex: null,
+          programCount: null,
+          programName: null,
+          cutterKey: null,
+          setupIndex: null,
+          finishedAt: null,
+          stock: null,
+          registration: null,
+          cutMaps: [],
+        },
+        {
+          hash: 'e5f6a7b8',
+          cutMaps: [{ setupIndex: 1, state: 'complete', unknownReason: null, map: goodMap }],
+        },
+      ],
+    });
+    expect(served.finishedRuns[0]!.jobId).toBeUndefined();
+    expect(served.finishedRuns[0]!.registration).toBeUndefined();
+    expect(served.finishedRuns[1]!.cutMaps![0]!.map).toMatchObject({ cellMm: 2, cols: 80 });
+  });
+
+  it('the shared golden wire fixture parses as a machine record', () => {
+    // `tests/unit/fixtures/house-served-finished-run.json` — the bytes the REAL axum router served
+    // for F's step-1 finish-write shape (rust:1.90 container, land18 561029fc9). The Rust test in
+    // location.rs asserts its serde output equals this same file, so a serde change that moves the
+    // wire fails cargo and a client change that stops tolerating it fails here.
+    const servedRun = JSON.parse(
+      readFileSync(new URL('./fixtures/house-served-finished-run.json', import.meta.url), 'utf8'),
+    ) as unknown;
+    const base = MachineRecordSchema.parse(fixture.machine);
+    const parsed = MachineRecordSchema.safeParse({ ...base, finishedRuns: [servedRun] });
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues.slice(0, 3))).toBe(true);
+    if (parsed.success) {
+      const run = parsed.data.finishedRuns[0]!;
+      expect(run.registration?.g54?.z).toBeUndefined();
+      expect(run.registration?.impliedThicknessMm).toBeUndefined();
+      expect(run.cutMaps).toEqual([]);
+    }
+  });
+
   it('a full record parses, and a hash-only record parses too', () => {
     const base = MachineRecordSchema.parse(fixture.machine);
     const full = MachineRecordSchema.parse({
@@ -45,16 +109,22 @@ describe('#1179 the finished-run record', () => {
             measuredAt: '2026-11-10T13:00:00.000Z',
             planExpectedTopMachineZ: -60.0,
           },
-          cutMap: {
-            cellMm: 2,
-            cols: 80,
-            rows: 63,
-            x0Mm: 0,
-            y0Mm: 0,
-            stepMm: 0.05,
-            flat: { encoding: 'rle', data: '5040:1' },
-            depth: { encoding: 'rle', data: '5040:0' },
-          },
+          cutMaps: [
+            {
+              setupIndex: 1,
+              state: 'complete',
+              map: {
+                cellMm: 2,
+                cols: 80,
+                rows: 63,
+                x0Mm: 0,
+                y0Mm: 0,
+                stepMm: 0.05,
+                flat: { encoding: 'rle', data: '5040:1' },
+                depth: { encoding: 'rle', data: '5040:0' },
+              },
+            },
+          ],
         },
       ],
     });
@@ -63,7 +133,13 @@ describe('#1179 the finished-run record', () => {
       programIndex: 1,
       programCount: 17,
       registration: { surfaceMachineZ: -60.487, measuredTopMachineZ: -60.487, topSource: 'touch' },
-      cutMap: { cellMm: 2, cols: 80, rows: 63, stepMm: 0.05 },
+      cutMaps: [
+        {
+          setupIndex: 1,
+          state: 'complete',
+          map: { cellMm: 2, cols: 80, rows: 63, stepMm: 0.05 },
+        },
+      ],
     });
     // Every field but the hash is optional — a record from a caller that knows less still parses.
     const partial = MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4' }] });
@@ -75,11 +151,30 @@ describe('#1179 the finished-run record', () => {
         finishedRuns: [
           {
             hash: 'a1b2c3d4',
-            cutMap: { cellMm: 2, cols: 80, rows: 63, x0Mm: 0, y0Mm: 0, stepMm: 0.05, flat: { encoding: 'rle', data: 'x'.repeat(4097) }, depth: { encoding: 'rle', data: '1:0' } },
+            cutMaps: [
+              {
+                setupIndex: 1,
+                state: 'complete',
+                map: { cellMm: 2, cols: 80, rows: 63, x0Mm: 0, y0Mm: 0, stepMm: 0.05, flat: { encoding: 'rle', data: 'x'.repeat(4097) }, depth: { encoding: 'rle', data: '1:0' } },
+              },
+            ],
           },
         ],
       }),
     ).toThrow();
+    // #1179's ruling (comment 6775024844): the state carries its evidence — a complete entry needs
+    // its map, and an unknown one needs its reason. Neither may be silently absent.
+    expect(() =>
+      MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 1, state: 'complete' }] }] }),
+    ).toThrow();
+    expect(() =>
+      MachineRecordSchema.parse({ ...base, finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 1, state: 'unknown' }] }] }),
+    ).toThrow();
+    const unknown = MachineRecordSchema.parse({
+      ...base,
+      finishedRuns: [{ hash: 'a1b2c3d4', cutMaps: [{ setupIndex: 2, state: 'unknown', unknownReason: 'the map did not fit the record even at 8 mm cells' }] }],
+    });
+    expect(unknown.finishedRuns[0]!.cutMaps![0]!.state).toBe('unknown');
   });
 });
 

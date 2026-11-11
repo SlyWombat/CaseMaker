@@ -23,6 +23,10 @@ import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
+// #1202 — a completed tap records its routine identity on the machine, so a later press can say
+// whether this exact motion has run here before.
+import { routineIdentityOf } from '@/engine/cnc/registration/routineIdentity';
+import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
 
 /**
  * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
@@ -122,8 +126,21 @@ export interface MountTapInputs {
   floor: number;
   /** The checked-out probe's id, written as the datum's `by`. */
   probeId: string | null;
+  /**
+   * #1199 — the machine's own travel height, machine Z (`toolChange.clearanceZ`): the height the
+   * XY move to the tap point is taken at. The tap's `fromMachineZ` is a DESCENT height and is never
+   * used for the traverse; a tap with no clearance refuses before the wire.
+   */
+  clearanceZ: number;
   /** What the caller says once the mount's reference is recorded. */
   successNote: string;
+  /**
+   * #1189 bench blocker — THE CALLER'S STEP-1 STATEMENT ALREADY ANSWERS THE FIT-PROBE ASK. The
+   * registration executor takes that answer (`operator: step.kind === 'fit-probe' ? true : ask`);
+   * the seat tap runs in the same card off the same statement, so it must take it too, and press
+   * straight into motion rather than wait on a prompt the Register card used not to draw.
+   */
+  probeFitted?: boolean;
 }
 
 export interface MountTapApi {
@@ -201,6 +218,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
   };
 
   const askOperator = (step: OperatorStep): Promise<boolean> => {
+    // #1189 — the caller's step-1 statement answers this one, exactly as for the executor.
+    if (step.kind === 'fit-probe' && inputs.probeFitted === true) return Promise.resolve(true);
     setPrompt(step);
     return new Promise<boolean>((resolve) => {
       resolver.current = (ok) => {
@@ -221,17 +240,23 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     // #637 — a second press (the other host's button, or a double press) must not orphan the first
     // tap's console handle: the shared gate refuses it outright.
     const token = {};
-    if (!useMountTapGate.getState().begin(token)) return;
+    if (!useMountTapGate.getState().begin(token)) {
+      // #1189 — a press swallowed by another tap's gate says so, where the press was made.
+      noteNow('a seat measurement is already running');
+      return;
+    }
     tokenRef.current = token;
     setNote(null);
     const handle = attachConsole(inputs.target);
     handleRef.current = handle;
     try {
       const r = await runMountTap(
-        { x: tap.x, y: tap.y },
-        tap.fromMachineZ,
+        // #1199 — the tap's own approach rides with the point; the session's height is the
+        // machine's clearance, so the XY move to the seat is taken there and the descent at it.
+        { x: tap.x, y: tap.y, fromMachineZ: tap.fromMachineZ },
+        inputs.clearanceZ,
         inputs.settings,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
         inputs.floor,
         mountKindOf(tap.reference),
         // #1070 — the probe is stated (null here: the hook's caller carries no instrument object;
@@ -245,6 +270,23 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
       if (r.ok) {
         const record = machineAt(inputs.target);
         if (record !== null) {
+          // #1202 — THE COMPLETION RIDES THE DATUM WRITE. A separate PUT raced the datum save
+          // (its record was read before the datum landed, and whichever arrived second won), so
+          // the routine's identity is folded into the SAME update: one write, one record, and a
+          // refused save leaves no claim that the routine completed.
+          const seatRoutine = tap.reference === 'bracket-seat' && (tap.datumOffsetMm ?? 0) === 0;
+          const completion = {
+            routine: seatRoutine ? ('seat-press' as const) : ('mount-tap' as const),
+            shape: routineIdentityOf(seatRoutine ? 'seat-press' : 'mount-tap', r.transcript.map((t) => t.line), {
+              clearance: inputs.clearanceZ,
+              ...(Number.isFinite(tap.fromMachineZ) ? { approach: tap.fromMachineZ } : {}),
+              ...(tap.planTravelMm !== undefined && tap.planTravelMm !== null && tap.planTravelMm > 0
+                ? { seek: -tap.planTravelMm }
+                : {}),
+            }).shape,
+            at: new Date().toISOString(),
+            build: buildStamp(),
+          };
           const now = new Date().toISOString();
           // #595 — the tap's reading lands on the mount's OWN record as well: the unit's record is
           // the one the planner prefers (`mountDatumFor`), and a measurement that happened must not
@@ -259,6 +301,8 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               tap.reference === 'bracket-seat' ? 'bracket' : 'vise',
               { z: r.z, at: r.at },
               inputs.probeId,
+              // #1189 — the seating this reading was taken in, for a later refit's correction.
+              r.probe.lengthZ,
             );
           }
           // #613 — a no-profile machine gets its first bed here; the datum then lands as designed.
@@ -272,7 +316,11 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             const seat = bracketSeatFromTap(r.z, tap.datumOffsetMm ?? 0);
             // #636 — the write's answer is read: a stale guard retries once against the re-read, and
             // a record that did not land is never reported as one that did.
-            const update: MachineUpdate = (current) => withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now);
+            const update: MachineUpdate = (current) =>
+              withRoutineCompletion(
+                withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now, r.probe.lengthZ),
+                completion,
+              );
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -297,7 +345,11 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
               return;
             }
           } else {
-            const update: MachineUpdate = (current) => withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now);
+            const update: MachineUpdate = (current) =>
+              withRoutineCompletion(
+                withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now, r.probe.lengthZ),
+                completion,
+              );
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -355,6 +407,12 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         axisY: req.nominal.axisY,
         nominalRadiusMm: req.nominal.radiusMm,
       };
+      // #1190 — THE AXIS DATUM'S OWN SEATING. The trial chord and the crown's band are placed from
+      // the stored axis Z (a raw M491-era reading), so the tap carries that datum's reference and
+      // the executor corrects the geometry once its own M491 is known.
+      const activeRecord = machineAt(inputs.target);
+      const activeProfile = activeRecord?.bedProfiles?.find((p) => p.id === activeRecord.activeBedProfileId);
+      const axisProbeRefZ = activeProfile?.datums.rotaryAxis?.probeRefZ ?? null;
       const r = await runRotaryTap(
         {
           at: rotaryTapPoint(record, req.atX),
@@ -367,8 +425,9 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           touchFeed: inputs.settings.touchFeed,
           surfaceFeed: inputs.settings.surfaceSlowFeed,
           parkAboveSurfaceMm: inputs.settings.parkAboveSurfaceMm,
+          probeRefZ: axisProbeRefZ,
         },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {
@@ -388,11 +447,21 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         const now = new Date().toISOString();
         const bed = await createFirstBed(held, null, now);
         const update: MachineUpdate = (current) =>
-          withRotaryAxisDatum(
-            bed(current),
-            { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
-            inputs.probeId,
-            now,
+          withRoutineCompletion(
+            withRotaryAxisDatum(
+              bed(current),
+              { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
+              inputs.probeId,
+              now,
+              // #1189 — the seating this tap was taken in (runRotaryTap returns the run's M491).
+              r.probeRefZ,
+            ),
+            {
+              routine: 'rotary-tap',
+              shape: routineIdentityOf('rotary-tap', r.transcript.map((t) => t.line), { clearance: req.seekFromMachineZ }).shape,
+              at: now,
+              build: buildStamp(),
+            },
           );
         const outcome = await saveMachineWithRetry(held, update);
         if (outcome !== 'ok') {
@@ -433,7 +502,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
       }
       const r = await runFaceAngle(
         { plan: planned, touchFeed: req.touchFeed },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {
@@ -446,11 +515,19 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         const now = new Date().toISOString();
         const bed = await createFirstBed(held, null, now);
         const update: MachineUpdate = (current) =>
-          withRotaryFaceAngleDatum(
-            bed(current),
-            { aOffsetDeg: r.thetaDeg, atX: planned.x, axisY: (planned.yPlus + planned.yMinus) / 2, residualMm: r.residualMm },
-            inputs.probeId,
-            now,
+          withRoutineCompletion(
+            withRotaryFaceAngleDatum(
+              bed(current),
+              { aOffsetDeg: r.thetaDeg, atX: planned.x, axisY: (planned.yPlus + planned.yMinus) / 2, residualMm: r.residualMm },
+              inputs.probeId,
+              now,
+            ),
+            {
+              routine: 'face-angle',
+              shape: routineIdentityOf('face-angle', r.transcript.map((t) => t.line), {}).shape,
+              at: now,
+              build: buildStamp(),
+            },
           );
         const outcome = await saveMachineWithRetry(held, update);
         if (outcome !== 'ok') {

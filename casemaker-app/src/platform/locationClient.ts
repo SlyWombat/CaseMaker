@@ -38,6 +38,8 @@ import { ShopDefaultsSchema } from './defaultsClient';
 import { PowerSwitchSchema } from './powerClient';
 import { WasteboardSchema, ScarSchema } from '@/engine/cnc/wasteboard';
 import { RegistrationsSchema } from './registrationMemo';
+// #1202 — the motion routines that have completed on this machine, validated and drop-on-bad.
+import { RoutineCompletionsSchema } from './routineRecord';
 
 /** Magic string that says "this is a Case Maker location file". Equal to `location.rs`'s. */
 export const LOCATION_KIND = 'casemaker-location';
@@ -92,6 +94,12 @@ export const FinishedRunRegistrationSchema = z.object({
   measuredAt: z.string().optional(),
   /** The plan's expected top for this job (slice D's difference). */
   planExpectedTopMachineZ: z.number().optional(),
+  /**
+   * #1189 — the probe's `M491` when this run measured its top. `surfaceMachineZ` is a raw machine
+   * Z, so a later run corrects it by `today's M491 − this`; a record without it is not used across
+   * a probe fitting. Written by the finish-write from the run's own outcome.
+   */
+  probeRefZ: z.number().optional(),
 });
 export type FinishedRunRegistration = z.infer<typeof FinishedRunRegistrationSchema>;
 
@@ -102,14 +110,14 @@ export const CutMapStreamSchema = z.object({
 });
 
 /**
- * #1179 — the per-program CUT MAP: a 2 mm raster of the blank in the STOCK frame (`x0Mm`/`y0Mm` =
+ * #1179 — one setup's (face's) CUT MAP on the blank: a raster in the STOCK frame (`x0Mm`/`y0Mm` =
  * the stock's min corner) with, per cell, the deepest Z cut after this program (quantised to
  * `stepMm`, 0 = uncut) and whether the cell's floor is FLAT (a touch point D's slice B may use).
  * Two RLE streams, row-major: `flat` = `count:0|1` pairs; `depth` = `count:level` pairs with
- * `level = round(depth / stepMm)` (an uncut cell is level 0). A 160 × 126 tray is 80 × 63 = 5,040
- * cells; raw depth would be 10 KB (uint16), RLE is typically under 1.5 KB in total; each stream is
- * capped at 4,096 chars and over the cap the whole map is null (never a silently partial grid —
- * stage B then falls back to the current plan's own footprint).
+ * `level = round(depth / stepMm)` (an uncut cell is level 0). `cellMm` is the STORED pitch — 2 mm
+ * normally, coarsened to 4 or 8 when the record's 4,096-char stream budget would not hold it (the
+ * analyst's ruling, #1179 comment 6775024844). Each stream is capped at 4,096 chars by this schema;
+ * the engine coarsens rather than ever sending a partial grid.
  */
 export const FinishedCutMapSchema = z.object({
   cellMm: z.number().positive().default(2),
@@ -123,7 +131,52 @@ export const FinishedCutMapSchema = z.object({
 });
 export type FinishedCutMap = z.infer<typeof FinishedCutMapSchema>;
 
-export const FinishedRunSchema = z.object({
+/**
+ * #1179 — the cut-map entry for ONE setup/face. Side 1 and side 2 never merge (depths are measured
+ * from that face's top), and the state is never silently partial: `complete` carries the map;
+ * `unknown` carries the reason and NO map, and once unknown it stays unknown for that setup until
+ * the blank is replaced — a later program must not restart a layer that reads as the whole face.
+ */
+export const FinishedSetupCutMapSchema = z
+  .object({
+    /** The setup the face belongs to (the frozen package's 1-based setup index). */
+    setupIndex: z.number().int().positive(),
+    state: z.enum(['complete', 'unknown']),
+    /** Why the state is unknown — the record's own sentence, never empty. */
+    unknownReason: z.string().min(1).optional(),
+    map: FinishedCutMapSchema.optional(),
+  })
+  .superRefine((entry, ctx) => {
+    if (entry.state === 'complete' && entry.map === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'a complete cut map must carry its map' });
+    }
+    if (entry.state === 'unknown' && entry.unknownReason === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'an unknown cut map must state its reason' });
+    }
+  });
+export type FinishedSetupCutMap = z.infer<typeof FinishedSetupCutMapSchema>;
+
+/**
+ * #1179 — the house is Rust: every `Option` is serialised as `null` (never omitted), and a `Vec`
+ * as `[]`. The client's record schemas express "not stated" as an ABSENT key, so a run record the
+ * service hands back must have its nulls removed before parsing — otherwise one absent field makes
+ * the whole machine unreadable. The same rule the machine record's own nullable fields follow.
+ */
+function nullsToAbsent(raw: unknown): unknown {
+  if (Array.isArray(raw)) return raw.map(nullsToAbsent);
+  if (raw !== null && typeof raw === 'object') {
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>)
+        .filter(([, value]) => value !== null)
+        .map(([key, value]) => [key, nullsToAbsent(value)]),
+    );
+  }
+  return raw;
+}
+
+export const FinishedRunSchema = z.preprocess(
+  nullsToAbsent,
+  z.object({
   hash: z.string().min(1),
   jobId: z.string().min(1).optional(),
   jobName: z.string().optional(),
@@ -144,8 +197,20 @@ export const FinishedRunSchema = z.object({
     .object({ lengthMm: z.number().optional(), widthMm: z.number().optional(), thicknessMm: z.number().optional() })
     .optional(),
   registration: FinishedRunRegistrationSchema.optional(),
-  cutMap: FinishedCutMapSchema.nullable().optional(),
-});
+  /**
+   * #1179 — one entry per setup/face; the newest record carries the blank's whole state (the other
+   * setups' entries are carried forward). Absent for a run that states no setup.
+   */
+  cutMaps: z.array(FinishedSetupCutMapSchema).optional(),
+  /**
+   * #1179 blank identity (issue comment 6776457695) — WHICH blank this program was cut on. Opaque;
+   * the stock footprint stays a sanity check, not the identity. The current id for a job lives on
+   * the MACHINE record (`currentBlank`), never in the job: a job file carries no blank to another
+   * machine. Absent on records written before the field existed.
+   */
+  blankId: z.string().min(1).optional(),
+  }),
+);
 export type FinishedRun = z.infer<typeof FinishedRunSchema>;
 
 export const MachineAddressSchema = z.object({
@@ -208,6 +273,16 @@ export const FixtureRecordSchema = z
     constants: z.record(z.string(), z.unknown()).default({}),
     unit: z.record(z.string(), z.unknown()).default({}),
     provenance: bedProvenance.default({}),
+    /**
+     * #1200 — THE OPERATOR'S TOUCH RESTRICTION FOR THIS UNIT: `z-only` never plans a sideways
+     * `G38.3`, `all` keeps its instrument's own capability. Absent means the unit's default —
+     * `all` for a 3D variant, `z-only` for the wired V2 (`probeFor` derives it). The reason and
+     * date are the operator's record of the decision; all three are optional so every record
+     * written before #1200 stays valid.
+     */
+    touches: z.enum(['z-only', 'all']).optional(),
+    touchesReason: bedText.optional(),
+    touchesSince: bedText.optional(),
     // #597 — the house owns every accessory; a unit is in the box or checked out to one machine.
     whereabouts: AccessoryWhereSchema.default({ kind: 'box' }),
     history: z
@@ -249,6 +324,17 @@ export const MeasuredDatumSchema = z
      * under-board again. Written true by the seat write-back; absent on older readings.
      */
     restsOnStock: z.boolean().optional(),
+    /**
+     * #1189 — THE PROBE'S OWN REFERENCE when this datum was measured: the `M491` tool-length
+     * reading from the same probe seating. A datum is a RAW machine Z (the value the probe
+     * triggered at), so a probe refitted a little further out makes every surface trigger that
+     * much higher. The probe-independent height is `value − probeRefZ`; the plan corrects the
+     * expected surface by `today's M491 − probeRefZ` once the probe is measured.
+     *
+     * Absent on datums measured before this key existed. The Register card does not trust one
+     * across a fitting: it asks for the one-touch re-measure, which writes the reference.
+     */
+    probeRefZ: bedNumber.nullable().optional(),
   })
   .strict();
 
@@ -553,6 +639,20 @@ export const MachineRecordSchema = z.object({
    * never a machine the app cannot read). Absent on records written before the section existed.
    */
   registrations: RegistrationsSchema,
+  /**
+   * #1202 — the motion routines that have COMPLETED on this machine, each with its line-sequence
+   * shape, date and build (see `platform/routineRecord.ts`). A routine absent here has never run
+   * on this controller, and its card says so before the press. Unreadable entries are dropped;
+   * absent on records written before the section existed.
+   */
+  completedRoutines: RoutineCompletionsSchema,
+  /**
+   * #1179 blank identity — the CURRENT blank id per job, on this machine (issue comment
+   * 6776457695): a blank sits on one machine's bed, so the job file must never carry one. Written
+   * by the first finish-write of a job with no id and by `mintBlank` (the Register card's press,
+   * its re-finish mint, "Cut another of these"). Absent on records written before the field.
+   */
+  currentBlank: z.record(z.string(), z.string()).optional(),
   /** The machine's bed profiles, same presence rule; `[]` is a deliberately emptied description. */
   bedProfiles: z.array(BedProfileSchema).optional(),
   /** The one active profile; present exactly when `bedProfiles` holds at least one. */

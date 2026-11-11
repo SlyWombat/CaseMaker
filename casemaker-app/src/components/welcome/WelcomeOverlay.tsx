@@ -12,6 +12,11 @@ import { useLibraryStore, refreshStaleSources, type ImportResult } from '@/store
 import { useStartWizardStore } from '@/store/startWizardStore';
 import { useRecentJobsStore } from '@/store/recentJobsStore';
 import { useViewportStore } from '@/store/viewportStore';
+import { useEngraveJobStore, engraveJobChangedAt } from '@/store/engraveJobStore';
+import { continueLine } from './continueLine';
+import { useEngraveJobFileStore } from '@/store/engraveJobFileStore';
+import { hasWorkedOn } from '@/store/homeSession';
+import { ConfirmDialog } from '@/components/layout/ConfirmDialog';
 import { openRecentJob } from '@/store/openRecentJob';
 import { openDoorFile } from '@/store/openDoorFile';
 import { enterCncWorkspace } from '@/store/enterCncWorkspace';
@@ -221,6 +226,8 @@ export function WelcomeOverlay() {
   const [manufacturer, setManufacturer] = useState('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<ImportResult | null>(null);
+  /** #1123-48 — a card that would replace the open project, awaiting the app's dialog. */
+  const [pendingReplace, setPendingReplace] = useState<{ id: string } | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -296,13 +303,25 @@ export function WelcomeOverlay() {
     [filteredTemplates],
   );
 
-  const applyTemplate = async (id: string) => {
+  const reallyApplyTemplate = async (id: string) => {
     const t = findTemplateAcrossSources(id);
     if (!t) return;
     const project = t.build();
     setProject(project); // also flips welcomeMode off
     clearHistory();
     await scheduleImmediate(project);
+  };
+
+  // #1123-48 — a card that BUILDS a project replaces the open one. When there is work to continue,
+  // the choice asks once in the app's own dialog, saying plainly that the open project is
+  // replaced (the app keeps one open project; only Home keeps it). The CNC card is not guarded: it
+  // keeps the project and the job (enterCncWorkspace), so nothing is replaced.
+  const applyTemplate = async (id: string) => {
+    if (!hasWorkedOn()) {
+      await reallyApplyTemplate(id);
+      return;
+    }
+    setPendingReplace({ id });
   };
 
   /** Board's curated quickstart when it has one, else a blank default shell. */
@@ -402,6 +421,29 @@ export function WelcomeOverlay() {
     URL.revokeObjectURL(a.href);
   };
 
+  /**
+   * #1123-48 — THE CONTINUE ROW. Home never discards: the project and the CNC job stay in their
+   * stores, so Continue is just the workspace again — and the row names what waits, what it is and
+   * when it last changed. A first visit has nothing worked on, so there is no row at all.
+   */
+  const continueInfo = ((): string | null => {
+    if (!hasWorkedOn()) return null;
+    const now = Date.now();
+    const section = useViewportStore.getState().activeSidebarSection;
+    if (section !== null && section.startsWith('cnc-')) {
+      const file = useEngraveJobFileStore.getState();
+      const job = useEngraveJobStore.getState().job;
+      return continueLine({
+        name: job.name,
+        what: 'a CNC job',
+        changedAt: engraveJobChangedAt(),
+        savedToFile: file.savedAt !== null,
+        now,
+      });
+    }
+    const project = useProjectStore.getState().project;
+    return continueLine({ name: project.name, what: 'a project', changedAt: Date.parse(project.modifiedAt), savedToFile: null, now });
+  })();
   const selectedTpl = selected ? findTemplateByBoardAcrossSources(selected.board.id) : undefined;
   const selectedTemplates = selected
     ? allTemplates.filter((t) => t.boardId === selected.board.id)
@@ -418,6 +460,25 @@ export function WelcomeOverlay() {
       onDrop={(e) => void onDropFile(e)}
     >
       <div className="wb">
+        {/* #1123-48 — CONTINUE FIRST: the work that is still open, one press back to exactly where
+            the operator was (the stores were never touched by Home). Absent on a first visit. */}
+        {continueInfo !== null && (
+          <section className="wb-continue" data-testid="welcome-continue" aria-label="Continue">
+            <div className="wb-continue__text">
+              <h2>Continue</h2>
+              <p data-testid="welcome-continue-what">{continueInfo}</p>
+            </div>
+            <button
+              type="button"
+              className="wb-btn wb-btn--primary wb-continue__action"
+              data-testid="welcome-continue-open"
+              onClick={() => useProjectStore.getState().resume()}
+              title="Back to the workspace, exactly as you left it — nothing was discarded"
+            >
+              Continue
+            </button>
+          </section>
+        )}
         {/* #878 — the front door. The hero names the product in one line; the four cards are the
             capabilities, each with its own picture and one way in. The library controls sit to
             the right of the hero, quieter: they are housekeeping, not a reason to be here. */}
@@ -980,6 +1041,23 @@ export function WelcomeOverlay() {
           </aside>
         </div>
       </div>
+      {/* #1123-48 — a card that BUILDS a project asks once, in the app's own dialog, when there is
+          work to continue: the app keeps one open project, so the honest sentence says it is
+          replaced. The CNC card never asks — it keeps the project and the job. */}
+      {pendingReplace !== null && (
+        <ConfirmDialog
+          testId="welcome-replace-confirm"
+          title="Open a new project?"
+          body={`The open project "${useProjectStore.getState().project.name}" will be replaced — it is not kept. Save it from the toolbar first if you need it back.`}
+          confirmLabel="Replace it"
+          onCancel={() => setPendingReplace(null)}
+          onConfirm={() => {
+            const pending = pendingReplace;
+            setPendingReplace(null);
+            void reallyApplyTemplate(pending.id);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -30,6 +30,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
+import { clearanceHoldWords } from '@/components/welcome/holdingMounts';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { planChoiceOf, type EngraveJob, type FrozenPackage } from '@/types/engraveJob';
@@ -60,7 +61,7 @@ import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, finishedRunsFor, useLocationStore } from '@/store/locationStore';
@@ -78,6 +79,9 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
 import { CutRunCard } from './CutRunCard';
+import { CutFlipCard, flipDue } from './CutFlipCard';
+import { CutEndCard } from './CutEndCard';
+import { CutBitChangeCard } from './CutBitChangeCard';
 import {
   ROTARY_NO_MODULE_REFUSAL,
   ROTARY_UNMEASURED_REFUSAL,
@@ -128,6 +132,8 @@ import { EngraveMachineUpload } from './EngraveMachineUpload';
 import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './CutterChecklist';
 import type { CutterChecklistEntry } from '@/types/engraveJob';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
+import { CutRecoveryCard } from './CutRecoveryCard';
+import { CutStoppedCard } from './CutStoppedCard';
 import { MachineStrip } from './MachineStrip';
 import { RunPlanView } from './RunPlanView';
 import { EngraveRegistrationStep } from './EngraveRegistrationStep';
@@ -627,6 +633,11 @@ export function EngraveCutSurface({
 }: EngraveCutSurfaceProps): JSX.Element {
   const freeze = useEngravePackageStore((s) => s.freeze);
   const openManage = useManageModeStore((s) => s.openManage);
+  // #1191 — a run restored from another build: its origin line, and the background plan compare.
+  const restoreNote = useEngraveRunStore((s) => s.restoreNote);
+  const buildCompare = useEngraveRunStore((s) => s.buildCompare);
+  const compareRestoredPlan = useEngraveRunStore((s) => s.compareRestoredPlan);
+  const keepRestoredPlan = useEngraveRunStore((s) => s.keepRestoredPlan);
   const shelfItems = useStockStore((s) => s.items);
   const defaults = useShopDefaultsStore((s) => s.defaults);
   // #695 — the machine RECORD (not the LAN observation): the bed profile the wizard writes is the
@@ -683,13 +694,20 @@ export function EngraveCutSurface({
   const releaseRecord = useEngraveReleaseStore((s) => (target === null ? undefined : s.records[machineKey(target)]));
   const releaseFinished =
     releaseRecord === undefined || releaseRecord.files.length === 0 || releasePending(releaseRecord.files).length === 0;
-  const runOver =
+  /**
+   * #819 — THIS JOB'S MACHINE RUN HAS ENDED. The end card's condition (`runOver`) also asks
+   * whether the RELEASE record has no programs left, because a multi-program job keeps the steps
+   * and the next program's press. A PRESS must not wait for that bookkeeping: once this job's run
+   * has ended, the one-screen confirm's Go is the press that would start the finished program
+   * again, and it goes even while the release record still calls the program pending.
+   */
+  const runEnded =
     machineRun !== null &&
     !machineRun.running &&
     machineRun.end !== null &&
     machineRun.end.kind !== 'nothing' &&
-    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id) &&
-    releaseFinished;
+    (machineRun.context?.jobId === undefined || machineRun.context.jobId === job.id);
+  const runOver = runEnded && releaseFinished;
   // #689 — the clearance acknowledgement lives in step 1 now, not under Generate. It is the run
   // gate's own flag; the warning codes that need it come from the Generate (re-post included) and
   // the sweep, so both are subscribed to and the step re-renders when they arrive.
@@ -971,6 +989,8 @@ export function EngraveCutSurface({
     // #535 — a goal program has no verifier report; its surface check is the one that gates it.
     releaseCheck(singleSource) !== null;
   const [expertOpen, setExpertOpen] = useState(false);
+  /** #1170 — the flip card's one door: its press opens (and brings into view) the Register step. */
+  const [flipRegisterOpen, setFlipRegisterOpen] = useState(false);
   const domeProps: DomeChoiceProps | null = domeStanding
     ? {
         accept: domeAccept,
@@ -1057,6 +1077,17 @@ export function EngraveCutSurface({
     const machineFinished = target === null ? [] : finishedProgramsFor(target);
     return [...new Set([...machineFinished, ...logged])];
   }, [target, job.runLog]);
+  // #1191 — "NOT YET STARTED" IS ABOUT THIS PACKAGE. `finishedHashes` also carries every program
+  // the machine has ever cut, so a bare non-empty check would say a fresh blank had started.
+  const packageStarted =
+    pkg !== null && pkg.programs.some((program) => finishedHashes.includes(program.hash));
+  // #1191 — A RESTORED RUN NOBODY HAS STARTED MAY BE COMPARED. After the cross-build re-check has
+  // finished, this build plans the job once in the BACKGROUND and compares hashes; the restored
+  // run is untouched while it runs (keeping is the default), and a different plan is an offer.
+  useEffect(() => {
+    if (restoreNote === null || restoreChecking || buildCompare !== null || packageStarted) return;
+    void compareRestoredPlan();
+  }, [restoreNote, restoreChecking, buildCompare, packageStarted, compareRestoredPlan]);
   const plan = useMemo(
     () =>
       pkg === null
@@ -1064,6 +1095,16 @@ export function EngraveCutSurface({
         : cutPlan({ job, pkg, finishedHashes, defaults, overrides }),
     [job, pkg, finishedHashes, defaults, overrides],
   );
+  // #1170 — THE TURN IS DUE when the next unfinished program is a flipped setup's first. Derived
+  // from the package and the finished hashes alone, so a reload lands back on the card.
+  const flip = useMemo(
+    () => (pkg === null ? null : flipDue({ job, pkg, finishedHashes })),
+    [job, pkg, finishedHashes],
+  );
+  // #1170 — the turn card stays until side 2 is actually registered; after that the ordinary
+  // change/start flow returns and program N+1 is the next press. While it is due, step 3 is the
+  // current step (below): the registration must not be offered above the turn it depends on.
+  const flipPending = flip !== null && currentSetupRegistration?.outcome.usable !== true;
 
   // #1179 slice A — WHAT THIS BLANK HAS ALREADY BEEN THROUGH. The machine's finished-run records
   // are compared with the package on screen: the same plan is today's ✓/resume and says nothing;
@@ -1114,14 +1155,17 @@ export function EngraveCutSurface({
     setOverrides((current) => ({ ...current, [key]: on }));
   };
 
-  const reservation = ((): { line: string; detail: string | null } | null => {
+  const reservation = ((): { line: string; detail: string | null; know: boolean } | null => {
     if (pkg === null) return null;
     if (pkg.stockEntryId === null) {
       // #1123 item 7 (bench, 2026-11-09) — THE SHELF FACT, NOT A HOLDING CLAIM. The old sentence
       // ("You're supplying this stock yourself, so no blank needs to be held") read as "nothing
       // holds the blank" on a bracket job whose blank is clamped in the bracket. This states only
       // what is true of the shelf: the blank is not on it.
-      return { line: 'This blank is not on the shelf — nothing to take from it.', detail: null };
+      // #1123 item 57 — AND IT IS INFORMATION, NOT AN INSTRUCTION. There is nothing to do about
+      // a blank that was never a shelf pick, so it reads the way the Know band reads — a closed
+      // fold — instead of a boxed line with no action.
+      return { line: 'This blank is not on the shelf — nothing to take from it.', detail: null, know: true };
     }
     const shelf = shelfItems.find((item) => item.id === pkg.stockEntryId) ?? null;
     const held = shelf?.reservations.find((entry) => entry.jobId === job.id) ?? null;
@@ -1129,11 +1173,13 @@ export function EngraveCutSurface({
       return {
         line: 'No blank is held for this job — check you have one before cutting.',
         detail: `Shelf entry ${pkg.stockEntryId} has no hold for this job.`,
+        know: false,
       };
     }
     return {
       line: `This job’s blank is held for you${held.quantity > 1 ? ` · ${held.quantity} blanks` : ''}.`,
       detail: `Held for job ${job.id} under shelf entry ${pkg.stockEntryId}.`,
+      know: false,
     };
   })();
 
@@ -1205,8 +1251,13 @@ export function EngraveCutSurface({
     }
   };
   // Step 1 is DONE only when the gate passed: a program that was never simulated, stopped, or
-  // failed keeps the step open — that is the whole point of this issue.
-  const fitDone = checked && frozen && verdict === 'passed';
+  // failed keeps the step open — that is the whole point of this issue. #1170 — BUT A RELOAD AT
+  // THE FLIP MUST LAND ON THE FLIP, NOT STEP 1. The check/ack/simulation state is session; a
+  // frozen package this design still matches, together with a finished program on the machine or
+  // in the document's run log, is durable evidence the operator got past step 1. Resume from
+  // where the work is; a stale package (`frozen` false) still sends them back.
+  const resuming = frozen && finishedHashes.length > 0;
+  const fitDone = resuming || (checked && frozen && verdict === 'passed');
   const registrationPlan = job.setups?.[0]?.registration?.plan ?? null;
   // A registration is a measurement on THIS machine; with no machine connected, a record for this
   // job still says the blank was registered in this session. #1088 — the record must be the
@@ -1221,7 +1272,10 @@ export function EngraveCutSurface({
     pkg !== null &&
     pkg.programs.length > 0 &&
     pkg.programs.every((program) => finishedHashes.includes(program.hash));
-  const currentStep = !fitDone ? 1 : !registeredDone ? 2 : !ran ? 3 : 0;
+  // #1170 — THE TURN IS STEP 3's BUSINESS. While the flip is due, the Cut screen is on step 3 (the
+  // flip card), not on the Register step its press will open: the registration is offered only
+  // after the blank is turned and the confirmation ticked.
+  const currentStep = !fitDone ? 1 : flipPending ? 3 : !registeredDone ? 2 : !ran ? 3 : 0;
   // #hotfix — while the registration executor waits at a prompt, the step holding it stays open
   // even if `currentStep` fell back to 1 (a Register press can stale the package).
   const registrationPromptPending = useRegistrationPromptStore((s) => s.pending);
@@ -1378,20 +1432,6 @@ export function EngraveCutSurface({
     });
   };
 
-  // #819 — the ended run's screen: the Done card and its one action, nothing else.
-  if (runOver && target !== null) {
-    return (
-      <div data-testid="engrave-cut-surface">
-        {/* #927 — the ONE line the done screen adds: the last measured run's clock against the
-            estimate its record carries. Nothing else on the card changes. */}
-        <p style={{ margin: '0 0 6px', fontSize: 12, color: '#9aa4b0' }} data-testid="engrave-cut-actual-time">
-          {actualTimeSentence(lastMeasuredRun)}
-        </p>
-        <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
-      </div>
-    );
-  }
-
   return (
     <div data-testid="engrave-cut-surface">
       {/* #1123-45 — A GENERATE PRESSED FROM THIS TAB SAYS SO HERE. The same line the Design footer
@@ -1421,6 +1461,40 @@ export function EngraveCutSurface({
         >
           {restart.sentence}
         </p>
+      )}
+      {/* #1169 — THE MACHINE'S WAITING PROMPT, above the steps so it is seen whatever step is open. */}
+      <CutRecoveryCard machine={machine} target={target} />
+      {/* #1169 — THE MACHINE STOPPED, at whichever step it happened: recovery first, then the
+          four choices. "End the job here" only dismisses this card (record untouched). */}
+      <CutStoppedCard
+        machine={machine}
+        target={target}
+        originWritten={firstRegistration === null ? null : true}
+        onRegisterAgain={() => {
+          const step2 = document.querySelector<HTMLDetailsElement>('[data-testid="engrave-cut-step-2"]');
+          if (step2 !== null) step2.open = true;
+          document.querySelector<HTMLElement>('[data-testid="engrave-registration"]')?.scrollIntoView({ block: 'center' });
+        }}
+      />
+      {/* #1191 — THIS BUILD PLANS THE JOB DIFFERENTLY, AND THAT IS THE OPERATOR'S CALL. Identical
+          plans say nothing; a different one is an offer, never a forced re-plan. Keeping is the
+          default: the restored programs stay on the blank until the operator presses. */}
+      {buildCompare?.status === 'different' && (
+        <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-build-compare">
+          <p style={MUTED} data-testid="engrave-build-compare-sentence">
+            This build plans this job differently ({buildCompare.changed} of {buildCompare.total}{' '}
+            program{buildCompare.total === 1 ? '' : 's'} changed) — keep the programs you have, or
+            use the new plan.
+          </p>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button type="button" data-testid="engrave-build-compare-keep" onClick={keepRestoredPlan}>
+              Keep these programs
+            </button>
+            <button type="button" data-testid="engrave-build-compare-use" onClick={onGenerate}>
+              Use the new plan
+            </button>
+          </div>
+        </section>
       )}
       {/* #524/#689 — the Cut surface as a four-line checklist: Checked → Frozen → Register the
           blank → Run. Each line is one sentence; only the step the operator is on has a body. */}
@@ -1541,7 +1615,8 @@ export function EngraveCutSurface({
               />
               <span>
                 I am at the machine — the probe is fitted, the head is clear, and the stock is
-                clamped — and I have checked clearance to the vise and the tool's reach myself.
+                clamped — and I have checked the clearance myself: to{' '}
+                {clearanceHoldWords(job.workholding)}, and to the tool's reach.
               </span>
             </label>
             {/* #788 — the ask above is where the probe is fitted, so the head diagram stands with
@@ -1567,7 +1642,10 @@ export function EngraveCutSurface({
         )}
         {planTradeoff?.material && planTradeoff.line !== null && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-tradeoff">
-            <p style={MUTED}>{planTradeoff.line}</p>
+            {/* #1193 — the tradeoff is the PLANS' comparison and says whose cycle it is: on a
+                multi-setup job the result's plan outcome covers the first side only. The run's own
+                cycle is stated separately (runCycleSeconds → the job card and the sheet's §2). */}
+            <p style={MUTED}>{jobSetups(job).length > 1 ? `Setup 1’s plan — ${planTradeoff.line}` : planTradeoff.line}</p>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               <button
                 type="button"
@@ -1628,7 +1706,16 @@ export function EngraveCutSurface({
               {generateBlocker}
             </p>
           )}
-          {reservation !== null && (
+          {reservation !== null && (reservation.know ? (
+            <details
+              style={{ ...MUTED, marginTop: 4 }}
+              data-testid="engrave-package-reservation"
+              data-band="know"
+            >
+              <summary style={{ cursor: 'pointer' }}>shelf</summary>
+              {reservation.line}
+            </details>
+          ) : (
             <div style={MUTED} data-testid="engrave-package-reservation">
               {reservation.line}
               {reservation.detail !== null && (
@@ -1638,7 +1725,7 @@ export function EngraveCutSurface({
                 </details>
               )}
             </div>
-          )}
+          ))}
           {freezeError !== null && (
             <p style={WARN} data-testid="engrave-package-freeze-error">
               Nothing was made — {freezeError}.
@@ -1677,7 +1764,7 @@ export function EngraveCutSurface({
         done={registeredDone}
         current={currentStep === 2}
         summary={step2Summary}
-        forceOpen={registrationPromptPending}
+        forceOpen={registrationPromptPending || flipRegisterOpen}
       >
         <EngraveRegistrationStep job={job} target={target} setupIndex={currentSetupIndex} />
         {/* #608 / #796 — once the registration measured a tilt, the program made for a flat blank
@@ -1736,12 +1823,43 @@ export function EngraveCutSurface({
         )}
       </Step>
 
-      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary}>
+      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary} forceOpen={flipPending}>
+        {/* #1168 — THE BIT CHANGE, ON THE STEP (mockup 7). Shown for as long as the release is
+            paused between programs, never inside a fold: the operator is at the machine and the
+            one press they need must be where they are looking. The card calls the same release
+            action the expert panel's button does, so the posted lines are unchanged. */}
+        {releaseRecord !== undefined && releaseRecord.phase === 'bit-change' && releaseRecord.next !== null && target !== null && (
+          <CutBitChangeCard
+            record={releaseRecord}
+            onConfirm={() => useEngraveReleaseStore.getState().confirmChange(target)}
+          />
+        )}
         {/* #1167 — THE RUN AS ONE CARD, before the controls that make it start: every program in
             run order (the running row, the bit-change marks, the flip), the fixed Pause/Stop row,
             and the footnote. Display only — the release step below still runs the job. */}
         {plan !== null && pkg !== null && (
           <CutRunCard job={job} pkg={pkg} plan={plan} finishedHashes={finishedHashes} target={target} />
+        )}
+        {/* #1170 — THE TURN. The operator is at the flip: the blank is turned and the corner seated
+            before side 2 can register. The one press opens Register; the card stays until side 2 is
+            registered, and the release step (and its "SAME corner" change panel) waits below until
+            then. */}
+        {flip !== null && flipPending && pkg !== null && (
+          <CutFlipCard
+            job={job}
+            pkg={pkg}
+            finishedHashes={finishedHashes}
+            target={target}
+            onRegister={() => {
+              setFlipRegisterOpen(true);
+              // Bring the Register card the press opened into view; it sits above this step.
+              window.requestAnimationFrame(() => {
+                document
+                  .querySelector('[data-testid="engrave-cut-step-2"]')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
+          />
         )}
         {/* #1127 — the cutter checklist, at the machine: one row per bit, located or replaced; the
             Load and the cut are gated on every row being settled. */}
@@ -1801,29 +1919,35 @@ export function EngraveCutSurface({
                 statement and ONE Cut press that uploads, prepares and starts. */}
             {oneScreen && machine !== null && target !== null && singleSource !== undefined && (
               <>
-                <EngraveCutConfirm
-                  job={job}
-                  machine={machine}
-                  source={singleSource}
-                  filename={releaseFileName(job.name, 1, 1, false)}
-                  oracle={runOracle}
-                  blocker={
-                    step1Blocker ??
-                    programBlocker ??
-                    ackBlocker ??
-                    uploadBlocker ??
-                    missingReportBlocker ??
-                    surfaceGate ??
-                    // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
-                    // until every row of the checklist is located or replaced.
-                    cutterChecklistBlocker
-                  }
-                  dome={domeProps}
-                  domeBlocker={domeG32Blocker}
-                  runContext={runContextWithDry}
-                  surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
-                  onLiveStatus={onLiveStatus}
-                />
+                {/* #819 — THE RUN-OVER RULE APPLIES HERE TOO. The one-screen confirm's Go press is
+                    the expert step's Cut press in the ordinary path; once THIS JOB's run has ended
+                    it would start the program again. The steps stay above the end card (#1123 item
+                    39) — the press does not. While the flip is due the card owns the step too. */}
+                {flipPending || runEnded ? null : (
+                  <EngraveCutConfirm
+                    job={job}
+                    machine={machine}
+                    source={singleSource}
+                    filename={releaseFileName(job.name, 1, 1, false)}
+                    oracle={runOracle}
+                    blocker={
+                      step1Blocker ??
+                      programBlocker ??
+                      ackBlocker ??
+                      uploadBlocker ??
+                      missingReportBlocker ??
+                      surfaceGate ??
+                      // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
+                      // until every row of the checklist is located or replaced.
+                      cutterChecklistBlocker
+                    }
+                    dome={domeProps}
+                    domeBlocker={domeG32Blocker}
+                    runContext={runContextWithDry}
+                    surfaceCheck={runSurfaceProgram ? { gridPitchMm: runGridPitchMm } : null}
+                    onLiveStatus={onLiveStatus}
+                  />
+                )}
                 <EngraveMachineRun target={target} onProgramLine={onProgramLine} />
               </>
             )}
@@ -1889,23 +2013,31 @@ export function EngraveCutSurface({
                         next program's press is below.
                       </p>
                     )}
-                    <EngraveReleaseStep
-                      target={target}
-                      job={job}
-                      programs={releaseSources}
-                      runPlan={plan}
-                      blocker={
-                        step1Blocker ??
-                        programBlocker ??
-                        ackBlocker ??
-                        releaseBlocker ??
-                        missingReportBlocker ??
-                        surfaceGate ??
-                        domeG32Blocker ??
-                        cutterChecklistBlocker
-                      }
-                      onProgramLine={onProgramLine}
-                    />
+                    {/* #1170 — at the turn the flip card is the one primary action. The release
+                        step returns once side 2 is registered; until then its change panel would
+                        ask the operator to keep the SAME corner, which is the opposite of a turn.
+                        Once the job is over the end card owns the screen under the steps; the
+                        release step would also re-plan a finished release away from the record the
+                        end card's replay reads, so it is not mounted at all. */}
+                    {flipPending || runOver ? null : (
+                      <EngraveReleaseStep
+                        target={target}
+                        job={job}
+                        programs={releaseSources}
+                        runPlan={plan}
+                        blocker={
+                          step1Blocker ??
+                          programBlocker ??
+                          ackBlocker ??
+                          releaseBlocker ??
+                          missingReportBlocker ??
+                          surfaceGate ??
+                          domeG32Blocker ??
+                          cutterChecklistBlocker
+                        }
+                        onProgramLine={onProgramLine}
+                      />
+                    )}
                     </>
                   ) : (
                     <EngraveMachineUpload
@@ -1947,6 +2079,21 @@ export function EngraveCutSurface({
           </>
         )}
       </Step>
+
+      {/* #1170 — THE END OF THE JOB, UNDER THE THREE STEPS (#1123 item 39). The steps are above
+          this card and are never replaced by it; the card owns the job's clocks, the two last
+          questions and the next move. */}
+      {runOver && target !== null && pkg !== null && (
+        <CutEndCard
+          job={job}
+          pkg={pkg}
+          generated={generated}
+          run={machineRun}
+          lastMeasuredRun={lastMeasuredRun}
+          measuredSentence={actualTimeSentence(lastMeasuredRun)}
+          target={target}
+        />
+      )}
     </div>
   );
 }

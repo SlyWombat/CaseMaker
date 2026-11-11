@@ -213,7 +213,7 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
     if (!planned.ok) throw new Error(planned.reason);
 
     const console = tapMissConsole();
-    const r = await runRegistration(planned.plan, { console, operator: async () => true });
+    const r = await runRegistration(planned.plan, { liveClearanceZ: -3, console, operator: async () => true });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       // The sentence the bench read on 2026-10-23, character for character.
@@ -264,7 +264,7 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
     // outside the 2 mm slack, not a miss: "no jaw top … down to machine Z" would send the operator
     // looking for a surface the probe did find.
     const console = tapTouchConsole(JAW.jawTopZ + 5);
-    const r = await runRegistration(planned.plan, { console, operator: async () => true });
+    const r = await runRegistration(planned.plan, { liveClearanceZ: -3, console, operator: async () => true });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('a touch at machine Z -51.82 at (-186.2, -180), 5 mm above the stored jaw top -56.82');

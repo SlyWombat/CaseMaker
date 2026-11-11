@@ -279,7 +279,7 @@ describe('#475 the executor measures the cut extents', () => {
       jaw: true,
     });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     expect(r.spread).toBeDefined();
@@ -329,7 +329,7 @@ describe('#475 the executor measures the cut extents', () => {
       jaw: true,
     });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     expect(r.spread!.spread).toBe(0.08);
@@ -361,7 +361,7 @@ describe('#475 the executor measures the cut extents', () => {
     const shifted = spreadPlan.touches.map((t, i) => ({ x: t.x, y: t.y + (i === 0 ? 0 : SHIFT), z: zs[i]! }));
     const z1 = fakeZ1({ actual, surface: zs[0]!, readings: shifted, jaw: true });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     // The front scan found the edge 2 mm along (to the scan's fine step).
@@ -397,7 +397,7 @@ describe('#475 the executor measures the cut extents', () => {
     const shifted = spreadPlan.touches.map((t, i) => ({ x: t.x, y: t.y + (i === 0 ? 0 : SHIFT), z: zs[i]! }));
     const z1 = fakeZ1({ actual, surface: zs[0]!, readings: shifted, jaw: true });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     // The front edge was found inward of the expected start, so Y is measured and the offset is the
@@ -419,7 +419,7 @@ describe('#475 the executor measures the cut extents', () => {
     const actual: ExpectedStock = { ...BADGE_STOCK, yMin: BADGE_STOCK.yMin + SHIFT, yMax: BADGE_STOCK.yMax + SHIFT };
     const z1 = fakeZ1({ actual, surface: -55.131, jaw: true });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes });
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     expect(r.outcome.measured).toEqual({ x: true, y: true });
@@ -433,7 +433,7 @@ describe('#475 the executor measures the cut extents', () => {
     const zs = [-55, -55.02, -55.04, -55.06, -55.08];
     const z1 = fakeZ1({ actual: LAMINATE_STOCK, surface: zs[0]!, readings: readingsFor(spreadPlan, zs), jaw: true });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     // #632 — the approach is the higher of the band's high bound and the MEASURED centre reading.
@@ -490,7 +490,7 @@ describe('#475 the executor measures the cut extents', () => {
     const zs = [measured, measured - 0.02, measured - 0.04, measured - 0.06, measured - 0.08];
     const z1 = fakeZ1({ actual: LAMINATE_STOCK, surface: measured, readings: readingsFor(spreadPlan, zs), jaw: true });
 
-    const r = await runRegistration(plan, { console: z1.console, operator: yes }, spreadPlan);
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes }, spreadPlan);
     if (!r.ok) throw new Error(r.reason);
 
     const clear = Math.round((measured + S.parkAboveSurfaceMm) * 1000) / 1000;
@@ -523,7 +523,7 @@ describe('#475 the executor measures the cut extents', () => {
   it('does not take the extents when the caller asks for no spread verdict', async () => {
     const plan = registrationPlan(BADGE_STOCK, -55.131, { x: 24, y: 43 });
     const z1 = fakeZ1({ actual: BADGE_STOCK, surface: -55.131, jaw: true });
-    const r = await runRegistration(plan, { console: z1.console, operator: yes });
+    const r = await runRegistration(plan, { liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.spread).toBeUndefined();
     expect(r.outcome.surfaceZ).toBe(-55.131);

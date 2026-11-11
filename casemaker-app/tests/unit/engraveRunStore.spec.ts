@@ -1046,6 +1046,17 @@ describe('engraveRunStore (#206)', () => {
     expect(saveBlocker(useEngraveRunStore.getState())).toBe('the job changed since it was generated');
   });
 
+  it('#1123-52 — the press warning is the run log’s FIRST line', async () => {
+    setEngraveRunClientLoader(async () => ({
+      engraveGenerate: async () => NOTHING,
+      simOracle: async () => ({ ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } }),
+    }));
+    await useEngraveRunStore.getState().generate(null, { memoryWarning: 'memory warning line' });
+    const log = useEngraveRunStore.getState().log;
+    expect(log[0]).toMatchObject({ label: 'memory warning line', ms: 0 });
+    expect(log.some((entry) => entry.label === 'starting the worker')).toBe(true);
+  });
+
   // #297: the generator (post, verifier, frame file) and the simulation must judge ONE machine. The
   // saved frame is read once per run and handed to both; a change to the saved frame while the
   // generator is working must not reach the simulation load of the same run.

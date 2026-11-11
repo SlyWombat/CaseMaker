@@ -149,6 +149,7 @@ export function goalFlipFindings(
         code: 'goal-unreached',
         targetId: goal.id,
         goalReachedFraction: plan.reachedFraction,
+        goalTopFraction: top,
         message:
           `The top setup reproduces ${topWords} of the goal's surface. The rest is under the ` +
           `${coveragePercent(COVERAGE_SMALL_FRACTION)} a single setup is expected to leave (faces pointing away, ` +
@@ -201,6 +202,7 @@ export function goalFlipFindings(
       code: 'goal-unreached',
       targetId: goal.id,
       goalReachedFraction: plan.reachedFraction,
+      goalTopFraction: top,
       ...(plan.sides.length > 1 ? { goalFlipSides: plan.sides.map((s) => s.faceUp) } : {}),
       ...(canOffer ? { goalFlipAction: FLIP_ACTION_LABEL, ...(detail === undefined ? {} : { goalFlipDetail: detail }) } : {}),
       ...(need === undefined ? {} : { goalFlipNeed: need }),

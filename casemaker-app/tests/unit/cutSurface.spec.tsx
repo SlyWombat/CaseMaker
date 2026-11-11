@@ -34,7 +34,7 @@ import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engrav
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useEngraveRunStore, saveBlocker } from '@/store/engraveRunStore';
+import { useEngraveRunStore, saveBlocker, setEngraveRunClientLoader } from '@/store/engraveRunStore';
 import { useRegistrationPromptStore } from '@/store/registrationPromptStore';
 import type { EngraveInputKey } from '@/engine/cnc/engrave/runInputs';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -836,6 +836,26 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.getByTestId('engrave-cut-ack').querySelector('[data-testid="probe-fit-diagram"]')).toBeNull();
   });
 
+  it('#1123-55 — the statement names the job’s own hold: a bracket job says the bracket, not the vise', () => {
+    const job = bracketJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      oracle: { ok: true, band: 0.016, levels: [], worst: { underCut: 0, overCut: 0 } } as never,
+      acknowledged: false,
+    });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    const statement = () =>
+      screen.getByTestId('engrave-cut-ack').querySelector('label')!.textContent ?? '';
+    expect(statement()).toContain("the bracket's arms and its 2 clamps");
+    expect(statement()).not.toContain('vise');
+
+    // The words follow the mount, so a vise job still says the vise.
+    cleanup();
+    const viseJob = plannedJob();
+    draw({ job: viseJob, report: reportOf(), pkg: frozen(viseJob, [P1]), generated: generated([P1]), canDrive: true });
+    expect(statement()).toContain('to the vise, and to the tool');
+  });
+
   it('#796 — a program older than the design disables the one-screen press and the upload until Generate', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
@@ -1574,30 +1594,45 @@ describe('#819 the finished screen', () => {
     pendingStock: null,
   });
 
-  it('a finished run gives the Cut screen to its Done card — one line and one action — and a foreign run does not', () => {
+  it('a finished run keeps the three steps and puts its end card under them — and a foreign run shows neither', () => {
     const job = plannedJob();
     const pkg = frozen(job, [P1]);
 
-    // This job's run: the steps give way to the card and its one action.
+    // #1170 — THE STEPS STAY ABOVE THE END CARD (#1123 item 39). The job's own end card is below
+    // them, with its one primary action; the old done card no longer takes the screen.
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
-    expect(screen.queryByTestId('engrave-cut-step-1')).toBeNull();
-    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
-    expect(screen.getByTestId('engrave-run-end').dataset.kind).toBe('finished');
-    expect(screen.getByTestId('engrave-run-done-title').textContent).toMatch(/^Finished · /);
-    expect(screen.getByTestId('engrave-run-outcome').textContent).toBe('Vacuum off (M852); homed.');
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-step-2')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-step-3')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-end-card')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-end-save').textContent).toBe('Save the run record');
     expect(screen.queryByText('bookkeeping the card must not draw')).toBeNull();
     expect(screen.queryByTestId('engrave-run-start')).toBeNull();
-    expect(screen.getByTestId('engrave-run-another')).toBeTruthy();
 
     // Another job's run on the same machine: this job's steps stay — with the press step 3 owns —
-    // so the other job's end cannot take this screen. (The machine's own run panel still draws that
-    // entry inside step 3, as it always has: the entry belongs to the machine, not to the job.)
+    // so the other job's end cannot put this job's end card on the screen. (The machine's own run
+    // panel still draws that entry inside step 3, as it always has: the entry belongs to the
+    // machine, not to the job.)
     cleanup();
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended('another-job') } as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-end-card')).toBeNull();
+  });
+
+  it('#1191 review — a finished run for this job leaves no Go press; the steps stay', () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended(job.id) } as never });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    // #819 — THE RUN-OVER RULE APPLIES TO THE ONE-SCREEN CONFIRM TOO. Its Go press is the expert
+    // step's press in the ordinary path; on a finished job it would start the same program again.
+    // The steps themselves stay above the end card (#1123 item 39); the press does not.
+    expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
+    expect(screen.getByTestId('engrave-cut-end-card')).toBeTruthy();
   });
 
   // #1123 item 39 — THE DONE CARD IS FOR A FINISHED JOB, NOT A FINISHED PROGRAM. At the bench a
@@ -2142,6 +2177,19 @@ describe('#1123 the Fit-and-clamp card’s wording', () => {
     expect(line).not.toContain('supplying this stock yourself');
   });
 
+  it('#1123-57 — the shelf fact is Know: folded, not a boxed line with no action', () => {
+    const job = defaultEngraveJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+    // The blank was not a shelf pick, so there is nothing to take and nothing to do: the fact is
+    // information, and it reads the way the Know band reads — a closed fold, opened on demand.
+    const shelf = screen.getByTestId('engrave-package-reservation');
+    expect(shelf.tagName).toBe('DETAILS');
+    expect((shelf as HTMLDetailsElement).open).toBe(false);
+    expect(shelf.getAttribute('data-band')).toBe('know');
+    expect(shelf.textContent).toContain('This blank is not on the shelf — nothing to take from it.');
+  });
+
   it('item 16 — the "I turned the stock…" expander waits until something has been cut', () => {
     const job = defaultEngraveJob();
     const pkg = frozen(job, [P1]);
@@ -2253,5 +2301,128 @@ describe('#1123-45 the Cut step says what Generate is doing', () => {
   it('no progress block when nothing is running', () => {
     draw({ job: defaultEngraveJob(), report: reportOf(), pkg: null, generated: null });
     expect(screen.queryByTestId('engrave-cut-generate-progress')).toBeNull();
+  });
+});
+
+// #1191 — a stored run made by ANOTHER BUILD is kept; a different plan this build would make is
+// an offer, never a forced re-plan. Keeping is the default (the button needs a press, and the
+// stored programs stay on the blank).
+describe('#1191 — the cross-build plan comparison', () => {
+  const RESTORE_NOTE = 'These programs were generated by build 1.0.0+oldcommit on 9 Nov.';
+
+  function drawWithCompare(status: 'different' | 'kept', changed = 1, total = 2) {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    useEngraveRunStore.setState({
+      generated: generated([P1]),
+      restoreNote: RESTORE_NOTE,
+      restoreChecking: false,
+      buildCompare: { status, changed, total },
+    });
+    return draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
+  }
+
+  it('a different plan is an offer: keep the programs (default) or use the new plan', () => {
+    drawWithCompare('different');
+    expect(screen.getByTestId('engrave-build-compare-sentence').textContent).toContain(
+      'This build plans this job differently (1 of 2 programs changed)',
+    );
+    fireEvent.click(screen.getByTestId('engrave-build-compare-keep'));
+    expect(useEngraveRunStore.getState().buildCompare!.status).toBe('kept');
+    expect(generateSpy).not.toHaveBeenCalled();
+  });
+
+  it('“Use the new plan” is the panel’s own Generate press', () => {
+    drawWithCompare('different');
+    fireEvent.click(screen.getByTestId('engrave-build-compare-use'));
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a kept comparison shows nothing', () => {
+    drawWithCompare('kept');
+    expect(screen.queryByTestId('engrave-build-compare')).toBeNull();
+  });
+});
+
+// #1191 — the comparison is started by the step itself, in the background, once the restored run
+// is no longer being checked and the blank has not been started. The stored run is untouched.
+describe('#1191 — the background comparison starts itself', () => {
+  it('a restored, not-yet-started run is compared and the difference is offered', async () => {
+    const job = plannedJob();
+    job.toolKey = 'flat-1.0';
+    const pkg = frozen(job, [P1]);
+    setEngraveRunClientLoader(
+      async () =>
+        ({
+          engraveGenerate: async () => generated([{ ...P1, programHash: 'a-different-plan' }]),
+        }) as never,
+    );
+    try {
+      const stored = generated([P1]);
+      useEngraveRunStore.setState({
+        generated: stored,
+        restoreNote: 'These programs were generated by build 1.0.0+oldcommit on 9 Nov.',
+        restoreChecking: false,
+        buildCompare: null,
+        staleSince: null,
+      });
+      draw({ job, report: reportOf(), pkg, generated: stored });
+      await waitFor(() => expect(screen.getByTestId('engrave-build-compare')).toBeTruthy(), {
+        timeout: 5000,
+      });
+      expect(screen.getByTestId('engrave-build-compare-sentence').textContent).toContain(
+        'This build plans this job differently',
+      );
+      // The stored run was not replaced by the comparison's plan.
+      expect(useEngraveRunStore.getState().generated).toBe(stored);
+    } finally {
+      setEngraveRunClientLoader(null);
+    }
+  });
+});
+
+// #1191 — A JOB IN PROGRESS KEEPS ITS PACKAGE BY DEFAULT: once any program of THIS package is
+// finished on the blank, the restored run is not compared at all — Generate remains available,
+// but the step never offers a re-plan over a blank that is already part-cut.
+describe('#1191 — a started blank is never offered a re-plan', () => {
+  it('a finished program of the restored package stops the background comparison', async () => {
+    const job = plannedJob();
+    job.toolKey = 'flat-1.0';
+    const pkg = frozen(job, [P1, P2]);
+    const location = locationWith('vise', '3d');
+    useLocationStore.setState({
+      status: 'ready',
+      etag: '"loc-1"',
+      location: {
+        ...location,
+        machines: [{ ...location.machines[0]!, finishedPrograms: [pkg.programs[0]!.hash] }],
+      },
+    } as never);
+    let planned = false;
+    setEngraveRunClientLoader(
+      async () =>
+        ({
+          engraveGenerate: async () => {
+            planned = true;
+            return generated([P1]);
+          },
+        }) as never,
+    );
+    try {
+      const stored = generated([P1, P2]);
+      useEngraveRunStore.setState({
+        generated: stored,
+        restoreNote: 'These programs were generated by build 1.0.0+oldcommit on 9 Nov.',
+        restoreChecking: false,
+        buildCompare: null,
+        staleSince: null,
+      });
+      draw({ job, report: reportOf(), pkg, generated: stored });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(planned).toBe(false);
+      expect(screen.queryByTestId('engrave-build-compare')).toBeNull();
+    } finally {
+      setEngraveRunClientLoader(null);
+    }
   });
 });

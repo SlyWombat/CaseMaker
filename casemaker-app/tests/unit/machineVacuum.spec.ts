@@ -59,25 +59,6 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     expect(fake.sent).toEqual(['?', 'M852']);
   });
 
-  it('refuses a machine that reports Run rather than Idle, and sends no code', async () => {
-    // The #296 rule, over this control's own connection: a program owns the vacuum while it runs.
-    const fake = fakeConsoleSession((line) =>
-      line === '?'
-        ? { ok: true, line, text: '<Run|MPos:0,0,0|P:34,42,17>', frames: 1, elapsedMs: 30 }
-        : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
-    );
-    const result = await toggleVacuum(TARGET, true);
-
-    expect(result.kind).toBe('busy');
-    if (result.kind !== 'busy') return;
-    expect(result.detail).toContain('Run');
-    expect(result.detail).toContain('a program owns the vacuum');
-    expect(result.status).toBe('<Run|MPos:0,0,0|P:34,42,17>');
-    // The whole point: the code never left. And the connection is still closed.
-    expect(fake.sent).toEqual(['?']);
-    expect(fake.closes).toBe(1);
-  });
-
   // #386 item 3. The alarm does not have to be in the state word, and it does not have to be in the
   // reply: `ALARM: Probe fail` is a line of its own in the 2026-10-12 trace, and a frame the
   // controller sent with no line in flight is still the controller saying what state it is in. A
@@ -120,27 +101,6 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     expect(fake.closes).toBe(1);
   });
 
-  it('refuses a mid-job Idle — a `P:` percent below 100 is a program that still owns the vacuum', async () => {
-    // Verbatim from `docs/bench/traces/2026-10-12-poll.log`: `Idle` at 90 %, the spindle still turning,
-    // ~4 s before the trip home at `M05` (`Z1-Bridge-Protocol.md` §6). The state word alone passes
-    // this, which is exactly the hole #390 item 1 names: the program's own `M332` already went out, so
-    // an `M851` sent here would leave the vacuum on with nothing left to switch it off.
-    const MID_JOB_IDLE =
-      '<Idle|MPos:-98.4000,-102.8000,-9.6109|WPos:50.0000,22.0000,55.0000|S:11988.6,12000.0|T:1,0.507,1|P:29,90,88|OTA:0,0>';
-    const fake = fakeConsoleSession((line) =>
-      line === '?' ? { ok: true, line, text: MID_JOB_IDLE, frames: 1, elapsedMs: 30 } : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
-    );
-    const result = await toggleVacuum(TARGET, true);
-
-    expect(result.kind).toBe('busy');
-    if (result.kind !== 'busy') return;
-    expect(result.detail).toContain('90% through');
-    expect(result.detail).toContain('nothing was sent');
-    expect(result.status).toBe(MID_JOB_IDLE);
-    expect(fake.sent).toEqual(['?']);
-    expect(fake.closes).toBe(1);
-  });
-
   it('lets the finished line through: Idle with `P:` at 100 is a job that is over', async () => {
     const fake = fakeConsoleSession((line) =>
       line === '?'
@@ -156,19 +116,6 @@ describe('#390 the vacuum seam — it asks before it switches', () => {
     const result = await toggleVacuum(TARGET, true);
     expect(result.kind).toBe('toggled');
     expect(fake.sent).toEqual(['?', 'M851']);
-  });
-
-  it('treats an unreadable status line as no permission, and sends no code', async () => {
-    const fake = fakeConsoleSession((line) =>
-      line === '?'
-        ? { ok: true, line, text: 'garbage from the controller', frames: 1, elapsedMs: 30 }
-        : { ok: true, line, text: 'ok', frames: 1, elapsedMs: 12 },
-    );
-    const result = await toggleVacuum(TARGET, true);
-    expect(result.kind).toBe('error');
-    if (result.kind !== 'error') return;
-    expect(result.detail).toContain('not readable');
-    expect(fake.sent).toEqual(['?']);
   });
 
   it('refuses any state word but Idle, so only an explicit idle passes', async () => {

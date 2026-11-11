@@ -2226,10 +2226,15 @@ impl HouseStore {
     /// Store one crash report under `crash-reports/`, returning its path relative to the house
     /// directory (#787). The NAME is the service's — the epoch millis plus this process's write
     /// counter — never the caller's: a request may not choose a path, and two reports filed in the
-    /// same millisecond must not overwrite one another. The body must be the app's own report kind
-    /// and fit [`MAX_CRASH_REPORT_BYTES`]; a file that fails either rule is refused before the disk
-    /// is touched. No index, no ETag, no listing endpoint: a report is a note to a person, read
+    /// same millisecond must not overwrite one another. The body must be one of the app's own report
+    /// kinds and fit [`MAX_CRASH_REPORT_BYTES`]; a file that fails either rule is refused before the
+    /// disk is touched. No index, no ETag, no listing endpoint: a report is a note to a person, read
     /// from the house directory by whoever is diagnosing the crash.
+    ///
+    /// #1187 — TWO KINDS, BESIDE EACH OTHER. A crash report (`casemaker-crash-report`) and a stopped
+    /// machine action's report (`casemaker-machine-stop-report`) are stored in the same directory;
+    /// the body's `kind` is the record, and the name says which it is so a person reading the
+    /// directory sees the difference before opening anything.
     pub fn save_crash_report(&self, bytes: &[u8]) -> Result<String, HouseError> {
         if bytes.len() > MAX_CRASH_REPORT_BYTES {
             return Err(HouseError::BadEntry(format!(
@@ -2239,17 +2244,23 @@ impl HouseStore {
         }
         let value: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|e| HouseError::BadEntry(format!("the crash report is not JSON: {e}")))?;
-        if value.get("kind").and_then(|k| k.as_str()) != Some("casemaker-crash-report") {
-            return Err(HouseError::BadEntry(
-                "the body is not a Case Maker crash report (kind: casemaker-crash-report)".to_string(),
-            ));
-        }
+        let stem = match value.get("kind").and_then(|k| k.as_str()) {
+            Some("casemaker-crash-report") => "crash",
+            Some("casemaker-machine-stop-report") => "stop",
+            _ => {
+                return Err(HouseError::BadEntry(
+                    "the body is not a Case Maker report (kind: casemaker-crash-report or \
+                     casemaker-machine-stop-report)"
+                        .to_string(),
+                ))
+            }
+        };
         let millis = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let seq = WRITE_SEQ.fetch_add(1, Ordering::Relaxed);
-        let name = format!("crash-{millis}-{seq}.json");
+        let name = format!("{stem}-{millis}-{seq}.json");
         let path = self.dir.join("crash-reports").join(&name);
         write_atomic(&path, bytes)?;
         Ok(format!("crash-reports/{name}"))
@@ -2357,6 +2368,20 @@ mod tests {
         // Two reports are two files: the name is the service's, so one can never overwrite another.
         let second = store.save_crash_report(body).unwrap();
         assert_ne!(path, second);
+        // #1187 — a stopped machine action's report is the OTHER kind: beside the crash reports,
+        // under a name that says which it is, with the kind carried in the body.
+        let stop = br#"{"kind":"casemaker-machine-stop-report","version":1,"action":"register","error":"read failed: connection reset by peer"}"#;
+        let stop_path = store.save_crash_report(stop).unwrap();
+        assert!(stop_path.starts_with("crash-reports/stop-"), "{stop_path}");
+        let stored = std::fs::read(dir.path().join(&stop_path)).unwrap();
+        assert_eq!(stored, stop);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&stored)
+                .unwrap()
+                .get("kind")
+                .and_then(|k| k.as_str()),
+            Some("casemaker-machine-stop-report")
+        );
         // Not a report, not stored: the kind is checked before the disk is touched.
         assert!(matches!(store.save_crash_report(br#"{"kind":"other"}"#), Err(HouseError::BadEntry(_))));
         assert!(matches!(store.save_crash_report(b"not json"), Err(HouseError::BadEntry(_))));
@@ -2408,6 +2433,10 @@ mod tests {
                 at: "2026-10-23T00:00:00.000Z".into(),
                 what: "owned; not yet tested".into(),
             }],
+            // #1200 — the touch restriction is optional; absent on this record.
+            touches: None,
+            touches_reason: None,
+            touches_since: None,
         };
         store.put_accessory(probe, Some("*")).await.unwrap();
 
@@ -2434,6 +2463,9 @@ mod tests {
                         since: "2026-10-23T00:00:00.000Z".into(),
                     },
                     history: vec![],
+                    touches: None,
+                    touches_reason: None,
+                    touches_since: None,
                 },
                 Some("*"),
             )
@@ -3720,6 +3752,8 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            completed_routines: None,
+            current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
     }
@@ -3739,7 +3773,8 @@ mod tests {
             finished_at: None,
             stock: None,
             registration: None,
-            cut_map: None,
+            blank_id: None,
+            cut_maps: Vec::new(),
         }
     }
 
@@ -4628,16 +4663,21 @@ mod tests {
             Err(HouseError::BadEntry(_))
         ));
         let mut broken = a_run("a1b2c3d4", 1);
-        broken.cut_map = Some(crate::location::FinishedCutMap {
-            cell_mm: 2.0,
-            cols: 80,
-            rows: 63,
-            x0_mm: 0.0,
-            y0_mm: 0.0,
-            step_mm: 0.05,
-            flat: crate::location::CutMapStream { encoding: "rle".into(), data: String::new() },
-            depth: crate::location::CutMapStream { encoding: "rle".into(), data: "1:0".into() },
-        });
+        broken.cut_maps = vec![crate::location::FinishedSetupCutMap {
+            setup_index: 1,
+            state: "complete".into(),
+            unknown_reason: None,
+            map: Some(crate::location::FinishedCutMap {
+                cell_mm: 2.0,
+                cols: 80,
+                rows: 63,
+                x0_mm: 0.0,
+                y0_mm: 0.0,
+                step_mm: 0.05,
+                flat: crate::location::CutMapStream { encoding: "rle".into(), data: String::new() },
+                depth: crate::location::CutMapStream { encoding: "rle".into(), data: "1:0".into() },
+            }),
+        }];
         assert!(matches!(
             store.add_finished_program("m-1", "a1b2c3d4", Some(broken)).await,
             Err(HouseError::BadEntry(_))

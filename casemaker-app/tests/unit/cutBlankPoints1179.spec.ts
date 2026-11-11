@@ -7,10 +7,12 @@
 // recorded, the set is "outside today's footprint", d = 0, and the caller says the earlier cuts are
 // unknown.
 import { describe, expect, it } from 'vitest';
+import { encodeRuns } from '@/engine/cnc/engrave/cutMap';
 import {
   CUT_BLANK_EDGE_MARGIN_MM,
   CUT_BLANK_MAX_POINTS,
   cutBlankCandidates,
+  cutBlankCandidatesFromMap,
   cutFootprintMask,
   depthRaster,
   flatFloorMask,
@@ -231,5 +233,99 @@ describe('#1179 a non-flat cutter’s floor is not flat (analyst, 2026-11-10)', 
       const insideFootprint = p.x > 20 - 3 && p.x < 80 + 3 && p.y > 10 - 3 && p.y < 50 + 3;
       expect(insideFootprint).toBe(false);
     }
+  });
+});
+
+describe('#1179 stage 2 — candidates from the record’s per-setup cut map', () => {
+  // The map's frame: a 100 × 60 stock at the stored pitch; the depth stream is levels of stepMm.
+  const mapOf = (cellMm: number, levels: number[], flat: number[], stepMm = 0.05) => ({
+    cellMm,
+    cols: Math.ceil(100 / cellMm),
+    rows: Math.ceil(60 / cellMm),
+    x0Mm: 0,
+    y0Mm: 0,
+    stepMm,
+    flat: { encoding: 'rle' as const, data: encodeRuns(flat) },
+    depth: { encoding: 'rle' as const, data: encodeRuns(levels) },
+  });
+
+  it('reads the stored pitch and offers the flat floors at their own depths', () => {
+    // 2 mm map: the whole face is a 2 mm floor (level 40 × 0.05), all flat.
+    const cols = Math.ceil(100 / 2);
+    const rows = Math.ceil(60 / 2);
+    const levels = new Array(cols * rows).fill(40);
+    const flat = new Array(cols * rows).fill(1);
+    const out = cutBlankCandidatesFromMap({
+      map: mapOf(2, levels, flat),
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never);
+    expect(out).not.toBeNull();
+    expect(out!.points.length).toBeGreaterThanOrEqual(2);
+    for (const p of out!.points) expect(p.depthMm).toBeCloseTo(2, 6);
+    // The points sit on the 2 mm grid's cell centres.
+    expect((out!.points[0]!.x - 1) / 2).toBeCloseTo(Math.round((out!.points[0]!.x - 1) / 2), 6);
+  });
+
+  it('a coarsened 4 mm map is read at ITS pitch, not 2', () => {
+    const cols = Math.ceil(100 / 4);
+    const rows = Math.ceil(60 / 4);
+    const levels = new Array(cols * rows).fill(20); // 20 × 0.05 = 1 mm
+    const flat = new Array(cols * rows).fill(1);
+    const out = cutBlankCandidatesFromMap({
+      map: mapOf(4, levels, flat),
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never)!;
+    expect(out.points.every((p) => p.depthMm === 1)).toBe(true);
+    // Cell centres of a 4 mm grid: 2, 6, 10 … — never a 2 mm centre like 1.
+    for (const p of out.points) expect((p.x - 2) / 4).toBeCloseTo(Math.round((p.x - 2) / 4), 6);
+  });
+
+  it('non-flat cells are never candidates — the probe would read a slope', () => {
+    const cols = Math.ceil(100 / 2);
+    const rows = Math.ceil(60 / 2);
+    const levels = new Array(cols * rows).fill(40);
+    const flat = new Array(cols * rows).fill(0);
+    // Make one interior cell flat so there is something to sample.
+    flat[Math.floor(rows / 2) * cols + Math.floor(cols / 2)] = 1;
+    const out = cutBlankCandidatesFromMap({
+      map: mapOf(2, levels, flat),
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never)!;
+    expect(out.points.length).toBe(1);
+  });
+
+  it('a deep floor needs the probe’s body, and a malformed stream is refused', () => {
+    const cols = Math.ceil(100 / 2);
+    const rows = Math.ceil(60 / 2);
+    const levels = new Array(cols * rows).fill(40);
+    const flat = new Array(cols * rows).fill(1);
+    const noBody = cutBlankCandidatesFromMap({
+      map: mapOf(2, levels, flat),
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 1 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never)!;
+    expect(noBody.points).toEqual([]);
+    expect(noBody.floorsRestricted).toContain('body diameter is not recorded');
+    const withBody = cutBlankCandidatesFromMap({
+      map: mapOf(2, levels, flat),
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 1, bodyDiameterMm: 4 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never)!;
+    expect(withBody.points.length).toBeGreaterThanOrEqual(2);
+    const broken = cutBlankCandidatesFromMap({
+      map: { ...mapOf(2, levels, flat), depth: { encoding: 'rle', data: 'not-a-run' } },
+      probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
+      fallbackRadiusMm: 2,
+      obstacles: [],
+    } as never);
+    expect(broken).toBeNull();
   });
 });

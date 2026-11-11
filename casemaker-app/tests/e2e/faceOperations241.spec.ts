@@ -38,9 +38,8 @@ const simState = (page: Page): Promise<SimInfo> =>
 async function toStep4(page: Page): Promise<void> {
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  // #897 — the starter lands on Holding; the question is two steps back (through the blank).
-  await page.getByTestId('start-wizard-back').click();
-  await page.getByTestId('start-wizard-back').click();
+  // #1107 — the starter ASKS ITS QUESTION: it lands on step 2 with the rotary picker and the text
+  // field waiting (the rod stock and chuck are already seeded, so the blank and hold pass through).
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 }
 
@@ -174,17 +173,18 @@ test('a mixed job with a neck cuts the map work, the face, then the neck', async
   await cm.ready();
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
+  // #1107 — the starter lands on the question; answer it, then walk the blank and the hold.
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  await page.getByTestId('start-wizard-op-text').fill('Zoomba');
+  await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
+  await page.getByTestId('start-wizard-operation-next').click();
+  await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-mount-rotary')).toBeChecked({ timeout: 30_000 });
   // The Holding step: leave the part on the default neck (chuck side, ⌀7 mm on the ⌀20 mm rod).
   await page.getByTestId('engrave-setup-rotary-neck').check();
   await expect(page.getByTestId('engrave-setup-rotary-neck-diameter')).toBeVisible();
-  // #897 — the question is two steps back from the starter's Holding (through the blank).
-  await page.getByTestId('start-wizard-back').click();
-  await page.getByTestId('start-wizard-back').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
-  await page.getByTestId('start-wizard-op-text').fill('Zoomba');
-  await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
-  await createOperation(page);
+  await page.getByTestId('engrave-setup-next').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
   // A flat on the stock's faces, from the panel's own add menu (A 0°, 1 mm deep).
   await page.getByTestId('engrave-add-summary').click();

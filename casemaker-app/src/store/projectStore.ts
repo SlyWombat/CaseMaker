@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { markWorkedOn, clearWorkedOn } from './homeSession';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { temporal } from 'zundo';
 import { produce } from 'immer';
@@ -23,6 +24,7 @@ import { defaultAntennasForBoard } from '@/engine/compiler/antennas';
 import { fourCornerScrewTabs, endFlangesPreset, extrusionMountPreset } from '@/engine/compiler/mountingFeatures';
 import { computeShellDims } from '@/engine/compiler/caseShell';
 import { patchProject } from '@/platform/headless/patch';
+import { useViewportStore } from './viewportStore';
 
 const DEFAULT_BOARD_ID = 'rpi-4b';
 
@@ -103,6 +105,14 @@ export interface ProjectState {
    * board / template. Project is reset to the default so the engine still
    * has a valid board behind the welcome overlay. */
   showWelcome: () => void;
+  /**
+   * #1123-48 — HOME: the main page over the work that is already open. Unlike `showWelcome` it
+   * resets nothing — the project and the CNC job stay exactly as they were, and the main page's
+   * Continue row returns to them.
+   */
+  showHome: () => void;
+  /** #1123-48 — the Continue row: back into the workspace, over the stores' untouched state. */
+  resume: () => void;
   setProject: (p: Project) => void;
   patchCase: (patch: Partial<CaseParameters>) => void;
   /** Issue #148 — the bed this project prints on. `undefined` clears it. */
@@ -219,8 +229,23 @@ export const useProjectStore = create<ProjectState>()(
         // gated on `welcomeMode` instead.
         project: createDefaultProject(),
         welcomeMode: true,
-        showWelcome: () => set({ project: createDefaultProject(), welcomeMode: true }),
-        setProject: (p) => set({ project: p, welcomeMode: false }),
+        showWelcome: () => {
+          // #1123-48 — a NEW project: the previous one is replaced (the dialog said so), so there
+          // is nothing left to continue.
+          clearWorkedOn();
+          set({ project: createDefaultProject(), welcomeMode: true });
+        },
+        // #1123-48 — the main page WITHOUT a reset: everything stays open behind it.
+        showHome: () => set({ welcomeMode: true }),
+        resume: () => set({ welcomeMode: false }),
+        setProject: (p) => {
+          // #1123-48 — a project is open from here on: Home offers Continue back to it.
+          markWorkedOn();
+          // #1123-59 — a project opened from the door is the CASE workspace (its own rail); the
+          // CNC workspace is entered by the job itself, never by the project behind it.
+          useViewportStore.getState().setWorkspace('case');
+          set({ project: p, welcomeMode: false });
+        },
         patchCase: (patch) =>
           set((s) => {
             // Issue #56 — validate before committing, and reject invalid writes
@@ -262,8 +287,12 @@ export const useProjectStore = create<ProjectState>()(
               draft.modifiedAt = new Date(0).toISOString();
             }),
           })),
-        loadBuiltinBoard: (boardId) =>
-          set(() => ({ project: createDefaultProject(boardId), welcomeMode: false })),
+        loadBuiltinBoard: (boardId) => {
+          markWorkedOn();
+          // #1123-59 — a board project is the case workspace's.
+          useViewportStore.getState().setWorkspace('case');
+          set(() => ({ project: createDefaultProject(boardId), welcomeMode: false }));
+        },
         addPort: (port) =>
           set((s) => ({
             project: produce(s.project, (draft) => {

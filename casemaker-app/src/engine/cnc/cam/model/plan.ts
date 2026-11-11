@@ -55,6 +55,7 @@ import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits , type ClGridEntry } from './clsurface';
 import { dropCutterHeight, profileOf, type CutterProfile, type DropCutterMesh } from './dropcutter';
 import { ARC_CHORD_TOLERANCE_MM } from '@/engine/compiler/arcResolution';
+import { fixtureUnmodelledSentence } from './statedGaps';
 
 /**
  * #965/#898 part 2 — THE FRAME-FLIP ALGEBRA, isolated from feature recognition's own
@@ -2354,7 +2355,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     );
     if (bitChanges.length > 0) {
       bitChangeNotes.push(
-        `the run's cycle is ${formatSpan(totalCostSeconds)}: cutting and rapids ${formatSpan(cuttingSeconds)}, bit changes ${formatSpan(changeTotalSeconds)} in ${bitChanges.length} change${bitChanges.length === 1 ? '' : 's'}; ${bitChangeShapeSentence(bitChange)}`,
+        // #1193 — THIS PLAN's cycle, not the run's: the number is this plan's setups (one per side
+        // of a flip is planned at a time), and the run's own total over every posted program is
+        // stated by the generate seam (`runTotals.ts` → §2, the Cut card, the receipt).
+        `this plan's cycle is ${formatSpan(totalCostSeconds)}: cutting and rapids ${formatSpan(cuttingSeconds)}, bit changes ${formatSpan(changeTotalSeconds)} in ${bitChanges.length} change${bitChanges.length === 1 ? '' : 's'}; ${bitChangeShapeSentence(bitChange)}`,
       );
     }
 
@@ -2606,7 +2610,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       }
     }
     if (input.fixture.envelope !== null) {
-      const text = `the ${input.fixture.mount} fixture envelope is not one of this plan's own region obstacles — the posted program is checked against it by the verifier and the sweep`;
+      // #1123 item 56(b) — the Check says what to check and where, not what the software does.
+      const text = fixtureUnmodelledSentence(input.fixture.mount);
       notes.push(text);
       statements.push({ severity: 'warning', code: 'goal-fixture-unmodelled', count: 1, text });
     }
@@ -5464,7 +5469,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         const text =
           `"${region.id}": not finished — floor ${cutFloorMm} mm below the stock top, the ${cutterName}'s usable length ${finisherReach} mm, no cutter in the set reaches it — use a longer-flute cutter, or let a ball finish it`;
         notes.push(text);
-        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text });
+        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [region.id], text, floorMm: cutFloorMm, usableMm: finisherReach });
         // No move of the region is posted: the rest and pencil passes ride this finish's CL.
         continue;
       }

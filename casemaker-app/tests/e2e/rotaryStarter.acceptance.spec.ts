@@ -31,17 +31,11 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   await cm.ready();
   await expect(page.getByTestId('welcome-overlay')).toBeVisible();
 
-  // — 1. THE STARTER. One press puts the rod in the chuck and opens Holding on it.
+  // — 1. THE STARTER. One press puts the rod in the chuck and ASKS ITS QUESTION (#1107): step 2
+  // with the rotary picker and the text field waiting, so the empty job is impossible from here.
   await page.getByTestId('welcome-starter-dowel').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
-  const picture = page.getByTestId('engrave-setup-holding-picture');
-  await expect(picture).toContainText('rod ⌀20');
-  await expect(picture).toContainText('grip 15 mm');
-  await expect(picture).toContainText('stick-out 85 mm');
-  const holdingText = await page.getByTestId('start-wizard').innerText();
-  expect(holdingText).not.toMatch(ROTARY_CODES);
-  expect(holdingText).not.toMatch(/\.\d{4,}/);
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
   // The seeded job is a rod in the chuck — the Holding step's own default, not a starter's guess.
   const job = await page.evaluate(() =>
@@ -54,11 +48,7 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   expect(job.workholding.kind).toBe('rotary-chuck');
   expect(job.workholding.rotary.tailstock).toBe(true);
 
-  // — 2. THE OPERATION. The wizard's empty-design rule applies: a starter seeds no items. #897 —
-  // the question is two steps back from the starter's Holding (through the blank).
-  await page.getByTestId('start-wizard-back').click();
-  await page.getByTestId('start-wizard-back').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+  // — 2. THE OPERATION. The wizard's empty-design rule applies: a starter seeds no items.
   // #752 — on a rod the step is the ROTARY picker: the three groups, each operation's one field,
   // and Relief tagged simulate only. #241 slice 2 made the face group authorable: Flat, Faces all
   // round and Cross-hole are enabled, each with its index and its one field.
@@ -70,9 +60,18 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   await expect(page.getByTestId('start-wizard-op-reads-select')).toHaveValue('along');
   await page.getByTestId('start-wizard-op-text').fill('Zoomba');
   await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
-  // The blank (the rod's own, passed through) and the hold, then the last step's create (#897).
+  // The blank (the rod's own, passed through) and the hold — its picture names the chuck — then
+  // the last step's create (#897).
   await page.getByTestId('start-wizard-operation-next').click();
   await page.getByTestId('start-wizard-stock-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  const picture = page.getByTestId('engrave-setup-holding-picture');
+  await expect(picture).toContainText('rod ⌀20');
+  await expect(picture).toContainText('grip 15 mm');
+  await expect(picture).toContainText('stick-out 85 mm');
+  const holdingText = await page.getByTestId('start-wizard').innerText();
+  expect(holdingText).not.toMatch(ROTARY_CODES);
+  expect(holdingText).not.toMatch(/\.\d{4,}/);
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
@@ -112,7 +111,9 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   const bench = page.getByTestId('engrave-cut-rotary-bench');
   await expect(bench).toBeVisible();
   await expect(bench).toHaveText(BENCH);
-  const step3Buttons = page.locator('[data-testid="engrave-cut-step-3"] button');
+  // #1180 — the cut card (#1167) draws its fixed Pause/Stop row in step 3 too; with no run both are
+  // disabled. The refusal's one REMEDY is still the only enabled button in the step.
+  const step3Buttons = page.locator('[data-testid="engrave-cut-step-3"] button:enabled');
   await expect(step3Buttons).toHaveCount(1);
   await expect(step3Buttons.first()).toHaveAttribute('data-testid', 'engrave-cut-open-machines');
   await page.screenshot({ path: path.join(OUT, 'cut.png') });

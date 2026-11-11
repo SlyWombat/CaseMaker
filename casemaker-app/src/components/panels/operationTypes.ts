@@ -114,26 +114,26 @@ export interface OperationTypeDef {
  * the panel's add picker and every row's chip say the same words (#685, §4).
  */
 export const OPERATION_TYPES: readonly OperationTypeDef[] = [
-  { id: 'engrave', label: 'Engrave text', blurb: 'Text, or single-stroke lines', addTestId: 'engrave-add-label', group: 'engrave-carve' },
-  { id: 'v-carve', label: 'V-carve', blurb: 'A region cut by the job’s V-bit', addTestId: 'engrave-add-v-carve', group: 'engrave-carve' },
-  { id: 'v-carve-variable', label: 'V-carve, variable depth', blurb: 'The V follows the design’s width down to its centre', addTestId: 'engrave-add-v-carve-variable', group: 'engrave-carve' },
-  { id: 'inlay', label: 'Inlay', blurb: 'A female pocket, and the male plug to glue into it', addTestId: 'engrave-add-inlay', group: 'engrave-carve' },
-  { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed region', addTestId: 'engrave-add-rect', group: 'cut-away' },
+  { id: 'engrave', label: 'Engrave text', blurb: 'Text, or a single line the cutter traces', addTestId: 'engrave-add-label', group: 'engrave-carve' },
+  { id: 'v-carve', label: 'V-carve', blurb: 'Carve with a V-bit — lines get wider as they go deeper', addTestId: 'engrave-add-v-carve', group: 'engrave-carve' },
+  { id: 'v-carve-variable', label: 'V-carve, variable depth', blurb: 'Deeper where the drawing is wide, shallower where it is narrow', addTestId: 'engrave-add-v-carve-variable', group: 'engrave-carve' },
+  { id: 'inlay', label: 'Inlay', blurb: 'A pocket and the matching plug', addTestId: 'engrave-add-inlay', group: 'engrave-carve' },
+  { id: 'pocket', label: 'Pocket', blurb: 'A flat-bottomed recess', addTestId: 'engrave-add-rect', group: 'cut-away' },
   // #685 — "Cut out" is not a word beside "Profile": the profile IS the cut-out, so the chip
   // carries the historic cut-out test id and the second vocabulary has one fewer kind.
-  { id: 'profile', label: 'Profile', blurb: 'A cut-out through the blank, held with tabs', addTestId: 'engrave-add-cutout', group: 'cut-away' },
-  { id: 'chamfer', label: 'Chamfer', blurb: 'Break a profile’s or pocket’s edge at an angle', addTestId: 'engrave-add-chamfer', group: 'cut-away' },
+  { id: 'profile', label: 'Profile', blurb: 'Cut out through the blank, held by small tabs', addTestId: 'engrave-add-cutout', group: 'cut-away' },
+  { id: 'chamfer', label: 'Chamfer', blurb: 'A sloped edge on a cut-out or pocket', addTestId: 'engrave-add-chamfer', group: 'cut-away' },
   { id: 'hole', label: 'Hole', blurb: 'A hole, or a grid of them', addTestId: 'engrave-add-drill', group: 'holes' },
-  { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, helixed down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
-  { id: 'thread', label: 'Thread', blurb: 'A milled internal thread', addTestId: 'engrave-add-thread', group: 'holes' },
-  { id: 'thread-external', label: 'Thread a boss (external)', blurb: 'A milled thread around the outside of a boss or rod', addTestId: 'engrave-add-thread-external', group: 'holes' },
-  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a goal mesh or picture', addTestId: 'engrave-add-surface', group: 'file' },
+  { id: 'bore', label: 'Bore to size', blurb: 'A hole wider than the cutter, cut in a spiral down its wall', addTestId: 'engrave-add-bore', group: 'holes' },
+  { id: 'thread', label: 'Thread', blurb: 'A thread cut inside a hole', addTestId: 'engrave-add-thread', group: 'holes' },
+  { id: 'thread-external', label: 'Thread a boss (external)', blurb: 'A thread cut on the outside of a raised post or stud', addTestId: 'engrave-add-thread-external', group: 'holes' },
+  { id: 'surface', label: 'Surface a mesh', blurb: 'Rough and finish a 3D mesh or picture', addTestId: 'engrave-add-surface', group: 'file' },
   // #874 — the board's chip carries its own id: `engrave-add-pcb` is the panel's older standalone
   // door to the same import, and two elements with one test id are one element too many.
-  { id: 'pcb', label: 'Circuit board (Gerbers)', blurb: 'A board’s copper, holes and outline, from its Gerber and drill files', addTestId: 'engrave-add-pcb-chip', group: 'file' },
-  { id: 'texture', label: 'Texture', blurb: 'A seeded pattern of short strokes over a region', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
-  { id: 'flute', label: 'Flute', blurb: 'A groove that ramps in and out along its ends', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
-  { id: 'prism', label: 'Prism', blurb: 'A shape standing on sloped sides, cut by the V-bit', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
+  { id: 'pcb', label: 'Circuit board (Gerbers)', blurb: 'A circuit board’s copper, holes and outline, from its design files', addTestId: 'engrave-add-pcb-chip', group: 'file' },
+  { id: 'texture', label: 'Texture', blurb: 'A pattern of small marks, the same every run', addTestId: 'engrave-add-texture', group: 'engrave-carve' },
+  { id: 'flute', label: 'Flute', blurb: 'A groove that ramps in and out', addTestId: 'engrave-add-flute', group: 'engrave-carve' },
+  { id: 'prism', label: 'Prism', blurb: 'Raised letters with sloped sides', addTestId: 'engrave-add-prism', group: 'engrave-carve' },
 ];
 
 /** The options the old second vocabulary ("More kinds and imports") carried, by their own word. */

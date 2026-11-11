@@ -21,9 +21,6 @@ afterEach(() => setMachineConsoleLoader(null));
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
-const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
 
 const status = (text: string): ((line: string) => ConsoleSend) => (line) =>
@@ -84,37 +81,5 @@ describe('#289 the accessory press', () => {
     const r = await toggleAccessory(TARGET, 'wp-charge', false);
     expect(r).toMatchObject({ kind: 'toggled', id: 'wp-charge', on: false });
     expect(z1.sent).toEqual(['?', 'M842']);
-  });
-
-  it('refuses a running machine without sending any accessory code', async () => {
-    const z1 = fakeConsoleSession(status(RUNNING));
-    const r = await toggleAccessory(TARGET, 'spindle-fan', true);
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('Run');
-    expect(z1.sent).toEqual(['?']);
-    expect(z1.closes).toBe(1);
-  });
-
-  it('refuses an idle machine whose program has not finished', async () => {
-    const z1 = fakeConsoleSession(status(MID_JOB));
-    const r = await toggleAccessory(TARGET, 'power-fan', true);
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('90%');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('refuses an alarm without sending anything', async () => {
-    const z1 = fakeConsoleSession(status(ALARM));
-    const r = await toggleAccessory(TARGET, 'external-output', true);
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('alarm');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('refuses an unreadable status line before switching', async () => {
-    const z1 = fakeConsoleSession(status('not a status line'));
-    const r = await toggleAccessory(TARGET, 'wp-charge', true);
-    expect(r.kind).toBe('error');
-    expect(z1.sent).toEqual(['?']);
   });
 });

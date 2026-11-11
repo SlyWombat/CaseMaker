@@ -61,6 +61,7 @@ import {
 } from '@/platform/locationClient';
 import { houseAddFinishedProgram } from '@/platform/finishedProgramsClient';
 import type { FinishedRun } from '@/platform/locationClient';
+import { mergeSetupCutMaps } from '@/engine/cnc/engrave/cutMap';
 import { bedFromLegacy, bedMigrationDue, ensureFirstRegistrationBed, firstRegistrationBed, newestViseRegistration, type LegacyViseRegistration } from '@/platform/bedProfiles';
 import { parseMarginsStrict, useSettingsStore, type FixturesSettings } from './settingsStore';
 import { useMachineStore } from './machineStore';
@@ -123,6 +124,14 @@ export interface LocationState {
    * already had the hash — a repeated finish, with no request sent.
    */
   recordFinishedProgram: (machineId: string, hash: string, run?: FinishedRun) => Promise<{ ok: boolean; added: boolean; text: string }>;
+  /**
+   * #1179 blank identity — MINT A NEW BLANK for `jobId` on `machineId` (the Register card's press,
+   * its re-finish mint, "Cut another of these"): writes `currentBlank[jobId]` through the same
+   * guarded machine PUT as every other record and returns the new id. The operator's press is the
+   * only way the app can know a blank was swapped; the first finish-write of a job with no id mints
+   * too, inside `recordFinishedProgram`. A repeated program hash NEVER mints.
+   */
+  mintBlank: (machineId: string, jobId: string) => Promise<{ ok: boolean; blankId: string | null; text: string }>;
 }
 
 /**
@@ -144,6 +153,22 @@ function takeLocation(
     return;
   }
   set({ status: 'present', location, etag, reason: null });
+}
+
+/**
+ * #1179's ruling — the SAME BLANK: the same job's stock footprint, so a cut map accumulates only
+ * on the piece of wood it describes. The length and width must both be stated and equal (the map's
+ * XY frame is exactly this); the thickness splits the blank only when BOTH records state it, so an
+ * older record without one is not discarded on a guess.
+ */
+function sameBlank(a: FinishedRun, b: FinishedRun): boolean {
+  const aLength = a.stock?.lengthMm;
+  const aWidth = a.stock?.widthMm;
+  if (aLength === undefined || aWidth === undefined) return false;
+  if (aLength !== b.stock?.lengthMm || aWidth !== b.stock?.widthMm) return false;
+  const aThick = a.stock?.thicknessMm;
+  const bThick = b.stock?.thicknessMm;
+  return aThick === undefined || bThick === undefined || aThick === bThick;
 }
 
 export const useLocationStore = create<LocationState>((set, get) => ({
@@ -244,10 +269,64 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     if (machine === null) {
       return { ok: false, added: false, text: `machine ${machineId} is not in the location` };
     }
-    // Already on the list this window has read: nothing to send. The service dedupes as well, so a
-    // second window racing this one cannot duplicate it.
-    if (machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
-    const res = await houseAddFinishedProgram(machineId, hash, undefined, run);
+    // Already on the list this window has read: nothing to send — UNLESS a #1179 record travels
+    // with it. The record upserts newest-wins even for a hash already listed (a re-cut under a
+    // newer registration), and the service dedupes the hash itself, so a second window racing this
+    // one cannot duplicate it.
+    if (run === undefined && machine.finishedPrograms.includes(hash)) return { ok: true, added: false, text: '' };
+    // #1179 blank identity (issue comment 6776457695) — every record of a job carries the blank
+    // it was cut on. The current id lives on the MACHINE (a job file carries no blank to another
+    // machine). The FIRST finish-write of a job with no id mints one here; every later record
+    // reuses it. Nothing else mints at the finish — a repeated hash keeps the id and its map.
+    let assignedBlankId: string | null = null;
+    if (run !== undefined && run.jobId !== undefined && run.blankId === undefined) {
+      const current = machine.currentBlank?.[run.jobId];
+      if (current !== undefined) {
+        assignedBlankId = current;
+      } else {
+        assignedBlankId = newId('blank');
+        const saved = await get().saveMachine({
+          ...machine,
+          currentBlank: { ...(machine.currentBlank ?? {}), [run.jobId]: assignedBlankId },
+          updatedAt: new Date().toISOString(),
+        });
+        if (saved !== 'ok') {
+          // Without a stable id the record could never be scoped to a blank, and its map could
+          // never merge again — nothing is posted and the run says why.
+          return {
+            ok: false,
+            added: false,
+            text: `the blank's id could not be recorded (${saved}), so this program's finished record was not written`,
+          };
+        }
+      }
+    }
+    const scoped: FinishedRun | undefined =
+      run === undefined
+        ? undefined
+        : { ...run, ...(run.blankId !== undefined ? {} : assignedBlankId === null ? {} : { blankId: assignedBlankId }) };
+    // #1179 step 3 — the cut maps are per SETUP/FACE and cumulative within the same job, setup and
+    // blank (the ruling, comment 6775024844, and the blank identity above). The previous list is
+    // the newest record for the SAME BLANK — same job, same blankId, and the same stock footprint
+    // as a sanity check; a different blank starts fresh, which is also what clears an `unknown`
+    // face. A different package of the same job on the same setup merges normally (same blank).
+    let posted = scoped;
+    if (
+      scoped !== undefined &&
+      scoped.cutMaps !== undefined &&
+      scoped.cutMaps.length > 0 &&
+      scoped.jobId !== undefined &&
+      scoped.blankId !== undefined
+    ) {
+      const previous = [...(machine.finishedRuns ?? [])]
+        .reverse()
+        .find(
+          (record) =>
+            record.jobId === scoped.jobId && record.blankId === scoped.blankId && sameBlank(record, scoped),
+        );
+      posted = { ...scoped, cutMaps: mergeSetupCutMaps(previous?.cutMaps ?? [], scoped.cutMaps) };
+    }
+    const res = await houseAddFinishedProgram(machineId, hash, undefined, posted);
     if (res.kind !== 'ok') {
       const text = res.kind === 'absent' ? res.reason : res.kind === 'refused' ? res.message : res.detail;
       set({ writeNote: text });
@@ -258,6 +337,22 @@ export const useLocationStore = create<LocationState>((set, get) => ({
     // service's own dedupe still keeps the next append honest.
     await get().refresh();
     return { ok: true, added: true, text: '' };
+  },
+
+  mintBlank: async (machineId, jobId) => {
+    const machine = get().location?.machines.find((m) => m.id === machineId) ?? null;
+    if (machine === null) {
+      return { ok: false, blankId: null, text: `machine ${machineId} is not in the location` };
+    }
+    const blankId = newId('blank');
+    const saved = await get().saveMachine({
+      ...machine,
+      currentBlank: { ...(machine.currentBlank ?? {}), [jobId]: blankId },
+      updatedAt: new Date().toISOString(),
+    });
+    return saved === 'ok'
+      ? { ok: true, blankId, text: '' }
+      : { ok: false, blankId: null, text: `the blank was not saved (${saved})` };
   },
 }));
 
@@ -374,6 +469,16 @@ export function mergeMachine(
   const sameHost = obs !== null && server?.address?.host === obs.host;
   return {
     record: {
+      // #1202 — THE SERVED RECORD IS THE BASE, FIELD FOR FIELD. This write-through OWNS the fields
+      // named below (its sections, the observation's name/address, the clock); every other field
+      // belongs to the service and to whoever wrote it there. Rebuilding the record from a
+      // hardcoded list dropped whole SECTIONS this merge does not model — `currentBlank` (#1179),
+      // `registrations` (#1123-40, the per-setup memos) and `completedRoutines` (#1202) — every
+      // time the status poller noted a live line, silently erasing them ~10 s after a load. The
+      // spread is the fix: a field this build has never heard of rides through a settings or
+      // status write instead of being deleted, and `sameRecord` then sees no change and writes
+      // nothing at all.
+      ...(server ?? {}),
       id: server?.id ?? newId('machine'),
       profileId: obs?.profileId ?? server?.profileId ?? local.calibration?.machineId ?? null,
       // A typed address announces no name: the old one is kept only for the same host.

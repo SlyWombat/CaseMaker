@@ -317,10 +317,10 @@ describe('registering setup 2 on the drilled holes (#429)', () => {
     // the plan's own resolution, and still enough of each hole left for the probe to read a miss.
     const shift = { x: 0.2, y: -0.15 };
     const fake = fakeBoard(openings, shift);
-    const run = await runRegistration(planned.plan, { console: fake.console, operator: async () => true });
+    const run = await runRegistration(planned.plan, { liveClearanceZ: -3, console: fake.console, operator: async () => true });
     if (!run.ok) throw new Error(run.reason);
     expect(run.outcome.usable, run.outcome.problems.join(' | ')).toBe(true);
-    const applied = await applyCorrection(run.outcome, { console: fake.console, operator: async () => true }, { confirmed: true });
+    const applied = await applyCorrection(run.outcome, { liveClearanceZ: -3, console: fake.console, operator: async () => true }, { confirmed: true });
     expect(applied.ok).toBe(true);
 
     // THE ACCEPTANCE: each bottom pad, cut by setup 2's program at its nominal point, lands on its
@@ -513,7 +513,7 @@ describe('alignment holes for a board the probe cannot read (#743 P-8)', () => {
 
     const shift = { x: 0.2, y: -0.15 };
     const fake = fakeBoard(openings, shift, bench.tipRadiusMm);
-    const run = await runRegistration(planned.plan, { console: fake.console, operator: async () => true });
+    const run = await runRegistration(planned.plan, { liveClearanceZ: -3, console: fake.console, operator: async () => true });
     if (!run.ok) throw new Error(run.reason);
     expect(run.outcome.usable, run.outcome.problems.join(' | ')).toBe(true);
     const resolution = planned.plan.referenceRotation!.resolutionMm;

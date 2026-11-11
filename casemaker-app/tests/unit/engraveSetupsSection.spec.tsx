@@ -77,7 +77,7 @@ const DATUM_LOCATION = {
       bedProfiles: [
         {
           id: 'bp-1',
-          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null } },
+          datums: { viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null , probeRefZ: -80 } },
           placements: [
             { id: 'pl-vise', fixture: 'fx-vise-1', where: { kind: 'pins', pins: 'vise', anchor: null }, count: null, frame: { fixedJawFaceX: -181.2, jawStartY: -203.5 }, provenance: {} },
           ],
@@ -428,7 +428,7 @@ describe('#471 registration — planned only after approval, refused with the en
                 ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
                 datums: {
                   ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-old', at: null },
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-old', at: null , probeRefZ: -80 },
                 },
               },
             ],
@@ -473,7 +473,7 @@ describe('#471 registration — planned only after approval, refused with the en
                 ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
                 datums: {
                   ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null },
+                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null , probeRefZ: -80 },
                 },
                 history: [],
               },
@@ -493,14 +493,20 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(tapButton);
     // The runner is at the operator prompt: Continue is there, by testid, and the row's button is
     // disabled while the tap runs (a second press would orphan the console handle).
-    await screen.findByTestId('engrave-mount-tap-continue');
+    // #1181 — the runner is async; the default 1 s find could expire under the loaded run while
+    // the prompt was still on its way. 15 s is a clock deadline, not the subject.
+    await screen.findByTestId('engrave-mount-tap-continue', {}, { timeout: 15_000 });
     expect(screen.getByTestId('engrave-mount-tap-cancel')).toBeTruthy();
     expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
     });
-    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'));
+    // #1181 — same: the tap's completion and note land asynchronously; the 1 s default was seen
+    // to expire under load before the note rendered. 15 s only trips if the note never lands.
+    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'), {
+      timeout: 15_000,
+    });
     expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(false);
     expect(operatorPrompts.length).toBeGreaterThan(0);
   });

@@ -23,6 +23,7 @@ import {
   noteWorkStart,
   recordCrumb,
   sampleMemory,
+  setDesktopCloseIO,
   setFlightCrumbIO,
   setFlightMarkerIO,
   startFlightRecorder,
@@ -187,6 +188,45 @@ describe('#787 — the session marker', () => {
     markCleanExit();
     expect(marks.value).toBeNull();
     expect(flightCrumbs().some((c) => c.kind === 'note' && c.data?.event === 'clean-exit')).toBe(true);
+  });
+
+  // #1196 — A CLEAN DESKTOP QUIT IS A CLEAN EXIT. WebView2 does not reliably run the page's
+  // pagehide/beforeunload when the shell's window closes, so the marker survived ordinary quits:
+  // every next start read the last (usually cleanly ended) session as a crash. All six reports on
+  // the house are a day old for exactly this reason. The Tauri close event clears the marker.
+  it('#1196 — a desktop window close is a clean exit: the next start reports nothing', async () => {
+    const crumbs = new FakeCrumbs();
+    const marks = new FakeMarker();
+    setFlightCrumbIO(crumbs);
+    setFlightMarkerIO(marks);
+    let close: (() => void) | null = null;
+    setDesktopCloseIO((onClose) => {
+      close = onClose;
+    });
+    await startFlightRecorder({ appVersion: '2.1.0', commit: 'abc1234' });
+    noteWorkStart('generate');
+    expect(close, 'the desktop close is bound at start').not.toBeNull();
+    expect(marks.value).not.toBeNull();
+
+    // The operator closes the window.
+    close!();
+    expect(marks.value).toBeNull();
+
+    // The next launch finds no leftover marker, so the door opens with no banner.
+    const previous = await startFlightRecorder({ appVersion: '2.1.0', commit: 'abc1234', now: 9_000 });
+    expect(previous).toBeNull();
+  });
+
+  it('#1196 — the close binding is registered once per load, however many starts ask', async () => {
+    setFlightCrumbIO(new FakeCrumbs());
+    setFlightMarkerIO(new FakeMarker());
+    let binds = 0;
+    setDesktopCloseIO(() => {
+      binds += 1;
+    });
+    await startFlightRecorder({ appVersion: '2.1.0' });
+    await startFlightRecorder({ appVersion: '2.1.0' });
+    expect(binds).toBe(1);
   });
 });
 

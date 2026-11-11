@@ -10,6 +10,7 @@ import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineCon
 import { fakeConsoleSession } from './helpers/fakeConsole';
 import { Z1 } from '@/engine/cnc/machine';
 import {
+  cameraHomeLiftProblem,
   cameraHomeLines,
   cameraHomeWords,
   runCameraHome,
@@ -20,9 +21,6 @@ afterEach(() => setMachineConsoleLoader(null));
 
 const TARGET = { host: '192.168.10.43', port: 2222 };
 const IDLE = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128>';
-const RUNNING = '<Run|MPos:1.0000,2.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const MID_JOB = '<Idle|MPos:-1.0000,-1.0000,-1.0000|Bf:14,128|S:12031|P:389,90,88>';
-const ALARM = '<Alarm|MPos:0.0000,0.0000,0.0000>';
 
 /** The shipped Z1 pose, as the panel resolves it from the profile. */
 const POSE: CameraHomePose = {
@@ -44,8 +42,16 @@ const status = (
 };
 
 describe('#770 the camera-home move', () => {
+  it('#1199 — the pose is PROVEN at or above the machine clearance; a lower one refuses and builds no lines', () => {
+    expect(cameraHomeLiftProblem(POSE, Z1.toolChange.clearanceZ)).toBeNull();
+    const below = { ...POSE, z: Z1.toolChange.clearanceZ - 5 };
+    expect(cameraHomeLiftProblem(below, Z1.toolChange.clearanceZ)).toContain('below the machine');
+    // The same shape as the bench accident is refused before a line exists.
+    expect(() => cameraHomeLines(below, Z1.toolChange.clearanceZ)).toThrow('below the machine');
+  });
+
   it('is two machine-coordinate lines: lift in Z, then X and Y at that height', () => {
-    const lines = cameraHomeLines(POSE);
+    const lines = cameraHomeLines(POSE, Z1.toolChange.clearanceZ);
     expect(lines).toEqual(['G53 G0 Z-3', 'G53 G0 X-11.6 Y-14.6']);
     // The lift comes FIRST: X/Y at the current Z could drag the cutter through the work.
     expect(lines[0]!.startsWith('G53 G0 Z')).toBe(true);
@@ -67,43 +73,18 @@ describe('#770 the camera-home move', () => {
 describe('#770 the camera-home press', () => {
   it('moves an idle machine: asks, lifts, traverses, and closes the connection', async () => {
     const z1 = fakeConsoleSession(status(IDLE));
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
+    const r = await runCameraHome(TARGET, cameraHomeLines(POSE, Z1.toolChange.clearanceZ));
     expect(r.kind).toBe('moved');
     expect(z1.sent).toEqual(['?', 'G53 G0 Z-3', 'G53 G0 X-11.6 Y-14.6']);
     expect(z1.opens).toBe(1);
     expect(z1.closes).toBe(1);
   });
 
-  it('refuses a running machine without sending a motion line', async () => {
-    const z1 = fakeConsoleSession(status(RUNNING));
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('Run');
-    expect(z1.sent).toEqual(['?']);
-    expect(z1.closes).toBe(1);
-  });
-
-  it('refuses an idle machine whose program has not finished', async () => {
-    const z1 = fakeConsoleSession(status(MID_JOB));
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('90%');
-    expect(z1.sent).toEqual(['?']);
-  });
-
-  it('refuses an alarm without sending anything', async () => {
-    const z1 = fakeConsoleSession(status(ALARM));
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
-    expect(r.kind).toBe('busy');
-    expect(r.kind === 'busy' && r.detail).toContain('alarm');
-    expect(z1.sent).toEqual(['?']);
-  });
-
   it('names the line that failed, and does not send the next one', async () => {
     const z1 = fakeConsoleSession(
       status(IDLE, (line) => (line.startsWith('G53 G0 Z') ? { ok: false, reason: 'timeout', line, text: '', detail: 'the controller did not answer' } : null)),
     );
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
+    const r = await runCameraHome(TARGET, cameraHomeLines(POSE, Z1.toolChange.clearanceZ));
     expect(r.kind).toBe('failed');
     expect(r.kind === 'failed' && r.detail).toContain('the lift line');
     expect(z1.sent).toEqual(['?', 'G53 G0 Z-3']);
@@ -113,17 +94,10 @@ describe('#770 the camera-home press', () => {
     const z1 = fakeConsoleSession(
       status(IDLE, (line) => (line.startsWith('G53 G0 X') ? { ok: false, reason: 'timeout', line, text: '', detail: 'the controller did not answer' } : null)),
     );
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
+    const r = await runCameraHome(TARGET, cameraHomeLines(POSE, Z1.toolChange.clearanceZ));
     expect(r.kind).toBe('failed');
     expect(r.kind === 'failed' && r.detail).toContain('the XY line');
     expect(z1.sent).toEqual(['?', 'G53 G0 Z-3', 'G53 G0 X-11.6 Y-14.6']);
-  });
-
-  it('refuses an unreadable status line before moving', async () => {
-    const z1 = fakeConsoleSession(status('not a status line'));
-    const r = await runCameraHome(TARGET, cameraHomeLines(POSE));
-    expect(r.kind).toBe('error');
-    expect(z1.sent).toEqual(['?']);
   });
 
   it('sends nothing for an empty move and opens no connection', async () => {

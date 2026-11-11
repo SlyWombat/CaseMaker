@@ -447,7 +447,8 @@ export function boxProblem(box: StockBox, machine: SizedMachine): string | null 
   const names = { length: 'length', width: 'width', thickness: 'thickness' } as const;
   for (const key of ['length', 'width', 'thickness'] as const) {
     const v = box[key];
-    if (!Number.isFinite(v) || v <= 0) return `the ${names[key]} needs a number in mm, above 0`;
+    // #1109 — the blocker proposes a value.
+    if (!Number.isFinite(v) || v <= 0) return `${names[key].charAt(0).toUpperCase()}${names[key].slice(1)} needs a size — type a number above 0 (for example 80)`;
   }
   const t = travel(machine);
   if (box.length > t.length) {
@@ -482,7 +483,7 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
   for (const key of STOCK_SIZE_FIELDS[form]) {
     const v = size[key];
     if (v === null || v === undefined || !Number.isFinite(v) || v <= 0) {
-      return `the ${key} needs a number in mm, above 0`;
+      return `${key.charAt(0).toUpperCase()}${key.slice(1)} needs a size — type a number above 0 (for example 80)`;
     }
   }
   if (form === 'rod' || form === 'tube') return rotaryEnvelopeProblem(size, machine);
@@ -500,7 +501,9 @@ export function formSizeProblem(form: JobStockForm, size: StockSize, machine: Mi
 export function shelfPickProblem(item: StockItem, machine: Mill): string | null {
   if (item.quantity === 0) {
     const last = item.consumed[item.consumed.length - 1];
-    return last ? `none left — consumed by ${last.jobId}` : 'none left on the shelf';
+    return last
+      ? `None left — used by job ${last.jobId.replace(/^job-/, '')}`
+      : 'None left on the shelf';
   }
   if (free(item) <= 0) return `all ${item.quantity} held for other jobs`;
   const form = formProblem(item.form);

@@ -208,10 +208,18 @@ describe('#966 the headless CLI generate path posts a goal job through cam/model
     expect(Number.isFinite(comparison.idealSeconds)).toBe(true);
     const sheetText = readFileSync(join(outDir, `${runSheetFileName(job.name).replace(/\.nc$/, '')}-run-sheet.md`), 'utf8');
     if (comparison.line !== null) expect(sheetText).toContain(comparison.line);
-    // The SHEET states the app's own duration words; the receipt keeps the raw seconds.
+    // The SHEET states the app's own duration words; the receipt keeps the raw seconds. #1193 —
+    // the line says whose cycle it is: a plan comparison, not the run's own cycle.
     expect(sheetText).toContain(
-      `The ideal plan’s cycle is ${formatDuration(comparison.idealSeconds)} against the owned plan’s ${formatDuration(comparison.ownedSeconds)}`,
+      `The plan: owned ${formatDuration(comparison.ownedSeconds)} against ideal ${formatDuration(comparison.idealSeconds)} — the plans’ own cycle`,
     );
+    // #1193 — THE RECEIPT AND THE SHEET AGREE ON THE RUN'S OWN CYCLE: every posted program, with
+    // the changes between them, stated once in the JSON and in the same words on the sheet.
+    const runCycle = r.details.runCycle;
+    expect(runCycle, 'the receipt carries the run’s own cycle').toBeDefined();
+    expect(runCycle!.programCount).toBe(r.details.programs.length);
+    expect(runCycle!.totalSeconds).toBeCloseTo(runCycle!.cuttingSeconds + runCycle!.changeSeconds, 6);
+    expect(sheetText).toContain(`The run’s cycle is ${formatDuration(runCycle!.totalSeconds)}`);
     defaultProgramTexts = r.details.programs.map((program) => readFileSync(join(outDir, program.ncFile), 'utf8'));
   }, 180_000);
 

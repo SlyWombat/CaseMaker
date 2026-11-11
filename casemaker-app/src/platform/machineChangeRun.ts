@@ -180,8 +180,20 @@ export async function homeMachine(
     for (let i = 0; i < polls; i++) {
       await sleep(pollMs);
       const r = await session.send('?', STATUS_POLL_TIMING);
+      if (r.kind === 'error') {
+        // BENCH BLOCKER 2026-11-10 — A FAILED READ IS A DEAD SESSION, NOT A DROPPED POLL. The
+        // console seam closes the session on a rejected read (the reset path), and the next send
+        // would open a NEW one; continuing the 30-poll loop then churns a session per iteration
+        // against a controller that just reset the link. Stop here, in the operator's words.
+        return {
+          kind: 'failed',
+          detail:
+            `the machine stopped answering mid-home (${r.detail}) — check it is powered and try again; ` +
+            'if it is mid-move, home it by hand',
+        };
+      }
       if (r.kind !== 'sent') {
-        // A dropped poll is not the end: the socket may be between replies, and the window is the
+        // A timeout is not the end: the socket may be between replies, and the window is the
         // caller's. Keep the last reading and try the next poll.
         continue;
       }

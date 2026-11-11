@@ -65,6 +65,11 @@ test('#489 — the editor’s profile follows its fields', async ({ cm, page }) 
   await cm.ready();
   await page.evaluate(() => window.__caseMaker!.openManage('tools'));
 
+  // #1180 — #1172A opens the list on the OWNED bits (the catalogue switch off by default). This
+  // test's fake has an empty inventory and one `/tools` library entry, so show the catalogue
+  // before the row can be reached.
+  await page.getByTestId('manage-show-catalogue').check();
+
   // The row the fake service supplied, in the Yours tier; opening it draws the definition.
   await page.getByTestId('manage-tools-row-user:489vbit').click();
   const profile = page.getByTestId('manage-def-profile');

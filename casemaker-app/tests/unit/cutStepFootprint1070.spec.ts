@@ -25,10 +25,9 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { ProbeSpec } from '@/engine/cnc/registration/plan';
 import type { Setup } from '@/engine/cnc/setups';
 import { planRegistrationAttempt } from '@/components/panels/registrationAttempt';
-import { footprintInputFor, seatSeekFor, sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
+import { footprintInputFor, sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { planFootprintRegistration } from '@/engine/cnc/registration/footprint';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
-import { isSeatPlan, seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import type { EngraveJob } from '@/types/engraveJob';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -95,7 +94,7 @@ function baseArgs(job: EngraveJob) {
     mountDatumMismatch: null,
     mountDatumMismatchName: null,
     surfaceTopZ: null,
-    bracketSeat: { value: -51.69, what: 'bracket seat' as const, measuredAt: '2026-11-07T20:00:00.000Z' },
+    bracketSeat: { value: -51.69, what: 'bracket seat' as const, measuredAt: '2026-11-07T20:00:00.000Z', probeRefZ: -76.063 },
     probe: PROBE,
     probeName: 'Makera Wired Probe V2',
     mountTap: null,
@@ -244,82 +243,27 @@ describe('#1070 the sheet’s §6 prints the footprint plan', () => {
   });
 });
 
-describe('#1070 the first seat is measured by the program (6b’s ruling)', () => {
-  it('with no seat datum the press plans ONE bounded Z seek on the wasteboard beside the blank (#1133 chooses the point)', () => {
+describe('#1201 no seat on file: the card measures the top on the blank', () => {
+  it('a bracket job with no seat plans two guarded touches on the stock, never a seat tap', () => {
     const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true }, bracketSeat: null });
     expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
     if (attempt.kind !== 'plan') return;
     const plan = attempt.plan;
-    expect(plan.mountTap?.reference).toBe('bracket-seat');
-    // The reading IS the seat: no datum offset.
-    expect(plan.mountTap?.datumOffsetMm).toBe(0);
-    expect(plan.mountTap?.expectZ).toBe(-85.75);
-    expect(plan.seek.band).toEqual({ min: -87.25, max: -84.25 });
-    // Starts above the band.
-    expect(plan.seek.fromMachineZ).toBe(-81.25);
-    // The point: chosen on open board, clear of the stock and every fixture by the head envelope.
-    expect(plan.mountTap!.x).toBeGreaterThan(CALIBRATION.softEndstop.xMin);
-    expect(plan.mountTap!.y).toBeGreaterThan(CALIBRATION.softEndstop.yMin);
-    // The bound: no further than the band's floor less the scan reach, inside the soft endstop.
-    expect(plan.seek.travelMm).toBeCloseTo(-81.25 - (-92.25), 3);
-    expect(-92.25).toBeGreaterThan(CALIBRATION.softEndstop.zMin);
-    const notes = plan.notes.join('\n');
-    expect(notes).toContain('derived from the 2026-11-07 touch');
-    expect(notes).toContain('valid only for the probe fitting');
-    expect(notes).toContain('measures every session');
-    expect(notes).toContain('arm top 15');
-  });
-});
-
-describe('#1070 the sheet names the seat seek as the first touch of the day', () => {
-  it('the app sheet’s one seam: the shared plan for the tray job and house prints the seat block', () => {
-    const job = bracketJob();
-    // The app's call site resolves the same four inputs the Cut card plans from (calibration,
-    // probe, defaults, seat): on this house the datum is not usable by the checked-out probe, so
-    // the card — and now the sheet — take the seat branch.
-    const reg = sheetRegistrationPlan({ job, calibration: CALIBRATION, defaults: null, probe: PROBE, bracketSeat: null });
-    expect(reg.footprint).toBeUndefined();
-    expect(reg.seatSeek?.band).toEqual({ min: -87.25, max: -84.25 });
-    const stub = { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null } as unknown as Parameters<typeof buildRunSheet>[1];
-    const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { ...reg });
-    const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
-    expect(text).toContain('THE FIRST TOUCH OF THE DAY');
-    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the blank');
+    expect(plan.guarded).toBeDefined();
+    expect(plan.guarded!.seatIgnored).toBe('absent');
+    expect(plan.mountTap).toBeNull();
+    const checks = plan.surfaceChecks ?? [];
+    expect(checks).toHaveLength(2);
+    for (const c of checks) {
+      expect(c.x).toBeGreaterThan(plan.stock.xMin);
+      expect(c.x).toBeLessThan(plan.stock.xMax);
+      expect(c.y).toBeGreaterThan(plan.stock.yMin);
+      expect(c.y).toBeLessThan(plan.stock.yMax);
+    }
   });
 
-  it('no seat datum: §6 opens with the one bounded seek, then says to plan again', () => {
-    const job = bracketJob();
-    const seat = seatSeekFor({ job, calibration: CALIBRATION, defaults: null, probe: PROBE });
-    if (!seat.ok) throw new Error(seat.reason);
-    const stub = { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null } as unknown as Parameters<typeof buildRunSheet>[1];
-    const sheet = buildRunSheet(job, stub, null, new Date('2026-11-08T00:00:00Z'), undefined, { seatSeek: seat.seek });
-    const text = sheet.sections.flatMap((s2) => s2.steps.map((step) => step.text)).join('\n');
-    expect(text).toContain('THE FIRST TOUCH OF THE DAY');
-    expect(text).toContain('bounded Z seek with the wired probe on the wasteboard beside the blank');
-    expect(text).toContain('valid only for the probe fitting');
-    expect(text).toContain('press Plan registration again');
-  });
-});
-
-describe('#1070 the seat press hands the tap its plan bound (A’s executor aea758abf)', () => {
-  it('the seat tap is bounded at −92.25 (band floor less reach), not the envelope floor', () => {
-    const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true }, bracketSeat: null });
-    if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
-    expect(isSeatPlan(attempt.plan)).toBe(true);
-    const args = seatTapArgs(attempt.plan);
-    expect(args, 'a seat plan hands the tap args').not.toBeNull();
-    // 11 mm of travel below the start: the tap floor is −81.25 − 11 = −92.25, never the envelope's.
-    expect(args!.planTravelMm).toBeCloseTo(11, 3);
-    expect(args!.fromMachineZ - args!.planTravelMm!).toBeCloseTo(-92.25, 3);
-    expect(args!.fromMachineZ - args!.planTravelMm!).toBeGreaterThan(CALIBRATION.softEndstop.zMin);
-    expect(args!.reference).toBe('bracket-seat');
-    expect(args!.datumOffsetMm).toBe(0);
-  });
-
-  it('the measured-seat plan is not a seat plan and hands no tap args (#1133: no tap at all)', () => {
-    const attempt = planRegistrationAttempt({ ...baseArgs(bracketJob()), mount: { kind: 'bracket', board: true } });
-    if (attempt.kind !== 'plan') throw new Error(JSON.stringify(attempt));
-    expect(isSeatPlan(attempt.plan)).toBe(false);
-    expect(seatTapArgs(attempt.plan)).toBeNull();
+  it('the run sheet prints no seat block for a job', () => {
+    const reg = sheetRegistrationPlan({ job: bracketJob(), calibration: CALIBRATION, defaults: null, probe: PROBE, bracketSeat: null });
+    expect(reg.seatSeek).toBeUndefined();
   });
 });

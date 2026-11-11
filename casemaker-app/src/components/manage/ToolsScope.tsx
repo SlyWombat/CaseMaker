@@ -39,10 +39,10 @@ import { TOOL_LIBRARY, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { statedCuttingSize } from '@/engine/cnc/tool';
 import { cutterProfileScale } from '@/engine/cnc/cutterProfile';
 import { CutterProfile } from '@/components/ui/CutterProfile';
-import { caseSwatch, copyCaseSummary, distinctCases } from '@/engine/cnc/caseColour';
+import { caseSwatch, copyCase, copyCaseSummary, distinctCases } from '@/engine/cnc/caseColour';
 import type { ToolCopy } from '@/engine/cnc/toolCondition';
 import type { InventoryItem } from '@/platform/houseClient';
-import { haveWords, ownedCounts, possessionSearchText } from './bitsList';
+import { haveWords, ownedCounts, possessionSearchText, usablePieces } from './bitsList';
 import { MILL_MODELS } from '@/engine/cnc/machine';
 import { machineDisplayName, type MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
@@ -134,6 +134,21 @@ export function ToolsScope() {
   const [docsOpen, setDocsOpen] = useState(false);
   const importInput = useRef<HTMLInputElement | null>(null);
 
+  // #1172 item 2 — the filters and the sort. The list's columns already carry the facts; these
+  // narrow it by shape and case colour and order Tip / Cuts / Have, per tier (the tiers stay
+  // grouped). `null` sort is the catalogue's own order.
+  type SortKey = 'tip' | 'cuts' | 'have';
+  const [shapeFilter, setShapeFilter] = useState('');
+  const [caseFilter, setCaseFilter] = useState('');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
+  const toggleSort = (key: SortKey): void =>
+    setSort((current) =>
+      current?.key === key ? { key, dir: current.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' },
+    );
+  const ariaSort = (key: SortKey): 'ascending' | 'descending' | 'none' =>
+    sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const sortMark = (key: SortKey): string => (sort?.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '');
+
   // #450 slice 6: the feeds table is a PANE beside the cutter list, not a Manage scope of its own —
   // the issue's placement decision is that feeds are per cutter, and the cutter's surface is where
   // they are reached. `cutters` is the default, so every existing Tools behaviour is untouched.
@@ -161,11 +176,23 @@ export function ToolsScope() {
     return machineDisplayName(machine, profile) ?? machine.profileId ?? machine.id;
   };
 
-  // The tiers, then the filter. Both the counts line and the table read the same filtered list, so
+  // The tiers, then the filters. Both the counts line and the table read the same filtered list, so
   // what the line says and what is drawn underneath it cannot disagree.
   const counts = tierCounts(tools);
   const query = search.trim();
-  const narrowing = query.length > 0 || tier !== 'all';
+  const narrowing = query.length > 0 || tier !== 'all' || shapeFilter !== '' || caseFilter !== '' || sort !== null;
+  // The filter's own options come from what the rows actually carry, not a fixed vocabulary.
+  const shapes = useMemo(() => [...new Set(tools.map((e) => e.tool.shape))].sort(), [tools]);
+  const caseColours = useMemo(() => {
+    const colours = new Set<string>();
+    for (const item of items) {
+      for (const copy of item.copies) {
+        const kase = copyCase(copy);
+        if (kase !== null) colours.add(kase.colour.toLowerCase());
+      }
+    }
+    return [...colours].sort();
+  }, [items]);
   const groups = useMemo(() => {
     const text = (e: ToolLibraryEntry) => {
       const possession = itemsByKey.get(e.key);
@@ -176,14 +203,50 @@ export function ToolsScope() {
         (possession === undefined ? '' : ` ${possessionSearchText(possession)}`)
       );
     };
+    const coloursOf = (key: string): string[] => {
+      const possession = itemsByKey.get(key);
+      if (possession === undefined) return [];
+      return possession.copies
+        .map((c) => copyCase(c)?.colour.toLowerCase())
+        .filter((c): c is string => c !== undefined);
+    };
+    // The sort values are the columns' own facts. An unstated number always sorts last, whichever
+    // direction is chosen — it is not a low value, it is no value.
+    const value = (e: ToolLibraryEntry): Record<SortKey, number | null> => {
+      const possession = itemsByKey.get(e.key);
+      return {
+        tip: statedCuttingSize(e.tool),
+        cuts: e.tool.fluteLength,
+        have: possession === undefined ? null : usablePieces(possession),
+      };
+    };
+    const ordered = (entries: ToolLibraryEntry[]): ToolLibraryEntry[] => {
+      if (sort === null) return entries;
+      const direction = sort.dir === 'asc' ? 1 : -1;
+      return [...entries].sort((a, b) => {
+        const va = value(a)[sort.key];
+        const vb = value(b)[sort.key];
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;
+        if (vb === null) return -1;
+        return (va - vb) * direction;
+      });
+    };
     return groupByTier(tools)
       .filter((g) => tier === 'all' || g.tier === tier)
       .map((g) => ({
         ...g,
-        entries: query.length === 0 ? g.entries : g.entries.filter((e) => matchesSearch(text(e), query)),
+        entries: ordered(
+          g.entries.filter((e) => {
+            if (query.length > 0 && !matchesSearch(text(e), query)) return false;
+            if (shapeFilter !== '' && e.tool.shape !== shapeFilter) return false;
+            if (caseFilter !== '' && !coloursOf(e.key).includes(caseFilter)) return false;
+            return true;
+          }),
+        ),
       }))
       .filter((g) => g.entries.length > 0);
-  }, [tools, itemsByKey, tier, query]);
+  }, [tools, itemsByKey, tier, query, shapeFilter, caseFilter, sort]);
 
   const shown = groups.reduce((n, g) => n + g.entries.length, 0);
 
@@ -468,6 +531,34 @@ export function ToolsScope() {
             />
             also show bits you could buy ({counts.catalogue})
           </label>
+          <select
+            className="fld"
+            data-testid="manage-filter-shape"
+            aria-label="Filter by shape"
+            value={shapeFilter}
+            onChange={(e) => setShapeFilter(e.target.value)}
+          >
+            <option value="">all shapes</option>
+            {shapes.map((shape) => (
+              <option key={shape} value={shape}>
+                {shape}
+              </option>
+            ))}
+          </select>
+          <select
+            className="fld"
+            data-testid="manage-filter-case"
+            aria-label="Filter by case colour"
+            value={caseFilter}
+            onChange={(e) => setCaseFilter(e.target.value)}
+          >
+            <option value="">all case colours</option>
+            {caseColours.map((colour) => (
+              <option key={colour} value={colour}>
+                {colour}
+              </option>
+            ))}
+          </select>
           <span className="mcount" data-testid="manage-counts">
             {tools.length} definition{tools.length === 1 ? '' : 's'}
             {TIER_ORDER.map((t) => ` · ${counts[t]} ${TIER_TAG[t]}`).join('')}
@@ -482,12 +573,43 @@ export function ToolsScope() {
                 <th style={{ width: '34%' }}>Name</th>
                 <th className="thumb" aria-label="Profile" />
                 <th>Shape</th>
-                <th className="num">Tip ⌀</th>
+                <th className="num" aria-sort={ariaSort('tip')}>
+                  <button
+                    type="button"
+                    className="tbl__sort"
+                    data-testid="manage-sort-tip"
+                    title="Sort by tip diameter"
+                    onClick={() => toggleSort('tip')}
+                  >
+                    Tip ⌀{sortMark('tip')}
+                  </button>
+                </th>
+                <th className="num" aria-sort={ariaSort('cuts')}>
+                  <button
+                    type="button"
+                    className="tbl__sort"
+                    data-testid="manage-sort-cuts"
+                    title="Sort by the depth it can cut"
+                    onClick={() => toggleSort('cuts')}
+                  >
+                    Cuts{sortMark('cuts')}
+                  </button>
+                </th>
                 <th className="num">Shank</th>
                 <th className="num">Flute</th>
                 <th className="num">Shoulder</th>
                 <th className="num">Stick-out</th>
-                <th className="num">Have</th>
+                <th className="num" aria-sort={ariaSort('have')}>
+                  <button
+                    type="button"
+                    className="tbl__sort"
+                    data-testid="manage-sort-have"
+                    title="Sort by the pieces a job can use"
+                    onClick={() => toggleSort('have')}
+                  >
+                    Have{sortMark('have')}
+                  </button>
+                </th>
                 <th>Case</th>
                 <th>From</th>
               </tr>
@@ -515,7 +637,7 @@ export function ToolsScope() {
               })}
               {groups.length === 0 && (
                 <tr className="more">
-                  <td colSpan={11} data-testid="manage-no-matches">
+                  <td colSpan={12} data-testid="manage-no-matches">
                     nothing matches “{query}”
                   </td>
                 </tr>
@@ -616,7 +738,7 @@ function Rows({
   return (
     <>
       <tr className="grp" data-testid={`manage-group-${tier}`}>
-        <td colSpan={11}>
+        <td colSpan={12}>
           {TIER_HEADING[tier]} <small>{tierNote(tier, count)}</small>
         </td>
       </tr>
@@ -659,6 +781,10 @@ function Rows({
             </td>
             <td>{t.shape}</td>
             <td className={dim(tip)}>{mm(tip)}</td>
+            {/* #1172 item 2 — the depth the bit can cut: the flute length the record states. */}
+            <td className={dim(t.fluteLength)} data-testid={`manage-tools-cuts-${entry.key}`}>
+              {mm(t.fluteLength)}
+            </td>
             <td className={dim(t.handleDiameter)}>{mm(t.handleDiameter)}</td>
             <td className={dim(t.fluteLength)}>{mm(t.fluteLength)}</td>
             <td className={dim(t.shoulderLength)}>{mm(t.shoulderLength)}</td>
@@ -677,7 +803,7 @@ function Rows({
       })}
       {more > 0 && (
         <tr className="more">
-          <td colSpan={11} data-testid={`manage-more-${tier}`}>
+          <td colSpan={12} data-testid={`manage-more-${tier}`}>
             … {more} more catalogue {more === 1 ? 'row' : 'rows'} — search or scroll
           </td>
         </tr>

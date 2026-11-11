@@ -22,6 +22,8 @@
  */
 import { buildSwathIndex } from '@/engine/cnc/engrave/liveSwath';
 import type { ToolShape } from '@/engine/cnc/tool';
+import { decodeRuns } from '@/engine/cnc/engrave/cutMap';
+import type { FinishedCutMap } from '@/platform/locationClient';
 
 /** The candidate raster's pitch, mm. */
 export const CUT_BLANK_PITCH_MM = 1;
@@ -33,6 +35,16 @@ export const CUT_BLANK_FLAT_MM = 0.02;
 export const CUT_BLANK_MAX_POINTS = 5;
 /** The extra reach past a cutter's radius that a floor must be clear of other depths, mm. */
 export const CUT_BLANK_FLAT_REACH_MM = 1;
+/**
+ * #1179 amendment (2026-11-10) — THE FIRST CHECKS PREFER THE INSIDE. Chips and burrs collect
+ * against the bracket's arms and the stock's edges, so the first three check points are chosen at
+ * least this far in from every edge when the uncut area allows; the 3 mm hard margin stays the
+ * absolute limit, and a blank too narrow for the inset falls back to it.
+ */
+export const CUT_BLANK_PREFERRED_INSET_MM = 10;
+/** #1179 amendment — a point this close to TWO edges is "in a corner", avoided for the first three
+ *  when enough mid-edge points exist (the bench's first touch was the front-left corner). */
+export const CUT_BLANK_CORNER_ZONE_MM = 15;
 
 export interface StockRaster {
   xMin: number;
@@ -268,6 +280,20 @@ export interface ProbeBody {
   tipRadiusMm: number;
   tipLengthMm?: number | null;
   bodyDiameterMm?: number | null;
+  /**
+   * #1200 — the unit's stated lateral uncertainty of the tip, mm. A TOP touch keeps this plus the
+   * tip radius clear of every edge: near an edge the ball can meet the roll-off and read low.
+   */
+  tipLateralUncertaintyMm?: number | null;
+}
+
+/**
+ * #1200 — the closest a top touch may sit to an edge: the operator's stated lateral uncertainty
+ * plus the tip radius, never below the historical 3 mm margin. The 10 mm PREFERENCE is unchanged
+ * (it chooses among acceptable points); this is the floor.
+ */
+export function topTouchEdgeMarginMm(probe: ProbeBody): number {
+  return Math.max(CUT_BLANK_EDGE_MARGIN_MM, probe.tipRadiusMm + (probe.tipLateralUncertaintyMm ?? 0));
 }
 
 /**
@@ -303,6 +329,78 @@ export function cutFootprintMask(
   return mask;
 }
 
+/**
+ * #1179 stage 2 — THE CANDIDATES FROM THE RECORD'S CUT MAP (E's per-setup map, the analyst's
+ * fields comment 6776457695). The map is the blank's own measured state for THIS face: the stored
+ * pitch (`cellMm`, 2 normally and coarsened to 4 or 8), a depth level per cell (`level × stepMm`,
+ * 0 = uncut) and a flat bit per cell (a horizontal cut or a straight plunge; a ramp is never a
+ * flat floor). Only flat cells are candidates — the uncut top (level 0) first, then the floors;
+ * the probe body's rule filters the deep floors exactly as the package-raster path does.
+ *
+ * `null` when the map's streams do not decode: the caller then takes the unknown-cuts footprint
+ * path rather than trusting a map it could not read.
+ */
+export function cutBlankCandidatesFromMap(input: {
+  map: FinishedCutMap;
+  probe: ProbeBody;
+  obstacles: readonly CutBlankObstacle[];
+  edgeMarginMm?: number;
+}): { points: SurfacePointCandidate[]; floorsRestricted: string | null } | null {
+  const { map } = input;
+  const count = map.cols * map.rows;
+  const levels = decodeRuns(map.depth.data, count);
+  const flatBits = decodeRuns(map.flat.data, count);
+  if (levels === null || flatBits === null) return null;
+  // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
+  // radius); an explicitly passed margin still wins.
+  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
+  const tipLengthKnown = input.probe.tipLengthMm !== null && input.probe.tipLengthMm !== undefined;
+  const bodyKnown =
+    input.probe.bodyDiameterMm !== null && input.probe.bodyDiameterMm !== undefined && input.probe.bodyDiameterMm > 0;
+  const xEnd = map.x0Mm + map.cols * map.cellMm;
+  const yEnd = map.y0Mm + map.rows * map.cellMm;
+  const top: Cell[] = [];
+  const floor: Cell[] = [];
+  for (let j = 0; j < map.rows; j++) {
+    const y = map.y0Mm + (j + 0.5) * map.cellMm;
+    if (y < map.y0Mm + margin || y > yEnd - margin) continue;
+    for (let i = 0; i < map.cols; i++) {
+      const x = map.x0Mm + (i + 0.5) * map.cellMm;
+      if (x < map.x0Mm + margin || x > xEnd - margin) continue;
+      if (input.obstacles.some((o) => x >= o.min[0] && x <= o.max[0] && y >= o.min[1] && y <= o.max[1])) continue;
+      const at = j * map.cols + i;
+      // A cell that is not flat (a ramp's exit, a scallop the map could not vouch for) is never a
+      // check point: the probe would read a slope, not a level.
+      if (flatBits[at] !== 1) continue;
+      const depthMm = Math.round(levels[at]! * map.stepMm * 1000) / 1000;
+      const cell = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, depthMm: 0 };
+      if (depthMm <= CUT_BLANK_FLAT_MM) top.push(cell);
+      else floor.push({ ...cell, depthMm });
+    }
+  }
+  const deepest = floor.reduce((max, cell) => Math.max(max, cell.depthMm), 0);
+  const floorsRestricted = !tipLengthKnown
+    ? 'the probe’s body/tip length is not recorded, so only the uncut top was used as a check point'
+    : !bodyKnown && deepest > input.probe.tipLengthMm! + 1e-9
+      ? `the probe’s body diameter is not recorded, so floors deeper than the tip’s ${input.probe.tipLengthMm} mm were not used as check points`
+      : null;
+  const usableFloor = !tipLengthKnown
+    ? []
+    : bodyKnown
+      ? floor
+      : floor.filter((cell) => cell.depthMm <= input.probe.tipLengthMm! + 1e-9);
+  const centre = { x: map.x0Mm + (map.cols * map.cellMm) / 2, y: map.y0Mm + (map.rows * map.cellMm) / 2, depthMm: 0 };
+  // #1179 amendment — the first three away from the edges/corners, then the rest of the top, then
+  // floors fill what is left.
+  const chosen = [...spreadPreferred(top, Math.min(3, CUT_BLANK_MAX_POINTS), { xMin: map.x0Mm, yMin: map.y0Mm, xMax: xEnd, yMax: yEnd }, centre)];
+  const restTop = top.filter((cell) => !chosen.includes(cell));
+  chosen.push(...spread(restTop, CUT_BLANK_MAX_POINTS - chosen.length, centre));
+  if (chosen.length < CUT_BLANK_MAX_POINTS) {
+    chosen.push(...spread(usableFloor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
+  }
+  return { points: chosen.map((cell) => ({ x: cell.x, y: cell.y, depthMm: cell.depthMm })), floorsRestricted };
+}
+
 interface Cell {
   x: number;
   y: number;
@@ -310,6 +408,40 @@ interface Cell {
 }
 
 const dist = (a: Cell, b: Cell): number => Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * #1179 amendment — THE FIRST TOUCHES, CHOSEN AWAY FROM THE EDGES AND CORNERS.
+ *
+ * The old order was farthest-from-centre, which always answers the four corners — exactly where
+ * chips are swept and where the bench's 2026-11-10 registration stopped on a pile above the top.
+ * The first `count` points come from cells at least `CUT_BLANK_PREFERRED_INSET_MM` in from every
+ * edge, then (when enough qualify) not within the corner zone of two edges. Only a blank whose
+ * uncut area is too narrow for that falls back to the 3 mm margin. The spread rule still applies
+ * WITHIN whichever pool qualifies.
+ */
+function spreadPreferred(
+  cells: readonly Cell[],
+  count: number,
+  bounds: { xMin: number; yMin: number; xMax: number; yMax: number },
+  centre: Cell,
+): Cell[] {
+  const insetAtLeast = (mm: number): Cell[] =>
+    cells.filter(
+      (c) => c.x >= bounds.xMin + mm - 1e-9 && c.x <= bounds.xMax - mm + 1e-9 && c.y >= bounds.yMin + mm - 1e-9 && c.y <= bounds.yMax - mm + 1e-9,
+    );
+  let pool: readonly Cell[] = cells;
+  const inset = insetAtLeast(CUT_BLANK_PREFERRED_INSET_MM);
+  if (inset.length >= count) {
+    pool = inset;
+    const away = inset.filter((c) => {
+      const nearX = Math.min(c.x - bounds.xMin, bounds.xMax - c.x) <= CUT_BLANK_CORNER_ZONE_MM;
+      const nearY = Math.min(c.y - bounds.yMin, bounds.yMax - c.y) <= CUT_BLANK_CORNER_ZONE_MM;
+      return !(nearX && nearY);
+    });
+    if (away.length >= count) pool = away;
+  }
+  return spread(pool, count, centre);
+}
 
 /** Farthest-point sampling from the stock's centre: spread the points as far as the cells allow. */
 function spread(cells: readonly Cell[], max: number, centre: Cell): Cell[] {
@@ -356,7 +488,9 @@ export function cutBlankCandidates(input: {
   edgeMarginMm?: number;
 }): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const { raster, programs, obstacles } = input;
-  const margin = input.edgeMarginMm ?? CUT_BLANK_EDGE_MARGIN_MM;
+  // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
+  // radius); an explicitly passed margin still wins.
+  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
   const earlierCutsKnown = input.earlierCutsUnknown !== true && programs.some((program) => program.finished);
   const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
   // #1179 B (analyst) — a floor deeper than the tip's length is entered by the probe's BODY: it is
@@ -405,8 +539,11 @@ export function cutBlankCandidates(input: {
     }
   }
   const centre = { x: (raster.xMin + raster.xMax) / 2, y: (raster.yMin + raster.yMax) / 2, depthMm: 0 };
-  // Uncut top first; floors fill what the top cannot.
-  const chosen = [...spread(top, CUT_BLANK_MAX_POINTS, centre)];
+  // Uncut top first; floors fill what the top cannot. #1179 amendment — the first three come from
+  // the preferred inset (away from the edges and corners) when the uncut area supplies them.
+  const chosen = [...spreadPreferred(top, Math.min(3, CUT_BLANK_MAX_POINTS), raster, centre)];
+  const restTop = top.filter((cell) => !chosen.includes(cell));
+  chosen.push(...spread(restTop, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   if (chosen.length < CUT_BLANK_MAX_POINTS) chosen.push(...spread(floor, CUT_BLANK_MAX_POINTS - chosen.length, centre));
   return {
     points: chosen.map((c) => ({ x: c.x, y: c.y, depthMm: c.depthMm })),

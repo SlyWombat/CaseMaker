@@ -107,7 +107,7 @@ const yes = async () => true;
 describe('#607 runRotaryTap on a bench-shaped chuck', () => {
   it('writes the axis Z, axis Y and radius from one chord and the crown, with a clean check chord', async () => {
     const fake = fakeChuck();
-    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    const result = await runRotaryTap(options(), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.circle.axisY).toBeCloseTo(AXIS.y, 2);
     expect(result.circle.radiusMm).toBeCloseTo(NOMINAL_R, 1);
@@ -127,9 +127,48 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
     }
   });
 
+  it('#1190 — a probe refit shifts the trial chord and the crown’s band, and says so', async () => {
+    // The axis datum is a RAW machine Z from the seating it was measured in. The M491 today reads
+    // -80.000; the datum was taken at -82.000, so the probe sits 2 mm further out and every
+    // expectation taken from the datum moves by that difference.
+    const base = options();
+    const fake = fakeChuck();
+    const steps: string[] = [];
+    const result = await runRotaryTap(
+      { ...base, probeRefZ: -82 },
+      { liveClearanceZ: -3, console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) },
+    );
+    if (!result.ok) throw new Error(result.reason);
+    const f3 = (n: number): string => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
+    const shiftedTrial = { z1: base.trial.z1 + 2, z2: base.trial.z2 + 2 };
+    // The chord and check chord are SENT at the corrected heights...
+    expect(fake.lines).toContain(`G53 G0 Z${f3(shiftedTrial.z1 + base.parkAboveSurfaceMm)}`);
+    expect(fake.lines).toContain(`G53 G0 Z${f3(shiftedTrial.z2 + base.parkAboveSurfaceMm)}`);
+    // ...and the run says why, in the operator's words.
+    expect(steps.join(' ')).toContain('the probe sits 2 mm further out');
+    expect(steps.join(' ')).toContain(`corrected to machine Z ${f3(shiftedTrial.z1)}`);
+    // The measured circle is the one the unshifted seating gives: the correction cancels the
+    // seating difference, so the axis is the same physical wheel.
+    const control = await runRotaryTap(base, { liveClearanceZ: -3, console: fakeChuck().console, operator: yes });
+    if (!control.ok) throw new Error(control.reason);
+    expect(result.circle.axisZ).toBeCloseTo(control.circle.axisZ, 2);
+    expect(result.circle.radiusMm).toBeCloseTo(control.circle.radiusMm, 1);
+  });
+
+  it('with no stored reference the trial keeps its numbers — a legacy datum cannot be separated from its seating', async () => {
+    const base = options();
+    const fake = fakeChuck();
+    const steps: string[] = [];
+    const result = await runRotaryTap(base, { liveClearanceZ: -3, console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) });
+    if (!result.ok) throw new Error(result.reason);
+    const f3 = (n: number): string => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
+    expect(fake.lines).toContain(`G53 G0 Z${f3(base.trial.z1 + base.parkAboveSurfaceMm)}`);
+    expect(steps.join(' ')).not.toContain('the probe sits');
+  });
+
   it('measures an off-nominal chuck: R 41 is read, not the record’s 40', async () => {
     const fake = fakeChuck(41);
-    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    const result = await runRotaryTap(options(), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.circle.radiusMm).toBeCloseTo(41, 1);
     expect(result.circle.axisZ).toBeCloseTo(AXIS.z, 1);

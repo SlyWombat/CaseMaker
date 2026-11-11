@@ -13,6 +13,8 @@ import {
   type ConsoleSend,
   type MachineConsoleClient,
 } from '@/platform/machineConsole';
+import type { MachineStopReport } from '@/platform/machineStopReport';
+import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
 import { PROBE_OPEN_REPLY, okReply as reply } from './helpers/registrationFixtures';
 import { EngraveRegistrationStep } from '@/components/panels/EngraveRegistrationStep';
 import { useLocationStore } from '@/store/locationStore';
@@ -310,6 +312,7 @@ beforeEach(() => {
   resetEngraveRegistrationStore();
   resetRegistrationTouchesStore();
   resetMachineStore();
+  __resetMachineStopReportStoreForTests();
 });
 
 afterEach(() => {
@@ -320,6 +323,65 @@ afterEach(() => {
 
 function install(plan: RegistrationPlan, opts: FakeOptions = {}): void {
   setMachineConsoleLoader(async () => controller(plan, sent, opts));
+}
+
+/**
+ * #1197 — a controller whose reply cannot be READ. The transport answers, and then the console's
+ * own read of the answer throws (a getter outside its catch): the executor does not convert that
+ * into a RunResult, so it lands on the panel's thrown-error card — a stop the app could not say
+ * anything better about.
+ */
+function breakingClient(message: string): MachineConsoleClient {
+  return {
+    async open() {
+      return {
+        async send(line: string): Promise<ConsoleSend> {
+          return {
+            ok: true,
+            line,
+            frames: 1,
+            elapsedMs: 1,
+            get text(): string {
+              throw new Error(message);
+            },
+          };
+        },
+        async close() {},
+      };
+    },
+  };
+}
+
+/**
+ * #1197 — the controller answers everything as the ordinary `controller` does, except its SECOND
+ * `$H`: the run's opening home is #1, and the panel's own home-after-the-failure is #2.
+ */
+function failingHomeClient(plan: RegistrationPlan, opts: FakeOptions, failure: ConsoleSend): MachineConsoleClient {
+  const inner = controller(plan, sent, opts);
+  let homes = 0;
+  return {
+    async open(target, timing) {
+      const session = await inner.open(target, timing);
+      return {
+        async send(line, t) {
+          if (line === '$H') {
+            homes += 1;
+            if (homes >= 2) return failure;
+          }
+          return session.send(line, t);
+        },
+        close: () => session.close(),
+      };
+    },
+  };
+}
+
+/** The shared press: acknowledge, start, and wait for either end of the run. */
+async function pressStart(): Promise<void> {
+  act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('engrave-registration-start'));
+  });
 }
 
 async function runStep(): Promise<void> {
@@ -1144,7 +1206,7 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
                 id: 'bp-proposal',
                 datums: {
                   surfaceTopZ: null,
-                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  viseJawTopZ: { value: -57.491, measuredAt: '2026-10-23T00:00:00.000Z', by: 'fx-probe-1', at: null , probeRefZ: -80 },
                   bracketSeatZ: null,
                   rotaryAxis: null,
                 },
@@ -1192,6 +1254,38 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     });
   }
 
+  // #1200 — a unit the operator restricted to top touches says so on the card, before the press.
+  it('#1200 — the proposal line states a top-touches-only unit', async () => {
+    proposalLocation();
+    const location = useLocationStore.getState().location!;
+    useLocationStore.setState({
+      location: {
+        ...location,
+        accessories: (location.accessories ?? []).map((a) =>
+          a.id === 'fx-probe-1'
+            ? {
+                ...a,
+                product: 'Makera 3D Wired Probe',
+                variant: '3d',
+                unit: { tipDiameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05, tipLateralUncertaintyMm: 1 },
+                touches: 'z-only',
+                touchesReason: 'the ball tip may not be 100% straight down',
+                touchesSince: '2026-11-10T20:15:00.000Z',
+              }
+            : a,
+        ),
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    const base = defaultEngraveJob();
+    const setup0 = jobSetups(base)[0]!;
+    const job: EngraveJob = { ...base, setups: [{ ...setup0, mount: { kind: 'vise' } }] };
+    useEngraveJobStore.setState({ job });
+    useEngraveRunStore.setState({ acknowledged: false, acknowledgedFor: null });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const line = await screen.findByTestId('engrave-registration-proposal-line');
+    expect(line.textContent).toContain('3D probe · top touches only');
+  }, 120_000);
+
   it('shows the planner’s one-line proposal, and one Register press approves it and starts', async () => {
     // The default blank on the vise: a blank whose top stands proud of the jaws, which is the
     // configuration the planner can bracket. (The badge fixture's thin laminate sits flush.)
@@ -1220,6 +1314,15 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     expect(register.disabled).toBe(true);
     act(() => {
       useEngraveRunStore.getState().acknowledgeProgram('program-key');
+    });
+    // #1202 — this routine has never completed on this machine: the card marks it and holds the
+    // press until the operator's own at-machine statement for THIS press.
+    const firstRun = await screen.findByTestId('engrave-registration-first-run', undefined, { timeout: 5000 });
+    expect(firstRun.textContent).toContain('has not run on this machine before');
+    expect(register.disabled).toBe(true);
+    const tick = screen.getByTestId('engrave-registration-first-run-tick');
+    act(() => {
+      fireEvent.click(tick);
     });
     expect(register.disabled).toBe(false);
 
@@ -1252,7 +1355,7 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
               {
                 id: 'bp-rotary',
                 datums: {
-                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null },
+                  surfaceTopZ: { value: -76, measuredAt: '2026-10-31T00:00:00.000Z', by: 'fx-probe-3d', at: null , probeRefZ: -80 },
                   viseJawTopZ: null,
                   bracketSeatZ: null,
                   rotaryAxis: null,
@@ -1304,12 +1407,12 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
   });
 });
 
-describe('#1070 the proposals need no saved setup for a bed-held job', () => {
-  it('a bracket job with setups: [] shows the seat press — nothing walked, nothing saved', () => {
+describe('#1201 a bracket job with no trusted seat measures the top on the blank', () => {
+  function bedJob(name: string): EngraveJob {
     const base = defaultEngraveJob();
-    const job: EngraveJob = {
+    return {
       ...base,
-      name: 'setups-less 1070',
+      name,
       stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
       labels: [],
       shapes: [],
@@ -1319,24 +1422,98 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
         bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
       },
     };
+  }
+  const CAL = {
+    frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+    machineId: 'Z1',
+    measuredAt: '2026-11-07T20:00:00.000Z',
+    softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+    source: 'config',
+  };
+
+  it('no seat: the card shows the top-on-the-blank plan and NO seat press', () => {
+    const job = bedJob('setups-less 1201');
     useEngraveJobStore.setState({ job });
     resetEngraveRegistrationStore();
     useEngraveRunStore.setState({ acknowledged: true });
     beddedLocation();
-    // The machine's anchor-1 calibration with the soft endstop, and the 6 mm wasteboard bed with
-    // NO seat datum yet: the proposal must be the seat press, planned from the job alone.
-    const cal = {
-      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
-      machineId: 'Z1',
-      measuredAt: '2026-11-07T20:00:00.000Z',
-      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
-      source: 'config',
-    };
-    useSettingsStore.setState({ machineCalibration: cal as unknown as ReturnType<typeof useSettingsStore.getState>['machineCalibration'] });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    // #1201 — REGISTER, never a seat press: the seat is a bed-setup datum.
     const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
-    expect(button.textContent).toContain('Measure the bracket seat');
-    expect(screen.getByTestId('engrave-registration-proposal-line').textContent ?? '').toContain('seat');
+    expect(button.textContent).toContain('Register');
+    expect(button.textContent).not.toContain('seat');
+    // The plan is the top on the blank, and the card STATES both machine XY points before the press.
+    const line = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(line).toContain('the top on the blank');
+    expect(line).toContain('machine X ');
+    expect(screen.getByTestId('engrave-registration-top-on-blank').textContent).toContain(
+      'the bed states no seat',
+    );
+    // No control that could touch off the stock.
+    expect(screen.queryByText(/Measure the bracket seat/)).toBeNull();
+    expect(screen.queryByTestId('engrave-registration-seat-prompt')).toBeNull();
+  });
+
+  // #1200 × #1201 — the guarded top seek must name the UNIT, not a hard-coded "wired probe": a 3D
+  // probe restricted to top touches registers on this path, and the card owes the operator that
+  // instrument and its restriction before the press.
+  it('a guarded top seek names a top-touches-only 3D probe', () => {
+    const job = bedJob('guarded restricted 1201');
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    beddedLocation();
+    const loc = useLocationStore.getState().location!;
+    useLocationStore.setState({
+      location: {
+        ...loc,
+        accessories: [
+          {
+            id: 'fx-probe-1',
+            kind: 'probe',
+            product: 'Makera 3D Wired Probe',
+            variant: '3d',
+            unit: { tipDiameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05, tipLateralUncertaintyMm: 1 },
+            touches: 'z-only',
+            touchesReason: 'the ball tip may not be 100% straight down',
+            touchesSince: '2026-11-10T20:15:00.000Z',
+            provenance: {},
+            history: [],
+            whereabouts: { kind: 'machine', machineId: 'm1', since: '2026-11-07T00:00:00.000Z' },
+          },
+        ],
+      } as unknown as NonNullable<ReturnType<typeof useLocationStore.getState>['location']>,
+    });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const line = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(line).toContain('the top on the blank');
+    expect(line).toContain('3D probe · top touches only');
+  });
+
+  it('a LEGACY seat: the card says it is not used, and still offers only Register', () => {
+    const job = bedJob('legacy seat 1201');
+    beddedLocation();
+    const loc = useLocationStore.getState().location as unknown as {
+      machines: { bedProfiles: { datums: Record<string, unknown> }[] }[];
+    };
+    loc.machines[0]!.bedProfiles[0]!.datums['bracketSeatZ'] = {
+      value: -85.788,
+      measuredAt: '2026-11-09T17:55:01.000Z',
+      by: 'fx-probe-1',
+      at: [-175, -35],
+    };
+    useLocationStore.setState({ location: { ...loc } as never });
+    useEngraveJobStore.setState({ job });
+    resetEngraveRegistrationStore();
+    useEngraveRunStore.setState({ acknowledged: true });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.getByTestId('engrave-registration-approve-start').textContent).toContain('Register');
+    expect(screen.getByTestId('engrave-registration-top-on-blank').textContent).toContain(
+      'last measured before this probe was fitted and is not used',
+    );
   });
 });
 
@@ -1400,7 +1577,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' },
+                  bracketSeatZ: { value: SEAT, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1' , probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1449,7 +1626,7 @@ describe('#1088 — a flipped setup registers side 2 on the bores', () => {
       tilt: { xMm: 0, yMm: 0 },
       ok: true,
       verdict: 'flat',
-    } as never);
+    } as never, -80);
   }
 
   /**
@@ -1727,7 +1904,7 @@ describe('#1082 the Register card on a cold first paint', () => {
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -1817,7 +1994,7 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
                 datums: {
                   surfaceTopZ: null,
                   viseJawTopZ: null,
-                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null },
+                  bracketSeatZ: { value: -56.8, measuredAt: '2026-11-08T00:00:00.000Z', by: 'fx-probe-1', at: null, probeRefZ: -80 },
                   rotaryAxis: null,
                 },
                 placements: [],
@@ -2050,5 +2227,242 @@ describe('#1123-40 — the registration survives a reload, keyed by job + setup 
     expect(memo!.registration.outcome).toEqual(recorded.outcome);
     // The memo write is not a frame write: the bed it was given is unchanged.
     expect(last.bedProfiles).toEqual(useLocationStore.getState().location!.machines[0]!.bedProfiles);
+  });
+});
+
+describe('#bench-2026-11-10 — the card closes its console when it unmounts', () => {
+  it('leaving the card at measured closes the session (no stranded ESTABLISHED socket)', async () => {
+    const plan = makePlan(-55.131);
+    const job = jobWithPlan(plan);
+    install(plan);
+    let closes = 0;
+    const inner = controller(plan, sent, {});
+    setMachineConsoleLoader(async () => ({
+      async open(target: Parameters<typeof inner.open>[0], timing: Parameters<typeof inner.open>[1]) {
+        const session = await inner.open(target, timing);
+        return {
+          send: (line: string, t: Parameters<typeof session.send>[1]) => session.send(line, t),
+          close: async () => {
+            closes += 1;
+            await session.close();
+          },
+        };
+      },
+    }));
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    await runStep();
+    // The run ended at `measured`; its console is still held for the write press.
+    expect(closes).toBe(0);
+    cleanup();
+    await waitFor(() => expect(closes, 'the unmount closed the console').toBe(1));
+  });
+});
+
+describe('#1179 — blank identity on the Register card', () => {
+  // The analyst's fields (issue comment 6776457695): the guard reads the BLANK, and the card
+  // offers "This is a new blank". These cases drive the real card with the machine record's own
+  // fields; the fake console never moves.
+  const plan = makePlan(-55.131);
+  const job = jobWithPlan(plan);
+
+  function withMachine(over: Partial<MachineRecord>): void {
+    beddedLocation();
+    const location = useLocationStore.getState().location!;
+    const machine = location.machines[0]!;
+    useLocationStore.setState({
+      location: { ...location, machines: [{ ...machine, ...over } as MachineRecord] },
+    });
+  }
+
+  it('a job WITH a blank id and a legacy machine entry draws no cut-blank banner', () => {
+    withMachine({
+      finishedPrograms: ['yesterdays-keyless-hash'],
+      currentBlank: { [job.id]: 'blank-X' },
+      finishedRuns: [],
+    } as Partial<MachineRecord>);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    expect(screen.queryByTestId('engrave-registration-blank')).toBeNull();
+  });
+
+  it('a NO-ID job on a legacy machine offers the press, and the press mints the blank', async () => {
+    const saves: Array<Record<string, unknown>> = [];
+    withMachine({ finishedPrograms: ['yesterdays-keyless-hash'], finishedRuns: [] } as Partial<MachineRecord>);
+    useLocationStore.setState({
+      saveMachine: async (machine: unknown) => {
+        saves.push(machine as Record<string, unknown>);
+        return 'ok';
+      },
+    });
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const banner = await screen.findByTestId('engrave-registration-blank', undefined, { timeout: 5000 });
+    expect(banner.textContent ?? '').toContain('may have been cut');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('engrave-registration-new-blank'));
+    });
+    // The mint wrote the job's id through the guarded machine write; the card says so.
+    expect(saves.length).toBe(1);
+    const current = (saves[0] as { currentBlank?: Record<string, string> }).currentBlank ?? {};
+    expect(Object.keys(current)).toEqual([job.id]);
+    expect(current[job.id]).toMatch(/^blank-/);
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-registration-blank-note').textContent ?? '').toContain('A new blank'),
+    );
+  });
+
+  it('a fully finished package on the current blank mints a new one at Register, before the probe moves', async () => {
+    const saves: Array<Record<string, unknown>> = [];
+    // The job carries a frozen package, every program of it finished under blank X.
+    const packaged: EngraveJob = {
+      ...job,
+      package: {
+        jobId: job.id,
+        frozenAt: '2026-11-10T08:00:00.000Z',
+        hash: 'pkg-1179',
+        jobHash: 'job-1179',
+        programs: [{ setupIndex: 1, setupId: job.setups![0]!.id, toolKey: 'flat-1.0', nc: ';', hash: 'h1', frameNc: null, frameHash: null }],
+        setups: job.setups ?? [],
+        stockEntryId: null,
+      },
+    };
+    withMachine({
+      currentBlank: { [job.id]: 'blank-X' },
+      finishedPrograms: [],
+      finishedRuns: [
+        { hash: 'h1', jobId: job.id, blankId: 'blank-X', finishedAt: '2026-11-10T09:00:00.000Z' },
+      ],
+    } as Partial<MachineRecord>);
+    useLocationStore.setState({
+      saveMachine: async (machine: unknown) => {
+        saves.push(machine as Record<string, unknown>);
+        return 'ok';
+      },
+    });
+    useEngraveJobStore.setState({ job: packaged });
+    render(<EngraveRegistrationStep job={packaged} target={TARGET} />);
+    // The approved plan's own start press is `engrave-registration-start` (runStep's button); the
+    // mint runs before the executor's first line, so no verdict ever appears.
+    act(() => {
+      useEngraveRunStore.setState({ acknowledged: true });
+    });
+    const startButton = await screen.findByTestId('engrave-registration-start', undefined, { timeout: 5000 });
+    // #1202 — a first-run routine is held until its own statement; tick it, then press.
+    const firstRunTick = await screen.findByTestId('engrave-registration-first-run-tick', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(firstRunTick);
+    });
+    await act(async () => {
+      fireEvent.click(startButton);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('engrave-registration-blank-note').textContent ?? '').toContain(
+        'The last blank was finished',
+      ),
+    );
+    expect(saves.length).toBe(1);
+  });
+});
+
+// #1197 — THE REGISTRATION'S TWO OTHER STOPS. #1187 gave the failed RunResult its report; a
+// THROWN error card and a Home press that did not answer are stops on the same link, and carry
+// their own report — only when the sentence is a transport or controller error, never an app
+// refusal. The console is the seam that supplies both.
+describe('#1197 — the registration’s other stop reports', () => {
+  it('offers the register report when the run threw a transport error, with this press’s facts', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-thrown.json' };
+    });
+    setMachineConsoleLoader(async () => breakingClient('read failed: Connection reset by peer (os error 104)'));
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    const card = await screen.findByTestId('engrave-registration-error');
+    expect(card.textContent).toContain('read failed: Connection reset by peer (os error 104)');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('register');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]!.action).toBe('register');
+    expect(reports[0]!.error).toBe('read failed: Connection reset by peer (os error 104)');
+    // The throw happened on the first reply, so the card has no transcript to claim.
+    expect(reports[0]!.transcript).toEqual([]);
+    expect(reports[0]!.job).toEqual({ id: job.id, name: job.name, packageHash: null });
+  });
+
+  it('never offers it when the throw is the app’s own refusal', async () => {
+    setMachineConsoleLoader(async () =>
+      breakingClient('no origin is written from this measurement: spread 1.2 mm is outside the 0.7 mm band'),
+    );
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    useEngraveJobStore.setState({ job });
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-error');
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
+  });
+
+  it('offers the home report when the home after a failed run did not answer', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-reg-home.json' };
+    });
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    // The fast seek finds nothing (a clean failed run); the app then homes, and that `$H` times out.
+    setMachineConsoleLoader(async () =>
+      failingHomeClient(plan, { missFastTouch: true }, {
+        ok: false,
+        reason: 'timeout',
+        line: '$H',
+        detail: 'timeout — no reply within 60000 ms',
+        text: '',
+      }),
+    );
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-failed');
+    const note = screen.getByTestId('engrave-registration-home-note');
+    expect(note.textContent).toContain('did not answer the home command');
+    const action = screen.getByTestId('stop-report-action');
+    expect(action.dataset.action).toBe('home');
+
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]!.action).toBe('home');
+    expect(reports[0]!.error).toBe('timeout — no reply within 60000 ms');
+    expect(reports[0]!.transcript).toEqual([]);
+    expect(reports[0]!.job).toEqual({ id: job.id, name: job.name, packageHash: null });
+  });
+
+  it('never offers it when the home was refused in the app’s own words', async () => {
+    const plan = makePlan(-56.172);
+    const job = jobWithPlan(plan);
+    setMachineConsoleLoader(async () =>
+      failingHomeClient(plan, { missFastTouch: true }, {
+        ok: false,
+        reason: 'refused',
+        line: '$H',
+        detail: 'the machine reads Alarm, not Idle',
+        text: '',
+      }),
+    );
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+
+    await pressStart();
+    await screen.findByTestId('engrave-registration-failed');
+    expect(screen.getByTestId('engrave-registration-home-note')).toBeTruthy();
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
   });
 });

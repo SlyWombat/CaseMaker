@@ -283,7 +283,7 @@ describe('#449 the values reach the code, and the floors still hold', () => {
     );
     if (!good.ok) throw new Error(good.reason);
     const sent: string[] = [];
-    const r = await runRegistration({ ...good.plan, settings: { ...s, surfaceSlowSeekMm: 1 } }, {
+    const r = await runRegistration({ ...good.plan, settings: { ...s, surfaceSlowSeekMm: 1 } }, { liveClearanceZ: -3,
       console: { send: async (line: string) => (sent.push(line), { kind: 'sent' as const, line, text: 'ok', frames: 1, elapsedMs: 1 }) },
       operator: async () => true,
     });

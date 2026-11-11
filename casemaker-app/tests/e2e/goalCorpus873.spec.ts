@@ -8,7 +8,7 @@
 //   3. no dead-end message: whatever the verdict, the panel says what it cut and what is left.
 
 import { fileURLToPath } from 'node:url';
-import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, openSomethingElse } from './fixtures/caseMaker';
 
 const FIGURE = fileURLToPath(new URL('../fixtures/goals/figure.stl', import.meta.url));
 const RELIEF = fileURLToPath(new URL('../fixtures/goals/relief-plate.stl', import.meta.url));
@@ -28,6 +28,7 @@ async function wizardGoal(page: import('@playwright/test').Page, file: string, s
 
   // What: Surface a mesh, and the file. The pick is shown by name, never "No file chosen" (#870).
   await expect(page.getByTestId('start-wizard-progress')).toContainText('What are you cutting?');
+  await openSomethingElse(page);
   await page.getByTestId('engrave-setup-what-surface').click();
   const name = file.split(/[\\/]/).pop()!;
   await page.getByTestId('start-wizard-op-surface-file').setInputFiles(file);
@@ -52,7 +53,9 @@ async function wizardGoal(page: import('@playwright/test').Page, file: string, s
 /** Open a `<details>` fold only if it is closed — a blind summary click toggles it shut. */
 async function openFold(page: import('@playwright/test').Page, testid: string): Promise<void> {
   const fold = page.getByTestId(testid);
-  if ((await fold.getAttribute('open')) === null) await fold.locator('summary').click();
+  // #1180 — the fold's OWN summary is the first one: a nested `<details>` (the flip offer's “If you
+  // add it:” under the findings) adds a second `<summary>`, and a bare locator matches both.
+  if ((await fold.getAttribute('open')) === null) await fold.locator('summary').first().click();
 }
 
 /**
