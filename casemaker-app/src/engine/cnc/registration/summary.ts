@@ -63,14 +63,16 @@ export function summarizePlan(plan: RegistrationPlan): string {
   // X and Y, only the surface is touched) narrates NO scan. Before this, the empty case fed the
   // sentence its own words — "then scan no edge scan (the bracket fixes X and Y) — bracketing each
   // edge and bisecting …", which reads as a garbled instruction to do something impossible.
+  // #1123 item 46 — NO BRACKET ARM HERE. A bracket's plan carries no scans (#1133: the bracket
+  // fixes X and Y, so nothing is measured along an edge), so the "right edge at Y … and the back
+  // edge at X …" arm could never be reached; it also indexed scans[1] blind. The empty case above
+  // speaks for every bracketed plan.
   const edges =
     plan.scans.length === 0
       ? ''
       : plan.disc !== undefined
         ? `the disc’s rim at its centre-lines — left, right, front and back — so each touch finds the extreme point of the circle (the centre is the midpoint of each opposite pair, the diameter the span)`
-        : plan.mount === 'bracket'
-          ? `the right edge at Y ${n(plan.scans[0]!.along)} and the back edge at X ${n(plan.scans[1]!.along)} only to confirm the stock is in the bracket's corner (the bracket fixes X and Y)`
-          : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
+        : plan.scans.map((sc) => `the ${sc.edge} edge at ${sc.edge === 'left' || sc.edge === 'right' ? 'Y' : 'X'} ${n(sc.along)}`).join(', ');
   const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
   const assumes =
     plan.mount === 'bracket'
