@@ -400,6 +400,17 @@ pub struct InventoryItem {
     pub added_at: String,
     #[serde(default)]
     pub notes: Option<String>,
+    /// #1172 item 3 — the item-level case colour (a copy's own `case` still wins) and where the
+    /// bit is kept. Both optional; absent is "not stated", never a default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_colour: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_in: Option<String>,
+    /// #1172 item 5 — "Use this bit in plans", default ON. Off keeps the record; no plan asks for
+    /// it. A build older than the field refuses it (deny_unknown_fields); house and desktop ship
+    /// together, which was the accepted cost.
+    #[serde(default = "default_true")]
+    pub use_in_plans: bool,
     /// The copies the operator has described (#415): condition, where each is. At most `quantity`;
     /// a copy with no entry has no condition set and is in its box (`tool_copy.rs`).
     ///
@@ -619,6 +630,11 @@ pub struct CatalogueImport {
 
 /// The build string a report written before #566 carries: the field is absent, and the honest
 /// answer is that it does not know rather than a version nobody built.
+/// #1172 item 5 — a boolean that is ON unless the document says otherwise (the plans switch).
+fn default_true() -> bool {
+    true
+}
+
 fn unknown_build() -> String {
     "unknown".to_string()
 }
@@ -2328,6 +2344,9 @@ mod tests {
             }],
             added_at: "2026-10-08T00:00:00.000Z".to_string(),
             notes: None,
+            case_colour: None,
+            kept_in: None,
+            use_in_plans: true,
             copies: vec![],
             collet_fits: None,
         }
@@ -2811,6 +2830,50 @@ mod tests {
         reopened.delete_inventory("inv-1", Some(&served)).await.unwrap();
         let (bytes, _) = reopened.inventory().await.unwrap();
         assert_eq!(bytes, b"[]");
+    }
+
+    // #1172 — THE THREE NEW INVENTORY FIELDS SURVIVE THE FILE, and an older document reads the
+    // agreed defaults: case colour and place are optional and absent stays absent; the plans switch
+    // is ON unless the document says otherwise (an item that never carried it still plans).
+    #[tokio::test]
+    async fn the_inventory_carries_case_place_and_the_plans_switch() {
+        let (dir, store) = store();
+        let mut yellow = an_item("inv-1");
+        yellow.case_colour = Some("yellow".to_string());
+        yellow.kept_in = Some("box A".to_string());
+        yellow.use_in_plans = false;
+        store.create_inventory(yellow).await.unwrap();
+        store.create_inventory(an_item("inv-2")).await.unwrap();
+
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        let (bytes, _) = reopened.inventory().await.unwrap();
+        let items: Vec<InventoryItem> = serde_json::from_slice(&bytes).unwrap();
+        let switched = items.iter().find(|item| item.id == "inv-1").unwrap();
+        assert_eq!(switched.case_colour.as_deref(), Some("yellow"));
+        assert_eq!(switched.kept_in.as_deref(), Some("box A"));
+        assert!(!switched.use_in_plans);
+        // The served document says the switch, in the wire format's own words (camelCase), so the
+        // next build of the app reads the same fact.
+        let raw = serde_json::to_value(switched).unwrap();
+        assert_eq!(raw["useInPlans"], serde_json::json!(false));
+        assert_eq!(raw["caseColour"], serde_json::json!("yellow"));
+        assert_eq!(raw["keptIn"], serde_json::json!("box A"));
+
+        // An item that states no case/place carries none, and a document written before the fields
+        // existed reads them as absent with the switch ON.
+        let plain = items.iter().find(|item| item.id == "inv-2").unwrap();
+        assert_eq!(plain.case_colour, None);
+        assert_eq!(plain.kept_in, None);
+        assert!(plain.use_in_plans);
+        let mut older = serde_json::to_value(plain).unwrap();
+        let object = older.as_object_mut().unwrap();
+        object.remove("caseColour");
+        object.remove("keptIn");
+        object.remove("useInPlans");
+        let old: InventoryItem = serde_json::from_value(older).unwrap();
+        assert_eq!(old.case_colour, None);
+        assert_eq!(old.kept_in, None);
+        assert!(old.use_in_plans);
     }
 
     // #309's invariant, enforced where it cannot be bypassed (#320): the panel resolves a code to

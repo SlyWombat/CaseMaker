@@ -884,6 +884,32 @@ describe('#309 — the register frame and its three doors', () => {
     expect(sent.origin?.id).toBe('112111313812');
   });
 
+  it('every add door asks for case colour and where it is kept, empty and optional (#1172 item 2)', async () => {
+    resetManageMode();
+    openRegister('scan');
+    scan('C1-BIT-FLAT-2-12');
+    fireEvent.click(screen.getByTestId(`manage-scan-candidate-${CAT.key}`));
+    for (const field of ['case-colour', 'kept-in'] as const) {
+      expect((screen.getByTestId(`manage-scan-${field}`) as HTMLInputElement).value).toBe('');
+    }
+    cleanup();
+
+    resetManageMode();
+    openRegister('catalogue');
+    fireEvent.click(screen.getByTestId(`manage-catalogue-row-${CAT.key}`));
+    for (const field of ['case-colour', 'kept-in'] as const) {
+      expect((screen.getByTestId(`manage-catalogue-${field}`) as HTMLInputElement).value).toBe('');
+    }
+    cleanup();
+
+    resetManageMode();
+    openRegister('type');
+    for (const field of ['case-colour', 'kept-in'] as const) {
+      expect((screen.getByTestId(`manage-type-${field}`) as HTMLInputElement).value).toBe('');
+    }
+    cleanup();
+  });
+
   // #333 — symbology is the only evidence a label was actually scanned (`houseClient.ts`), and it
   // used to be door state: one camera hit, and every code typed after it was recorded as a QR scan.
   it('a code typed after a camera decode is recorded as typed, not as a scan (#333)', async () => {

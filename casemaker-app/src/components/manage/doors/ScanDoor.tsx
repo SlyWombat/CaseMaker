@@ -70,6 +70,8 @@ export function ScanDoor() {
   const [picked, setPicked] = useState<string | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [notes, setNotes] = useState('');
+  const [caseColour, setCaseColour] = useState('');
+  const [keptIn, setKeptIn] = useState('');
   const [camera, setCamera] = useState<'off' | 'on' | 'denied'>('off');
 
   const fieldRef = useRef<HTMLInputElement | null>(null);
@@ -177,6 +179,8 @@ export function ScanDoor() {
       quantity: quantityOrOne(quantity),
       code: code.trim().length > 0 ? { symbology, value: code.trim() } : null,
       notes,
+      caseColour,
+      keptIn,
       now: new Date().toISOString(),
       health,
     });
@@ -187,6 +191,8 @@ export function ScanDoor() {
       setPicked(null);
       setQuantity('1');
       setNotes('');
+      setCaseColour('');
+      setKeptIn('');
       selectRegistered(item.id);
       refocus.current = true;
     }
@@ -279,8 +285,12 @@ export function ScanDoor() {
             prefix="manage-scan"
             quantity={quantity}
             notes={notes}
+            caseColour={caseColour}
+            keptIn={keptIn}
             onQuantity={setQuantity}
             onNotes={setNotes}
+            onCaseColour={setCaseColour}
+            onKeptIn={setKeptIn}
             disabled={disabled}
           />
           <div className="btn-row">

@@ -726,6 +726,9 @@ describe('itemFromForm — the Type door', () => {
     shoulderLength: '',
     quantity: '',
     notes: '',
+    // #1172 item 3 — the two optional inventory fields, empty on a fresh form.
+    caseColour: '',
+    keptIn: '',
   };
 
   it('a blank length is null, never 0', () => {

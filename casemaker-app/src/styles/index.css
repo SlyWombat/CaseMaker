@@ -3105,9 +3105,17 @@ button:disabled {
   text-align: right;
 }
 /* #1172A/#500 — THE TOOLS LIST FITS ITS CARD. The numeric columns are fixed-width and tighter than
-   the table's default (8 px sides), so the twelve columns come to 863 px inside the 884 px card at
+   the table's default (8 px sides), so the twelve columns came to 863 px inside the 884 px card at
    1500×850 with the detail panel open — no horizontal scroll, and the From badge is not clipped.
-   Scoped to the tools list; the accessories table and the detail panel keep the default padding. */
+   Scoped to the tools list; the accessories table and the detail panel keep the default padding.
+   #1172 — Kept and In plans joined the list (93 px), so the TEXT columns' sides drop to 6 as well:
+   Name, the profile glyph, Shape, Case, Kept and From give back 24 px, and the tools list's name
+   cell yields its own 60 (below) — the fourteen columns then total 867 in 884, 17 px of slack. */
+.manage .tbl--tools th,
+.manage .tbl--tools td {
+  padding-left: 6px;
+  padding-right: 6px;
+}
 .manage .tbl--tools th.num,
 .manage .tbl--tools td.num {
   padding-left: var(--m-num-col-pad);
@@ -3189,6 +3197,13 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* #1172 — the tools list's own budget: the two new columns come out of the name cell there (240 +
+   12 px of cell sides = 252), leaving the fourteen columns 867 px in the 884 px card at 1500×850
+   with the detail panel open. The other Manage tables keep the 300 px cap above. */
+.manage .tbl--tools .nm,
+.manage .tbl--tools .nm small {
+  max-width: 240px;
 }
 /* #500 — the name line gets the same treatment: a 60-character catalogue name must not paint into
    the profile glyph. */

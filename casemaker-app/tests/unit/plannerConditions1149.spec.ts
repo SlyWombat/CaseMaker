@@ -153,6 +153,16 @@ describe('#1149 T2 — owned is a bit on the shelf, not "any non-cat: key"', () 
     if (withUser !== undefined) expect(withUser.source['user:lonely-06']).toBe('catalogue');
   });
 
+  it('a bit with the plans switch off is absent from a plan’s candidates (#1172 item 5)', () => {
+    const OFF: ToolLibraryEntry = { ...entry('inv:off', 'flat', { tipDiameter: 1, diameter: 1 }), useInPlans: false };
+    const ON = entry('inv:on', 'flat', { tipDiameter: 2, diameter: 2 });
+    const plans = candidatePlans(labelJob(), [OFF, ON], []);
+    for (const plan of plans) expect(plan.cutters.map((c) => c.key)).not.toContain('inv:off');
+    // …and it is not "on the shelf" either; the ON one still is.
+    expect(ownedKeysOf([OFF, ON], null).has('inv:off')).toBe(false);
+    expect(ownedKeysOf([OFF, ON], null).has('inv:on')).toBe(true);
+  });
+
   it('a definition an inventory piece corresponds to IS owned (#454’s cutter rule)', () => {
     const owned = ownedKeysOf([FLAT_06, USER_06], null);
     expect(owned.has('user:my-corn-0-6')).toBe(true);

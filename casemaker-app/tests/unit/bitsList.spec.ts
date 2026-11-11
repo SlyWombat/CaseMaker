@@ -8,6 +8,9 @@
 import { describe, expect, it } from 'vitest';
 import type { InventoryItem } from '@/platform/houseClient';
 import { haveWords, ownedCounts, possessionSearchText } from '@/components/manage/bitsList';
+import { flatEndMill } from '@/engine/cnc/tool';
+import { matchesSearch, toolSearchText } from '@/engine/cnc/toolTiers';
+import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 function item(over: Partial<InventoryItem> = {}): InventoryItem {
   return {
@@ -88,5 +91,47 @@ describe('#1172 — the bits list facts', () => {
     expect(text).toContain('yellow');
     expect(text).toContain('clear tube');
     expect(text).toContain('box a · row 1');
+  });
+
+  it('finds a row by its numbers to one decimal, its colour, its name and its place', () => {
+    const boxed = (id: string, colour: string) => ({
+      id,
+      condition: 'new' as const,
+      whereabouts: { kind: 'box' as const, case: { colour, label: null } },
+      runtimeWarnMinutes: null,
+      notes: null,
+      runtimeMinutes: null,
+    });
+    const inventory = [
+      item({
+        id: 'bits-corn-06',
+        tool: flatEndMill(0.6, { name: '0.6 mm corn', typeText: 'Corn Bit' }),
+        copies: [boxed('c1', 'yellow')],
+        notes: 'box A · row 2',
+      }),
+      item({
+        id: 'bits-corn-09',
+        tool: flatEndMill(0.9, { name: '0.9 mm corn', typeText: 'Corn Bit' }),
+        copies: [boxed('c2', 'red')],
+        notes: 'box B · row 2',
+      }),
+      item({
+        id: 'bits-flat-4',
+        tool: flatEndMill(4, { name: '4 mm flat' }),
+        copies: [boxed('c3', 'green')],
+        notes: 'box B · row 1',
+      }),
+    ];
+    const rowText = inventory.map((i) => ({
+      id: i.id,
+      text: `${toolSearchText({ key: `inv:${i.id}`, tool: i.tool, provenance: 'owned' } as unknown as ToolLibraryEntry)} ${possessionSearchText(i)}`,
+    }));
+    const hits = (query: string): string[] => rowText.filter((r) => matchesSearch(r.text, query)).map((r) => r.id);
+
+    expect(hits('yellow')).toEqual(['bits-corn-06']);
+    // The acceptance's own query: a 4 mm bit is found by "4.0", not only by "4".
+    expect(hits('4.0')).toEqual(['bits-flat-4']);
+    expect(hits('corn')).toEqual(['bits-corn-06', 'bits-corn-09']);
+    expect(hits('box A')).toEqual(['bits-corn-06']);
   });
 });

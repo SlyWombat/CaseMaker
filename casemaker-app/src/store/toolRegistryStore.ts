@@ -144,6 +144,8 @@ export function inventoryEntryFor(item: InventoryItem): ToolLibraryEntry {
     // Registering and cloning are different acts (#311 decision 2): an owned row is a cutter in the
     // drawer, and its definition is either the catalogue's or the one typed in — never a clone.
     provenance: item.origin ? 'a cutter you own, registered from the catalogue' : 'a cutter you own, typed in here',
+    // #1172 item 5 — off means the plan search does not ask for it; the list still shows it.
+    useInPlans: item.useInPlans !== false,
   };
 }
 

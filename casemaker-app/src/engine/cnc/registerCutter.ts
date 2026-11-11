@@ -534,6 +534,9 @@ export interface EntryChoice {
   /** The code the cutter was identified by, if any: the box one, or nothing for a Type-door entry. */
   code?: Coded | null;
   notes?: string | null;
+  /** #1172 item 3 — optional case colour and kept-in place; never defaulted. */
+  caseColour?: string | null;
+  keptIn?: string | null;
   /** The client's clock, injected so a test is not reading the wall. */
   now: string;
   /** The catalogue sync the row came from, so a clone can name where it came from (#212). */
@@ -589,6 +592,8 @@ export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): Inv
   const origin: Origin | null = catalogueId
     ? { id: catalogueId, syncedAt: choice.health?.catalogueSyncedAt ?? null }
     : null;
+  const caseColour = textOrNull(choice.caseColour);
+  const keptIn = textOrNull(choice.keptIn);
   return {
     id: newId(),
     tool: { ...entry.tool, fluteLength: entry.tool.fluteLength ?? vFluteLength(entry.tool) },
@@ -599,6 +604,9 @@ export function itemFromEntry(entry: ToolLibraryEntry, choice: EntryChoice): Inv
     notes: textOrNull(choice.notes),
     // #415: a newly registered cutter has no copy described and no collet fit stated.
     copies: [],
+    ...(caseColour === null ? {} : { caseColour }),
+    ...(keptIn === null ? {} : { keptIn }),
+    useInPlans: true,
     colletFits: null,
   };
 }
@@ -624,6 +632,9 @@ export interface CutterForm extends CutterSpec {
   /** Blank means one; see {@link quantityOrOne}. */
   quantity: string;
   notes: string;
+  /** #1172 item 3 — optional, never defaulted: the case colour and where the bit is kept. */
+  caseColour: string;
+  keptIn: string;
 }
 
 /** A form field, in mm, or null — NEVER 0. A blank field is "not stated", and 0 mm is a cutter
@@ -763,6 +774,8 @@ export function toolFromSpec(spec: CutterSpec, base: Tool): Tool {
  * catalogue row. The derived fields are {@link toolFromSpec}'s.
  */
 export function itemFromForm(form: CutterForm, now: string): InventoryItem {
+  const caseColour = textOrNull(form.caseColour);
+  const keptIn = textOrNull(form.keptIn);
   return {
     id: newId(),
     tool: toolFromSpec(form, BLANK_TOOL),
@@ -773,6 +786,9 @@ export function itemFromForm(form: CutterForm, now: string): InventoryItem {
     notes: textOrNull(form.notes),
     // #415: a newly registered cutter has no copy described and no collet fit stated.
     copies: [],
+    ...(caseColour === null ? {} : { caseColour }),
+    ...(keptIn === null ? {} : { keptIn }),
+    useInPlans: true,
     colletFits: null,
   };
 }

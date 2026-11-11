@@ -101,7 +101,7 @@ export function ownedKeysOf(
     const summary = conditions?.get(key);
     return summary == null || summary.usable > 0;
   };
-  const inventory = tools.filter((e) => e.key.startsWith('inv:'));
+  const inventory = tools.filter((e) => e.key.startsWith('inv:') && e.useInPlans !== false);
   const owned = new Set<string>();
   for (const item of inventory) if (hasUsableCopy(item.key)) owned.add(item.key);
   for (const entry of tools) {
@@ -267,6 +267,9 @@ export function rulePlanOf(
   /** #940 — the document's supporting floors (#748); a cone's reach is measured from its floor. */
   floors?: ReadonlyMap<string, number> | null,
 ): CandidatePlan | null {
+  // #1172 item 5 — a bit whose "Use this bit in plans" is OFF is not asked for by any plan (the
+  // flag rides on its inventory entry; absent is ON).
+  tools = tools.filter((t) => t.useInPlans !== false);
   const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
   if (base.cutters.length === 0) return null;
   return planFrom(base.cutters, tools, ownedKeysOf(tools, conditions), base.faceToolKey, base.goalRoughKey);
@@ -311,6 +314,8 @@ export function candidatePlans(
   /** #940 — the document's supporting floors (#748), as `planCutters` takes them. */
   floors?: ReadonlyMap<string, number> | null,
 ): CandidatePlan[] {
+  // #1172 item 5 — see rulePlanOf: the plans switch removes a bit from every candidate.
+  tools = tools.filter((t) => t.useInPlans !== false);
   const out: CandidatePlan[] = [];
   const seen = new Set<string>();
   // #1149 T2 — one ownership answer for the whole search: a bit on the shelf, not a key prefix.
