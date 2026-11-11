@@ -644,6 +644,20 @@
       "unit": "mm",
       "note": "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"
     },
+    "registration.faceAngleBallClearanceMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far the probe ball stays clear of a keep-out when the face is levelled"
+    },
+    "registration.faceAngleLevelBandMm": {
+      "value": 0.02,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the level band on |Z+ - Z-|; the step stops once the pair reads within it"
+    },
     "registration.faceAngleMaxDeg": {
       "value": 10.0,
       "source": "seeded",
@@ -1051,6 +1065,13 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"
+    },
+    "rotary.tailstockBandMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the last millimetres of the stick-out the tailstock holds, kept clear of every move"
     },
     "margins.boundaryMarginMm": {
       "value": 0.2,

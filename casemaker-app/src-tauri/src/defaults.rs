@@ -131,6 +131,11 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     // #1059 - the largest tilt the face-angle step will turn out of a square stock in the 4th
     // axis. CHOSEN, not measured; a larger reading is a wrong touch or a wrong mounting.
     ("registration.faceAngleMaxDeg", 10.0, "°"),
+    // #1211 field 7 (#1207 fix-on-touch) — the face-angle step's ball clearance and level band.
+    // CHOSEN, not measured: this array carries no per-key note (see `UNMEASURED_SEEDS` for those);
+    // the note lives in `defaultsClient.ts` and the location-doc fixture.
+    ("registration.faceAngleBallClearanceMm", 3.0, "mm"),
+    ("registration.faceAngleLevelBandMm", 0.02, "mm"),
     ("registration.scanInsideMm", 3.0, "mm"),
     ("registration.scanReachMm", 5.0, "mm"),
     // #1133 - the edge-find band: every stock-edge scan spans expected +/- this. CHOSEN, not
@@ -388,6 +393,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // #1211 field 7 (#1207 fix-on-touch) — the chuck keep-out past the jaw tips: nothing moves at X
     // inside it, at any Z.
     ("rotary.jawKeepOutMm", 3.0, "mm", "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"),
+    // #1211 field 7 (#1207 fix-on-touch) — the tailstock's keep-out band at the free end.
+    ("rotary.tailstockBandMm", 10.0, "mm", "chosen, not measured: the last millimetres of the stick-out the tailstock holds, kept clear of every move"),
     // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
     ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
     // ── #451 runSheet (end)
@@ -726,6 +733,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "registration.faceAngleMaxDeg" => Some(need(
             n.is_some_and(|v| (0.2..=45.0).contains(&v)),
             "0.2 to 45 degrees",
+        )),
+        "registration.faceAngleBallClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=20.0).contains(&v)),
+            "0 to 20 mm",
+        )),
+        "registration.faceAngleLevelBandMm" => Some(need(
+            n.is_some_and(|v| (0.001..=1.0).contains(&v)),
+            "0.001 to 1 mm",
         )),
         "registration.scanInsideMm" => Some(need(
             n.is_some_and(|v| (0.5..=30.0).contains(&v)),
@@ -1237,6 +1252,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.1 to 2 mm",
         )),
         "rotary.jawKeepOutMm" => Some(need(n.is_some_and(|v| (0.0..=20.0).contains(&v)), "0 to 20 mm")),
+        "rotary.tailstockBandMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
         // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
         // playback speed is one of the transport's multipliers, not any number in a range.
         "sim.playbackSpeed" => Some(need(

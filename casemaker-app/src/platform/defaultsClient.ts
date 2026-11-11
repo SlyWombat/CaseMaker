@@ -122,6 +122,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #1059 — the largest tilt the face-angle step will turn out of a square stock in the 4th axis.
   // A larger reading is a wrong touch or a wrong mounting, not a turn.
   'registration.faceAngleMaxDeg': { label: 'face angle, largest correction', unit: '°', rule: z.number().min(0.2).max(45), fallback: 10 },
+  // ── #1211 field 7 (#1207 fix-on-touch) — the face-angle step's two numbers and the rotary
+  // tailstock band, each a key now that the #1211 guard work touched them. The constants in
+  // `faceAngle.ts` / `rotary/wrap.ts` ARE these keys' labelled fallbacks.
+  'registration.faceAngleBallClearanceMm': { label: 'face angle, the ball’s clearance to a keep-out (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  'registration.faceAngleLevelBandMm': { label: 'face angle, the level band on |Z+ − Z−| (chosen)', unit: 'mm', rule: z.number().min(0.001).max(1), fallback: 0.02 },
   'registration.scanInsideMm': { label: 'scan start inside the edge', unit: 'mm', rule: z.number().min(0.5).max(30), fallback: 3.0 },
   'registration.scanReachMm': { label: 'scan reach past the edge', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5.0 },
   // #1133 — the edge-find band: every stock-edge scan spans expected ± this. CHOSEN, not measured:
@@ -436,6 +441,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // session guard; the verifier and the relief CAM still hold the constant, which derives from
   // this key's fallback.
   'rotary.jawKeepOutMm': { label: 'rotary chuck keep-out past the jaw tips (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  // ── #1211 field 7 (#1207 fix-on-touch) — the tailstock's keep-out band at the free end, mm.
+  'rotary.tailstockBandMm': { label: 'rotary tailstock keep-out band (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 10 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

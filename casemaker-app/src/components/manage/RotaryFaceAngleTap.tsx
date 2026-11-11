@@ -108,8 +108,11 @@ export function RotaryFaceAngleTap({ machine, job, testIdPrefix = 'rotary-face-a
         ...(probe?.tipLateralUncertaintyMm === undefined ? {} : { tipLateralUncertaintyMm: probe.tipLateralUncertaintyMm }),
         // #1211 field 7 — the chuck keep-out from the shop defaults (its labelled fallback).
         jawKeepOutMm: readDefault(defaults, 'rotary.jawKeepOutMm').value,
+        // #1211 field 7 — the two #1207 keys, read where the shop's choice lives.
+        ballClearanceMm: readDefault(defaults, 'registration.faceAngleBallClearanceMm').value,
       },
       touchFeed: settings.touchFeed,
+      levelBandMm: readDefault(defaults, 'registration.faceAngleLevelBandMm').value,
     });
   }
 

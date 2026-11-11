@@ -48,7 +48,9 @@ export const ROTARY_JAW_KEEP_OUT_MM = readDefault(null, 'rotary.jawKeepOutMm').v
  * The tailstock's band at the free end, mm, while the tailstock is in — Case Maker's DEFAULT:
  * Makera does not publish the tailstock's reach (#626, design §5, §9 Q8).
  */
-export const ROTARY_TAILSTOCK_BAND_MM = 10;
+// #1211 field 7 (#1207 fix-on-touch): the number is the shop's `rotary.tailstockBandMm`; this
+// constant IS that key's labelled fallback, so modules with no defaults map still speak it.
+export const ROTARY_TAILSTOCK_BAND_MM = readDefault(null, 'rotary.tailstockBandMm').value;
 
 /**
  * Clearance above the stock's surface a rapid needs before it may turn or traverse, mm — Makera's

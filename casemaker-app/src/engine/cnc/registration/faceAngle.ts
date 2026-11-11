@@ -23,17 +23,20 @@
  * exists, exactly as the axis tap does.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import { sectionEnvelopeRadius, ROTARY_JAW_KEEP_OUT_MM, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import { topTouchEdgeMarginsMm } from './cutBlank';
 
 /** The touches' offset either side of the axis, mm — the maintainer's 15 mm on a 44.5 mm face. */
 export const FACE_ANGLE_D_MM = 15;
-/** How much clear of a keep-out the probe BALL keeps, mm (the safety rule's own number). */
-export const FACE_ANGLE_BALL_CLEARANCE_MM = 3;
+/** How much clear of a keep-out the probe BALL keeps, mm — the shop's `registration.faceAngleBallClearanceMm`
+ *  (#1211 field 7; this constant is the key's labelled fallback). */
+export const FACE_ANGLE_BALL_CLEARANCE_MM = readDefault(null, 'registration.faceAngleBallClearanceMm').value;
 /** Smallest useful lever arm, mm: below this the angle's own resolution is noise. */
 export const FACE_ANGLE_MIN_D_MM = 2;
-/** The level band on |Z+ − Z−|, mm — the maintainer's 0.02 mm (≈ 0.04° over 2d). */
-export const FACE_ANGLE_LEVEL_BAND_MM = 0.02;
+/** The level band on |Z+ − Z−|, mm (≈ 0.04° over 2d) — the shop's `registration.faceAngleLevelBandMm`
+ *  (#1211 field 7; this constant is the key's labelled fallback). */
+export const FACE_ANGLE_LEVEL_BAND_MM = readDefault(null, 'registration.faceAngleLevelBandMm').value;
 /** How many corrections the step may make before it stops and says so. */
 export const FACE_ANGLE_MAX_CORRECTIONS = 2;
 
@@ -81,6 +84,8 @@ export interface FaceAngleInputs {
   tipLateralUncertaintyMm?: number;
   /** #1211 field 7 — the shop's `rotary.jawKeepOutMm`; absent → the registry's fallback. */
   jawKeepOutMm?: number;
+  /** #1211 field 7 — the shop's `registration.faceAngleBallClearanceMm`; absent → the fallback. */
+  ballClearanceMm?: number;
 }
 
 export interface FaceAnglePlan {
@@ -105,6 +110,8 @@ export interface FaceAnglePlan {
   /** The section's circumscribed radius — the swing the turn must clear, mm. */
   envelopeRadiusMm: number;
   maxDeg: number;
+  /** #1211 field 7 — the ball's clearance this plan was built with, mm. */
+  ballClearanceMm: number;
   /** The distances the plan kept, in the operator's words, for the run sheet and the receipt. */
   notes: string[];
   // ── #1211 field 2 — THE ROTARY JOB'S DESCENT REGION, carried for the guard ──────────────────
@@ -157,12 +164,14 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
   // own margin AND the rule's clearance; the tailstock side keeps the clearance from the free
   // span's end, which already excludes the tailstock's band when it is in.
   const keepOutMm = i.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM;
-  const jawSideX = i.jawFaceX + keepOutMm + FACE_ANGLE_BALL_CLEARANCE_MM + i.probeRadiusMm;
-  const tailSideX = i.jawFaceX + i.freeEndMm - FACE_ANGLE_BALL_CLEARANCE_MM - i.probeRadiusMm;
+  // #1211 field 7 — the ball's clearance is the shop's key (this constant is its fallback).
+  const ballClearanceMm = i.ballClearanceMm ?? FACE_ANGLE_BALL_CLEARANCE_MM;
+  const jawSideX = i.jawFaceX + keepOutMm + ballClearanceMm + i.probeRadiusMm;
+  const tailSideX = i.jawFaceX + i.freeEndMm - ballClearanceMm - i.probeRadiusMm;
   if (!(tailSideX - jawSideX >= 2)) {
     return {
       ok: false,
-      reason: `the stock leaves ${num(Math.max(0, i.freeEndMm - ROTARY_JAW_KEEP_OUT_MM - 2 * FACE_ANGLE_BALL_CLEARANCE_MM - 2 * i.probeRadiusMm))} mm between the jaws’ keep-out and the ${i.freeEndMm} mm free end once the probe clears both by ${FACE_ANGLE_BALL_CLEARANCE_MM} mm — there is no room to touch the face at X. Use a longer stick-out, or take the tailstock out`,
+      reason: `the stock leaves ${num(Math.max(0, i.freeEndMm - keepOutMm - 2 * ballClearanceMm - 2 * i.probeRadiusMm))} mm between the jaws’ keep-out and the ${i.freeEndMm} mm free end once the probe clears both by ${ballClearanceMm} mm — there is no room to touch the face at X. Use a longer stick-out, or take the tailstock out`,
     };
   }
   const x = r3((jawSideX + tailSideX) / 2);
@@ -219,9 +228,10 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
     probeRadiusMm: i.probeRadiusMm,
     regionMarginMm,
     jawKeepOutMm: keepOutMm,
+    ballClearanceMm,
     notes: [
       `the two touches run at machine X ${num(x)}, at ${num(d)} mm either side of the axis line (Y ${num(yPlus)} and ${num(yMinus)})`,
-      `the probe ball keeps ${FACE_ANGLE_BALL_CLEARANCE_MM} mm clear of the jaws’ ${num(keepOutMm)} mm keep-out (X ≥ ${num(jawSideX)}) and of the free end (X ≤ ${num(tailSideX)})`,
+      `the probe ball keeps ${num(ballClearanceMm)} mm clear of the jaws’ ${num(keepOutMm)} mm keep-out (X ≥ ${num(jawSideX)}) and of the free end (X ≤ ${num(tailSideX)})`,
       `the face is expected at machine Z ${num(faceTopZ)}; the touch is capped at ${num(bandFloorZ)} (${num(i.bandAllowanceMm)} mm below it) and parks at ${num(parkZ)}`,
       `every A word is sent from machine Z ${num(turnClearanceZ)} — the ⌀${num(2 * envelopeRadiusMm)} envelope plus the ${num(i.clearanceAboveStockMm)} mm clearance, so the corner cannot sweep into the probe`,
       `a reading past ${num(i.maxDeg)}° is refused, never turned: that is a wrong touch or a wrong mounting`,
