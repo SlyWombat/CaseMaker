@@ -193,7 +193,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: 6,
   },
   'vise.jawTopToleranceMm': {
-    label: 'seat recommendation: a cut within this of the jaw tops is not called below them (chosen)',
+    label: 'seat recommendation: a cut ending less than this above the jaw tops is treated as reaching them (chosen)',
     unit: 'mm',
     rule: z.number().min(0).max(5),
     fallback: 0.5,

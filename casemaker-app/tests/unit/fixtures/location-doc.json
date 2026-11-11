@@ -1820,7 +1820,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: a cut no more than this deeper than the seat's proud height is not called below the jaw tops (the model's own uncertainty)"
+      "note": "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"
     },
     "registration.guardedFloorMarginMm": {
       "value": 1.0,

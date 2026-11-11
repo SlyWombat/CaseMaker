@@ -66,6 +66,16 @@ describe('#1103 the recommended seat reads the work', () => {
     expect(KNOWN_DEFAULTS['vise.jawTopToleranceMm']?.fallback).toBe(0.5);
   });
 
+  it('the jaw-top tolerance is CONSERVATIVE: raising it refuses more, never less', () => {
+    // 30 mm on the ledge stands 26.9 mm proud; a 26.6 mm cut ends 0.3 mm ABOVE the jaw tops. The
+    // 0.5 mm tolerance treats that as reaching them (a refusal); at 0 it does not.
+    const work = { deepestCutMm: 26.6, through: false, reachesEdgeWithinMm: 0 };
+    const strict = recommendSeat({ thickness: 30 }, work, [], true, { cutProudMarginMm: 1, jawSideClearanceMm: 6, jawTopToleranceMm: 0.5 });
+    const lenient = recommendSeat({ thickness: 30 }, work, [], true, { cutProudMarginMm: 1, jawSideClearanceMm: 6, jawTopToleranceMm: 0 });
+    expect(strict.refused.map((r) => r.mount)).toContain('ledge');
+    expect(lenient.refused.map((r) => r.mount)).not.toContain('ledge');
+  });
+
   it('item 2 — a through cut with an unknown margin is still never a vise seat', () => {
     const r = recommendSeat({ thickness: 12 }, { deepestCutMm: 12, through: true, reachesEdgeWithinMm: null }, BOARDS);
     expect(r.mount).toBe('board');

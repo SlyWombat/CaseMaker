@@ -274,7 +274,7 @@ export interface SeatShop {
   cutProudMarginMm: number;
   /** A cut nearer the gripped edge than this can be under the jaws. */
   jawSideClearanceMm: number;
-  /** A cut no deeper than the seat's proud height plus this is not below the jaw tops. */
+  /** A cut ending less than this above the jaw tops is treated as reaching them (conservative). */
   jawTopToleranceMm: number;
 }
 
