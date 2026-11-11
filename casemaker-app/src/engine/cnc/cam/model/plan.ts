@@ -1029,7 +1029,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const stampCache = new BoundedCache<ToolpathIR, Float32Array | null>(STAMP_CACHE_MAX);
   const stampedField = (ir: ToolpathIR): Float32Array | null => {
     const cached = stampCache.get(ir);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      // planner v3 slice 0 — one row per simulation the planner asks for; `cached: 1` is a cache hit.
+      memTrace('stamp', { cached: 1 });
+      return cached;
+    }
     let field: Float32Array | null = null;
     const posted = postZ1(ir, coverageCtx, Z1);
     if (posted.ok) {
@@ -1041,6 +1045,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         if (stamp !== null) field = stamp.field;
       }
     }
+    memTrace('stamp', { cached: 0, ok: field === null ? 0 : 1 });
     stampCache.set(ir, field);
     return field;
   };
