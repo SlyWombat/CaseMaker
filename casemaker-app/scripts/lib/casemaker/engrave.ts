@@ -636,6 +636,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   // #1089 — the run's ideal-vs-owned comparison, for the sheet and the receipt. The first program
   // written is the run's own; a two-tool rest pass never replaces it.
   let runComparison: EngraveDetails['comparison'] | undefined;
+  // #1193 — the run's OWN cycle (every posted program), taken from the generated result's seam.
+  let runCycle: EngraveDetails['runCycle'] | undefined;
   let runOk = true;
   let runStage: string | null = null;
   /**
@@ -713,6 +715,8 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(faceAngle === undefined ? {} : { faceAngle }),
         ...(runSampling === undefined ? {} : { sampling: runSampling }),
         ...(runComparison === undefined ? {} : { comparison: runComparison }),
+        // #1193 — the run's own cycle (every posted program), beside the plan comparison.
+        ...(runCycle === undefined ? {} : { runCycle }),
       },
     });
   }
@@ -1621,6 +1625,19 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #1089 — the run's comparison, captured once for the receipt and handed to the sheet below.
     const comparison = comparisonOf(generated);
     if (runComparison === undefined && comparison !== null) runComparison = receiptComparison(comparison);
+    // #1193 — the run's own cycle, from the seam that saw every posted program.
+    if (runCycle === undefined && generated.runCycle !== undefined && generated.runCycle !== null) {
+      const r = generated.runCycle;
+      runCycle = {
+        totalSeconds: r.totalSeconds,
+        cuttingSeconds: r.cuttingSeconds,
+        changeSeconds: r.changeSeconds,
+        changes: r.changes,
+        programCount: r.programCount,
+        setupCount: r.setupCount,
+        flip: r.flip,
+      };
+    }
     const writeSheet = opts.sheet !== false;
     // The stem is claimed through `stemFor`, which refuses a name already used this run: the rest
     // program of a two-tool job is written from a job named `<name> rest`, so the two programs land

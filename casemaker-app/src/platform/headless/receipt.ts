@@ -379,6 +379,24 @@ export const engraveComparisonSchema = z
   ])
   .describe('The ideal-vs-owned comparison; omitted when the run had no ideal to compare.');
 
+/**
+ * #1193 — THE RUN'S OWN CYCLE, over every POSTED program (all setups, the locating program), with
+ * the bit changes between consecutive programs. The comparison's `ownedSeconds` above is a PLAN's
+ * number and says so; this is the run's. Omitted on a run whose programs stated no cycle and on
+ * receipts written before the field existed, which parse to themselves.
+ */
+export const engraveRunCycleSchema = z
+  .object({
+    totalSeconds: z.number().nonnegative().describe('The run’s cycle over every posted program, seconds.'),
+    cuttingSeconds: z.number().nonnegative().describe('The posted programs’ own cycles summed, seconds.'),
+    changeSeconds: z.number().nonnegative().describe('The bit changes between consecutive programs, seconds.'),
+    changes: z.number().int().nonnegative().describe('How many bit changes the run has.'),
+    programCount: z.number().int().positive().describe('The posted programs the total covers.'),
+    setupCount: z.number().int().positive().describe('The setups the run covers.'),
+    flip: z.boolean().describe('Whether the run turns the blank over; its own time is not modelled.'),
+  })
+  .describe('The run’s cycle, over every posted program (the comparison’s numbers are the plans’).');
+
 export const engraveDetailsSchema = z
   .object({
     kind: z.enum(['job', 'design', 'coupon']).describe('Which input built the run: a job, a 3MF design, or a coupon spec.'),
@@ -390,6 +408,8 @@ export const engraveDetailsSchema = z
     // #1089 — THE IDEAL-VS-OWNED LINE on the receipt, the same one the sheet and the card print.
     // Omitted when the run had no ideal to compare; a deferred comparison is stated, not omitted.
     comparison: engraveComparisonSchema.optional(),
+    // #1193 — the run's OWN cycle (every posted program), beside the plan comparison above.
+    runCycle: engraveRunCycleSchema.optional(),
     coupon: engraveCouponSchema.nullable().describe('The coupon summary, or null for a job or design run.'),
     pair: engravePairSchema.nullable().describe('The two-program summary, or null when only one program ran.'),
     bed: z
@@ -901,6 +921,19 @@ function engraveLines(receipt: Extract<Receipt, { command: 'engrave' }>): string
   // the bed its numbers were planned against, and a saved job only records WHICH profile it was.
   if (details.bed != null && details.programs.length > 0) {
     lines.push('', `  bed        ${details.bed.profileId} @ ${details.bed.profileVersion}`);
+  }
+
+  // #1193 — THE RUN'S OWN CYCLE, over every posted program. The comparison below/above states the
+  // PLANS' cycles; this is the one number that covers the run (all setups + the locating program).
+  if (details.runCycle !== undefined) {
+    const r = details.runCycle;
+    lines.push(
+      '',
+      `  run cycle  ${Math.round(r.totalSeconds)} s over ${r.programCount} file${r.programCount === 1 ? '' : 's'} on ` +
+        `${r.setupCount} setup${r.setupCount === 1 ? '' : 's'} — cutting ${Math.round(r.cuttingSeconds)} s + ` +
+        `${r.changes} bit change${r.changes === 1 ? '' : 's'} ${Math.round(r.changeSeconds)} s` +
+        (r.flip ? '; the flip itself is not timed' : ''),
+    );
   }
 
   for (const program of details.programs) {
