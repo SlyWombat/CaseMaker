@@ -69,6 +69,7 @@ body, html, #root {
   line-height: 0;
   padding: 6px 0;
 }
+.app-header__mark { display: none; }
 .app-header__logo img {
   display: block;
   height: 36px;
@@ -113,6 +114,24 @@ body, html, #root {
      the collapsed ⋯ toolbar; below 640px the two together would push the ⋯
      menu off-screen, so the wordmark goes. */
   .app-header__logo { display: none; }
+  /* #1123-48 — THE HOME BAR ON A PHONE. Walked on land18 42bc22f03: the slim bar's controls were
+     squeezed until each wrapped to two lines, 50 px tall in the 48 px header (top and bottom
+     clipped), and the brand was gone. On the welcome bar only, the controls stay on one line at
+     the body size with the tighter space token, and the brand returns as the mark (the wordmark
+     is the wide part). The full toolbar's phone rules above are untouched. */
+  .app-header:has(.toolbar-buttons--welcome) .app-header__logo { display: flex; }
+  .app-header:has(.toolbar-buttons--welcome) .app-header__wordmark { display: none; }
+  .app-header:has(.toolbar-buttons--welcome) .app-header__mark { display: block; }
+  .toolbar-buttons--welcome { gap: var(--cm-space-1); }
+  /* Load and Docs drop their word as Home does (the icon carries them; the aria-label and the
+     title keep the name): five controls plus the mark do not fit 358 px otherwise. */
+  .toolbar-buttons--welcome > button[data-testid='load-project'] .btn-label,
+  .toolbar-buttons--welcome > button[data-testid='docs-open'] .btn-label { display: none; }
+  .toolbar-buttons--welcome > button {
+    white-space: nowrap;
+    font-size: var(--cm-text-body-size);
+    padding: var(--cm-space-1) var(--cm-space-2);
+  }
   /* #1123-48 + #134 (2026-11-10) — Home stays ONE TAP away on a phone, but its word does not:
      the six labelled controls measured 377 px in the bar's 358, and its min-content stretched
      the whole shell to 409. The icon carries the control, as the laptop band's icon controls
