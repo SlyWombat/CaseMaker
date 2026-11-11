@@ -27,6 +27,8 @@
  * breaks the app it is watching.
  */
 
+import { isTauriWindow } from '@/platform/capabilities';
+
 export type CrumbKind = 'session' | 'work' | 'stage' | 'progress' | 'memory' | 'finding' | 'error' | 'note';
 
 /** The heavy work a crumb belongs to. `preview` and `import` are the other long-running paths. */
@@ -331,6 +333,40 @@ function bindUnload(): void {
 }
 
 /**
+ * #1196 — THE DESKTOP WINDOW'S OWN CLOSE IS A CLEAN EXIT (see `desktop/windowClose.ts`). Bound at
+ * every start like the unload listeners, once per load; the browser keeps the unload bindings.
+ *
+ * THE IMPORT IS COMPILE-TIME DEAD ON THE WEB (#181's rule, the `desktop/crashLog.ts` shape): the
+ * guard reads the vite define INLINE, so the web build folds the branch away and never emits the
+ * desktop module. The seam is how a spec stands in for the window.
+ */
+type DesktopCloseIO = (onClose: () => void) => void;
+const REAL_DESKTOP_CLOSE: DesktopCloseIO = (onClose) => {
+  // The compile-time constant INLINE (the vite define), so the web build folds this branch away
+  // and never emits the desktop module — see capabilities.ts's dynamic-import boundary note.
+  if (__BUILD_TARGET__ !== 'desktop') return;
+  if (!isTauriWindow()) return;
+  void import('./desktop/windowClose')
+    .then((m) => m.onWindowClose(onClose))
+    .catch(() => {
+      // A shell that cannot register the handler keeps the unload bindings above; a recorder must
+      // never be the thing that breaks a close.
+    });
+};
+let desktopCloseIO: DesktopCloseIO = REAL_DESKTOP_CLOSE;
+/** Spec seam: replace the desktop close binding. `null` restores the real one. */
+export function setDesktopCloseIO(fn: DesktopCloseIO | null): void {
+  desktopCloseIO = fn ?? REAL_DESKTOP_CLOSE;
+}
+
+let desktopCloseBound = false;
+function bindDesktopClose(): void {
+  if (desktopCloseBound) return;
+  desktopCloseBound = true;
+  desktopCloseIO(markCleanExit);
+}
+
+/**
  * Begin a session. Reads the previous marker — a leftover one means the last session died
  * uncleanly — and the crumbs it left; both are RETURNED for the banner, and this session's ring
  * starts empty (its first flush replaces the stored crumbs). Writes this session's marker and binds
@@ -369,6 +405,8 @@ export async function startFlightRecorder(opts: {
   };
   writeMarker(session);
   bindUnload();
+  // #1196 — the desktop window's close is a clean exit too, exactly as a tab's pagehide is.
+  bindDesktopClose();
   recordCrumb({ kind: 'session', data: { version: session.appVersion, commit: session.commit, marker: session.id, ...environmentFacts() } });
   return previous;
 }
@@ -537,4 +575,6 @@ export function __resetFlightRecorderForTests(): void {
   stopMemoryWatch();
   crumbIO = null;
   markerIO = null;
+  desktopCloseIO = REAL_DESKTOP_CLOSE;
+  desktopCloseBound = false;
 }
