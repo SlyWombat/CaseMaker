@@ -67,6 +67,11 @@ test('#1202 — the tool-change card shows its line, marks the first run, and th
   expect(shown).toEqual(['M490.2']);
   await expect(runPanel.getByTestId('engrave-registration-dry-note')).toContainText('M490.2 macro');
 
+  // Keep the proof: the marked card, above the press it holds. Taken here — the card is gone once
+  // the run carries on, and a screenshot after the press waits for an element that no longer is.
+  fs.mkdirSync(OUT, { recursive: true });
+  await routine.screenshot({ path: path.join(OUT, 'tool-change-marked.png') });
+
   // THE STATEMENT, then the press.
   await runPanel.getByTestId('engrave-registration-first-run-tick').check();
   await expect(continueButton).toBeEnabled();
@@ -90,8 +95,4 @@ test('#1202 — the tool-change card shows its line, marks the first run, and th
       { timeout: 20_000 },
     )
     .toBe(true);
-
-  // Keep the proof: the marked card, above the press it holds.
-  fs.mkdirSync(OUT, { recursive: true });
-  await routine.screenshot({ path: path.join(OUT, 'tool-change-marked.png') });
 });
