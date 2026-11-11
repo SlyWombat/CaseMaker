@@ -21,8 +21,10 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
 
   // Step 1 — the e2e server is the relay-less web build, and the wizard says why instead of
   // offering a check it cannot run (#346/#821): the note, Cancel, and Continue without a machine.
+  // (#1106: the sentence is the positive one, the step's header — the old "without the machine
+  // relay" wording left with the first picker slice.)
   await expect(page.getByTestId('start-wizard-machine-note-build')).toContainText(
-    'without the machine relay',
+    'This page can write, check and simulate; to run the machine, open the desktop app.',
   );
   await expect(page.getByTestId('start-wizard-check')).toHaveCount(0);
   await expect(page.getByTestId('start-wizard-next')).toHaveText('Continue without a machine');

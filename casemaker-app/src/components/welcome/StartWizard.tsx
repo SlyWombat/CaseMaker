@@ -59,6 +59,7 @@ import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
 import { readLastMachineId, writeLastMachineId } from './lastMachine';
+import type { MachineRecord } from '@/platform/locationClient';
 
 /**
  * #681 — the ONE cutting-job wizard.
@@ -269,11 +270,25 @@ export function StartWizard(): JSX.Element {
   const setSection = useViewportStore((s) => s.setActiveSidebarSection);
   // #682 — step 1 wears the location's machine (name, nickname and address) without a picker.
   const machines = useLocationStore((s) => s.location?.machines ?? null);
+  // #1106 item 1 — the SELECTED ROW is a location record held here; the job holds only its profile
+  // id. Until a row is chosen: the last-used machine's record if it exists, else the only record,
+  // else the first record whose profile is the job's.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   // #930 — the stock step judges whether a facing pass can clear the jaws, which needs the
   // machine's own state: the vise's jaw tops only matter while the vise is what is on the pins.
   const location = useLocationStore((s) => s.location);
   const setMachineCalibration = useSettingsStore((s) => s.setMachineCalibration);
   const job = useEngraveJobStore((s) => s.job);
+  const selectedMachine = ((): MachineRecord | null => {
+    if (machines === null || machines.length === 0) return null;
+    const chosen = selectedRecordId === null ? undefined : machines.find((m) => m.id === selectedRecordId);
+    if (chosen !== undefined) return chosen;
+    const last = readLastMachineId();
+    const lastUsed = last === null ? undefined : machines.find((m) => m.id === last);
+    if (lastUsed !== undefined) return lastUsed;
+    if (machines.length === 1) return machines[0] ?? null;
+    return machines.find((m) => m.profileId === job.machineId) ?? null;
+  })();
 
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
@@ -1056,10 +1071,13 @@ export function StartWizard(): JSX.Element {
           }}
           // #1106 — the step is a picker: the job's machine is the selected row, the last used is
           // first, and the bed is changed from here.
-          selectedMachineId={job.machineId}
+          // The rows are LOCATION RECORDS; the job carries the record's PROFILE id (item 1).
+          selectedMachineId={selectedMachine?.id ?? null}
           lastMachineId={readLastMachineId()}
           onSelectMachine={(id) => {
-            useEngraveJobStore.getState().setMachine(id);
+            setSelectedRecordId(id);
+            const record = machines?.find((m) => m.id === id);
+            if (record?.profileId) useEngraveJobStore.getState().setMachine(record.profileId);
             writeLastMachineId(id);
           }}
           onChangeBed={() =>
