@@ -69,7 +69,9 @@ body, html, #root {
   line-height: 0;
   padding: 6px 0;
 }
-.app-header__mark { display: none; }
+/* #1123-48 — scoped under the logo so it outranks `.app-header__logo img` below (it did not, as a bare
+   class, and the mark showed beside the wordmark at every width). */
+.app-header__logo .app-header__mark { display: none; }
 .app-header__logo img {
   display: block;
   height: 36px;
@@ -121,7 +123,7 @@ body, html, #root {
      is the wide part). The full toolbar's phone rules above are untouched. */
   .app-header:has(.toolbar-buttons--welcome) .app-header__logo { display: flex; }
   .app-header:has(.toolbar-buttons--welcome) .app-header__wordmark { display: none; }
-  .app-header:has(.toolbar-buttons--welcome) .app-header__mark { display: block; }
+  .app-header:has(.toolbar-buttons--welcome) .app-header__logo .app-header__mark { display: block; }
   .toolbar-buttons--welcome { gap: var(--cm-space-1); }
   /* Load and Docs drop their word as Home does (the icon carries them; the aria-label and the
      title keep the name): five controls plus the mark do not fit 358 px otherwise. */
