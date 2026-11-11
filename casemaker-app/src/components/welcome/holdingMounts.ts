@@ -303,6 +303,8 @@ export function recommendSeat(
   stock: { thickness: number },
   work: SeatWorkFacts | null | undefined,
   choices: readonly BoardChoice[],
+  /** #1104 — "tape it to the bed" is said only where the tape row is on offer ({@link bedOffered}). */
+  tapeOffered = true,
 ): SeatChoice {
   const floorBoard = defaultBoardMm(stock, choices);
   if (work === null || work === undefined || work.reachesEdgeWithinMm === null) {
@@ -314,7 +316,9 @@ export function recommendSeat(
   const fallback = (): SeatChoice => ({
     mount: 'board',
     boardMm: thickest,
-    reason: `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board, a taller blank, or tape it to the bed`,
+    reason: tapeOffered
+      ? `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board, a taller blank, or tape it to the bed`
+      : `${fmt(belowLedge)} mm of the cut would be below the jaw tops — a thicker board or a taller blank`,
     bedSuggested: true,
   });
   if (work.through) return fallback();
@@ -463,18 +467,24 @@ export interface MountOptionArgs {
   tape?: TapeHold | null;
   /** #1103 — the work goes through the blank: the block seat is never offered for it. */
   through?: boolean;
+  /**
+   * #1104 — whether this build can drive a machine. A row that needs a machine change keeps its
+   * place on the web build, with its action pointing at Manage › Machines instead of the change
+   * wizard. Absent is true (the desktop build).
+   */
+  canReachMachine?: boolean;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
 
-/** "needs the vise off the pins" — the cost line, from what is on the pins now. */
+/** "Put the vise on the pins" — the cost line, from what is on the pins now; the action follows it. */
 function costWords(current: MachineMountKind, needed: MachineMountKind): string {
-  if (needed === 'rotary') return 'needs the rotary on the pins';
+  if (needed === 'rotary') return 'Put the rotary on the pins';
   if (needed === 'vise') {
-    return current === 'rotary' ? 'needs the rotary off the pins' : 'needs the vise on the pins';
+    return current === 'rotary' ? 'Take the rotary off the pins' : 'Put the vise on the pins';
   }
   const out = current === 'rotary' ? 'rotary' : 'vise';
-  return `needs the ${out} off the pins`;
+  return `Take the ${out} off the pins`;
 }
 
 /**
@@ -503,8 +513,8 @@ export function rodViseProblem(
   const rodLength = axisFrame ? stock.length : stock.thickness;
   if (rodLength <= ROD_VISE_MAX_LENGTH_MM) return null;
   return (
-    `the vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
-    `${fmt(rodLength)} mm; hold it in the rotary chuck`
+    `The vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
+    `${fmt(rodLength)} mm; hold it in the rotary chuck.`
   );
 }
 
@@ -540,7 +550,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     // A fixture the house does not own cannot be fitted at all — no cost, no escape.
     const owned = mechanism === 'bed' ? true : accessoryFor(accessories, mechanism) !== null;
     if (!owned) {
-      out.push({ ...base, hint: null, disabled: true, reason: 'not owned', escape: null });
+      out.push({ ...base, hint: null, disabled: true, reason: 'Not in this location’s accessories', escape: null });
       continue;
     }
 
@@ -560,7 +570,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'the cut goes through the blank — the block seat’s jaws would stand in it',
+        reason: 'The cut goes through the blank — the block seat’s jaws would stand in it; use the board seat.',
         escape: null,
       });
       continue;
@@ -576,7 +586,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'a disc is cut on its face — the rotary holds a rod',
+        reason: 'A disc is cut on its face — the rotary holds a rod.',
         escape: null,
       });
       continue;
@@ -586,7 +596,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: 'a disc touches the bracket at two points and turns under the cutter — tape it or hold it in the vise',
+        reason: 'A disc touches the bracket at two points and turns under the cutter — tape it or hold it in the vise.',
         escape: null,
       });
       continue;
@@ -599,13 +609,13 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
         ...base,
         hint: null,
         disabled: true,
-        reason: `it would sit ${fmt(below)} mm below the jaw tops`,
+        reason: `It would sit ${fmt(below)} mm below the jaw tops — use the board seat or a thicker board.`,
         escape: null,
       });
       continue;
     }
     if (mount === 'rotary' && stated) {
-      out.push({ ...base, hint: null, disabled: true, reason: 'this machine has no fourth axis', escape: null });
+      out.push({ ...base, hint: null, disabled: true, reason: 'This machine has no fourth axis.', escape: null });
       continue;
     }
     if (mount === 'rotary' && !rotaryStockFits(stock, args.round === true, envelope)) {
@@ -614,10 +624,10 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       const dims = [stock.length, stock.width, stock.thickness].sort((a, b) => a - b);
       const reason =
         args.round === true
-          ? `the stock does not fit the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm`
-          : `a ${fmt(dims[0]!)} × ${fmt(dims[1]!)} mm section turns a ⌀${fmt(
+          ? `The stock does not fit the rotary’s ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — say a shorter rod.`
+          : `A ${fmt(dims[0]!)} × ${fmt(dims[1]!)} mm section turns a ⌀${fmt(
               Math.hypot(dims[0]!, dims[1]!),
-            )} mm envelope, over the rotary's ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — it stays a vise job`;
+            )} mm envelope, over the rotary’s ⌀${fmt(envelope.diameter)} × ${fmt(envelope.length)} mm — it stays a vise job.`;
       out.push({ ...base, hint: null, disabled: true, reason, escape: null });
       continue;
     }
@@ -648,7 +658,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
           ...base,
           hint: null,
           disabled: true,
-          reason: 'the rotary holds round stock — say a rod in the stock step',
+          reason: 'The rotary holds round stock',
           escape: null,
         });
         continue;
@@ -682,7 +692,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
           ...base,
           hint: null,
           disabled: true,
-          reason: 'needs the bracket at anchor 1',
+          reason: 'Needs the bracket at anchor 1',
           escape: 'bed',
           escapeFitBracket: true,
         });
@@ -701,24 +711,45 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
 
   // #1104 — NO DEAD ENDS. An impossible seat is hidden (the block below the ledge step; tape under
   // a round stock); every disabled row carries one action in place; every refusal is a sentence.
-  return out
+  const drive = args.canReachMachine !== false;
+  const rows = out
     .filter((o) => !(o.mount === 'block' && stock.thickness < LEDGE_STEP))
     .filter((o) => !(o.mount === 'bed-tape' && args.round === true))
-    .map((o) => {
+    .map((o): MountOption => {
       if (!o.disabled) return { ...o, action: null };
-      const action =
+      const action: MountOption['action'] =
         o.escape !== null
-          ? { label: 'Change the machine…', kind: 'change-machine' as const }
-          : o.reason === 'not owned'
-            ? { label: 'Add it in Manage › Machine', kind: 'manage-link' as const }
-            : o.reason !== null && o.reason.startsWith('the rotary holds round stock')
-              ? { label: 'Say a rod in the stock step', kind: 'back-to-stock' as const }
-              : o.reason !== null
-                ? { label: 'Back to the stock step', kind: 'back-to-stock' as const }
-                : null;
+          ? drive
+            ? { label: 'Change the machine…', kind: 'change-machine' }
+            : { label: 'in Manage › Machines', kind: 'manage-link' }
+          : o.reason === 'Not in this location’s accessories'
+            ? { label: 'add it in Manage › Machines', kind: 'manage-link' }
+            : { label: 'Back to the stock step', kind: 'back-to-stock' };
       const reason = o.reason === null ? null : o.reason.charAt(0).toUpperCase() + o.reason.slice(1);
       return { ...o, reason, action };
     });
+  // "Tape it" is said only where the tape row is on offer: otherwise the sentence ends at the fact.
+  return bedOffered(rows)
+    ? rows
+    : rows.map((o) => ({
+        ...o,
+        hint: o.hint === null ? null : withoutTapeClause(o.hint),
+        reason: o.reason === null ? null : withoutTapeClause(o.reason),
+      }));
+}
+
+/**
+ * #1104 — IS TAPE ON OFFER? The tape row is present and either usable or one press away. Every
+ * "tape it" phrase in the step is said only when this is true, so no sentence names an option the
+ * state does not offer.
+ */
+export function bedOffered(rows: readonly MountOption[]): boolean {
+  return rows.some((r) => r.mount === 'bed-tape' && (!r.disabled || (r.action ?? null) !== null));
+}
+
+/** A sentence without its tape clause: "…, or tape it to the bed" and "tape it or hold it in the vise". */
+export function withoutTapeClause(text: string): string {
+  return text.replace(', or tape it to the bed', '').replace('tape it or hold it in the vise', 'hold it in the vise');
 }
 
 /**
@@ -869,7 +900,6 @@ function stockClassMatches(expr: string, stock: { thickness: number }, form: Job
       const fits = form === cls || (cls === 'sheet' && (form === 'plate' || form === 'sheet'));
       return fits && stock.thickness <= Number(bounded[2]);
     }
-    if (word === 'tube') return form === 'rod';
     return form === word;
   });
 }

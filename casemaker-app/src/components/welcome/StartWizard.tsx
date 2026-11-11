@@ -251,6 +251,11 @@ function seedFromPending(p: PendingStock): StartStockSeed | undefined {
   };
 }
 
+/** A refusal as a sentence: the reason already ends with its full stop (#1104 item 8); one that does not gets one. */
+function sentence(reason: string): string {
+  return /[.!?]$/.test(reason) ? reason : `${reason}.`;
+}
+
 export function StartWizard(): JSX.Element {
   const closeWizard = useStartWizardStore((s) => s.closeWizard);
   const initialStep = useStartWizardStore((s) => s.initialStep);
@@ -1251,12 +1256,12 @@ export function StartWizard(): JSX.Element {
           )}
           {holdingBlock !== null && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-block">
-              {holdingBlock}.
+              {sentence(holdingBlock)}
             </p>
           )}
           {holdingBlock === null && mountBlocked !== null && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-unblock">
-              {mountBlocked}.
+              {sentence(mountBlocked)}
             </p>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

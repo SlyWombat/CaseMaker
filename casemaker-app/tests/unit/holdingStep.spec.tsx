@@ -188,19 +188,19 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(rowText('ledge')).not.toContain('surface');
   });
 
-  it('shows all six mounts, with each machine-only one’s cost and escape; an unowned fixture says only "not owned"', () => {
+  it('shows all six mounts, with each machine-only one’s cost and escape; an unowned fixture says it is not in the location’s accessories', () => {
     seedLocation(machineWith(BOARDS_AND_TAPE));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
     for (const mount of ['ledge', 'board', 'block', 'bed-tape', 'bed-bracket', 'rotary']) {
       expect(screen.getByTestId(`engrave-setup-mount-row-${mount}`)).toBeTruthy();
     }
-    expect(rowText('bed-tape')).toContain('Needs the vise off the pins');
+    expect(rowText('bed-tape')).toContain('Take the vise off the pins');
     expect(screen.getByTestId('engrave-setup-change-bed-tape')).toBeTruthy();
-    expect(rowText('bed-bracket')).toContain('Needs the vise off the pins');
+    expect(rowText('bed-bracket')).toContain('Take the vise off the pins');
     // The house owns no rotary module: "not owned", and no change to offer for it.
-    expect(rowText('rotary')).toContain('Not owned');
-    expect(rowText('rotary')).not.toContain('Needs');
+    expect(rowText('rotary')).toContain('Not in this location’s accessories');
+    expect(rowText('rotary')).not.toContain('Put the rotary');
     expect(screen.queryByTestId('engrave-setup-change-rotary')).toBeNull();
     // The audit's sentence about a rotary being "asked about here" is gone.
     expect(screen.getByTestId('engrave-setup-step-holding').textContent).not.toMatch(/asked about|not yet offered/i);
@@ -213,7 +213,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     // The recommendation is applied on arrival: a 2 mm sheet on a 2 mm board stands 0.9 mm proud.
     expect(radio('board').checked).toBe(true);
     expect(radio('ledge').disabled).toBe(true);
-    expect(rowText('ledge')).toContain('It would sit 1.1 mm below the jaw tops');
+    expect(rowText('ledge')).toContain('It would sit 1.1 mm below the jaw tops — use the board seat or a thicker board.');
     expect(rowText('board')).toContain('2 mm on a 2 mm board stands 0.9 mm proud of the jaws');
     expect((screen.getByTestId('engrave-setup-sacrificial') as HTMLSelectElement).value).toBe('loc:0');
     const job = useEngraveJobStore.getState().job;
@@ -325,7 +325,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     seedLocation(machineWith(null), [...DOC.accessories, ROTARY]);
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
-    expect(rowText('rotary')).toContain('Needs the rotary on the pins');
+    expect(rowText('rotary')).toContain('Put the rotary on the pins');
     expect(screen.getByTestId('engrave-setup-change-rotary')).toBeTruthy();
     expect(radio('rotary').disabled).toBe(true);
   });
@@ -355,7 +355,7 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
       }
       // The chuck is offered through Change the machine…, because the vise occupies the pins.
       expect(radio('rotary').disabled).toBe(true);
-      expect(rowText('rotary')).toContain('Needs the rotary on the pins');
+      expect(rowText('rotary')).toContain('Put the rotary on the pins');
       expect(screen.getByTestId('engrave-setup-change-rotary')).toBeTruthy();
       // …and the footer's rule matches the rows: Next is disabled, with the one sentence.
       expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(true);
@@ -486,7 +486,7 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     const create = screen.getByTestId('engrave-setup-next') as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-holding-unblock').textContent).toBe(
-      'It would sit 1.6 mm below the jaw tops.',
+      'It would sit 1.6 mm below the jaw tops — use the board seat or a thicker board.',
     );
 
     act(() => {
@@ -673,7 +673,7 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     fireEvent.mouseMove(row);
     expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('bed-tape');
     expect(screen.getByTestId('engrave-setup-holding-note').textContent).toContain(
-      'Needs the vise off the pins',
+      'Take the vise off the pins',
     );
     fireEvent.mouseOut(row);
     expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('ledge');
