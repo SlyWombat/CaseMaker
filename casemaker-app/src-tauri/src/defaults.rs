@@ -1462,8 +1462,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
 pub const PARK_CLEARANCE_MM: f64 = 0.5;
 
 /// The most keys the section holds, and the longest unit. Caps, so a client cannot grow the
-/// document without bound (#416/#417 review).
-pub const MAX_KEYS: usize = 200;
+/// document without bound (#416/#417 review). #1222 raised the key cap from 200 for the five
+/// rotary limits, with headroom for the planner v3 records still to come.
+pub const MAX_KEYS: usize = 256;
 pub const MAX_UNIT: usize = 16;
 
 /// The seed for `key`, if it has one.

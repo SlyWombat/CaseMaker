@@ -763,8 +763,10 @@ export function readMeasured(map: ShopDefaults | null, key: string): { value: nu
 
 /** The whole section: well-formed keys, each value valid, and each known key within its rule. */
 export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superRefine((map, ctx) => {
-  if (Object.keys(map).length > 200) {
-    ctx.addIssue({ code: 'custom', message: 'the shop defaults hold more than 200 keys' });
+  // #1222 — raised from 200 for the five rotary limits (and the planner v3 records still to
+  // come); `defaults.rs` states the same cap.
+  if (Object.keys(map).length > 256) {
+    ctx.addIssue({ code: 'custom', message: 'the shop defaults hold more than 256 keys' });
   }
   // #430 review: the surface band inside the touch cap, as `defaults.rs` checks it.
   const band = map['registration.surfaceBandMm']?.value;
