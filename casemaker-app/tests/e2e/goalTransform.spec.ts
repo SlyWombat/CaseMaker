@@ -77,8 +77,48 @@ function tallJob(): EngraveJob {
   job.labels = [];
   job.shapes = [];
   job.targetObject = target;
-  job.toolKey = 'flat-1.0';
+  // #1195 — THE FREEING CUT NEEDS A STATED FLUTE. The built-in `flat-1.0` states none, so a
+  // 13.12 mm profile is refused by name; this walk's shop holds the same ⌀1 flat with a stated
+  // 20 mm flute (seedGoalShop), which is what lets the turned goal plan.
+  job.toolKey = 'inv:goal-flat-1';
+  // …AND THE NOW-PROVEN FREEING CUT NEEDS ROOM FOR THE SHANK. This goal nearly fills its blank
+  // (the contour runs 0.495 mm from the stock edge), so a 3.175 mm shank reaches into the vise's
+  // jaw — the refusal's own third way out is tape, and the walk is about the transform, not the
+  // vise. The built-in flat-1.0 has the same 3.175 shank; #1195 only made the contour provable.
+  job.workholding = {
+    kind: 'tape',
+    tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'default' },
+  };
   return job;
+}
+
+/** #1195 — the e2e shop's ⌀1 flat, with the length that proves the freeing cut. */
+async function seedGoalShop(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__caseMaker!.seedCutters([
+      {
+        key: 'inv:goal-flat-1',
+        provenance: 'the e2e’s shop — #1195 states the flute so the 13.12 mm profile can be freed',
+        tool: {
+          number: 1,
+          id: 'goal-flat-1-0',
+          name: '1 mm flat end (e2e)',
+          typeText: 'Flat End',
+          shape: 'flat',
+          handleDiameter: 3.175,
+          tipDiameter: 1,
+          diameter: 1,
+          cornerRadius: 0,
+          angle: 0,
+          halfAngle: 0,
+          fluteLength: 20,
+          shoulderLength: 20,
+          stickout: null,
+          centreCutting: null,
+        },
+      },
+    ], []);
+  });
 }
 
 async function openJob(page: Page, job: EngraveJob): Promise<void> {
@@ -117,6 +157,7 @@ function placement(page: Page) {
 
 test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X ring, then Generate', async ({ cm, page }) => {
   await cm.ready();
+  await seedGoalShop(page);
   await openJob(page, tallJob());
 
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
@@ -234,6 +275,7 @@ test('a 75 mm goal on a 43 × 32 blank: Lay it flat, a quarter turn on the X rin
 // the same run as "did not pass". This case is the acceptance for that surface fix.
 test('#949 — the CAM refusal sentence reaches the operator, before any toolpath', async ({ cm, page }) => {
   await cm.ready();
+  await seedGoalShop(page);
   const job = tallJob();
   job.targetObject!.position.x = 36;
   await openJob(page, job);
@@ -266,6 +308,7 @@ test('#949 — the CAM refusal sentence reaches the operator, before any toolpat
 // band is free. No modifier key either way.
 test('#876 — a ring drag in the scale band snaps; the same drag outside it does not', async ({ cm, page }) => {
   await cm.ready();
+  await seedGoalShop(page);
   await openJob(page, tallJob());
   await expect(page.getByTestId('engrave-target-row-0')).toBeVisible();
   // #876 — THE DISCOVERABILITY FIX. A job from a file arrives with its rows closed (#411), and

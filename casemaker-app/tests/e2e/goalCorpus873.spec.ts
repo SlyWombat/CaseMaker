@@ -67,9 +67,42 @@ async function openFold(page: import('@playwright/test').Page, testid: string): 
  * card appears only when every tick passed (the relief). The card's presence is the pass; its
  * absence beside a crossed oracle is the goal check's own failure, not a dead end.
  */
+/**
+ * #1195 — THE FREEING CUT NEEDS A STATED FLUTE. The built-in `flat-1.0` states none, so a deep
+ * profile is refused by name; the e2e shop holds the same ⌀1 flat with a stated 42 mm flute (the
+ * figure's profile is 40.3 mm), which is what lets these goals plan.
+ */
+async function seedGoalShop(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    window.__caseMaker!.seedCutters([
+      {
+        key: 'inv:goal-flat-1',
+        provenance: 'the e2e’s shop — #1195 states the flute so a corpus profile can be freed',
+        tool: {
+          number: 1,
+          id: 'goal-flat-1-0',
+          name: '1 mm flat end (e2e)',
+          typeText: 'Flat End',
+          shape: 'flat',
+          handleDiameter: 3.175,
+          tipDiameter: 1,
+          diameter: 1,
+          cornerRadius: 0,
+          angle: 0,
+          halfAngle: 0,
+          fluteLength: 42,
+          shoulderLength: 42,
+          stickout: null,
+          centreCutting: null,
+        },
+      },
+    ], []);
+  });
+}
+
 async function generateAndRead(page: import('@playwright/test').Page): Promise<'pass' | 'cross'> {
   await openCutterGroup(page);
-  await page.getByTestId('engrave-tool').selectOption('flat-1.0');
+  await page.getByTestId('engrave-tool').selectOption('inv:goal-flat-1');
   await page.getByTestId('engrave-generate').click();
 
   const oracle = page.getByTestId('engrave-run-oracle');
@@ -102,6 +135,7 @@ test.describe('the goal corpus, desktop', () => {
   test.beforeEach(async ({ cm, page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     await cm.ready();
+    await seedGoalShop(page);
   });
 
   test('the figure: picked in the wizard, generated, and the panel states what the top leaves', async ({ page }) => {
@@ -153,7 +187,8 @@ test.describe('the goal corpus, desktop', () => {
     await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
     const cutDetails = page.getByTestId('engrave-cut-details');
     if (!(await cutDetails.evaluate((el) => (el as HTMLDetailsElement).open))) {
-      await cutDetails.locator('summary').click();
+      // #1180 — the fold's OWN summary is the first one (a nested details can add a second).
+      await cutDetails.locator('summary').first().click();
     }
     await expect(cutDetails).toContainText(/The top setup reproduces \d+ % of the goal's surface/);
   });
@@ -173,6 +208,7 @@ test.describe('the goal corpus, phone width', () => {
   test.beforeEach(async ({ cm, page }) => {
     await page.setViewportSize({ width: 400, height: 900 });
     await cm.ready();
+    await seedGoalShop(page);
   });
 
   test('the relief at 400 × 900: the same picker and the same sentence, nothing clipped away', async ({ page }) => {
