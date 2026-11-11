@@ -181,11 +181,16 @@ for (const vp of VIEWPORTS) {
       await expect(makePart).toHaveCount(0);
       await expect(page.getByTestId('start-wizard-operation-next')).toBeDisabled();
 
-      // A picture: read, named, and no part/mould question.
+      // A picture: read, named, and only the PART arm of the question — #1098 items 1-4 gave a
+      // picture its one side ("a picture has only the part, and says why"): the "Make the part"
+      // radio is shown checked, the mould arm is not, and the note says why.
       await surfaceInput.setInputFiles({ name: 'relief.png', mimeType: 'image/png', buffer: await smallPng(page) });
       await expect(page.getByTestId('start-wizard-op-surface-name')).toHaveText('relief.png');
       await expect(page.getByTestId('start-wizard-op-surface-error')).toHaveCount(0);
-      await expect(makePart).toHaveCount(0);
+      await expect(makePart).toBeVisible();
+      await expect(makePart).toBeChecked();
+      await expect(page.getByTestId('start-wizard-op-surface-make-mold')).toHaveCount(0);
+      await expect(page.getByTestId('start-wizard-op-surface-picture-note')).toBeVisible();
 
       // A mesh: the name and its box beside Change, then the part/mould question.
       await surfaceInput.setInputFiles({ name: 'cube.stl', mimeType: 'model/stl', buffer: cubeStl() });
