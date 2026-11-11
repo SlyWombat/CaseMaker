@@ -1798,6 +1798,30 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm"
+    },
+    "registration.vise.placementAcrossJawsMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.vise.placementAlongJawsMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.tape.placementMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.tape.placementRotationDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg"
     }
   },
   "accessories": [

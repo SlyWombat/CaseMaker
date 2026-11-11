@@ -144,6 +144,13 @@ pub const SEEDS: &[(&str, f64, &str)] = &[
     // CHOSEN, not measured; `defaultsClient.ts` states the same 0..=20 mm bounds.
     ("registration.probeFootprintShrinkMm", 3.0, "mm"),
     ("registration.cutterFootprintGrowMm", 1.0, "mm"),
+    // #1199 field 7 (analyst 2026-11-11) - the hold's placement uncertainty, per axis and per hold
+    // kind. CHOSEN, not measured; the bench replaces them with measured spreads. Bounds mirror
+    // `defaultsClient.ts`.
+    ("registration.vise.placementAcrossJawsMm", 0.5, "mm"),
+    ("registration.vise.placementAlongJawsMm", 5.0, "mm"),
+    ("registration.tape.placementMm", 10.0, "mm"),
+    ("registration.tape.placementRotationDeg", 2.0, "deg"),
     // #475 - the surface touches across the cut regions' extents: a centre plus both extents on each
     // axis. CHOSEN, not measured; `defaultsClient.ts` states the same 5..=9 whole-number bound.
     ("registration.surfaceTouchCount", 5.0, "touches"),
@@ -495,6 +502,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("margins.edgeMarginMm", 1.0, "mm", "chosen, not measured: how close an item may come to a stock edge; seeds each new job"),
     ("registration.probeFootprintShrinkMm", 3.0, "mm", "chosen, not measured: the least a probe top touch footprint is shrunk below the blank outline; tip radius plus placement uncertainty may exceed it"),
     ("registration.cutterFootprintGrowMm", 1.0, "mm", "chosen, not measured: how far a cutter region grows beyond the blank outline, on top of its radius"),
+    ("registration.vise.placementAcrossJawsMm", 0.5, "mm", "chosen, not measured: the fixed jaw is a measured datum; allowance for a chip or a blank not fully seated"),
+    ("registration.vise.placementAlongJawsMm", 5.0, "mm", "chosen, not measured: the blank is set by eye against the jaw end or a mark"),
+    ("registration.tape.placementMm", 10.0, "mm", "chosen, not measured: laid by eye, middle of the bed, square to the front edge"),
+    ("registration.tape.placementRotationDeg", 2.0, "deg", "chosen, not measured: by-eye squareness; its corner shift is added to the inset"),
     ("margins.jawClearanceMm", 1.0, "mm", "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"),
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
@@ -790,6 +801,18 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.0..=20.0).contains(&v)),
             "0 to 20 mm",
         )),
+        "registration.vise.placementAcrossJawsMm" => {
+            Some(need(n.is_some_and(|v| (0.01..=5.0).contains(&v)), "0.01 to 5 mm"))
+        }
+        "registration.vise.placementAlongJawsMm" => {
+            Some(need(n.is_some_and(|v| (0.01..=20.0).contains(&v)), "0.01 to 20 mm"))
+        }
+        "registration.tape.placementMm" => {
+            Some(need(n.is_some_and(|v| (0.1..=30.0).contains(&v)), "0.1 to 30 mm"))
+        }
+        "registration.tape.placementRotationDeg" => {
+            Some(need(n.is_some_and(|v| (0.0..=10.0).contains(&v)), "0 to 10 degrees"))
+        }
         "registration.surfaceSeekMm" => Some(need(
             n.is_some_and(|v| (1.0..=100.0).contains(&v)),
             "1 to 100 mm",

@@ -59,6 +59,8 @@ function bracketPlan(
       mountObstacles: [],
       mountTap: null,
       probe: null,
+      // #1199 field 7 — the hold's placement figures the planner now requires.
+      holdUncertainty: { xMm: 0, yMm: 0 },
       ...planInput,
     },
     S,
@@ -226,6 +228,8 @@ describe('#1189 the probe seating shift', () => {
         surfaceTopZ: { value: TOP, probeRefZ: REF_THEN + 0.3 },
         probe: null,
         mountTap: null,
+        // #1199 field 7 — the hold's placement figures.
+        holdUncertainty: { xMm: 0, yMm: 0 },
         cutCentre: { x: 50, y: 30 },
       },
       S,
@@ -383,7 +387,7 @@ describe('#1179 amendment — above-band readings at a check point', () => {
 
   it('the first three candidates are inset from the edges and not the three corners', () => {
     const raster = { xMin: 0, yMin: 0, xMax: 100, yMax: 60, pitchMm: 1, nx: 100, ny: 60 };
-    const { points } = cutBlankCandidates({
+    const { points } = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster,
       programs: [],
       probe: { tipRadiusMm: 0.7, tipLengthMm: null, bodyDiameterMm: null },

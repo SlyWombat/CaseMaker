@@ -44,6 +44,8 @@ function visePlan(): RegistrationPlan {
       expectedSurface: { machineZ: 0, from: 'test' },
       seekFromMachineZ: 20,
       fixtureBelowSurfaceMm: 3,
+      // #1199 field 7 — the hold's placement figures the planner now requires.
+      holdUncertainty: { xMm: 0, yMm: 0 },
     },
     S,
   );
@@ -121,6 +123,8 @@ describe('the registration band (§5.4/§5.7)', () => {
         expectedSurface: { machineZ: 0, from: 'test' },
         seekFromMachineZ: 20,
         fixtureBelowSurfaceMm: 3,
+        // #1199 field 7 — the hold's placement figures the planner now requires.
+        holdUncertainty: { xMm: 0, yMm: 0 },
         openings: [{ itemId: 'bore', name: 'the bore', min: [30, 20], max: [50, 40], depth: 5 }],
       },
       S,
@@ -154,6 +158,8 @@ describe('the registration band (§5.4/§5.7)', () => {
         expectedSurface: { machineZ: 0, from: 'test' },
         seekFromMachineZ: 20,
         fixtureBelowSurfaceMm: 3,
+        // #1199 field 7 — the hold's placement figures the planner now requires.
+        holdUncertainty: { xMm: 0, yMm: 0 },
       },
       S,
     );

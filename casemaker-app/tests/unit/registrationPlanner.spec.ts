@@ -57,6 +57,9 @@ function input(mount: 'vise' | 'tape' | 'bracket' = 'vise', over: Partial<PlanIn
     fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
     bracketOrigin: mount === 'bracket' ? { x: G54.x, y: G54.y, from: 'anchor1 + (0, 0)', offsetMeasured: true } : undefined,
     mountObstacles: mount === 'bracket' ? [] : undefined,
+    // #1199 field 7 — the hold's placement figures the planner now requires; the badge blank's
+    // historical 3 mm floor came from the registry, and the hold sat where the plan says.
+    holdUncertainty: { xMm: 0, yMm: 0 },
     ...over,
   };
 }

@@ -43,6 +43,7 @@ import { PARK_CLEARANCE_MM } from '@/platform/defaultsClient';
 import { PROBE_RESIDUAL_MM } from '@/engine/cnc/probePlan';
 import type { SetupFlip } from '@/types/engraveJob';
 import { settingsProblem, type RegistrationSettings } from './settings';
+import { topTouchEdgeMarginsMm } from './cutBlank';
 import { planFootprintRegistration } from './footprint';
 import { centrePair } from './centreFind';
 import { MIN_SIDE_DEPTH_MM, SIDE_TOUCH_JAW_MARGIN_MM, sideTouchAllowed, sideTouchSelected, type SideTouchSubject } from './probe3d';
@@ -318,6 +319,8 @@ export interface PlanInput {
    * seek accepts a surface up to `jawTop + thickness + tolerance`. Absent on the legacy seat path.
    */
   stockThicknessMm?: number;
+  /** #1199 field 7 — the hold's placement uncertainty this plan was built with (see the plan). */
+  holdUncertainty?: HoldPlacementUncertainty;
   /**
    * #1189 — THE PROBE REFERENCE the expected surface was computed from (its datum's `probeRefZ`).
    * The plan is built before the probe's `M491`; the executor shifts the expected top and every
@@ -381,6 +384,48 @@ export interface PlanObstacle {
   topZ: number;
 }
 
+/** #1199 field 7 — the hold's placement uncertainty, per plan axis, mm (`analyst 2026-11-11`). */
+export interface HoldPlacementUncertainty {
+  xMm: number;
+  yMm: number;
+  /** Tape without a fence only: the by-eye rotation whose corner shift is already added to x/y. */
+  rotationDeg?: number;
+}
+
+/**
+ * #1199 field 7 — THE HOLD'S PLACEMENT UNCERTAINTY, resolved from the hold's own numbers (analyst
+ * 2026-11-11): a vise's across/along terms (0.5 / 5 mm), a bare tape's by-eye figure (10 mm both
+ * axes) plus its rotation's corner shift (half-diagonal × sin angle), a bracket's fit. `null` when
+ * the hold states no figure — the plan then carries none and its consumers refuse.
+ */
+export function holdUncertaintyFor(input: {
+  mount: Mount;
+  settings: Pick<RegistrationSettings, 'visePlacementAcrossJawsMm' | 'visePlacementAlongJawsMm' | 'tapePlacementMm' | 'tapePlacementRotationDeg'>;
+  stock: ExpectedStock;
+  /** The bracket's own fit, from `bracketSettings(...)`; required for a bracket plan. */
+  bracketFitMm?: number | null;
+}): HoldPlacementUncertainty | null {
+  if (input.mount === 'bracket') {
+    const fit = input.bracketFitMm;
+    return fit === undefined || fit === null || !Number.isFinite(fit) ? null : { xMm: fit, yMm: fit };
+  }
+  if (input.mount === 'vise') {
+    const across = input.settings.visePlacementAcrossJawsMm;
+    const along = input.settings.visePlacementAlongJawsMm;
+    if (across === undefined || along === undefined) return null;
+    return { xMm: across, yMm: along };
+  }
+  // TODO(#1102): a tape hold is treated as UN-FENCED until #1102 adds the fence record; when it
+  // lands, the fenced edges take the bracket's fit and the free ones this figure.
+  const placement = input.settings.tapePlacementMm;
+  const rotationDeg = input.settings.tapePlacementRotationDeg;
+  if (placement === undefined || rotationDeg === undefined) return null;
+  const halfDiagonal = Math.hypot(input.stock.xMax - input.stock.xMin, input.stock.yMax - input.stock.yMin) / 2;
+  const cornerShift = halfDiagonal * Math.sin((rotationDeg * Math.PI) / 180);
+  const tape = placement + cornerShift;
+  return { xMm: tape, yMm: tape, rotationDeg };
+}
+
 export interface RegistrationPlan {
   mount: Mount;
   stock: ExpectedStock;
@@ -431,6 +476,13 @@ export interface RegistrationPlan {
    * choice; the run's note carries the sentence.
    */
   surfaceChecksProbeNote?: string;
+  /**
+   * #1199 field 7 — HOW SURELY THIS HOLD PLACES THE BLANK, in PLAN AXES, mm. The planner fills it
+   * from the hold's own source (a vise's across/along terms, a bare tape's by-eye figure plus its
+   * rotation's corner shift, a bracket's fit); ABSENT means the app does not know, and a consumer
+   * that needs it refuses rather than assuming 0.
+   */
+  holdUncertainty?: HoldPlacementUncertainty;
   /**
    * #1199 — THE MACHINE'S OWN TRAVEL HEIGHT this plan was built against (`toolChange.clearanceZ`),
    * carried SEPARATELY from {@link RegistrationPlan.seek}: the executor's guard is built from THIS,
@@ -620,23 +672,33 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   }
 
   const surfacePoint = input.cutCentre ?? { x: (stock.xMin + stock.xMax) / 2, y: (stock.yMin + stock.yMax) / 2 };
-  // #1200 — A TOP TOUCH KEEPS THE UNIT'S LATERAL UNCERTAINTY PLUS THE TIP RADIUS CLEAR OF EVERY
-  // EDGE: near an edge the ball can meet the roll-off instead of the flat top and read low, and an
-  // off-axis tip (a bent stylus) turns that into an error. The old inset (a millimetre, or the
-  // corner radius) still applies on top.
+  // #1199 field 7 — THE SAME INSET THE GUARD USES, per axis: the top touch keeps the unit's lateral
+  // uncertainty, the tip radius and the HOLD's placement uncertainty on that axis clear of the
+  // edge, floored by the registry shrink; the corner radius is an extra term. A plan with no hold
+  // figure cannot place a touch and refuses (above).
   const lateralSigma = probe?.tipLateralUncertaintyMm ?? 0;
-  const topTouchInset = Math.max(1, stock.cornerRadius, s.tipRadiusMm + lateralSigma);
+  const hold = input.holdUncertainty;
+  const floorMm = s.probeFootprintShrinkMm;
+  if (hold === undefined || floorMm === undefined) {
+    return { ok: false, reason: 'the hold’s placement uncertainty is not stated, so the top touch’s distance from the edge cannot be proven — state the hold’s placement figures' };
+  }
+  const margins = topTouchEdgeMarginsMm(
+    { tipRadiusMm: s.tipRadiusMm, tipLateralUncertaintyMm: lateralSigma },
+    { floorMm, hold },
+  );
+  const insetX = Math.max(stock.cornerRadius, margins.xMm);
+  const insetY = Math.max(stock.cornerRadius, margins.yMm);
   if (
-    surfacePoint.x < stock.xMin + topTouchInset ||
-    surfacePoint.x > stock.xMax - topTouchInset ||
-    surfacePoint.y < stock.yMin + topTouchInset ||
-    surfacePoint.y > stock.yMax - topTouchInset
+    surfacePoint.x < stock.xMin + insetX ||
+    surfacePoint.x > stock.xMax - insetX ||
+    surfacePoint.y < stock.yMin + insetY ||
+    surfacePoint.y > stock.yMax - insetY
   ) {
     return {
       ok: false,
       reason:
-        `the surface touch point is not well inside the stock: a top touch keeps ${r3(topTouchInset)} mm clear of every edge ` +
-        `(the tip's ${r3(s.tipRadiusMm)} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''})`,
+        `the surface touch point is not well inside the stock: a top touch keeps ${r3(insetX)} mm clear in X and ${r3(insetY)} mm in Y ` +
+        `(the tip's ${r3(s.tipRadiusMm)} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''}, the hold's placement and the registry floor)`,
     };
   }
 
@@ -689,6 +751,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         mount,
         stock,
         stockThicknessMm: input.stockThicknessMm,
+        ...(input.holdUncertainty === undefined ? {} : { holdUncertainty: input.holdUncertainty }),
         ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
         ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
         ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
@@ -948,6 +1011,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       // #525 — present only on a corner plan, so every other plan's record is unchanged.
       ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
       stockThicknessMm: input.stockThicknessMm,
+      ...(input.holdUncertainty === undefined ? {} : { holdUncertainty: input.holdUncertainty }),
       ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
       ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
       ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
