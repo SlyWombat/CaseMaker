@@ -1700,6 +1700,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(footprint === undefined ? {} : { footprint }),
         ...(seatSeek === undefined ? {} : { seatSeek }),
         efficiencyThresholds: efficiencyThresholds(shopDefaults),
+        tapeStripCount: readDefault(shopDefaults, 'tape.stripCount').value,
         // #1089 — THE IDEAL-VS-OWNED LINE beside the cutter: the same statement the receipt
         // carries, or none when this run had nothing to compare.
         ...(comparison === null ? {} : { comparison }),

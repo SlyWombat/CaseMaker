@@ -2623,6 +2623,8 @@ export function EngravePanel(): JSX.Element {
           blankToleranceMm: shopDefault('runSheet.blankToleranceMm').value,
           // #926 — the air-time threshold the sheet judges a program against.
           efficiencyThresholds: efficiencyThresholds(shopDefaults),
+          // #1102 — the fence sentence names the shop's strip count.
+          tapeStripCount: readDefault(shopDefaults, 'tape.stripCount').value,
           // #1068 — THE FIXTURE THIS RUN WAS SWEPT AGAINST, so §8 names the bracket's arms, the
           // job's clamps and its own obstacle boxes instead of the vise's jaws. A vise job keeps
           // the sheet's own vise derivation (absent); a tape job states that nothing is modelled.

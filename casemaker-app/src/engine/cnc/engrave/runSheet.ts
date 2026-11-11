@@ -10,7 +10,7 @@ import {
   type RapidEstimate,
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
-import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { itemLabel, jobFence, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #1193 — the run's own cycle (every posted program) rides the generated result.
 import type { RunCycle } from '@/engine/cnc/engrave/runTotals';
 import {
@@ -131,7 +131,7 @@ import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import type { RotarySheetDatum } from '@/engine/cnc/rotary/sheetDatum';
 import { orient } from '@/engine/cnc/setups/orient';
 import { turnWords } from '@/engine/cnc/setups/remount';
-import type { EngraveFrameShape, EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
+import type { BracketHold, EngraveFrameShape, EngraveJob, EngraveMargins, JobStockFinish, ViseParams } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
 /**
@@ -2626,6 +2626,12 @@ export interface RunSheetOptions {
    */
   scan?: MaterialScanSettings;
   /**
+   * #1102 — how many strips of tape go under a blank, the shop's `tape.stripCount`. Passed in,
+   * never read here (this module is in the sim worker's import graph). Absent: the fence sentence
+   * leaves the count out rather than inventing one.
+   */
+  tapeStripCount?: number;
+  /**
    * #1070 — THE BED-HELD FOOTPRINT PLAN, when the caller has one (the Cut step's attempt, or the
    * CLI's own seam): §6 prints the cut region's six scans and four corner Z touches with their
    * machine coordinates instead of the blank's edge touches. Passed in, never read here — the plan
@@ -4981,7 +4987,29 @@ export function buildRunSheet(
   // program had been swept against no fixture at all — the CLI half of the same defect).
   const mount = jobMount(job);
   const tape = job.workholding.kind === 'tape' ? job.workholding.tape : null;
-  const bracket = job.workholding.kind === 'bracket' ? job.workholding.bracket : null;
+  // #1102 — A TAPED BLANK LOCATED AGAINST THE BRACKET (tape + fence) is the bracket's mount with no
+  // clamps (`jobMount` resolves it so): its anchor, placement and boxes are the fence's. The tape
+  // holds it; the sheet states that once, in `fenceSentence` below.
+  const fence = jobFence(job);
+  const bracket: BracketHold | null =
+    job.workholding.kind === 'bracket'
+      ? job.workholding.bracket
+      : fence === null || tape === null
+        ? null
+        : {
+            anchor: fence.anchor,
+            ...(fence.placement === undefined ? {} : { placement: fence.placement }),
+            variant: fence.variant,
+            clamps: [],
+            ...(fence.obstacles === undefined ? {} : { obstacles: fence.obstacles }),
+            source: tape.source,
+          };
+  const fenceSentence =
+    fence === null || tape === null
+      ? null
+      : `Taped to the bed — ${
+          options.tapeStripCount === undefined ? 'the' : `${options.tapeStripCount} strip${options.tapeStripCount === 1 ? '' : 's'} of the`
+        } ${fmtNum(tape.width)} mm tape, ${fmtNum(tape.inset)} mm in from every edge; pushed into the bracket’s corner at anchor ${fence.anchor}.`;
   // #717 — Makera's low-profile-vise page, in its own order: home, tool out, power off at the
   // machine's switch, the board off, the pins, the jaw off for the six screws, the jaw back on
   // with its locating key seated. The fixed jaw is on the left.
@@ -5019,6 +5047,7 @@ export function buildRunSheet(
                 ? `The bracket is pinned at anchor ${bracket?.anchor ?? 1} through the wasteboard with its two 4 mm dowels and screwed down; the wasteboard stays.`
                 : `Remove the MDF wasteboard. Pin the bracket to the bed at anchor ${bracket?.anchor ?? 1} with two 4 mm locating dowels and three M5 × 20 screws.`,
           },
+          ...(fenceSentence === null ? [] : [{ text: fenceSentence }]),
           { text: 'Switch the machine on.' },
         ];
   // #707 §5 — tape-down: the strips inside the blank's edges and the blank pressed flat.
@@ -5124,7 +5153,7 @@ export function buildRunSheet(
                 } as RunSheetStep,
               ]
             : []),
-          ...(bracket === null || bracket.clamps.length === 0
+          ...((bracket === null || bracket.clamps.length === 0) && !(fence !== null && under?.attach !== 'tape')
             ? // #943 (10) — the vendor's own side-2 hold: the bracket is the fence, the tape is
               // what keeps the part down.
               [
@@ -5135,7 +5164,7 @@ export function buildRunSheet(
                     'corner, as Makera does.',
                 } as RunSheetStep,
               ]
-            : bracket.clamps.map(
+            : (bracket?.clamps ?? []).map(
                 (p, i): RunSheetStep => {
                   // #1070 — ONE PLACE, ONE SENTENCE. The verifier's warning words this clamp with
                   // `clampLabel` (near edge, from the corner); the sheet used to name the centre
