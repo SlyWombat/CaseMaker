@@ -39,7 +39,7 @@ import {
 } from '@/components/welcome/holdingMounts';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
-import { defaultSetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { defaultRotaryChuck, defaultSetupAnswers } from '@/engine/cnc/engrave/setupFlow';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { resetMachineChange, useMachineChangeStore } from '@/store/machineChangeStore';
@@ -332,6 +332,21 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(radio('rotary').disabled).toBe(true);
   });
 
+  it('a rod answer with the rotary off the pins: the chuck row is selected, disabled, and offers Change the machine…', () => {
+    seedLocation(machineWith(null), [...DOC.accessories, ROTARY]);
+    const job = dj({ length: 20, width: 20, thickness: 100, shape: 'cylinder', diameter: 20 });
+    job.workholding = { kind: 'rotary-chuck', rotary: defaultRotaryChuck(job, 20) };
+    openHolding(job);
+
+    // The job's answer IS the chuck: the row is selected even though the machine cannot honour it.
+    expect(radio('rotary').checked).toBe(true);
+    expect(radio('rotary').disabled).toBe(true);
+    expect(rowText('rotary')).toContain('Put the rotary on the pins');
+    expect(screen.getByTestId('engrave-setup-change-rotary')).toBeTruthy();
+    // And the wizard will not leave held in it: Next is blocked with the row's own reason.
+    expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   // #713 review — step 2 no longer blocks a long rod, so Holding is where a rod that cannot stand
   // in the jaws is caught: no vise seat takes it, and the wizard will not let the job leave held in
   // one.
@@ -487,7 +502,9 @@ describe('#684 — a saved setup is the operator’s, not the stock’s recommen
     openHolding({ ...job, workholding: { kind: 'vise', vise: saved } });
 
     expect(radio('ledge').disabled).toBe(true);
-    expect(radio('ledge').checked).toBe(false);
+    // #1107 item 5 — the job's own mount stays SELECTED when the machine cannot honour it; the
+    // reason and the blocked Create are how it is refused, not a missing selection.
+    expect(radio('ledge').checked).toBe(true);
     const create = screen.getByTestId('engrave-setup-next') as HTMLButtonElement;
     expect(create.disabled).toBe(true);
     expect(screen.getByTestId('start-wizard-holding-unblock').textContent).toBe(

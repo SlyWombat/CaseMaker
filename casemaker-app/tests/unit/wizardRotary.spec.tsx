@@ -77,6 +77,39 @@ describe('#1107 — the question step knows the rotary', () => {
     );
   });
 
+  it("a sign's text is kept when Name on a dowel is picked", () => {
+    renderStep();
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
+    fireEvent.click(screen.getByTestId('start-wizard-rotary-intent-dowel'));
+    // The rod's engrave field carries the sign card's own text; nothing was retyped.
+    expect((screen.getByTestId('start-wizard-op-text') as HTMLInputElement).value).toBe('Hello');
+  });
+
+  it('a cut-out card dropped for a rod intent is named', () => {
+    renderStep();
+    fireEvent.click(screen.getByTestId('start-wizard-preset-cutout'));
+    fireEvent.click(screen.getByTestId('start-wizard-rotary-intent-dowel'));
+    expect(screen.getByTestId('start-wizard-rotary-dropped').textContent).toBe(
+      'Cut out a shape is a flat-stock operation — on a rod, choose again.',
+    );
+  });
+
+  it('after a rod intent the flat cards are still there, and picking one names the dropped rod pick', () => {
+    renderStep();
+    fireEvent.click(screen.getByTestId('start-wizard-rotary-intent-faces'));
+    // Item 2 — the way back is always on screen: the zone and the cards stay.
+    expect(screen.getByTestId('start-wizard-presets')).toBeDefined();
+    expect(screen.getByTestId('start-wizard-drop-zone')).toBeDefined();
+    // The rotary chips are in the Something else… fold, not the whole face of the step.
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
+    expect(screen.getByTestId('start-wizard-op-rotary-flat')).toBeDefined();
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    expect(screen.getByTestId('start-wizard-rotary-dropped').textContent).toBe(
+      'Faces all round is a rod operation — on flat stock, choose again.',
+    );
+  });
+
   it('the relief intent states the depth limit plainly until the #1164 fix', () => {
     renderStep();
     fireEvent.click(screen.getByTestId('start-wizard-rotary-intent-relief'));

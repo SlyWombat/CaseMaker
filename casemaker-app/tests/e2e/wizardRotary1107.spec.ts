@@ -11,6 +11,7 @@ import type { Page } from '@playwright/test';
 
 import { MachineRecordSchema, type FixtureRecord } from '@/platform/locationClient';
 import { test, expect } from './fixtures/caseMaker';
+import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(240_000);
 
@@ -119,6 +120,8 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
   await expect(page.getByTestId('start-wizard-rotary-intents')).toBeVisible();
   // The folded list: the rod cards sit in the SAME question as the eight flat intents.
   await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
+  // #1107 item 6 — step 2 WITH the rotary, pinned.
+  await expect(page.getByTestId('engrave-setup-step-what')).toHaveScreenshot('step2-with-rotary.png');
   await page.screenshot({ path: 'test-results/1107-question-folded-cards.png' });
   await page.getByTestId('start-wizard-rotary-intent-dowel').click();
   await page.getByTestId('start-wizard-op-text').fill('Hello');
@@ -143,4 +146,18 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
   await expect(page.getByTestId('engrave-stock-line')).toContainText('20');
   await page.screenshot({ path: 'test-results/1107-rotary-job.png' });
+});
+
+// #1107 item 6 — the other half of the baseline: a house with NO rotary never sees the rod intents.
+test('#1107 — step 2 without the rotary: no rod intents, and the step pinned', async ({ cm, page }) => {
+  await serveHouse(page, { location: locationView(locationDocument()), fromSharedDocument: true });
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await expect(page.getByTestId('start-wizard')).toBeVisible();
+  await page.getByTestId('start-wizard-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
+
+  await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-rotary-intents')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-setup-step-what')).toHaveScreenshot('step2-without-rotary.png');
 });

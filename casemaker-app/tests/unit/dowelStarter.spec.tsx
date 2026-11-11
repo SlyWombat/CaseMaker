@@ -152,8 +152,13 @@ describe('#1107 — the dowel starter', () => {
     const job = useEngraveJobStore.getState().job;
     expect(job.stock.shape).toBe('cylinder');
     expect(job.workholding.kind).toBe('rotary-chuck');
+    // #1107 item 3 — exactly ONE text item, and it is laid ALONG the rod. The choice's `reads` is
+    // applied by the layout; a label has no reads field, so the along direction is pinned by its
+    // zero rotation (an `around` line is turned 90° onto the map's other axis).
+    expect(job.labels).toHaveLength(1);
     const label = job.labels.find((l) => l.text === 'Hello');
     expect(label).toBeDefined();
     expect(label!.size).toBeGreaterThan(0);
+    expect(label!.rotation).toBe(0);
   });
 });
