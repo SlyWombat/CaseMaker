@@ -238,6 +238,9 @@ export function holdWordsForMount(
   hold: StockHold,
   part: PartDims,
 ): string {
+  // #1101 item 3 — a rod in the chuck has ONE axis: the chuck decides, so there are no hold words
+  // (and no hold cards) to say.
+  if (mechanism === 'rotary') return '';
   if (mechanism !== 'bed') return holdWordsFor(form, hold, part);
   if (form === 'rod' || form === 'tube') {
     if (hold.z === 'length') return 'standing on its end';
@@ -263,11 +266,16 @@ function axisLong(axis: PartAxis): string {
 }
 
 /** A rod's or disc's hold also names its cut face, which the permutation alone does not say. */
-export function holdCutFaceWords(form: JobStockForm, hold: StockHold): string {
+export function holdCutFaceWords(
+  form: JobStockForm,
+  hold: StockHold,
+  /** #1101 item 2 — whose page the words are on: a bed job does not lie across any jaw. */
+  mechanism: 'vise' | 'bed' | 'rotary' = 'vise',
+): string {
   if (form === 'rod' || form === 'tube') {
     if (hold.z === 'length') return 'cut on the ⌀ end face';
     if (hold.x === 'length') return 'cut on the curved side, the crest on top';
-    return 'cut on the curved side, lying across the jaws';
+    return mechanism === 'bed' ? 'cut on the curved side, lying on the bed' : 'cut on the curved side, lying across the jaws';
   }
   if (form === 'disc') return hold.z === 'thickness' ? 'cut on its flat face' : 'cut on its edge';
   return 'cut on its top face';

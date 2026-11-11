@@ -135,6 +135,15 @@ import type { WorkFacts } from './workFacts';
 import { Explain } from './Explain';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
+/** #1101 item 6 — a rotary landmark card (text only: a rod has no face to draw). */
+const LANDMARK_CARD: CSSProperties = {
+  display: 'grid',
+  gap: 2,
+  padding: 8,
+  border: '1px solid #2a2f36',
+  borderRadius: 4,
+  background: '#10151b',
+};
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, margin: '2px 0' };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
@@ -739,10 +748,13 @@ function OrientationPicture({
   landmark,
   stock,
   faceWord,
+  mechanism,
 }: {
   landmark: OrientationLandmark;
   stock: { length: number; width: number; thickness: number };
   faceWord: string;
+  /** #1101 item 1 — a bed job has no fixed jaw: the picture names edges, not jaws. */
+  mechanism: 'vise' | 'bed';
 }): JSX.Element {
   const view = { w: 120, h: 86 } as const;
   const svgStyle = {
@@ -753,11 +765,15 @@ function OrientationPicture({
     background: '#10151b',
   } as const;
   const caption =
-    landmark === 'face-up'
-      ? `Side view: the ${faceWord} is on top, where the cutter reaches it.`
-      : landmark === 'fixed-jaw'
-        ? 'Top view: the fixed jaw is on the left, and the stock’s left edge is flat against it.'
-        : 'Top view: the fixed jaw is on the left; the stock’s front edge is at the bottom, nearest you.';
+    mechanism === 'bed'
+      ? landmark === 'face-up'
+        ? 'Side view: the blank lies on the bed.'
+        : 'Top view: the blank’s left edge is on the left, the front edge nearest you.'
+      : landmark === 'face-up'
+        ? `Side view: the ${faceWord} is on top, where the cutter reaches it.`
+        : landmark === 'fixed-jaw'
+          ? 'Top view: the fixed jaw is on the left, and the stock’s left edge is flat against it.'
+          : 'Top view: the fixed jaw is on the left; the stock’s front edge is at the bottom, nearest you.';
 
   if (landmark === 'face-up') {
     // A SIDE view: the printed/finished layer is the top of the stock, and the cutter is above it.
@@ -821,10 +837,15 @@ function OrientationPicture({
   const jawLabel = { ...SVG_MUTED, fontSize: 8 } as const;
   const scene = (
     <>
-      <rect data-role="fixed-jaw" x={start} y={y} width="16" height={h} fill={FIXTURE_EDGE} />
-      <text x={start + 8} y="7" textAnchor="middle" {...jawLabel}>
-        fixed jaw
-      </text>
+      {/* #1101 item 1 — on the bed there is no fixed jaw to draw or name; nothing else moves. */}
+      {mechanism === 'vise' && (
+        <>
+          <rect data-role="fixed-jaw" x={start} y={y} width="16" height={h} fill={FIXTURE_EDGE} />
+          <text x={start + 8} y="7" textAnchor="middle" {...jawLabel}>
+            fixed jaw
+          </text>
+        </>
+      )}
       <rect
         data-role="stock"
         x={stockX}
@@ -1482,6 +1503,12 @@ export interface HoldingStepProps {
   onMountBlocked?: (reason: string | null) => void;
   /** #1099 — the part drawn in the blank's top view, so every step shows the same work. */
   part?: PartFootprint | null;
+  /**
+   * #1101 item 6 — the rotary fold's "Text reads" card: the answer the question step holds for a
+   * text operation on the rod, or null when this job's operation is not a text one.
+   */
+  reads?: 'along' | 'around' | null;
+  onReads?: (reads: 'along' | 'around') => void;
 }
 
 /** The answers with a board under the part, or none — the bed's own field, as the design writes it. */
@@ -1617,7 +1644,7 @@ function HoldChoice({
                 }
               />
               <b style={{ fontSize: 11 }}>{holdWordsForMount(mechanism, form, hold, part)}</b>
-              <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold)}</span>
+              <span style={{ ...MUTED, fontSize: 10, margin: 0 }}>{holdCutFaceWords(form, hold, mechanism)}</span>
             </button>
           );
         })}
@@ -1653,6 +1680,8 @@ export function HoldingStep({
   onMoveItemsToTop,
   onMountBlocked,
   part = null,
+  reads = null,
+  onReads,
 }: HoldingStepProps): JSX.Element {
   const location = useLocationStore((s) => s.location);
   // #730 — the JOB's machine (its `machineId` names a profile id), not the house's first: the
@@ -2093,7 +2122,7 @@ export function HoldingStep({
               },
           {
             key: 'nearest',
-            label: 'Nearest you',
+            label: 'Front edge nearest you',
             caption: 'The front edge is closest to you, at the bottom of the top view.',
           },
         ]
@@ -2794,7 +2823,11 @@ export function HoldingStep({
                 onBackToStock={onBackToStock}
                 // #1103 — the recommendation's reason sits under the recommended row, and a seat the
                 // rule refused says why on its own row.
-                recommendation={seatChoice.reason !== null && option.mount === seatChoice.mount ? seatChoice.reason : null}
+                recommendation={
+                  mechanismOf(current) === 'vise' && seatChoice.reason !== null && option.mount === seatChoice.mount
+                    ? seatChoice.reason
+                    : null
+                }
                 refusal={seatChoice.refused.find((r) => r.mount === option.mount)?.text ?? null}
                 onMachineChange={() => {
                   if (option.escape !== null) {
@@ -2864,11 +2897,44 @@ export function HoldingStep({
               Which way round{current === 'rotary' ? '' : ` — ${holdSummary} · change`}
             </summary>
             {current === 'rotary' ? (
-              // #714 — a round rod has no face or edge to square; the only landmark is its ends,
-              // and either end will do unless they differ (design §3.4).
-              <ul style={{ ...MUTED, margin: '4px 0 0 18px', padding: 0 }}>
-                <li>Either end — unless the ends differ: a printed rod's layers, a tube's chamfer.</li>
-              </ul>
+              // #1101 item 6 — a rod in the chuck is located by the chuck itself: two text cards,
+              // no picture, and the reading direction the question step already holds.
+              <div data-testid="engrave-setup-rotary-landmarks" style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+                <div data-testid="engrave-setup-rotary-chuck-end" style={LANDMARK_CARD}>
+                  <b style={{ fontSize: 12, color: '#d1d5db' }}>Chuck end</b>
+                  <span style={{ ...MUTED, margin: 0 }}>The end in the jaws is on the left.</span>
+                  <span style={{ ...MUTED, margin: 0 }}>
+                    Either end will do — unless the ends differ: a printed rod&rsquo;s layers, a tube&rsquo;s chamfer.
+                  </span>
+                </div>
+                {reads !== null && (
+                  <div data-testid="engrave-setup-rotary-reads" style={LANDMARK_CARD}>
+                    <b style={{ fontSize: 12, color: '#d1d5db' }}>Text reads</b>
+                    <div role="radiogroup" aria-label="Text reads" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}>
+                      <label style={FIELD_LABEL}>
+                        <input
+                          type="radio"
+                          name="holding-rotary-reads"
+                          checked={reads === 'along'}
+                          data-testid="engrave-setup-rotary-reads-along"
+                          onChange={() => onReads?.('along')}
+                        />
+                        <span>along the rod</span>
+                      </label>
+                      <label style={FIELD_LABEL}>
+                        <input
+                          type="radio"
+                          name="holding-rotary-reads"
+                          checked={reads === 'around'}
+                          data-testid="engrave-setup-rotary-reads-around"
+                          onChange={() => onReads?.('around')}
+                        />
+                        <span>around the rod</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <HoldChoice
@@ -2897,7 +2963,12 @@ export function HoldingStep({
                         margin: 0,
                       }}
                     >
-                      <OrientationPicture landmark={card.key} stock={answers.stock} faceWord={faceWord} />
+                      <OrientationPicture
+                        landmark={card.key}
+                        stock={answers.stock}
+                        faceWord={faceWord}
+                        mechanism={mechanismOf(current) === 'bed' ? 'bed' : 'vise'}
+                      />
                       <figcaption style={{ display: 'grid', gap: 2, minWidth: 0 }}>
                         <b
                           data-testid={`engrave-setup-orientation-label-${card.key}`}
