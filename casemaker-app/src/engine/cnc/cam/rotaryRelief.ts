@@ -406,6 +406,7 @@ function aSweepRoughing(
       const x = x0 + i * pitch;
       let open = false;
       let prevY = 0;
+      let lastTip = 0;
       for (let j = 0; j <= ny; j++) {
         // One full turn: after ny cells the seam cell closes the loop.
         const jj = j % ny;
@@ -424,9 +425,23 @@ function aSweepRoughing(
             moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
             open = true;
           } else {
-            moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+            // #1164 — THE SEGMENT HOLDS THE HIGHER OF ITS TWO ROWS' CLAMPS. The tip field
+            // evaluated the ROW centres; a single feed from one row's tip to the next ran the ball
+            // between them at an interpolated radius, which could sit below the clamp the material
+            // between the rows needs (the giraffe's 0.512 mm at one repeated pose). Lift to the
+            // higher clamp first, TRAVERSE at it, then settle onto the row's own tip — the segment
+            // can then never cut below either endpoint's clamp.
+            const hold = Math.max(tip, lastTip);
+            if (hold > lastTip + 1e-9) moves.push({ kind: 'feed', x, y: prevY, z: hold, f: feeds.feed });
+            if (hold > tip + 1e-9) {
+              moves.push({ kind: 'feed', x, y, z: hold, f: feeds.feed });
+              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
+            } else {
+              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+            }
           }
           prevY = y;
+          lastTip = tip;
         } else if (open) {
           retract(x, prevY);
           open = false;
