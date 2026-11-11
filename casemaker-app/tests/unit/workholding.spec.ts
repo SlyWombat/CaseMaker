@@ -211,7 +211,7 @@ describe('#1102 one mount for a fenced job: every reader sees the bracket', () =
       calibration: CALIBRATION,
       defaults: null,
       probe: PROBE,
-      bracketSeat: { value: -85.788, what: 'bracket seat', measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 },
+      bracketSeat: { value: -85.788, what: 'bracket seat' as const, measuredAt: '2026-11-09T17:00:00.000Z', probeRefZ: -76.063 },
     });
     const a = footprintInputFor(args(fencedJob(), 'tape'));
     const b = footprintInputFor(args(bracketTwin(), 'bracket'));
