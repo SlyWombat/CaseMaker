@@ -136,7 +136,7 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
     const steps: string[] = [];
     const result = await runRotaryTap(
       { ...base, probeRefZ: -82 },
-      { console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) },
+      { liveClearanceZ: -3, console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) },
     );
     if (!result.ok) throw new Error(result.reason);
     const f3 = (n: number): string => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
@@ -149,7 +149,7 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
     expect(steps.join(' ')).toContain(`corrected to machine Z ${f3(shiftedTrial.z1)}`);
     // The measured circle is the one the unshifted seating gives: the correction cancels the
     // seating difference, so the axis is the same physical wheel.
-    const control = await runRotaryTap(base, { console: fakeChuck().console, operator: yes });
+    const control = await runRotaryTap(base, { liveClearanceZ: -3, console: fakeChuck().console, operator: yes });
     if (!control.ok) throw new Error(control.reason);
     expect(result.circle.axisZ).toBeCloseTo(control.circle.axisZ, 2);
     expect(result.circle.radiusMm).toBeCloseTo(control.circle.radiusMm, 1);
@@ -159,7 +159,7 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
     const base = options();
     const fake = fakeChuck();
     const steps: string[] = [];
-    const result = await runRotaryTap(base, { console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) });
+    const result = await runRotaryTap(base, { liveClearanceZ: -3, console: fake.console, operator: yes, onStep: (sentence) => steps.push(sentence) });
     if (!result.ok) throw new Error(result.reason);
     const f3 = (n: number): string => (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '') || '0';
     expect(fake.lines).toContain(`G53 G0 Z${f3(base.trial.z1 + base.parkAboveSurfaceMm)}`);
