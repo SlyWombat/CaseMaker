@@ -79,6 +79,8 @@ export interface FaceAngleInputs {
   footprintShrinkMm?: number;
   /** #1211 — the unit's stated lateral uncertainty of the tip, mm (#1200's field). */
   tipLateralUncertaintyMm?: number;
+  /** #1211 field 7 — the shop's `rotary.jawKeepOutMm`; absent → the registry's fallback. */
+  jawKeepOutMm?: number;
 }
 
 export interface FaceAnglePlan {
@@ -114,6 +116,8 @@ export interface FaceAnglePlan {
   probeRadiusMm: number;
   /** The top-touch margin either end of the span and either side of the axis, mm. */
   regionMarginMm: number;
+  /** #1211 field 7 — the chuck keep-out this plan was built with, mm (the guard reads the same). */
+  jawKeepOutMm: number;
 }
 
 export interface FaceAngleRefusal {
@@ -152,7 +156,8 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
   // THE X, WITH THE BALL CLEAR OF BOTH KEEP-OUTS (safety rule 3). The jaw side adds the band's
   // own margin AND the rule's clearance; the tailstock side keeps the clearance from the free
   // span's end, which already excludes the tailstock's band when it is in.
-  const jawSideX = i.jawFaceX + ROTARY_JAW_KEEP_OUT_MM + FACE_ANGLE_BALL_CLEARANCE_MM + i.probeRadiusMm;
+  const keepOutMm = i.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM;
+  const jawSideX = i.jawFaceX + keepOutMm + FACE_ANGLE_BALL_CLEARANCE_MM + i.probeRadiusMm;
   const tailSideX = i.jawFaceX + i.freeEndMm - FACE_ANGLE_BALL_CLEARANCE_MM - i.probeRadiusMm;
   if (!(tailSideX - jawSideX >= 2)) {
     return {
@@ -213,9 +218,10 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
     freeEndMm: i.freeEndMm,
     probeRadiusMm: i.probeRadiusMm,
     regionMarginMm,
+    jawKeepOutMm: keepOutMm,
     notes: [
       `the two touches run at machine X ${num(x)}, at ${num(d)} mm either side of the axis line (Y ${num(yPlus)} and ${num(yMinus)})`,
-      `the probe ball keeps ${FACE_ANGLE_BALL_CLEARANCE_MM} mm clear of the jaws’ keep-out (X ≥ ${num(jawSideX)}) and of the free end (X ≤ ${num(tailSideX)})`,
+      `the probe ball keeps ${FACE_ANGLE_BALL_CLEARANCE_MM} mm clear of the jaws’ ${num(keepOutMm)} mm keep-out (X ≥ ${num(jawSideX)}) and of the free end (X ≤ ${num(tailSideX)})`,
       `the face is expected at machine Z ${num(faceTopZ)}; the touch is capped at ${num(bandFloorZ)} (${num(i.bandAllowanceMm)} mm below it) and parks at ${num(parkZ)}`,
       `every A word is sent from machine Z ${num(turnClearanceZ)} — the ⌀${num(2 * envelopeRadiusMm)} envelope plus the ${num(i.clearanceAboveStockMm)} mm clearance, so the corner cannot sweep into the probe`,
       `a reading past ${num(i.maxDeg)}° is refused, never turned: that is a wrong touch or a wrong mounting`,

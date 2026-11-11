@@ -23,6 +23,7 @@ import { SAFE_Z } from '@/engine/cnc/cam/ir';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { FACE_ANGLE_D_MM } from '@/engine/cnc/registration/faceAngle';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
+import { readDefault } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { MachineRecord } from '@/platform/locationClient';
@@ -105,6 +106,8 @@ export function RotaryFaceAngleTap({ machine, job, testIdPrefix = 'rotary-face-a
         // enforces agrees with the one the plan states.
         ...(settings.probeFootprintShrinkMm === undefined ? {} : { footprintShrinkMm: settings.probeFootprintShrinkMm }),
         ...(probe?.tipLateralUncertaintyMm === undefined ? {} : { tipLateralUncertaintyMm: probe.tipLateralUncertaintyMm }),
+        // #1211 field 7 — the chuck keep-out from the shop defaults (its labelled fallback).
+        jawKeepOutMm: readDefault(defaults, 'rotary.jawKeepOutMm').value,
       },
       touchFeed: settings.touchFeed,
     });

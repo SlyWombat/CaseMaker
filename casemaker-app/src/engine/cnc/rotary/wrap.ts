@@ -25,6 +25,7 @@
  * own or a named Case Maker / Makera constant below.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import type { CamMove, CamOperation, ToolpathIR } from '@/engine/cnc/cam/ir';
@@ -38,7 +39,10 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
  * the first {@link ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out: the grip itself is behind the map's
  * left edge (inside the jaws), so the two together are the design's "grip + 3 mm" of unusable stock.
  */
-export const ROTARY_JAW_KEEP_OUT_MM = 3;
+// #1211 field 7 (#1207 fix-on-touch): the number is the shop's `rotary.jawKeepOutMm`; this
+// constant IS that key's labelled fallback, so a module with no defaults map (the verifier, the
+// relief CAM) still speaks the registry's value rather than a second literal.
+export const ROTARY_JAW_KEEP_OUT_MM = readDefault(null, 'rotary.jawKeepOutMm').value;
 
 /**
  * The tailstock's band at the free end, mm, while the tailstock is in — Case Maker's DEFAULT:

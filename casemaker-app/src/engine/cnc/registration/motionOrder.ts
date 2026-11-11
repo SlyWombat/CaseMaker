@@ -258,11 +258,13 @@ export interface RotaryJobRegionInput {
   probeRadiusMm: number;
   /** The top-touch margin either end of the span and either side of the axis, mm. */
   marginMm: number;
+  /** #1211 field 7 — the chuck keep-out past the jaw tips, mm; absent → the registry's fallback. */
+  jawKeepOutMm?: number;
 }
 
 export function rotaryJobDescentRegion(i: RotaryJobRegionInput): (machine: boolean, x: number, y: number) => boolean {
   const eps = 1e-6;
-  const xMin = i.jawFaceX + ROTARY_JAW_KEEP_OUT_MM + i.probeRadiusMm;
+  const xMin = i.jawFaceX + (i.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM) + i.probeRadiusMm;
   const spanEnd = Math.min(i.freeEndMm, i.tailstockBandFromMm ?? Number.POSITIVE_INFINITY);
   const xMax = i.jawFaceX + spanEnd - i.marginMm;
   const yHalf = i.envelopeRadiusMm - i.marginMm;

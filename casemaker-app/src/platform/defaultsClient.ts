@@ -416,6 +416,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // this is Case Maker's figure until a bench measurement replaces it; the Holding step asks the
   // grip and derives the stick-out as the rod's length less it.
   'rotary.gripMm': { label: 'grip in the rotary chuck (chosen, not measured)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 15 },
+  // ── #1211 field 7 (#1207 fix-on-touch) — THE CHUCK KEEP-OUT past the jaw tips, mm: in a rotary
+  // session NOTHING moves at X inside it, at any Z — the jaws' reach varies with the grip, so no
+  // height over the chuck is clear (maintainer 2026-11-07). Read by the face-angle plan and the
+  // session guard; the verifier and the relief CAM still hold the constant, which derives from
+  // this key's fallback.
+  'rotary.jawKeepOutMm': { label: 'rotary chuck keep-out past the jaw tips (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },

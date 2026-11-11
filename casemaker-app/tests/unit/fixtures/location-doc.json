@@ -1031,6 +1031,13 @@
       "unit": "mm",
       "note": "chosen, not measured: how much of the rod sits inside the rotary chuck's jaws; Makera publishes no jaw depth"
     },
+    "rotary.jawKeepOutMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"
+    },
     "margins.boundaryMarginMm": {
       "value": 0.2,
       "source": "seeded",

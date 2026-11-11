@@ -104,7 +104,6 @@ import {
   type ScanTouch,
 } from './outcome';
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
-import { ROTARY_JAW_KEEP_OUT_MM } from '@/engine/cnc/rotary/wrap';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
 import {
@@ -2070,9 +2069,10 @@ export async function runFaceAngle(opts: FaceAngleOptions, deps: ExecDeps): Prom
       envelopeRadiusMm: plan.envelopeRadiusMm,
       probeRadiusMm: plan.probeRadiusMm,
       marginMm: plan.regionMarginMm,
+      jawKeepOutMm: plan.jawKeepOutMm,
     }),
     turnClearanceZ: plan.turnClearanceZ,
-    travelKeepOut: { maxMachineX: plan.jawFaceX + ROTARY_JAW_KEEP_OUT_MM, what: 'chuck' },
+    travelKeepOut: { maxMachineX: plan.jawFaceX + plan.jawKeepOutMm, what: 'chuck' },
   });
   let powered = false;
   /** The last machine Z commanded — what the A-turn guard reads. */
