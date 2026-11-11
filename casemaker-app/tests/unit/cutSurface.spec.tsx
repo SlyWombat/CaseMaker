@@ -2391,6 +2391,13 @@ describe('#1191 — the cross-build plan comparison', () => {
     return draw({ job, report: reportOf(), pkg, generated: generated([P1]) });
   }
 
+  // #1191 acceptance — the one-line origin sentence is ON THE CUT STEP (not only the Design
+  // side): the operator continuing a restored job reads where its programs came from.
+  it('states the stored run’s origin line on the Cut step', () => {
+    drawWithCompare('kept');
+    expect(screen.getByTestId('engrave-cut-restore-note').textContent).toBe(RESTORE_NOTE);
+  });
+
   it('a different plan is an offer: keep the programs (default) or use the new plan', () => {
     drawWithCompare('different');
     expect(screen.getByTestId('engrave-build-compare-sentence').textContent).toContain(
