@@ -96,6 +96,8 @@ export interface RotaryFaceAngleTapRequest {
   inputs: FaceAngleInputs;
   /** The touches' probe feed, mm/min (the registration settings' own). */
   touchFeed: number;
+  /** #1211 field 7 — the shop's `registration.faceAngleLevelBandMm`, mm; absent → the fallback. */
+  levelBandMm?: number;
 }
 
 /** #1059 — the face-angle step's reading, shown beside the control that ran it. */
@@ -513,7 +515,11 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         return;
       }
       const r = await runFaceAngle(
-        { plan: planned, touchFeed: req.touchFeed },
+        {
+          plan: planned,
+          touchFeed: req.touchFeed,
+          ...(req.levelBandMm === undefined ? {} : { levelBandMm: req.levelBandMm }),
+        },
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));

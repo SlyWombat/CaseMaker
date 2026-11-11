@@ -131,7 +131,7 @@ describe('#1059 the face-angle plan', () => {
     expect(FACE_ANGLE_LEVEL_BAND_MM).toBe(0.02);
   });
 
-  it('#1211 field 7 — the jaw keep-out is the shop key, and the plan carries the value it used', () => {
+  it('#1211 field 7 — a wider JAW BAND moves the touch X by half the extra band (the tail side stays)', () => {
     const fallback = planFaceAngle(inputs());
     const wider = planFaceAngle(inputs({ jawKeepOutMm: 10 }));
     if (!fallback.ok) throw new Error(fallback.reason);
@@ -142,5 +142,49 @@ describe('#1059 the face-angle plan', () => {
     // span's midpoint) moves by half of it.
     expect(wider.x - fallback.x).toBeCloseTo(7 / 2, 6);
     expect(wider.notes.join('\n')).toContain('10 mm keep-out');
+  });
+
+  it('#1211 field 7 — a wider BALL CLEARANCE moves both sides together: the touch X does not move', () => {
+    const fallback = planFaceAngle(inputs());
+    const wider = planFaceAngle(inputs({ ballClearanceMm: 6 }));
+    if (!fallback.ok) throw new Error(fallback.reason);
+    if (!wider.ok) throw new Error(wider.reason);
+    expect(fallback.ballClearanceMm).toBe(3); // the registry's labelled fallback
+    expect(wider.ballClearanceMm).toBe(6);
+    // The clearance is kept at BOTH ends: the jaw side moves outward by the extra 3 mm and the
+    // tail side moves the same way (it keeps the clearance from the free end), so the touch X —
+    // the span's midpoint — does not move.
+    expect(wider.x).toBeCloseTo(fallback.x, 6);
+    expect(wider.notes.join('\n')).toContain('6 mm clear of the jaws');
+  });
+
+  it('#1211 field 7 — THE COMBINED RULE (the authority): the jaw side adds the keep-out AND the clearance; the tail side only the clearance', () => {
+    const need = (p: ReturnType<typeof planFaceAngle>) => {
+      if (!p.ok) throw new Error(p.reason);
+      return p;
+    };
+    const plain = need(planFaceAngle(inputs()));
+    const jaw = need(planFaceAngle(inputs({ jawKeepOutMm: 10 })));
+    const ball = need(planFaceAngle(inputs({ ballClearanceMm: 6 })));
+    const both = need(planFaceAngle(inputs({ jawKeepOutMm: 10, ballClearanceMm: 6 })));
+    // The geometry the plan states and used:
+    //   jaw side  = jaw face + keep-out + ball clearance + probe radius
+    //   tail side = jaw face + free end - ball clearance - probe radius
+    //   the touch X is the midpoint of the two.
+    const jawSide = (p: typeof plain): number => p.jawFaceX + p.jawKeepOutMm + p.ballClearanceMm + p.probeRadiusMm;
+    const tailSide = (p: typeof plain): number => p.jawFaceX + p.freeEndMm - p.ballClearanceMm - p.probeRadiusMm;
+    const mid = (p: typeof plain): number => (jawSide(p) + tailSide(p)) / 2;
+    for (const p of [plain, jaw, ball, both]) {
+      expect(p.x).toBeCloseTo(mid(p), 6);
+      expect(p.notes.join('\n')).toContain(`${p.jawKeepOutMm} mm keep-out`);
+      expect(p.notes.join('\n')).toContain(`${p.ballClearanceMm} mm clear of the jaws`);
+    }
+    // The two derivatives, stated together: the jaw band moves only the jaw side (half at the
+    // midpoint); the ball clearance moves both sides (none at the midpoint); both compose.
+    expect(jaw.x - plain.x).toBeCloseTo(7 / 2, 6);
+    expect(ball.x - plain.x).toBeCloseTo(0, 6);
+    expect(both.x - plain.x).toBeCloseTo(7 / 2, 6);
+    expect(jawSide(both) - jawSide(plain)).toBeCloseTo(7 + 3, 6);
+    expect(tailSide(both) - tailSide(plain)).toBeCloseTo(-3, 6);
   });
 });
