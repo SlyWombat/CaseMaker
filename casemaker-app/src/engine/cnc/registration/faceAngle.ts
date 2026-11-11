@@ -24,6 +24,7 @@
  */
 
 import { sectionEnvelopeRadius, ROTARY_JAW_KEEP_OUT_MM, type RotarySection } from '@/engine/cnc/rotary/wrap';
+import { topTouchEdgeMarginsMm } from './cutBlank';
 
 /** The touches' offset either side of the axis, mm — the maintainer's 15 mm on a 44.5 mm face. */
 export const FACE_ANGLE_D_MM = 15;
@@ -71,6 +72,13 @@ export interface FaceAngleInputs {
   softLimits: { xMin: number; yMin: number; zMin: number } | null;
   /** The largest |θ| the step may correct, degrees — the shop's `registration.faceAngleMaxDeg`. */
   maxDeg: number;
+  /**
+   * #1211 field 2 — the shop's `registration.probeFootprintShrinkMm`, mm: the floor the top-touch
+   * margin never goes below. Absent: the probe's own radius is the margin.
+   */
+  footprintShrinkMm?: number;
+  /** #1211 — the unit's stated lateral uncertainty of the tip, mm (#1200's field). */
+  tipLateralUncertaintyMm?: number;
 }
 
 export interface FaceAnglePlan {
@@ -97,6 +105,15 @@ export interface FaceAnglePlan {
   maxDeg: number;
   /** The distances the plan kept, in the operator's words, for the run sheet and the receipt. */
   notes: string[];
+  // ── #1211 field 2 — THE ROTARY JOB'S DESCENT REGION, carried for the guard ──────────────────
+  /** The jaws' face, machine X. */
+  jawFaceX: number;
+  /** The stock's free span past the jaw face, mm. */
+  freeEndMm: number;
+  /** The probe's effective contact radius, mm. */
+  probeRadiusMm: number;
+  /** The top-touch margin either end of the span and either side of the axis, mm. */
+  regionMarginMm: number;
 }
 
 export interface FaceAngleRefusal {
@@ -170,6 +187,15 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
     if (bandFloorZ < s.zMin) return { ok: false, reason: `the touch may travel to ${num(bandFloorZ)}, past the machine’s Z soft limit ${num(s.zMin)} — check the axis datum and the face’s expected top` };
   }
 
+  // #1211 field 2 — THE ROTARY JOB'S DESCENT REGION'S MARGIN: the same top-touch margin the flat
+  // region uses (tip + lateral uncertainty, floored by the shop's shrink), one number for both
+  // axes. The stock is held by the chuck, whose placement is the measured datum, so the hold term
+  // is zero here.
+  const margins = topTouchEdgeMarginsMm(
+    { tipRadiusMm: i.probeRadiusMm, tipLateralUncertaintyMm: i.tipLateralUncertaintyMm ?? 0 },
+    { floorMm: i.footprintShrinkMm ?? 0, hold: { xMm: 0, yMm: 0 } },
+  );
+  const regionMarginMm = r3(Math.max(margins.xMm, margins.yMm));
   return {
     ok: true,
     d,
@@ -183,6 +209,10 @@ export function planFaceAngle(i: FaceAngleInputs): FaceAnglePlan | FaceAngleRefu
     turnClearanceZ,
     envelopeRadiusMm,
     maxDeg: i.maxDeg,
+    jawFaceX: i.jawFaceX,
+    freeEndMm: i.freeEndMm,
+    probeRadiusMm: i.probeRadiusMm,
+    regionMarginMm,
     notes: [
       `the two touches run at machine X ${num(x)}, at ${num(d)} mm either side of the axis line (Y ${num(yPlus)} and ${num(yMinus)})`,
       `the probe ball keeps ${FACE_ANGLE_BALL_CLEARANCE_MM} mm clear of the jaws’ keep-out (X ≥ ${num(jawSideX)}) and of the free end (X ≤ ${num(tailSideX)})`,

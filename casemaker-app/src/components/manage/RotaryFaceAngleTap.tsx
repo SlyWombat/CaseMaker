@@ -101,6 +101,10 @@ export function RotaryFaceAngleTap({ machine, job, testIdPrefix = 'rotary-face-a
         bandAllowanceMm: settings.surfaceToleranceMm + 1,
         softLimits: softLimitsOf(calibration),
         maxDeg: settings.faceAngleMaxDeg,
+        // #1211 field 2 — the top-touch margin's registry floor, so the descent region the guard
+        // enforces agrees with the one the plan states.
+        ...(settings.probeFootprintShrinkMm === undefined ? {} : { footprintShrinkMm: settings.probeFootprintShrinkMm }),
+        ...(probe?.tipLateralUncertaintyMm === undefined ? {} : { tipLateralUncertaintyMm: probe.tipLateralUncertaintyMm }),
       },
       touchFeed: settings.touchFeed,
     });
