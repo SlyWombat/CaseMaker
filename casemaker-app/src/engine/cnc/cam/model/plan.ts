@@ -1267,7 +1267,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       .map((tool) => ({ tool, key: cutterKeyOf(tool), diameter: cuttingDiameter(tool), params: paramsIfAny(tool) }))
       .filter((row): row is { tool: Tool; key: string; diameter: number; params: CutParams } => row.params !== null && row.diameter !== null);
     const keys = new Set<string>();
-    const incumbent = [...keyed].sort((a, b) => b.diameter - a.diameter)[0];
+    // #1192/#1114 — EQUAL DIAMETERS ARE THE PICK'S, NOT THE LIST'S. The incumbent is the largest
+    // flat; among equal diameters the tie falls to the #1114 decider's own preference — the
+    // shortest STATED flute that reaches (the stiffest adequate tool), an unstated flute last,
+    // then the key — never house order (which made the ⌀3.175 × 25 beat the × 12 on list order).
+    const incumbent = [...keyed].sort(
+      (a, b) =>
+        b.diameter - a.diameter
+        || ((a.tool.fluteLength ?? Number.POSITIVE_INFINITY) - (b.tool.fluteLength ?? Number.POSITIVE_INFINITY))
+        || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+    )[0];
     if (incumbent !== undefined) keys.add(incumbent.key);
     const bestOwnRow = keyed
       .filter((row) => hasOwnRow(row.tool))
@@ -2602,7 +2611,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const rowWords = Number.isFinite(rowMm) && rowMm > 0 ? `${rowMm} mm row's slower feed and step-down` : "borrowed feed row's slower numbers";
       const costWords = borrowedMinutes === null || borrowedMinutes <= 0 ? 'no faster owned alternative was found' : `about ${borrowedMinutes} min of this plan`;
       const text =
-        `${names.join(', ')} ${names.length === 1 ? 'has' : 'have'} no feed of their own for ${input.stock.material} ` +
+        `${names.join(', ')} ${names.length === 1 ? 'has no feed of its own' : 'have no feed of their own'} for ${input.stock.material} ` +
         `and cut at the ${rowWords} — ${costWords}`;
       notes.push(text);
       statements.push({

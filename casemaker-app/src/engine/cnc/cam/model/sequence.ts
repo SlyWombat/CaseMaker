@@ -589,12 +589,22 @@ export function candidateSequences(
   // #1192 rule 3 (the morning minimum) — only the shortlisted flats may PRIMARY; a flat off the
   // list keeps its rest/finish roles through `flatsDesc` below, never a program of its own.
   const mayPrimary = (c: CandidateCutter): boolean => opts?.allowPrimary === undefined || opts.allowPrimary(c.key);
-  const primaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c) && mayPrimary(c));
+  // #1192/#1195 — THE SHORTLIST MAY NARROW THE PICK, NEVER EMPTY IT. Its two names are the
+  // incumbent (the largest flat) and the best own-row flat; on a part whose only capable flat is
+  // neither (a V-floor pocket only a ⌀0.6 flat enters, against a larger flat that cannot enter it)
+  // filtering by name left NO primary and refused a plan the engine could make. The screen applies
+  // only while it leaves at least one flat that can actually cut something.
+  const eligiblePrimaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
+  const shortlisted = eligiblePrimaries.filter(mayPrimary);
+  const primaries = shortlisted.length > 0 ? shortlisted : eligiblePrimaries;
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
+  // #1192/#1195 — THE BALL FALLBACK IS NOT THE SHORTLIST'S. The shortlist is a rule about FLATS
+  // (the incumbent and the best own-row flat); the fallback exists precisely for the demand NO
+  // flat can cut, so gating it by a list of flats emptied the candidate set and refused plans the
+  // engine could plan (a V-floor part whose only cutter is the ball: "no cutter sequence").
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c) && mayPrimary(c));
-
+    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
   if (curvedFeatures.length > 0 && balls.length === 0) return [];
   if (rimFeatures.length > 0 && chamfers.length === 0) return [];
   // #1019 — a demand whose pockets are ALL un-enterable, with no contour to cut, is trivially
@@ -957,7 +967,7 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -968,6 +978,17 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
   const catalogue = ranked.sequence.steps.filter((s) => !s.cutter.house).length;
   const fallback = ranked.sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
   const signature = ranked.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+  // #1114 — THE SAME-DIAMETER DECIDER MUST COME BEFORE THE RAW SIGNATURE. The signature was added
+  // (#1186 rule 1) to make equal chains deterministic across house orders, but as the last key it
+  // also decided same-diameter ties by KEY — the ⌀3.175 × 22 ball beat the × 10 and the × 25 flat
+  // beat the × 12 (lexicographically smaller ids), overriding the stiffest-adequate rule the
+  // maintainer ruled on. The flute sum is that rule as a key: identical chains differ only in the
+  // tied cutter, so the shorter stated flute sorts first; an unstated flute sorts last, after
+  // every stated one (unknown is not preferred).
+  const fluteRank = ranked.sequence.steps.reduce(
+    (n, s) => n + (s.cutter.tool.fluteLength ?? Number.POSITIVE_INFINITY),
+    0,
+  );
   // #961 — the maintainer's ruling: completeness is the SURFACE left above the band after the
   // chain (the caller's simulated outcome), not the pocket count. A candidate the caller could
   // not simulate ranks after every simulated one; with no goal at all every key is +∞ and the
@@ -986,6 +1007,8 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
     ranked.cost.toolChanges,
     catalogue,
     fallback,
+    // #1114's stiffest-adequate preference, then the raw signature as the last resort.
+    fluteRank,
     signature,
   ] as const;
 }
@@ -1155,9 +1178,12 @@ export function chooseSequence(
       );
       if (picked !== 0) return picked > 0 ? -1 : 1;
     }
-    // #1186 — the signature is the LAST member of the rank tuple (index 8 since the rank gained
-    // the change-count key); an index kept from the old 7-key shape compared `fallback` forever.
-    return ra[8]! < rb[8]! ? -1 : ra[8]! > rb[8]! ? 1 : 0;
+    // #1186 — the tuple's tail: the flute rank (index 8), then the signature (index 9). The
+    // signature used to sit at 8 and decide same-diameter ties by id before #1114's preference
+    // could; the flute rank now takes that place.
+    if (ra[8]! < rb[8]!) return -1;
+    if (ra[8]! > rb[8]!) return 1;
+    return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
   };
   feasible.sort(compareRanked);
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient

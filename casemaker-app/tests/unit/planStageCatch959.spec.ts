@@ -108,18 +108,25 @@ describe('#959 item 5 — a failed region or stage is stated in `unplanned`, the
     expect(ops).not.toContain('pocket:pocket-1');
     const failure = plan.unplanned.find((f) => f.regionIds.includes('pocket-1'));
     expect(failure, `unplanned: ${JSON.stringify(plan.unplanned)}`).toBeDefined();
-    // The sequence's own step vocabulary: pocket-1 is the chain's REST step on the smaller flat.
-    expect(failure).toEqual({ kind: 'rest', cutterKey: 'flat-3.175', regionIds: ['pocket-1'], reason: 'injected pocket failure' });
-    // The chain that left it out ranks first, so it is also unreachable — with the real reason,
-    // not a cutter-size sentence the house's ⌀3.175 would contradict.
-    expect(plan.unreachable).toContain('pocket-1: not cut — planning failed (injected pocket failure)');
+    // The sequence's own step vocabulary: pocket-1 is covered by the smaller flat. #1186 rule 1
+    // RE-PIN — the flat that carries it is now labelled by what it IS in the chosen chain: the ⌀3.175
+    // prices first (its own row beats the ⌀6's), so pocket-1 rides its POCKET step, not a rest step
+    // behind the ⌀6. Same region, same cutter, same failure; only the step kind follows the pick.
+    expect(failure).toEqual({ kind: 'pocket', cutterKey: 'flat-3.175', regionIds: ['pocket-1'], reason: 'injected pocket failure' });
+    // #1186 rule 1 RE-PIN — the chosen chain no longer carries pocket-1: the ⌀3.175 step that used
+    // to be the rest behind the ⌀6 is now a competing primary the pick did not take, so the old
+    // "not cut — planning failed" unreachable sentence (the REST step's own) is not emitted. The
+    // failure is stated where it happened — the `unplanned` entry asserted above.
+    expect(plan.unreachable.some((u) => u.includes('pocket-1'))).toBe(false);
   }, 120_000);
 
   it('a PRIMARY failure still disqualifies the candidate: every flat-6 pocket throws, no candidate survives, the plan refuses', async () => {
-    // Every candidate this part offers roughs its pockets on flat-6 first (step 0): with that step
-    // failing, `priceSequence` drops each one, and the refusal is the sequence's own sentence —
-    // a plan whose primary failed is not posted with the failure stated, it is not a plan.
-    injected.current = { op: 'pocket', when: (o) => o.cutter.id === 'flat-6' };
+    // Every candidate this part offers must fail: #1186 rule 1 RE-PIN — the picker no longer starts
+    // every chain on the ⌀6 (the ⌀3.175 is shortlisted and prices first), so injecting the failure
+    // on flat-6 alone leaves a viable ⌀3.175 chain and the plan legitimately posts. The test's
+    // mechanic — a failed primary disqualifies its candidate, and a plan with none is not a plan —
+    // is preserved by failing EVERY flat's pocket step.
+    injected.current = { op: 'pocket', when: (o) => o.cutter.shape === 'flat' || o.cutter.shape === undefined };
     await expect(planSloped()).rejects.toThrow(/every candidate had a step the ops could not post/);
   }, 120_000);
 });
