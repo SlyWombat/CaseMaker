@@ -16,7 +16,7 @@
  * never go below) and the exact value for the tests; a guaranteed UPPER value on a wedge cell is
  * its own issue, written when the rotary planner needs it.
  */
-import { surfaceBounds } from './boundedField';
+import { surfaceBounds, tipBounds } from './boundedField';
 import { heightAt, dropCutterHeight, type CutterProfile, type DropCutterMesh } from '../model/dropcutter';
 
 /** A grid over a rod: `nx` cells along X, `nTheta` cells around. Cell (i, j) is at x = x0 + i * dx and θ = j * dTheta degrees; its index is j * nx + i. */
@@ -99,6 +99,27 @@ export function cylTipLower(surface: CylSurface, profile: CutterProfile): Float6
         }
       }
     }
+  }
+  return out;
+}
+
+/**
+ * #1236 — THE OTHER SIDE OF THE CHART: a value the exact tip height at (x, θ) is never ABOVE.
+ *
+ * A rod seen at one angle is a flat chart (#1220 turns the mesh so the tool's direction becomes
+ * +Z), and the flat chart's own upper bound (`tipBounds(...).hi`) is guaranteed at or above the
+ * exact tip height at a cell's centre. So each angle is one flat pass over a grid whose middle row
+ * lies on y′ = 0 — the line under the tool — and the result is that row.
+ */
+export function cylTipUpper(mesh: DropCutterMesh, grid: CylGrid, profile: CutterProfile): Float64Array {
+  const { nx, nTheta, x0, dx, dThetaDeg } = grid;
+  const K = Math.ceil(profile.radiusMm / dx) + 1;
+  const planar = { nx, ny: 2 * K + 1, x0, y0: -K * dx, pitch: dx };
+  const out = new Float64Array(nx * nTheta);
+  for (let j = 0; j < nTheta; j++) {
+    const turned = turnedAboutX(mesh, j * dThetaDeg);
+    const hi = tipBounds(surfaceBounds(turned, planar), profile).hi;
+    for (let i = 0; i < nx; i++) out[j * nx + i] = hi[K * nx + i]!;
   }
   return out;
 }
