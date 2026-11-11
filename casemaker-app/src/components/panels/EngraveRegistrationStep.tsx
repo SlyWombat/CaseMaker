@@ -141,6 +141,7 @@ import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 // #1202 + #1199 item 3 — the dry line view and the first-run mark.
 import { dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -671,6 +672,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // The press is refused when the guard would refuse a line, and held until the operator's own
   // statement when this exact routine has never completed on this machine (#1202 field 2).
   const routineGate = (preview !== null && preview.refused) || (firstRun && !routineTicked);
+  // #1202 field 4 — a first run under automation against a real controller is REFUSED, in words.
+  const headlessRefusal = firstRunAutomationRefusal({ firstRun });
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
   const [gridNote, setGridNote] = useState<string | null>(null);
@@ -1583,6 +1586,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             ))}
           </ol>
         </details>
+        {headlessRefusal !== null && (
+          <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">
+            {headlessRefusal}
+          </p>
+        )}
         {preview.refused && (
           <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
             The marked line would be refused — the press is disabled.
@@ -1710,7 +1718,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             // needs the statement: the executor would otherwise move without it.
             // #1202 — and a FIRST-RUN routine is refused at the guard level (a marked line) or
             // held until its own statement, whichever press this is.
-            disabled={busy || (!statementGiven && seatTapArgs(proposal.plan) === null) || routineGate}
+            disabled={busy || (!statementGiven && seatTapArgs(proposal.plan) === null) || routineGate || headlessRefusal !== null}
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
@@ -1875,7 +1883,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               <button
                 type="button"
                 data-testid="engrave-registration-start"
-                disabled={!statementGiven || routineGate}
+                disabled={!statementGiven || routineGate || headlessRefusal !== null}
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >
