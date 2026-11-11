@@ -286,22 +286,67 @@ function traceRing(ring: readonly [number, number][], z: number, feedMmPerMin: n
   return moves;
 }
 
+/** One ring to cut, with the offset step it belongs to. */
+export interface OrderedRing {
+  stepIndex: number;
+  loop: [number, number][];
+}
+
+/** The shortest distance from `point` to any vertex of `ring`. */
+function nearestVertexDistance(point: readonly [number, number], ring: readonly (readonly [number, number])[]): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const v of ring) {
+    const d = Math.hypot(v[0] - point[0], v[1] - point[1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 /**
- * Rings in a deterministic, short-travel order (#487's tour) — WITHIN one offset step only. Tour
- * ordering ACROSS steps would interleave inner and outer rings and turn some of them into
- * full-width slots (ring i+1 is only safe to feed into directly when it is truly one step-over
- * inside ring i, which only holds within a single `pocketLoops` offset step).
- *
- * `from` is wherever the tool actually is before this step starts (the manager's own follow-up
- * to the per-ring rotation above) — `tourNearest`'s own default of `[0, 0]` ignored it, so a
- * multi-lobe step (several disconnected rings at the same offset, common on the organizer) could
- * visit its FARTHEST ring first and its nearest one last, however good the per-ring entry seam
- * then is.
+ * planner v3 A4 — FINISH ONE LOBE BEFORE THE NEXT. `steps` are the pocket's rings at one level,
+ * outside-in (`pocketLoops`). A ring of step k+1 belongs to the ring of step k whose vertices are
+ * nearest its own first vertex. The order returned is a depth-first walk: a ring, then everything
+ * inside it (each child branch finished before the next), then its next sibling; siblings are
+ * visited nearest-first from where the tool is. With one ring per step this is the step order.
  */
-function orderedRings(loops: readonly [number, number][][], from: readonly [number, number]): [number, number][][] {
-  if (loops.length <= 1) return loops as [number, number][][];
-  const points = loops.map((r) => r[0]! as readonly [number, number]);
-  return tourNearest(points, from).map((i) => loops[i]!);
+export function nestedRingOrder(steps: readonly (readonly [number, number][][])[], from: readonly [number, number]): OrderedRing[] {
+  interface RingNode { stepIndex: number; loop: [number, number][]; children: RingNode[] }
+  const byStep: RingNode[][] = steps.map((step, stepIndex) =>
+    step.filter((loop) => loop.length > 0).map((loop) => ({ stepIndex, loop: loop as [number, number][], children: [] })),
+  );
+  const roots: RingNode[] = [...(byStep[0] ?? [])];
+  for (let k = 1; k < byStep.length; k++) {
+    const parents = byStep[k - 1]!;
+    for (const node of byStep[k]!) {
+      if (parents.length === 0) {
+        roots.push(node); // nothing to hang it on: treat it as its own branch
+        continue;
+      }
+      let parent = parents[0]!;
+      let best = Number.POSITIVE_INFINITY;
+      for (const candidate of parents) {
+        const d = nearestVertexDistance(node.loop[0]!, candidate.loop);
+        if (d < best) {
+          best = d;
+          parent = candidate;
+        }
+      }
+      parent.children.push(node);
+    }
+  }
+  const out: OrderedRing[] = [];
+  const visit = (nodes: readonly RingNode[], at: readonly [number, number]): readonly [number, number] => {
+    let here = at;
+    const order = nodes.length <= 1 ? nodes.map((_, i) => i) : tourNearest(nodes.map((n) => n.loop[0]! as readonly [number, number]), here);
+    for (const i of order) {
+      const node = nodes[i]!;
+      out.push({ stepIndex: node.stepIndex, loop: node.loop });
+      here = visit(node.children, node.loop[0]!);
+    }
+    return here;
+  };
+  visit(roots, from);
+  return out;
 }
 
 /** Index of `ring`'s vertex nearest `target`; ties to the lower index — same rule `tour.ts`
@@ -694,9 +739,9 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
     // that, never cut deeper than its own real obstruction allows.
     const levelRegion = ceilingMaskAt === null ? region : intersectWithRegion(ceilingMaskAt(z));
     const steps = pocketLoops(levelRegion, toolRadius, opts.stepOverMm, opts.offset, undefined, pocketRingInsetMm(toolRadius, opts.centreSpace === true));
-    for (const [stepIndex, step] of steps.entries()) {
-      const loops = orderedRings(step, comingFrom());
-      for (const loop of loops) {
+    // planner v3 A4 — one lobe's rings are finished before the next lobe's (nestedRingOrder).
+    for (const { stepIndex, loop } of nestedRingOrder(steps, comingFrom())) {
+      {
         // This is the lever toward Makera's own rapids/1,000: `ring[0]` used to be whichever
         // vertex Clipper happened to emit first, so the link into this ring often had most of its
         // own perimeter to cross before `link()` ever got a choice between a short hop and a
