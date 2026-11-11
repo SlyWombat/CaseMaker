@@ -22,7 +22,6 @@ import { planFlipSetups } from '@/engine/cnc/engrave/goalFlipSetups';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
-import { flatEndMill } from '@/engine/cnc/tool';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import { entry, FLAT3, stl } from './helpers/twoSetupBox966';
 
