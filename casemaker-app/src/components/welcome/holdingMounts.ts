@@ -364,9 +364,8 @@ export function recommendSeat(
   const edge = work.reachesEdgeWithinMm;
   const nearJaws = edge < shop.jawSideClearanceMm;
   const refusedAt = (proud: number): boolean => nearJaws && work.deepestCutMm > proud - shop.jawTopToleranceMm;
-  const seats: ViseHoldingMount[] = ['ledge', 'board', 'block'];
-  const refusedText = (seat: ViseHoldingMount): { mount: ViseHoldingMount; text: string } | null => {
-    const proud = seatProudOf(stock, seat, floorBoard);
+  const seats: ViseHoldingMount[] = ['ledge', 'block'];
+  const refusedText = (seat: ViseHoldingMount, proud: number): { mount: ViseHoldingMount; text: string } | null => {
     if (!refusedAt(proud)) return null;
     const where = edge <= 0 ? 'reaches the blank’s edge' : `comes within ${fmt(edge)} mm of the blank’s edge`;
     return {
@@ -374,7 +373,9 @@ export function recommendSeat(
       text: `The cut goes ${fmt(work.deepestCutMm)} mm down and ${where}; on this seat the jaws stand ${fmt(work.deepestCutMm - proud)} mm above its floor there.`,
     };
   };
-  const refused = seats.map(refusedText).filter((r): r is { mount: ViseHoldingMount; text: string } => r !== null);
+  const refused = seats
+    .map((seat) => refusedText(seat, seatProudOf(stock, seat, floorBoard)))
+    .filter((r): r is { mount: ViseHoldingMount; text: string } => r !== null);
   const how = edge <= 0 ? 'reaches the blank’s edge' : `stays ${fmt(edge)} mm inside the blank’s edge`;
   const sentence = (mount: ViseHoldingMount, boardMm: number, proud: number): string => {
     const prefix = mount === 'board' ? `on a ${fmt(boardMm)} mm board` : SEAT_PREFIX[mount];
@@ -396,19 +397,22 @@ export function recommendSeat(
   // jaws do not refuse; a house with no boards has the typed default as its one choice.
   const need = work.deepestCutMm + shop.cutProudMarginMm;
   const boards = choices.length === 0 ? [DEFAULT_BOARD_MM] : choices.map((c) => c.thickness);
-  const board = boards.find((b) => {
-    const proud = boardSeatProud(stock.thickness, b);
-    return proud >= need && !refusedAt(proud);
-  });
+  const boardProudAt = (b: number): number => boardSeatProud(stock.thickness, b);
+  const board = boards.find((b) => boardProudAt(b) >= need && !refusedAt(boardProudAt(b)));
   const candidates: { mount: ViseHoldingMount; boardMm: number; proud: number }[] = [];
   for (const mount of ['ledge', 'block'] as const) {
     const proud = seatProudOf(stock, mount, floorBoard);
     if (!refusedAt(proud) && proud >= need) candidates.push({ mount, boardMm: floorBoard, proud });
   }
-  if (board !== undefined) candidates.push({ mount: 'board', boardMm: board, proud: boardSeatProud(stock.thickness, board) });
+  if (board !== undefined) candidates.push({ mount: 'board', boardMm: board, proud: boardProudAt(board) });
   candidates.sort((a, b) => a.proud - b.proud);
   const pick = candidates[0];
-  if (pick === undefined) return fallback(refused);
+  if (pick === undefined) {
+    // The fallback names the THICKEST board; state that board's own refusal, never one the
+    // recommendation kept (a board seat that passes is not also "the jaws are in its way").
+    const boardRefusal = refusedText('board', boardProudAt(thickest));
+    return fallback(boardRefusal === null ? refused : [...refused, boardRefusal]);
+  }
   return {
     mount: pick.mount,
     boardMm: pick.boardMm,

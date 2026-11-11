@@ -116,6 +116,21 @@ describe('#1103 the recommended seat reads the work', () => {
     expect(r.refused.map((x) => x.mount)).toContain('block');
   });
 
+  it('item 3+6 — a board seat that passes the rule is not also listed as refused', () => {
+    const r = recommendSeat(PLATE, { deepestCutMm: 19.1, through: false, reachesEdgeWithinMm: 0 }, BOARDS);
+    expect(r.mount).toBe('board');
+    expect(r.boardMm).toBe(6);
+    // The board row is the recommendation; it must not simultaneously say the jaws are in its way.
+    expect(r.refused.map((x) => x.mount)).not.toContain('board');
+    expect(r.refused.map((x) => x.mount)).toEqual(['ledge', 'block']);
+    // When no board gets there, the fallback still states the thickest board's own numbers.
+    const none = recommendSeat(PLATE, { deepestCutMm: 19.1, through: false, reachesEdgeWithinMm: 0 }, [BOARDS[0]!]);
+    expect(none.bedSuggested).toBe(true);
+    expect(none.refused.find((x) => x.mount === 'board')?.text).toContain(
+      'The cut goes 19.1 mm down and reaches the blank’s edge; on this seat the jaws stand 0.1 mm above its floor there.',
+    );
+  });
+
   it('item 7 — the facing seed and the arrival seat are the same seat', () => {
     // A 19.1 mm surfacing pass on a 20.1 plate: the arrival seat is not the block, so the facing
     // seed must be judged on the SAME seat as the Holding step arrives in.
