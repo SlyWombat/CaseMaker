@@ -217,28 +217,77 @@ Carve hardwood on the CNC — a name plate, a coaster, a pocket, an engraving.
 
 1. On the welcome page, click **Cut it on the CNC**. This opens a four-step wizard: **Machine**,
    **What are you making?**, **Stock**, **Holding**.
-2. On **Machine**, pick a connected machine or continue without one.
-3. On **What are you making?**, pick an operation — or, with nothing picked, move on: a fresh job
-   already carries three lines of engraved text on a 100 × 60 × 12 mm hardwood block, ready to cut
-   with no setup at all. A few quick starters are also offered here — **Name badge**, **Bare
-   blank**, **Name on a dowel** — each a different starting recipe.
-4. On **Stock**, the blank is proposed from whatever you're cutting; adjust its material, form or
-   size if the proposal isn't what you want.
-5. On **Holding**, check how the stock is held, then press **Create the job**.
+2. On **Machine**, the shop's machines are listed with a picture of the bed as it is now and one
+   plain state line. Pick the machine — the one you used last is already picked — and, if the bed
+   is not holding what the picture shows, press **Change what's on the bed…**. The check never
+   blocks: the job can be written, checked and simulated now, and the machine is needed at Cut.
+3. On **What are you making?**, pick the card that matches the job — **A sign or name plate**,
+   **A part from a 3D model**, **Cut out a shape**, **A pocket or tray**, **A design from a
+   file**, **A circuit board**, or **Something else…** for the full operation list. The card
+   opens its own questions in place, and a file dropped anywhere on the step opens the card it
+   belongs to. **Start with an empty job**, at the bottom, is the deliberate way to begin from
+   nothing.
+4. On **Stock**, the blank is proposed from the work and the part is drawn on it with its margins
+   dimensioned. Take the proposal, a blank from the shop's shelf, or **Other size…**; the material
+   list is the shop's own and the size types in millimetres or inches.
+5. On **Holding**, check how the stock is held — the recommended seat says why it is recommended —
+   and the picture shows the part on the blank. Press **Create the job**.
 6. In the Job panel, click **Generate**. The app plans the toolpath, checks it against the stock
    and the holding, then runs a simulated pass so you can watch it sweep across the block before
    anything real happens.
 7. Once it's checked out, the job is ready to post as a program for a CNC machine — the CNC
    equivalent of the **Export** button on the other three capabilities.
 
+### The question step — what are you making?
+
+The step is a row of illustrated cards, because the operation names are the panel's vocabulary,
+not the answer a person starts with. Each card asks only its own questions.
+
+| Card | What it asks | What it makes |
+| :--- | :--- | :--- |
+| **A sign or name plate** | the text, a letter size (or none), the font | Engraved letters on a plate sized from the line |
+| **A part from a 3D model** | the file — STL, 3MF, STEP or OBJ | A rough-and-finish pass over the mesh |
+| **Cut out a shape** | a rectangle or circle, its size | A through cut, held by tabs |
+| **A pocket or tray** | a rectangle or circle, its size and depth | A flat-floored recess |
+| **A design from a file** | the file — SVG, DXF or a picture | An outline cut, a pocket or a carved relief |
+| **A circuit board** | the Gerber and drill files, or the board's zip | The copper, holes and outline of a board |
+| **Something else…** | the full list of operation types | Any single operation the panel knows |
+| **On a rod** (when a rotary is owned) | the dowel's text and reading, faces, or the relief's mesh | A job on the 4th axis, with the chuck chosen for you |
+
+**A file can come first.** Drop a file anywhere on the step and the card it belongs to opens with
+the file already read: a mesh or a picture opens the 3D-part card, an SVG or DXF opens the design
+card with **Cut it out**, **Pocket it** or **Carve it (V)**, a PrusaSlicer project opens the stock
+and design route, and a Gerber set opens the board card. The card shows a picture of what was read
+beside the numbers it found, so a file that read wrongly is caught here rather than at Generate.
+
+**The sign's letter size.** The size starts unchosen: the line is fitted to the house's stick and
+no plate is asked for. Choosing **Small · 20 mm**, **Medium · 35 mm** or **Large · 60 mm** asks
+for a plate sized from the line — the chosen size is the target, never larger than the fitted
+line, with a 10 mm margin around it — and the label is re-seated centred on the plate whenever the
+blank changes. The font is chosen beside the text.
+
+**On a rod.** When the shop owns a rotary module, its intents join the cards in their own *On a
+rod* group, first in the list when the module is on the pins: **Name on a dowel**, **Faces on a
+rod** and **A relief on a rod**. Picking one sets the rotary frame, proposes the rod and
+pre-selects the chuck on Holding.
+
+**Something else.** The sixteen operation types stay under **Something else…** — Engrave,
+V-carve, Pocket, Profile, Chamfer, Hole, Bore, Thread, Surface a mesh, Texture, Flute, Raise a
+prism and the rest. They are the same operations the Design panel's **Add** offers.
+
 ### Main options
 
-**Stock and cutter.** Every job states a stock block (material, width, length, thickness) and a
-cutter. Hardwood is the default material; picking a different one adjusts the feeds the app plans
-for it.
+**The blank.** Every job states a stock block (material, width, length, thickness). The Stock
+step opens with **Pick a blank** — **From your design** first, then the blanks the shop actually
+holds, then **Other size…** — and a shelf blank within a millimetre of the proposal in either
+orientation is already selected. Blanks in another material are shown greyed with the material to
+choose, rather than hidden, so the shelf stays visible. Hardwood is the default material; picking
+a different one adjusts the feeds the app plans for it. The form is a row of pictures — sheet,
+plate, block, disc, rod — and the size types in millimetres or inches while the job itself stays
+in millimetres. A piece typed here can be put on the shelf in the same step.
 
 **Work origin and holding.** A job's zero point sits at a known corner of the stock, and the
-holding (a vise, by default) is shown alongside it, so what the app plans matches where the
+holding is shown alongside it, in the mount's own words, so what the app plans matches where the
 material actually sits on the machine.
 
 ![A block of stock held in a vise, with the work-origin corner marked and arrows naming the X, Y and Z axes from that corner](img/cnc-work-origin-holding.svg)
@@ -279,6 +328,80 @@ position, and darkens the area the program has already cut. The Cut step states 
 is, and — once it has run for a few seconds — about how long is left; pauses and bit changes are
 not counted, and the controller's own elapsed field is never used as a clock.
 
+### Holding: what holds and what locates
+
+The Holding step's rows say how the stock is held, and the picture and the fold beside them use
+that mount's own words: a vise job keeps its jaw terms, while a taped or bracketed job speaks of
+the bed, the bracket's corner and its clamps.
+
+- **In the vise.** Three seats — on the jaw ledge, on a board on the ledge, or on the vise body
+  gripped as a block. The recommended seat is chosen from the work: the deepest cut, whether the
+  cut goes through, and how near it comes to the gripped edge. It says why — "Recommended: on the
+  jaw ledge — the cut goes 2 mm down and stays 6 mm inside the blank's edge; the ledge keeps
+  1.2 mm proud" — and a seat the work refuses says so on its own row ("The cut goes 19.1 mm down
+  and comes within 4 mm of the blank's edge; on this seat the jaws stand … above its floor
+  there."). A through cut is never recommended for a vise seat.
+- **Tape on the bed.** The taped row asks **Located against** — the bed's front edge, or the
+  bracket's corner at anchor 1 or 2 — and **Tape goes on** — the blank itself, or a board under
+  it. The bracket's corner is the default when the bracket is on the pins, and it squares the
+  blank; the Where row appears only when nothing fences the tape.
+- **The bracket.** On the bed, clamped in the bracket's corner at its anchor, with the clamps the
+  job states — none when the bracket only fences the blank, up to the shop's limit otherwise
+  (4 on a fresh shop), and going past the limit is refused by name.
+- **In the rotary chuck.** A rod's own mount, with its grip, stick-out, tailstock, jaws and neck
+  fields; the fold names **Chuck end** and **Text reads** (along the rod or around it).
+
+Nothing in the step points at an option the machine state does not offer: a row that needs another
+bed carries its own action ("Put the vise on the pins — **Change the machine…**"), and a row that
+cannot hold the piece at all is not drawn enabled. What holds the stock and what locates it are
+separate answers — tape holds, and the bed's front edge or the bracket's corner locates.
+
+### Before a routine moves the machine
+
+Every press that moves a machine — a registration, the registration routines' own walks, a centre
+find, the tool change's Continue — first shows its own lines.
+
+- **What will be sent.** The card lists the exact sequence the press will send, line by line, with
+  the motion guard's verdict on each line; a refused line is named in place. The list shown is the
+  list sent.
+- **A first run says so.** A shape this machine has never completed is marked: "This measurement
+  has not run on this machine before — stay at the Stop." The press stays held until you tick your
+  own statement — that you are at the machine, the probe or bit is fitted, the head is clear and
+  you will stay at the Stop.
+- **No unattended first run.** When the app is being driven automatically against a real
+  controller, a first run is refused in words: "a routine's first run has to be started by a
+  person at the machine."
+- **The machine guard.** No routine travels in X or Y while the head is below the session's safe
+  height: it lifts, travels at the safe height and descends only at the point it will touch. A
+  line that would break that rule is refused before it is sent.
+- **The tool change.** When the machine stops at a tool change, **The machine is waiting for you**
+  card names the bit and carries **Continue — the bit is in** and **Stop**. On a first run the
+  Continue is held by the statement above; on a shape this machine has already completed, a guard
+  refusal stays visible but does not take away the only way on.
+- **The centre find.** **Find the centre** shows its own routine the same way, and a bore's
+  search waits for a face beside it to read.
+- **A probe that touches down only.** A probe recorded as top-touches-only never gets a sideways
+  touch, a corner routine or an edge find that needs one; the plan and the Register card say
+  "<probe name> · top touches only" and say what was planned instead. Its top touches also stay
+  the probe's stated lateral uncertainty plus its tip radius clear of an edge.
+
+### The jaw touch is measured in Manage
+
+The vise's jaw top is a **bed-setup measurement**, not something a job measures: a job never
+descends beside the blank to find a jaw. It is measured once in **Manage › the machine**, where
+the bed's setup is recorded, and every job reads it. When the vise's place is not on file, the
+Setups row refuses in words and offers **Set up the vise in Manage**, which opens the bed setup;
+no control in a job moves the machine for it.
+
+### The Cut screen's cards
+
+The Cut screen states the run's condition in cards rather than one long column. While a program
+plays, a card follows the program's percent and the time the app's own clock implies, another
+names the next program that needs a different bit, and the waiting card owns the tool-change
+recovery. The Job panel above shows one **Program ready · N min** line once a run has passed, and
+the cutter list states its count once — in the Cutters group's summary — rather than repeating
+every missing name under the rows.
+
 ### Jobs with several programs
 
 A job can post more than one program — one per cutter or setup the plan runs, in cut order. With more
@@ -318,13 +441,28 @@ shop's default band). Cut them only after the machine is home and the program ha
 
 ### Rotary jobs
 
+A rod job starts on the question step's **On a rod** cards when the shop owns a rotary module:
+**Name on a dowel** (text read along the rod or around it), **Faces on a rod**, or **A relief on a
+rod**. The rod is proposed, and the Holding step opens with the chuck selected.
+
 A relief cut on the 4th axis is checked like any other goal: the goal check compares the swept
 surface with the design and states **coverage** against the shop's 95 % pass line and the
 **adjudicated cut-into** share (with the deepest cell and where it is), and the verdict fails when
-either holds it. A relief placed too close to the axis for the sampler to reach every cell is the
-finding **`goal-rotary-unreachable`**, with the share of the map it could not sample; the exact
-per-part ruling is coming in land15, and until then the finding names that share rather than passing
-silently.
+either holds it. A relief placed where the axis runs outside the body, or too close to the axis
+for any ball to cut, is the finding **`goal-rotary-unreachable`**: it states the share of the map
+that met air, the share of the covered surface within 2 mm of the axis (with the X spans of its
+pieces), and the share inside the finishing ball's radius with the closest approach and the ball's
+diameter. The relief's finish also states the cusp it leaves beside the one the job asks for —
+including when the job states no scallop, where the finish steps at the engine's default and the
+sheet reports the result.
+
+**The rotary's limits.** The jaws' keep-out past their tips (3 mm), the tailstock's band (10 mm),
+the clearance above the stock before the rod may turn or travel (3 mm), and the tailstock's live
+centre, body length and housing radius (12, 40 and 45 mm) are shop settings with recommended
+values: at the recommended values every program, finding and sentence is exactly as before, a
+measured value is used, and the numbers the shop actually uses are printed where they decide the
+job. A rotary probing routine also descends in a region clear of the chuck — nothing moves at X
+inside the jaws' keep-out at any height, and the A axis turns only where its floor allows.
 
 ### Materials
 
@@ -333,6 +471,14 @@ Besides the woods, plastics and metals, the material list includes **Epoxy tooli
 material in the app's words ("Epoxy tooling board"), and the feeds come from Makera's own
 `Epoxy Tooling` rows for that cutter; a cutter with no row in that material is stated unfeedable
 rather than guessed.
+
+The list is grouped from the shop's own vocabulary: the print and machining materials first
+(softwood, hardwood, MDF, PLA and the bought engraving laminate), then every material the machine
+profile declares — ABS, Acrylic, 6061 aluminium, 7075 aluminium, brass and copper on the Z1. A
+profile material is cut on **Makera's own numbers for that exact cutter and material**, from the
+catalogue the shop synced; with no catalogue row for the pair the job is refused and the missing
+row is named. A material with no row and no app vocabulary (Delrin, polycarbonate, PCB and the
+rest of the vendor's list) is not offered at all, rather than offered and then refused.
 
 ### Exporting from FreeCAD
 

@@ -212,10 +212,56 @@ it. A single-program run keeps `<stem>.nc`; a multi-program run is `<stem>-p<n>.
 **zero-padded to the width of `total`** (`p1…p5`, `p01…p19`), so the machine's file list sorts in
 cut order. The owned plan is planned from the owned set — `inv:` + `user:` + the chosen tool,
 built-ins only when the inventory is empty, `cat:` never (#1041) — and both the app and the CLI
-see one list in a canonical order (#1111). Two ball candidates equal on the rank's own keys are
-separated by the **reach-margin gate** (`fluteLength − deepest cut ≥ reachMarginMm`, shop setting,
-recommendation 1.0 mm), then by the canonical key; the row says "same diameter: by key, pending
-#1114" until the maintainer's shop-policy answer lands — #1114's priced bit change is coming.
+see one list in a canonical order (#1111). Candidates equal on the rank's own keys are separated
+by the **reach-margin gate** (`fluteLength − deepest cut ≥ reachMarginMm`, shop setting,
+recommendation 1.0 mm), then by the priced cycle (#1114 — a bit change is priced from the program
+before it), and only then by the canonical key; every site goes through the one `pickAmongEquals`.
+
+### The shop's defaults — registry keys and their recommendations
+
+A number a shop can reasonably choose is a **registry key**, never a literal in a screen or an
+engine: the key is registered in three places — `platform/defaultsClient.ts`'s `KNOWN_DEFAULTS`
+(label, unit, Zod bound, recommendation), `src-tauri/src/defaults.rs` (the seed, the same bound in
+`known_rule`, and the import check), and the location fixture the headless receipt is generated
+from (`tests/unit/fixtures/location-doc.json`) — and `docsRoundTrip.spec.ts` holds the receipt to
+the fixture's copy. A key's **recommendation** is its `fallback`: the number the code used before
+the key existed, and what `readDefault` returns when the shop has not stated one (labelled
+"fallback" wherever it is shown). A shop value inside the bound is used as stated; a measured
+value is not the same thing as a chosen one and is never listed as unmeasured (`rotaryLimits` in
+`engine/cnc/rotary/limits.ts` is the pattern). The map's key cap is 256 — raised from 200 by #1222,
+whose five keys took the registry past the old cap — and the single-barrel receipt is regenerated
+with `CM_EXPORT_RECEIPTS=1 npx vitest run tests/unit/docsRoundTrip.spec.ts` when a seed changes.
+
+The keys added since v0.2, with their recommendations:
+
+| Key | Recommendation | Bounds | What it governs |
+| :--- | :--- | :--- | :--- |
+| `vise.cutProudMarginMm` | 1 mm | 0–10 | The seat recommendation: the seat must stand the cut plus this proud. |
+| `vise.jawSideClearanceMm` | 6 mm | 0–30 | The seat recommendation: a cut this near the gripped edge can be under the jaws. |
+| `vise.jawTopToleranceMm` | 0.5 mm | 0–5 | The seat recommendation: a cut ending less than this above the jaw tops is treated as reaching them. |
+| `stock.shelfMatchMm` | 1 mm | 0–10 | A shelf blank within this of the proposal in either orientation is pre-selected on the Stock step. |
+| `stock.defaultPlateThicknessMm` | 12 mm | 1–100 | The plate a drawing is worked on when the shelf holds none that fits. |
+| `stock.signMarginMm` | 10 mm | 1–50 | The margin around a sign's line when the plate is sized from the text. |
+| `tape.stripCount` | 5 strips | whole, 1–20 | The tape strips the run sheet states under a blank. |
+| `tape.stripWidthMm` | 20 mm | 1–200 | The tape strip width the sheet states (the house roll). |
+| `clamps.maxCount` | 4 clamps | whole, 1–8 | The most clamps one bracket job may state (`too-many-clamps` when exceeded). |
+| `report.statusPollsKept` | 30 polls | whole, 5–500 | How much of the run's `?` status tail its stop report keeps — about a minute at the 2 s poll; every command is kept whole. |
+| `relief.planningPitchMm` | 1 mm | 0.1–2 | The map a rotary relief's drop-tip fields are planned on when the goal states no grid pitch; the 0.1 mm simulation grid is a measurement pitch, not a planning one. |
+| `rotary.jawKeepOutMm` | 3 mm | 0–20 | The chuck keep-out past the jaw tips: nothing moves at X inside it, at any Z, in a rotary session. |
+| `rotary.tailstockBandMm` | 10 mm | 0–50 | The tailstock's keep-out band at the rod's free end. |
+| `rotary.turnClearanceMm` | 3 mm | 0–20 | Clearance above the stock before the rod may turn or travel — Makera's rule. |
+| `rotary.tailstockCentreMm` | 12 mm | 0–100 | The tailstock live centre's length (provisional). |
+| `rotary.tailstockBodyMm` | 40 mm | 0–200 | The tailstock body's length (provisional). |
+| `rotary.tailstockHousingRadiusMm` | 45 mm | 0–150 | The tailstock housing's radius about the axis (provisional). |
+| `registration.mountTapFloorMm` | 2 mm | 0.1–10 | The jaw tap (the bed setup's own touch, never a job's): how far below the stored jaw top it searches. |
+| `registration.mountTapSlackMm` | 2 mm | 0–10 | The jaw tap: how far a reading may sit from the stored jaw top before the run says so. |
+| `registration.faceAngleBallClearanceMm` | 3 mm | 0–20 | The face-angle step: the ball's clearance to a keep-out. |
+| `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
+
+The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
+into the rotary-chuck workholding, and the verifier and both simulators read the setup's copy, so
+a sweep or a simulation cannot disagree with the plan about the bands. At the recommended values
+every program, finding and sentence is byte-identical to the pre-key build.
 
 ### Test API — `window.__caseMaker`
 
