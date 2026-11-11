@@ -168,7 +168,8 @@ import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
-import { efficiencyThresholds, goalPassCoverage, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { efficiencyThresholds, goalPassCoverage, installShopDefaults, KNOWN_DEFAULTS, readDefault, requireShopDefaultsFrom } from '../../../src/platform/defaultsClient';
+import { plannerDefaultsProvenance } from '../../../src/platform/plannerDefaults';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
 import { goalCauseFacts, goalCauseOf } from '../../../src/engine/cnc/engrave/goalCause';
 // #1134 — the one cutter-plan write-back (measuredPick's body), shared with the evaluator.
@@ -683,6 +684,12 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #953 — the run's goal read: the LAST program whose report carried one, matching
     // `combineOracles` (#948). Undefined for a job with no goal.
     const runGoal = [...programs].reverse().find((p) => p.goal !== undefined && p.goal !== null)?.goal;
+    // #1237 — THE PLANNER'S SETTINGS, STATED: with a location, every planner-read key whose value
+    // there differs from its recommendation; with none, every key at its recommendation. The
+    // receipt then says which shop settings shaped the plan (and that the recommendations did).
+    for (const entry of plannerDefaultsProvenance(shopDefaults, { withLocation: boot.location !== null })) {
+      noteProvenance(entry);
+    }
     out.emitReceipt({
       version: RECEIPT_VERSION,
       command: 'engrave',
@@ -798,6 +805,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * same thing the app itself does with no house service.
    */
   const shopDefaults = boot.location?.defaults ?? null;
+  // #1237 — THE ONE INSTALL: the planner reads its settings through the live source, and the
+  // app's store is not this process. A location given must be installed before any planning;
+  // the guard in `plannerShopDefaults` makes a missed install an error rather than a fallback.
+  installShopDefaults(() => shopDefaults);
+  if (boot.location !== null) requireShopDefaultsFrom(boot.location.path);
   /**
    * #922 — ONE SHOP OBJECT, ONE BUILDER, FOR BOTH DOORS. `engraveShopOpts` (`engine/cnc/engrave/
    * feeds.ts`) is built field-for-field to match what `engraveRunStore.ts` sends the worker for the
@@ -1279,7 +1291,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         {
           ...(opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null ? {} : { reusedOwnedPlan: opts.reusedOwnedPlan }),
           ...(args.deferIdeal === true ? { deferIdeal: true } : {}),
-          ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam() } : {}),
+          ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam({ defaults: shopDefaults }) } : {}),
           ...(args.restLadder === true ? { restLadder: true } : {}),
         },
       );

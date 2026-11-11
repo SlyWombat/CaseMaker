@@ -874,16 +874,30 @@ export function readDefault(map: ShopDefaults | null, key: string): ReadDefault 
 
 // ── The live section, for platform modules that cannot import the store ────────────────────────
 type DefaultsSource = () => ShopDefaults | null;
-let liveSource: DefaultsSource = () => null;
+/** `null` = nothing installed. A function answers null when its own section is not read yet. */
+let liveSource: DefaultsSource | null = null;
+/** #1237 — the location a command was given, when one was; planning without an install is an error. */
+let requiredFrom: string | null = null;
 
 /**
- * Point the platform modules at the section the store currently holds (#449). The store calls this
- * once; `machineProbe`, `machineUpload` and the console read {@link liveShopDefaults} rather than
+ * #1237 — THE ONE INSTALL. The app's store, the CLI and every worker install the location's shop
+ * defaults through this function; no caller keeps its own wiring. The source is a getter, because
+ * the app's store refreshes and the value must be read at each use.
+ *
+ * `machineProbe`, `machineUpload` and the console read {@link liveShopDefaults} rather than
  * importing the zustand store, which would drag React and the whole store graph into modules the
  * protocol specs and the desktop boundary load on their own.
  */
-export function setLiveDefaultsSource(source: DefaultsSource): void {
+export function installShopDefaults(source: DefaultsSource): void {
   liveSource = source;
+}
+
+/**
+ * #1237 — THIS COMMAND WAS GIVEN A LOCATION. Set by a command that booted a location document, so
+ * planning before an install is an error rather than a quiet use of the recommendations.
+ */
+export function requireShopDefaultsFrom(path: string): void {
+  requiredFrom = path;
 }
 
 /**
@@ -891,12 +905,35 @@ export function setLiveDefaultsSource(source: DefaultsSource): void {
  * labelled fallback, which is the no-service behaviour the hosted build wants anyway.
  */
 export function liveShopDefaults(): ShopDefaults | null {
+  if (liveSource === null) return null;
   try {
     return liveSource();
   } catch {
     // A source that throws (a store torn down mid-request) is no service, not a crash.
     return null;
   }
+}
+
+/**
+ * #1237 — THE PLANNER'S READ. The same source, with one addition: when a command was given a
+ * location (`requireShopDefaultsFrom`), nothing may plan until the location's defaults were
+ * installed through {@link installShopDefaults}. The error names the file, because a silent
+ * fallback would plan a different job than the app does.
+ */
+export function plannerShopDefaults(): ShopDefaults | null {
+  if (liveSource === null && requiredFrom !== null) {
+    throw new Error(
+      `the shop defaults were not installed before planning: ${requiredFrom} was given as the location, ` +
+        'so the planner must use its settings rather than the recommended fallbacks',
+    );
+  }
+  return liveShopDefaults();
+}
+
+/** Test seam: the source and the location requirement, both cleared. */
+export function resetLiveShopDefaults(): void {
+  liveSource = null;
+  requiredFrom = null;
 }
 
 /** The desktop machine transport's four windows, ms (#449, "smaller timings"). */

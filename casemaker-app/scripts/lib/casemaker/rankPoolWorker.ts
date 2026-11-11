@@ -18,6 +18,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { BUNDLED_FONT_KEYS, registerBundledFontBytes } from '@/engine/fonts/registry';
 import { setRegistry } from '@/engine/cnc/toolRegistry';
 import { planModelCam, type RankMeasurement } from '@/engine/cnc/cam/model/plan';
+import { installShopDefaults } from '@/platform/defaultsClient';
 import { rankHouseEntries, type RankWorkerInput, type RankWorkerReply } from './rankPool';
 
 const task = workerData as RankWorkerInput;
@@ -32,6 +33,9 @@ for (const key of BUNDLED_FONT_KEYS) {
 }
 // The registry takes ENTRIES, keyed by the identity a posted program stamps (`cutterKeyOf`).
 setRegistry(rankHouseEntries(task.input.cutters.house));
+// #1237 — THE SHOP'S SETTINGS, IN THIS REALM: the seam sends the parent's installed defaults;
+// the planner's own reads go through this realm's live source, which is otherwise empty.
+installShopDefaults(() => task.defaults ?? null);
 
 const reply = (msg: RankWorkerReply): void => port.postMessage(msg);
 

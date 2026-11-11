@@ -19,6 +19,7 @@ import { Worker } from 'node:worker_threads';
 import { cutterKeyOf } from '@/engine/cnc/cam/model/sequence';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool } from '@/engine/cnc/tool';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 import type {
   ModelPlanInput,
@@ -33,6 +34,12 @@ export interface RankWorkerInput {
   setupIndex: number;
   /** `cutterKeyOf`: the worker resolves the Tool from ITS OWN cloned input by this key. */
   candidateKey: string;
+  /**
+   * #1237 — THE SHOP'S SETTINGS: `ModelPlanInput` carries no defaults map, and the planner reads
+   * them through its realm's live source. The seam sends what the parent installed so a rank
+   * worker plans with the shop's values, not the recommendations.
+   */
+  defaults?: ShopDefaults | null;
 }
 
 /** The worker's reply: the metric, or the error that stopped it. */
@@ -88,7 +95,7 @@ interface Candidate {
  * finds them ready as soon as the search needs them.
  */
 export function rankPoolSeam(
-  options: { cap?: number; entry?: URL } = {},
+  options: { cap?: number; entry?: URL; defaults?: ShopDefaults | null } = {},
 ): (request: RankMeasureRequest) => RankMeasureHandle {
   const cap = Math.max(1, options.cap ?? rankWorkerCap());
   const entry = options.entry ?? new URL('./rankWorkerBoot.mjs', import.meta.url);
@@ -100,7 +107,7 @@ export function rankPoolSeam(
 
     const spawn = (candidateKey: string): Candidate => {
       const worker = new Worker(entry, {
-        workerData: { input: request.input, setupIndex: request.setupIndex, candidateKey } satisfies RankWorkerInput,
+        workerData: { input: request.input, setupIndex: request.setupIndex, candidateKey, defaults: options.defaults ?? null } satisfies RankWorkerInput,
         execArgv: workerExecArgv(),
       });
       const raw = new Promise<RankMeasurement>((resolve, reject) => {

@@ -11,7 +11,7 @@ import {
   housePutDefault,
   houseResetDefault,
   readDefault,
-  setLiveDefaultsSource,
+  installShopDefaults,
   type ReadDefault,
   type ShopDefault,
   type ShopDefaults,
@@ -63,7 +63,7 @@ export const useShopDefaultsStore = create<ShopDefaultsState>((set, get) => {
 // #449 — the console, the probe and the upload read their timing windows from these defaults, at
 // each use. They ask `defaultsClient` rather than importing this store, so the platform modules
 // stay free of React and of the store graph.
-setLiveDefaultsSource(() => useShopDefaultsStore.getState().defaults);
+installShopDefaults(() => useShopDefaultsStore.getState().defaults);
 
 /** The number for `key` right now: the location's, or the labelled fallback with no location. */
 export function shopDefault(key: string): ReadDefault {

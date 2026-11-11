@@ -34,6 +34,9 @@ const KEYS = {
   tailstockHousingRadiusMm: 'rotary.tailstockHousingRadiusMm',
 } as const;
 
+/** #1237 — the six keys, exported so the receipt's planner-key list can be held to its read sites. */
+export const ROTARY_LIMIT_KEYS: readonly string[] = Object.values(KEYS);
+
 export function rotaryLimits(map: ShopDefaults | null): RotaryLimitsRead {
   const read: SettingRead[] = [];
   const v = (key: string): number => {

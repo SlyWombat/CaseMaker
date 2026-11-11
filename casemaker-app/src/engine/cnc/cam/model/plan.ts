@@ -31,7 +31,7 @@ import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { dialectOf, Z1 } from '@/engine/cnc/machine';
-import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, plannerShopDefaults } from '@/platform/defaultsClient';
 import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
@@ -1000,7 +1000,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
-  const defaults = liveShopDefaults();
+  const defaults = plannerShopDefaults();
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
