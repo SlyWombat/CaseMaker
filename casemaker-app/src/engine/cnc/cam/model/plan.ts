@@ -48,6 +48,7 @@ import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNot
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
 import { traceShadowSelection } from '../fields/shadowSelector';
+import { polygonsPerimeter } from '../fields/flatReach';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
@@ -4214,6 +4215,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         },
         regions: shadowRegions,
         offset: opts.offset,
+        contourPerimeterMm: polygonsPerimeter(tree.contour.outline),
         paramsFor: opts.paramsFor,
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
         considered: choice.considered,

@@ -101,3 +101,40 @@ describe('#1216 estimateChain', () => {
     expect(e.changes).toBe(0);
   });
 });
+
+// planner v3 C1 — the contour is priced, and the estimate reports per cutter.
+describe('#1225 the contour and per-cutter seconds', () => {
+  const CONTOUR = { kind: 'contour', cutterKey: 't6', diameterMm: 6, regionIds: ['contour'], rates: R6 };
+
+  it('K: a contour is priced from its length and depth', () => {
+    const e = est([{ ...CONTOUR, contour: { perimeterMm: 200, depthMm: 6 } }]);
+    expect(e.cutSeconds).toBeCloseTo(41.2, 5);
+    expect(e.unpriced).toBe(0);
+  });
+
+  it('L: a contour with no outline is unpriced', () => {
+    const e = est([{ ...CONTOUR }]);
+    expect(e.cutSeconds).toBeCloseTo(0, 5);
+    expect(e.unpriced).toBe(1);
+  });
+
+  it('M: per cutter', () => {
+    const e = est([
+      step('pocket', 't6', 6, R6),
+      step('rest', 't3', 3, R3),
+      { ...CONTOUR, contour: { perimeterMm: 200, depthMm: 6 } },
+    ]);
+    expect(e.perCutter).toHaveLength(2);
+    expect(e.perCutter[0]!.cutterKey).toBe('t6');
+    expect(e.perCutter[0]!.cutSeconds).toBeCloseTo(47.733333, 5);
+    expect(e.perCutter[1]!.cutterKey).toBe('t3');
+    expect(e.perCutter[1]!.cutSeconds).toBeCloseTo(5.2, 5);
+    expect(e.changes).toBe(2);
+  });
+
+  it('N: every cutter appears, even unpriced', () => {
+    const e = est([step('pocket', 't6', 6, R6), step('finish', 'b6', 6, R6)]);
+    expect(e.perCutter).toHaveLength(2);
+    expect(e.perCutter[1]).toEqual({ cutterKey: 'b6', cutSeconds: 0 });
+  });
+});

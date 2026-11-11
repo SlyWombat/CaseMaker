@@ -212,3 +212,62 @@ export function parseTrace(text: string): TraceRow[] {
   }
   return rows;
 }
+
+/** #1225 — one row per (chain, cutter): the shadow's estimate beside the real planner's seconds. */
+export interface CutterRow {
+  signature: string;
+  cutterKey: string;
+  estSeconds: number | null;
+  realSeconds: number | null;
+  realChangeSeconds: number | null;
+}
+
+/**
+ * #1225 — ONE ROW PER (chain, cutter): the shadow's estimate beside the real planner's cutting
+ * seconds. A chain appears once per choice run in the trace; rows are in trace order. A side that
+ * has no number for that cutter is null.
+ */
+export function cutterRows(rows: readonly TraceRow[]): CutterRow[] {
+  const real = new Map<string, Map<string, [number, number]>>();
+  const out: CutterRow[] = [];
+  for (const row of rows) {
+    if (row.stage === 'chain:price' && typeof row.entries === 'string') {
+      try {
+        const entries = JSON.parse(row.entries) as [string, number, number][];
+        real.set(String(row.signature), new Map(entries.map(([key, cut, change]) => [key, [cut, change] as [number, number]])));
+      } catch {
+        // A malformed row says nothing about any cutter.
+      }
+    } else if (row.stage === 'shadow:candidate' && typeof row.estEntries === 'string') {
+      let est: [string, number][];
+      try {
+        est = JSON.parse(row.estEntries) as [string, number][];
+      } catch {
+        continue;
+      }
+      const signature = String(row.signature);
+      const r = real.get(signature);
+      const seen = new Set<string>();
+      for (const [key, seconds] of est) {
+        seen.add(key);
+        const pair = r?.get(key);
+        out.push({
+          signature,
+          cutterKey: key,
+          estSeconds: seconds,
+          realSeconds: pair === undefined ? null : pair[0],
+          realChangeSeconds: pair === undefined ? null : pair[1],
+        });
+      }
+      if (r !== undefined) {
+        for (const [key, [cut, change]] of r) {
+          if (seen.has(key)) continue;
+          out.push({ signature, cutterKey: key, estSeconds: null, realSeconds: cut, realChangeSeconds: change });
+        }
+      }
+    } else if (row.stage === 'shadow:choice') {
+      real.clear();
+    }
+  }
+  return out;
+}
