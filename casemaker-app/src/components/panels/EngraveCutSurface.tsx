@@ -134,6 +134,7 @@ import { CutterChecklist, cutterChecklistRows, missingCuttersWords } from './Cut
 import type { CutterChecklistEntry } from '@/types/engraveJob';
 import { EngraveReleaseStep } from './EngraveReleaseStep';
 import { CutRecoveryCard } from './CutRecoveryCard';
+import { cardStartBlocker } from './cutCardGate';
 import { CutStoppedCard } from './CutStoppedCard';
 import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
 import { MachineStrip } from './MachineStrip';
@@ -1885,20 +1886,20 @@ export function EngraveCutSurface({
             // #819 — once THIS job's run has ended, the card draws no Start; the bit-change card
             // (programs left) or the end card (job over) owns the next press.
             noStart={runEnded}
-            blocker={
-              step1Blocker ??
-              programBlocker ??
-              ackBlocker ??
-              // #1123 item 8 — a multi-program job states the RELEASE's own gate (the file that
-              // may not be played); a single program states the upload's. The card has one Start,
-              // so it carries the gate of the path that would actually run.
-              (releaseSources.length > 1 ? releaseBlocker : uploadBlocker) ??
-              (releaseSources.length > 1 ? uploadBlocker : null) ??
-              missingReportBlocker ??
-              surfaceGate ??
-              domeG32Blocker ??
-              cutterChecklistBlocker
-            }
+            blocker={cardStartBlocker({
+              step1Blocker,
+              programBlocker,
+              ackBlocker,
+              releaseBlocker,
+              uploadBlocker,
+              missingReportBlocker,
+              surfaceGate,
+              domeG32Blocker,
+              cutterChecklistBlocker,
+              // #1123 item 8 — a multi-program job carries the RELEASE's gate; a single program the
+              // upload's. Never both: `uploadBlocker` refuses >1 program by construction.
+              multiProgram: releaseSources.length > 1,
+            })}
           />
         )}
         {/* #1123 item 8 — THE LIVE RUN, BESIDE THE CARD: progress, the log, the end lines and the
