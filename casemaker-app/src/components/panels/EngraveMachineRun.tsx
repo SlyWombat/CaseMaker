@@ -113,12 +113,18 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     (s) => s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
   );
   const calibration = useSettingsStore((s) => s.machineCalibration);
-  // D's #1199 — the clearance is REQUIRED, never defaulted: an unread frame leaves it null and the
-  // preview refuses the line (the card says so); a made-up 0 would make every verdict meaningless.
-  const toolClearanceZ = useMemo(
-    () => clearanceZOf(jobMachine({ machineId: locationMachine?.profileId ?? 'Z1' }, calibration)),
-    [locationMachine?.profileId, calibration],
-  );
+  // D's #1199 — the clearance is REQUIRED, never defaulted. An unknown machine is an unknown
+  // clearance: with no record for this host:port there is no frame to read, and inventing one (a
+  // Z1 the app assumed) would review the line against numbers this machine never stated. An
+  // unread frame cannot answer either; the preview's refusal speaks in both cases.
+  const toolClearanceZ = useMemo(() => {
+    if (locationMachine?.profileId == null) return null;
+    try {
+      return clearanceZOf(jobMachine({ machineId: locationMachine.profileId }, calibration));
+    } catch {
+      return null;
+    }
+  }, [locationMachine?.profileId, calibration]);
   const toolDry = useMemo(() => dryToolChange(toolClearanceZ), [toolClearanceZ]);
   const [toolTicked, setToolTicked] = useState(false);
   const toolWaiting = entry?.toolWaiting != null;
@@ -258,7 +264,11 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
               <button
                 type="button"
                 data-testid="engrave-run-tool-continue"
-                disabled={entry.stopAsked || toolDry.refused || (toolFirstRun && !toolTicked) || toolHeadless !== null}
+                disabled={
+                  // A refused line holds a FIRST-RUN press; on a proved shape the refusal stays
+                  // visible but never takes away the only way on from a mid-job tool stop.
+                  entry.stopAsked || (toolFirstRun && (toolDry.refused || !toolTicked)) || toolHeadless !== null
+                }
                 style={{ width: '100%', padding: 7, marginTop: 4 }}
                 onClick={() => requestToolContinue(machine)}
               >

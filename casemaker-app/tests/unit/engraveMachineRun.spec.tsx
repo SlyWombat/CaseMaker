@@ -22,6 +22,9 @@ import type { Tool } from '@/engine/cnc/tool';
 import type { MachineObservation } from '@/platform/machineProbe';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import { verifyCheck } from '@/engine/cnc/uploadGate';
+import { resetLocationStore, useLocationStore } from '@/store/locationStore';
+import { MachineRecordSchema, type LocationView } from '@/platform/locationClient';
+import { toolChangeIdentity } from '@/platform/toolChangeDry';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -97,11 +100,41 @@ const upload = (
   />
 );
 
+/**
+ * #1202 — a location record for TARGET. A stated GRBL profile carries no controller frame, so its
+ * clearance is UNKNOWN: the card must refuse the line rather than review it against an invented 0.
+ */
+function seedMachine(completedShape?: string, profileId = 'grbl:shapeoko-4'): void {
+  const record = MachineRecordSchema.parse({
+    id: 'm-1',
+    profileId,
+    address: { host: TARGET.host, port: TARGET.port },
+    updatedAt: '2026-11-11T09:00:00.000Z',
+    completedRoutines:
+      completedShape === undefined
+        ? []
+        : [{ routine: 'tool-change', shape: completedShape, at: '2026-11-11T09:00:00.000Z', build: { version: '1.0.0', commit: null } }],
+  });
+  const location = {
+    kind: 'casemaker-location',
+    schemaVersion: 1,
+    id: 'loc-1',
+    name: 'QA',
+    createdAt: '2026-11-11T00:00:00.000Z',
+    machines: [record],
+    accessories: [],
+  } as unknown as LocationView;
+  act(() => {
+    useLocationStore.setState({ status: 'present', location, etag: '"e1"', reason: null });
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   sent.length = 0;
   resetRunConfirmStore();
   resetMachineRunStore();
+  resetLocationStore();
   __resetMachineStopReportStoreForTests();
   setMachineUploadLoader(async () => ({
     status: async () => ({ ok: true, text: '<Idle|MPos:0,0,0>' }),
@@ -421,6 +454,7 @@ describe('runContextFor', () => {
 // runs to its finish.
 describe('#655 the tool-change stop', () => {
   it('shows the prompt in our words and Continue carries the program on', async () => {
+    seedMachine(undefined, 'Z1'); // a read frame: the preview's clearance is known
     setMachineConsoleLoader(async () => client(1, { toolPolls: 8 }));
     render(upload());
     await uploadIt();
@@ -444,6 +478,46 @@ describe('#655 the tool-change stop', () => {
     await advanceUntil(() => expect(sent).toContain('M490.2'), { timeoutMs: 8000 });
     await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('finished'), { timeoutMs: 8000 });
     expect(screen.queryByTestId('engrave-run-tool-prompt')).toBeNull();
+  }, 30000);
+});
+
+// #1202 — THE CLEARANCE THE PREVIEW REVIEWS AGAINST. Without a reading the guard's verdict is
+// refused, never invented; but only a FIRST-RUN press is held by it — a proved shape keeps the
+// only way on from a mid-job tool stop.
+describe('#1202 the tool-change preview’s clearance', () => {
+  it('holds a first-run Continue on an unknown clearance, even when its statement is ticked', async () => {
+    // No location record for this host:port — there is no frame to read, so the card refuses.
+    setMachineConsoleLoader(async () => client(1, { toolPolls: 8 }));
+    render(upload());
+    await uploadIt();
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+
+    await advanceUntil(() => screen.getByTestId('engrave-run-tool-prompt'), { timeoutMs: 8000 });
+    expect(screen.getByTestId('engrave-registration-first-run')).toBeTruthy();
+    expect(screen.getByTestId('engrave-registration-dry-error').textContent).toContain('clearance unknown');
+    const cont = (): HTMLButtonElement => screen.getByTestId('engrave-run-tool-continue') as HTMLButtonElement;
+    expect(cont().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('engrave-registration-first-run-tick'));
+    expect(cont().disabled).toBe(true); // no reading is not a statement: the press stays held
+  }, 30000);
+
+  it('keeps a proved shape’s Continue on an unknown clearance, and still shows the refusal', async () => {
+    seedMachine(toolChangeIdentity().shape);
+    setMachineConsoleLoader(async () => client(1, { toolPolls: 8 }));
+    render(upload());
+    await uploadIt();
+    act(() => { useEngraveRunStore.setState({ acknowledged: true }); });
+    fireEvent.click(screen.getByTestId('engrave-run-start'));
+
+    await advanceUntil(() => screen.getByTestId('engrave-run-tool-prompt'), { timeoutMs: 8000 });
+    // Recorded here before: NOT a first run — the refusal is shown, the way on is not taken away.
+    expect(screen.queryByTestId('engrave-registration-first-run')).toBeNull();
+    expect(screen.getByTestId('engrave-registration-dry-error').textContent).toContain('clearance unknown');
+    const cont = screen.getByTestId('engrave-run-tool-continue') as HTMLButtonElement;
+    expect(cont.disabled).toBe(false);
+    fireEvent.click(cont);
+    await advanceUntil(() => expect(sent).toContain('M490.2'), { timeoutMs: 8000 });
   }, 30000);
 });
 
