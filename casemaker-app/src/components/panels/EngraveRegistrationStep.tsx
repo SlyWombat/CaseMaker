@@ -138,6 +138,10 @@ import {
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
+import { useMachineStopReportStore } from '@/store/machineStopReportStore';
+// #1187 — a stopped action's own report (the transport/controller error's card action).
+import { StopReportAction } from '@/components/panels/StopReportAction';
+import { stopIsReportable } from '@/platform/machineStopReport';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -991,6 +995,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       return;
     }
     if (flipAttempt?.kind === 'refused') return;
+    // #1187 — a new run starts its stop report clean: the last stop's "Sent …" line belongs to
+    // THAT stop, never to the card this press may earn.
+    useMachineStopReportStore.getState().reset();
     // #797 follow-up — the Register card approves the planner's proposal and starts in ONE press:
     // the plan it approved is handed here, because the render-time `plan` is still null.
     const effectivePlan = planOverride ?? plan;
@@ -1805,6 +1812,19 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           {result !== null && !result.ok && (
             <div data-testid="engrave-registration-failed" style={{ marginTop: 6 }}>
               <p style={{ fontSize: 12, color: BAD, margin: '0 0 4px' }}>{result.reason}</p>
+              {/* #1187 — a stop on a transport or controller error carries its OWN report: this
+                  press's transcript, the error, the machine's last status, the build, the job and
+                  its package. A refusal of the app's own (measurement, settings, operator Stop)
+                  never shows it. Nothing leaves the machine without this press. */}
+              {target !== null && stopIsReportable(result.reason) && (
+                <StopReportAction
+                  action="register"
+                  target={target}
+                  error={result.reason}
+                  transcript={result.transcript}
+                  job={{ id: job.id, name: job.name, packageHash: job.package?.hash ?? null }}
+                />
+              )}
               {homeNote !== null && <p style={MUTED}>{homeNote}</p>}
               {stopOutcome !== null && (
                 <p style={MUTED} data-testid="engrave-registration-stop-outcome">
