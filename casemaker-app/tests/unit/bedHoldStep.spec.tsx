@@ -180,7 +180,9 @@ describe('#715 with nothing on the pins, the bed options are real choices', () =
     expect(fields.textContent).toContain('Under itwasteboard');
     expect(screen.getByTestId('engrave-setup-tape-where').textContent).toBe('the middle of the bed');
     expect((screen.getByTestId('engrave-setup-bed-board') as HTMLSelectElement).value).toBe('none');
-    expect(fields.textContent).toContain('the front edge of the bed');
+    // #1102 ruling B — "Square to" became "Located against": the front edge is the chosen answer.
+    expect(fields.textContent).toContain('Located against');
+    expect(fields.textContent).toContain('The bed’s front edge');
 
     // The picture draws the tape under the stock, two strips for a 38.1 mm plate.
     const svg = screen.getByTestId('engrave-setup-holding-picture');

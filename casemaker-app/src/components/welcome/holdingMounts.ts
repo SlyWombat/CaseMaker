@@ -86,7 +86,8 @@ export const HOLDING_MOUNT_LABELS: Record<HoldingMount, string> = {
   board: 'In the vise, on a waste board between the jaws',
   block: 'In the vise, gripped as a block',
   'bed-tape': 'On the bed, taped',
-  'bed-bracket': 'On the bed, bracket and clamps',
+  // #1102 item 8 — the row reads as the held-by fact ("what holds it down"), not the fixture's name.
+  'bed-bracket': 'On the bed, clamped in the bracket',
   rotary: 'In the rotary chuck',
 };
 
@@ -899,15 +900,51 @@ export function underFieldWords(profile: BedProfile | null): string | null {
 export function bedTapeHold(profile: BedProfile | null, keep: TapeHold | null, insetMm: number = TAPE_DEFAULTS.insetMm): TapeHold {
   if (keep !== null) return { ...keep, where: keep.where === null ? null : { ...keep.where } };
   const roll = profile?.consumables?.tape ?? null;
-  if (roll === null) return defaultTapeHold({ ...TAPE_DEFAULTS, insetMm });
-  return defaultTapeHold({
-    widthMm: roll.widthMm,
-    thicknessMm: roll.thicknessMm,
-    // #727 F9 — the INSET is the shop's (`tape.insetMm`, seeded at 2), read by the caller; it used
-    // to be the hard-coded default even when the house had changed it.
-    insetMm,
-    provenance: roll.provenance,
-  });
+  const fresh =
+    roll === null
+      ? defaultTapeHold({ ...TAPE_DEFAULTS, insetMm })
+      : defaultTapeHold({
+          widthMm: roll.widthMm,
+          thicknessMm: roll.thicknessMm,
+          // #727 F9 — the INSET is the shop's (`tape.insetMm`, seeded at 2), read by the caller; it used
+          // to be the hard-coded default even when the house had changed it.
+          insetMm,
+          provenance: roll.provenance,
+        });
+  // #1102 items 6–7 — a FRESH taped hold is located against the bracket when one is on the pins
+  // (the corner at its anchor), else the bed's front edge. A hold the job already states keeps
+  // its own fence (`keep` above); this is the default only.
+  const anchor = bedAnchor(profile);
+  return anchor === null ? fresh : locateTape(fresh, anchor);
+}
+
+/**
+ * #1102 item 7 — WHERE THE TAPE KEEPS THE BLANK SQUARE: the bed's front edge, or the bracket's
+ * corner at one of the two anchors. The value the taped row's radio reads.
+ */
+export function tapeLocatedAgainst(tape: TapeHold): 'front' | 1 | 2 {
+  return tape.fence != null ? tape.fence.anchor : 'front';
+}
+
+/**
+ * #1102 item 7 — the hold with its "Located against" answer written: the front edge clears the
+ * fence (and the position is the operator's again), a corner states the fence and derives the
+ * position (where is null; squareTo 'fence'). The variant is the Makera kit's thin L-bracket; an
+ * existing fence at the same anchor is kept as it was.
+ */
+export function locateTape(tape: TapeHold, located: 'front' | 1 | 2): TapeHold {
+  if (located === 'front') {
+    return { ...tape, fence: null, squareTo: 'front', where: tape.fence == null ? tape.where : null };
+  }
+  if (tape.fence != null && tape.fence.anchor === located) {
+    return { ...tape, where: null, squareTo: 'fence' };
+  }
+  return {
+    ...tape,
+    where: null,
+    squareTo: 'fence',
+    fence: { kind: 'bracket', anchor: located, variant: 'thin', edges: 'corner' },
+  };
 }
 
 /**
