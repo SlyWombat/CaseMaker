@@ -1,15 +1,17 @@
 // #1202 + #1199 item 3, on the fake machine — THE FIRST-RUN GUARD AND THE SHOWN LINE LIST.
 //
-// The 2026-11-10 seat press had never moved this controller, nothing said so, and the sequence was
-// never shown. This walk pins the three facts the analyst asked for, on the bench's own seat press:
+// The 2026-11-10 accident had never moved this controller, nothing said so, and the sequence was
+// never shown. This walk pins the three facts the analyst asked for, on the REGISTER card's own
+// routine (#1201 retired the seat press from this card — the seat is a bed-setup datum now):
 //   1. a routine this machine has never completed is MARKED before the press and needs its own
 //      at-machine statement — even though Cut step 1's statement is already given;
 //   2. a recorded completion (the machine record's completedRoutines, seeded here) unmarks it; a
 //      DIFFERENT shape re-marks it;
 //   3. the lines the card SHOWS are the lines the fake console RECEIVES, in order.
 //
-// The house and console are the shared fixtures; the location is the bench's own without the seat
-// datum, so the planner proposes the one-touch seat press (the accident's routine).
+// The house and console are the shared fixtures; the location is the bench's own with the bracket
+// on anchor 1 and no recorded seat, so the planner proposes the registration (the surface find,
+// X and Y taken from the bracket).
 import fs from 'node:fs';
 import path from 'node:path';
 import { lanServerPort } from '../../scripts/e2ePort';
@@ -23,7 +25,7 @@ test.setTimeout(420_000);
 
 const OUT = path.resolve(process.cwd(), '..', 'docs', 'bench', 'img', '2026-11-11-1202-first-run');
 
-/** The bench's location with the bracket on anchor 1 and NO recorded seat: the seat press's case. */
+/** The bench's location with the bracket on anchor 1 and NO recorded seat: the Register card's case. */
 function benchLocationWithoutSeat(): Json {
   const doc = locationDocument();
   const machine = doc.machines[0]!;
@@ -75,9 +77,9 @@ async function rememberMachine(page: Page): Promise<void> {
   }, STATUS);
 }
 
-/** The wizard walk up to the Cut card's seat proposal (no generate needed: the seat plan comes
+/** The wizard walk up to the Cut card's registration proposal (no generate needed: the plan comes
  *  from the machine's own record and the job's stock). */
-async function openSeatProposal(page: Page): Promise<void> {
+async function openRegistrationProposal(page: Page): Promise<void> {
   await rememberMachine(page);
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
@@ -132,6 +134,23 @@ async function openCutRegistration(page: Page): Promise<void> {
   }
 }
 
+/**
+ * The preview's SETTLED identity: read until two consecutive reads agree. The card derives its plan
+ * after the machine record arrives, and re-derives the dry list when the plan object changes; the
+ * press records the identity of the list the card showed.
+ */
+async function settledShape(page: Page): Promise<string> {
+  const routine = page.getByTestId('engrave-registration-routine');
+  let previous: string | null = null;
+  for (let i = 0; i < 120; i += 1) {
+    const now = await routine.getAttribute('data-shape');
+    if (now !== null && now === previous) return now;
+    previous = now;
+    await page.waitForTimeout(500);
+  }
+  throw new Error('the card’s preview never settled');
+}
+
 /** The preview's shown lines, in order, from the DOM. */
 async function shownLines(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -180,17 +199,15 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
   await page.route('**/api/v1/defaults/**', async (route) => {
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  // DEBUG — log every machine PUT (fallback to the fixture's own handler).
   const fake: FakeConsole = await installFakeConsole(page, { steps: 20 });
   await cm.ready();
-  await openSeatProposal(page);
+  await openRegistrationProposal(page);
 
   // 1. THE MARK, before the press: the routine has never completed here, so the card says so and
   //    holds the press even though Cut step 1's statement is already given.
   const routine = page.getByTestId('engrave-registration-routine');
   await expect(routine).toBeVisible({ timeout: 60_000 });
-  await expect(routine).toHaveAttribute('data-routine', 'seat-press');
-  const shape = await routine.getAttribute('data-shape');
+  const shape = await settledShape(page);
   expect(shape, 'the routine identity is named on the card').toMatch(/^[0-9a-f]{8}$/);
   await expect(page.getByTestId('engrave-registration-first-run')).toContainText(
     'has not run on this machine before',
@@ -212,19 +229,17 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
   fs.mkdirSync(OUT, { recursive: true });
   await routine.screenshot({ path: path.join(OUT, 'first-run-marked.png') });
 
-  // 3. THE PRESS: the fake plays a boss at the tap point so the touch reads, and the run completes.
-  // The probe's own descent: the LAST Z and XY moves before the G38.3 (the first ones are the
-  // clearance traverse, which runs at the machine's clearance position, not at the seat).
-  const probeAt = lines.findIndex((l) => l.startsWith('G38.3'));
-  const before = lines.slice(0, probeAt);
-  const approach = /^G53 G0 Z(-?[\d.]+)$/.exec([...before].reverse().find((l) => /^G53 G0 Z/.test(l)) ?? '');
-  const seek = /^G38\.3 Z-([\d.]+)/.exec(lines[probeAt] ?? '');
-  const xy = /^G53 G0 X(-?[\d.]+) Y(-?[\d.]+)$/.exec([...before].reverse().find((l) => /^G53 G0 X/.test(l)) ?? '');
-  if (approach === null || seek === null || xy === null) throw new Error('the shown list lacks the seat move');
-  const top = Number(approach[1]) - Number(seek[1]) / 2;
-  fake.setFeature({ kind: 'boss', centre: { x: Number(xy[1]), y: Number(xy[2]) }, radiusMm: 40, topZ: top });
+  // 3. THE PRESS: the fake plays a boss at the surface point so the touch reads, and the run
+  // completes. The probe's own descent: the LAST Z and XY moves before the G38.3 (the first ones
+  // are the clearance traverse, which runs at the machine's clearance position, not at the point).
+  // The same boss the #1179 registrations run against: the house fixture's own blank top, wide
+  // enough to sit under BOTH of the plan's touches at machine (-158.3, -176.3) and (-140, -163).
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: -60.788 });
   await approve.click();
-  await expect(page.getByTestId('engrave-registration-seat-note')).toContainText('the bracket seat is recorded', {
+  await page.getByTestId('engrave-registration-continue').click({ timeout: 60_000 });
+  // THE CARD'S OWN COMPLETION STATEMENT: the run read the surface (X and Y are the bracket's,
+  // taken on trust — this plan makes no confirming lateral touch).
+  await expect(page.getByTestId('engrave-registration-verdict')).toContainText('surface was found', {
     timeout: 180_000,
   });
 
@@ -237,13 +252,14 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
     at = found + 1;
   }
 
-  // 4. THE RECORD: the completion lands on the machine (the seat press's own identity) — folded
-  //    into the datum write, so the served document carries it as soon as the save answers.
+  // 4. THE RECORD: the completion lands on the machine (the registration's own identity) — written
+  //    once the run finished without a stop, so the served document carries it as soon as the save
+  //    answers.
   await expect
     .poll(
       () =>
         ((house.machine()['completedRoutines'] ?? []) as { routine?: string; shape?: string }[]).some(
-          (e) => e.routine === 'seat-press' && e.shape === shape,
+          (e) => e.routine === 'registration' && e.shape === shape,
         ),
       { timeout: 15_000 },
     )
@@ -251,7 +267,7 @@ test('#1202 — a routine that has never run here is marked, shown, and its show
 
 });
 
-// THE RELOAD HALF. Once the seat routine is recorded, a fresh card for the SAME routine is
+// THE RELOAD HALF. Once the registration routine is recorded, a fresh card for the SAME routine is
 // unmarked and its press available; a changed sequence (the same id, a different shape) is a NEW
 // routine and re-marks it. This walk was parked while the write-through dropped `completedRoutines`
 // on every status tick — the merge fix it now covers (#1202, `mergeMachine` spreads the served
@@ -272,12 +288,12 @@ test('the same card is unmarked once its routine is recorded, and a changed shap
     route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }),
   );
   await cm.ready();
-  await openSeatProposal(page);
+  await openRegistrationProposal(page);
 
-  // The seat press's identity, as the card shows it, and its first-run mark.
+  // The registration routine's identity, as the card shows it, and its first-run mark.
   const routine = page.getByTestId('engrave-registration-routine');
-  await expect(routine).toHaveAttribute('data-routine', 'seat-press', { timeout: 60_000 });
-  const shape = await routine.getAttribute('data-shape');
+  await expect(routine).toHaveAttribute('data-routine', 'registration', { timeout: 60_000 });
+  const shape = await settledShape(page);
   expect(shape).toMatch(/^[0-9a-f]{8}$/);
   await expect(page.getByTestId('engrave-registration-first-run')).toContainText('has not run on this machine before');
 
@@ -286,19 +302,19 @@ test('the same card is unmarked once its routine is recorded, and a changed shap
   await page.goto('/');
   await cm.ready();
   await seedCompletions(page, [
-    { routine: 'seat-press', shape, at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
+    { routine: 'registration', shape, at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
   ]);
   await page.goto('/');
   await cm.ready();
   await openCutRegistration(page);
-  await expect(page.getByTestId('engrave-registration-routine')).toHaveAttribute('data-shape', shape!, { timeout: 60_000 });
+  await expect(page.getByTestId('engrave-registration-routine')).toHaveAttribute('data-shape', shape!, { timeout: 120_000 });
   await expect(page.getByTestId('engrave-registration-first-run')).toHaveCount(0);
 
   // A CHANGED SEQUENCE — the same routine id under a different shape — is a new routine: re-marked.
   await page.goto('/');
   await cm.ready();
   await seedCompletions(page, [
-    { routine: 'seat-press', shape: 'deadbeef', at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
+    { routine: 'registration', shape: 'deadbeef', at: new Date().toISOString(), build: { version: '1.0.0', commit: null } },
   ]);
   await page.goto('/');
   await cm.ready();
