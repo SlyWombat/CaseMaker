@@ -291,6 +291,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // choice the strips stop at, inside every edge where the edge scans land.
   'tape.holdRatio': { label: 'tape hold ratio (chosen, not measured)', unit: 'x', rule: z.number().min(1).max(1000), fallback: 100 },
   'tape.insetMm': { label: 'tape inset from every edge (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 2 },
+  // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
+  'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
+  'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },
+  // #1102 — the most clamps one bracket job states.
+  'clamps.maxCount': { label: 'most clamps on one bracket job (chosen)', unit: 'clamps', rule: z.number().int().min(1).max(8), fallback: 4 },
   // #414 — runtime is weighted by the material cut (the maintainer, 2026-10-16). Chosen, not measured.
   'tools.wearWeight.plastic': { label: 'wear weight, plastic', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },
   'tools.wearWeight.wood': { label: 'wear weight, wood', unit: 'x', rule: z.number().min(0.1).max(20), fallback: 1 },

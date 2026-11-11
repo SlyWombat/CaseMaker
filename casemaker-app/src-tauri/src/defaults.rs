@@ -303,6 +303,26 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         2.0,
         "mm",
         "chosen, not measured: the tape strips stop this far in from every edge of the stock",
+    ),
+    // #1102 — the tape under a blank, as the run sheet states it.
+    (
+        "tape.stripCount",
+        5.0,
+        "strips",
+        "chosen, not measured: how many strips of tape go under a blank",
+    ),
+    (
+        "tape.stripWidthMm",
+        20.0,
+        "mm",
+        "chosen, not measured: the width of one strip — the house roll is Makera's 20 mm double-sided tape",
+    ),
+    // #1102 — the most clamps a bracket job states.
+    (
+        "clamps.maxCount",
+        4.0,
+        "clamps",
+        "chosen, not measured: the most clamps one bracket job states — the bracket's two free edges take four comfortably",
     ),    // #434 — peck drilling with drill bits: the pecks chosen, the feeds placeholders. None measured.
     ("drill.peckDiameters", 1.0, "x", "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"),
     ("drill.peckClearanceMm", 0.5, "mm", "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"),
@@ -1046,6 +1066,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
+        "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
+        "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
+        "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),
         "tools.wearWeight.plastic"
         | "tools.wearWeight.wood"
         | "tools.wearWeight.aluminium"
