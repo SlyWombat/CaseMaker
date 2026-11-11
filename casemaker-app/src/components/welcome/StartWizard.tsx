@@ -1167,6 +1167,14 @@ export function StartWizard(): JSX.Element {
           onMoveItemsToTop={applyMoveItemsToTop}
           onMountBlocked={setMountBlocked}
           part={partFootprintFor(work)}
+          // #1101 item 6 — the rotary's "Text reads" card is bound to the operation step's own
+          // reading direction, so the two screens cannot disagree.
+          reads={operationChoice !== null && operationChoice.type === 'engrave' ? (operationChoice.reads ?? null) : null}
+          onReads={(reads) =>
+            setOperationChoice((choice) =>
+              choice !== null && choice.type === 'engrave' ? { ...choice, reads } : choice,
+            )
+          }
         />
       )}
 
