@@ -1651,7 +1651,13 @@ export function EngraveCutSurface({
             stated. */}
         {comparingPlans && (
           <section style={{ ...BOX, marginTop: 6 }} data-testid="engrave-plan-comparing">
-            <p style={MUTED}>comparing the plans…</p>
+            {/* #1123 item 58 — WHAT IS BEING COMPARED, THAT CUT CAN GO ON, AND WHERE THE ANSWER
+                APPEARS. The comparison never gates the press; its result is this same card's
+                tradeoff line (or "no material difference") once it lands. */}
+            <p style={MUTED}>
+              Owned plan vs catalogue ideal — comparing with every bit the app knows. Cut can carry
+              on; the result appears here when it lands.
+            </p>
           </section>
         )}
         {idealPlan.status === 'ready' && (planTradeoff === null || !planTradeoff.material) && (

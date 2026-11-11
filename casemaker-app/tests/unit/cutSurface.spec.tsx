@@ -2216,7 +2216,12 @@ describe('#986 the card reads the background comparison', () => {
       useEngraveRunStore.setState({ idealPlan: { status: 'comparing', tradeoff: null } });
     });
     const view = draw({ job, report: reportOf(), pkg: null, generated: generated([P1]) });
-    expect(screen.getByTestId('engrave-plan-comparing')).toBeTruthy();
+    // #1123 item 58 — the line says WHAT is compared, that Cut can go on, and where the answer
+    // appears (this card's own tradeoff line), instead of the bare "comparing the plans…".
+    const comparing = screen.getByTestId('engrave-plan-comparing').textContent ?? '';
+    expect(comparing).toContain('comparing with every bit the app knows');
+    expect(comparing).toContain('Cut can carry on');
+    expect(comparing).toContain('the result appears here when it lands');
 
     act(() => {
       useEngraveRunStore.setState({ idealPlan: { status: 'ready', tradeoff: { material: false, line: null, differences: [] } as never } });
