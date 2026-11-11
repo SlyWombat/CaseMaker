@@ -15,12 +15,14 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, readJob } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
 const STL = fileURLToPath(new URL('../fixtures/goals/thin-wall-box.stl', import.meta.url));
 const COASTER = fileURLToPath(new URL('../fixtures/outlines/coaster-60.svg', import.meta.url));
+// The maintainer's own PrusaSlicer project: a blank plus a negative-volume pocket (#410).
+const PROJECT_3MF = fileURLToPath(new URL('../../../samples/badge-blank/single.3mf', import.meta.url));
 
 type Json = Record<string, unknown>;
 type Doc = {
@@ -89,10 +91,13 @@ test('#1098 — an STL dropped on step 2 reaches Holding in two clicks', async (
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
-  // The drop sets the operation from the format; no chip to find.
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-empty.png');
+  // The drop sets the operation from the format; no chip to find — and never changes the blank's kind.
+  const stockKindBefore = (await readJob(page)).stockEntry?.kind;
   await page.getByTestId('start-wizard-drop-input').setInputFiles(STL);
   await expect(page.getByTestId('start-wizard-op-surface-name')).toHaveText('thin-wall-box.stl');
-  await page.screenshot({ path: 'test-results/1098-question-after-stl.png' });
+  expect((await readJob(page)).stockEntry?.kind).toBe(stockKindBefore);
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-after-stl.png');
 
   // Click 2 — the blank the mesh proposed, never the mesh AS the blank.
   await page.getByTestId('start-wizard-operation-next').click();
@@ -110,16 +115,18 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
+  const stockKindBeforeSvg = (await readJob(page)).stockEntry?.kind;
   await page.getByTestId('start-wizard-drop-input').setInputFiles(COASTER);
   await expect(page.getByTestId('start-wizard-op-outline-field')).toBeVisible();
+  expect((await readJob(page)).stockEntry?.kind).toBe(stockKindBeforeSvg);
   await expect(page.getByTestId('start-wizard-op-outline-fact')).toContainText('60');
   await expect(page.getByTestId('start-wizard-op-outline-cut')).toBeChecked();
-  await page.screenshot({ path: 'test-results/1098-question-after-svg.png' });
+  await expect(page.getByTestId('start-wizard')).toHaveScreenshot('wizard-step2-after-svg.png');
 
   // The drawing sizes the blank: 60 × 60 plus 5 mm each side.
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('Sized from the outline: 60');
+  await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('From your shelf: aluminium-6061 plate, 100 × 100 × 5 mm.');
   await page.screenshot({ path: 'test-results/1098-stock-from-svg.png' });
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
@@ -137,4 +144,68 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   for (const id of TICKS) {
     await expect(page.getByTestId(id), id).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   }
+});
+
+
+/** A job with its minted ids and times removed, so two routes' jobs can be compared by value. */
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([k]) => !['id', 'createdAt', 'updatedAt', 'savedAt'].includes(k))
+        .map(([k, v]) => [k, stable(v)]),
+    );
+  }
+  return value;
+}
+
+test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same job as the Stock step’s loader', async ({
+  cm,
+  page,
+  browser,
+}) => {
+  await fakeLocation(page);
+
+  // Route A — the drop on the question step: recognised there, settled on the Stock step, read at Next.
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await page.getByTestId('start-wizard-drop-input').setInputFiles(PROJECT_3MF);
+  await expect(page.getByTestId('start-wizard-op-design-fact')).toContainText('a PrusaSlicer project');
+  await page.getByTestId('start-wizard-operation-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  // The Stock step arrives settled on that file and says what it is — it does not ask for it again.
+  await expect(page.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
+  await page.getByTestId('start-wizard-stock-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
+  const viaDrop = await readJob(page);
+  expect(viaDrop.stockEntry?.kind).toBe('file');
+
+  // Route B — the Stock step's own loader, in a fresh browser context with another operation picked.
+  const context = await browser.newContext();
+  const fresh = await context.newPage();
+  await fakeLocation(fresh);
+  await fresh.goto('/', { waitUntil: 'domcontentloaded' });
+  await fresh.waitForFunction(() => Boolean(window.__caseMaker?.apiVersion === 1), undefined, { timeout: 30_000 });
+  await fresh.evaluate(async () => window.__caseMaker!.waitForIdle());
+  await fresh.getByTestId('welcome-start-cnc').click();
+  await fresh.getByTestId('start-wizard-next').click();
+  await fresh.getByTestId('start-wizard-preset-something-else').click();
+  await fresh.getByTestId('engrave-setup-what-pocket').click();
+  await fresh.getByTestId('start-wizard-operation-next').click();
+  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  await fresh.getByTestId('start-wizard-load-file').setInputFiles(PROJECT_3MF);
+  await expect(fresh.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
+  await fresh.getByTestId('start-wizard-stock-next').click();
+  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
+  const viaLoader = await readJob(fresh);
+  await context.close();
+
+  // The same job: stock, stockEntry, the file record and the design's items.
+  expect(stable(viaDrop.stock)).toEqual(stable(viaLoader.stock));
+  expect(stable(viaDrop.stockEntry)).toEqual(stable(viaLoader.stockEntry));
+  expect(stable(viaDrop.labels)).toEqual(stable(viaLoader.labels));
+  expect(stable(viaDrop.shapes)).toEqual(stable(viaLoader.shapes));
+  expect(stable(viaDrop.sources)).toEqual(stable(viaLoader.sources));
 });

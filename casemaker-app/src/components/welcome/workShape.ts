@@ -13,7 +13,14 @@ import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
-import { WORK_STOCK_MATERIAL, type StockProposal, type WorkShape } from '@/engine/cnc/stockProposal';
+import {
+  WORK_STOCK_MATERIAL,
+  type ProposalContext,
+  type StockProposal,
+  type WorkShape,
+} from '@/engine/cnc/stockProposal';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import type { StockItem } from '@/platform/stockClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { OperationChoice } from './OperationStep';
 
@@ -158,7 +165,13 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
     case 'outline':
       // #1098 — the drawing's extent in mm, as the importer measured it. Cut it out is the one
       // use that needs the blank to be a plate the profile can free the part from.
-      return { kind: 'outline', length: choice.outline.width, width: choice.outline.height, through: choice.use === 'profile' };
+      return {
+        kind: 'outline',
+        length: choice.outline.width,
+        width: choice.outline.height,
+        through: choice.use === 'profile',
+        ...(choice.use !== 'profile' && choice.depth !== undefined ? { depthMm: choice.depth } : {}),
+      };
     case 'cutout':
       // #1100 — the shape the card drew, through the blank.
       return { kind: 'cutout', length: choice.length, width: choice.width };
@@ -186,4 +199,23 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
     default:
       return { kind: 'none' };
   }
+}
+
+/**
+ * #1098 — what the proposal reads beside the work: the house's shelf, the job's material (only
+ * when the job has said one — the shipped demo's is not a statement), and the shop's default plate
+ * thickness. One builder, so the question step's promise and the Stock step's seed agree.
+ */
+export function proposalContextFor(
+  job: EngraveJob,
+  shelf: readonly StockItem[],
+  defaults: ShopDefaults | null,
+): ProposalContext {
+  const shipped = defaultEngraveJob();
+  const untouchedDemo = isShippedDemoLabelSet(job) && job.stock.material === shipped.stock.material;
+  return {
+    shelf,
+    jobMaterial: untouchedDemo ? null : job.stock.material,
+    plateThicknessMm: readDefault(defaults, 'stock.defaultPlateThicknessMm').value,
+  };
 }

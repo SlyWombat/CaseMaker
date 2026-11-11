@@ -304,6 +304,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "mm",
         "chosen, not measured: the tape strips stop this far in from every edge of the stock",
     ),
+    // #1098 — the plate a drawing is worked on when the shelf holds none that fits.
+    (
+        "stock.defaultPlateThicknessMm",
+        12.0,
+        "mm",
+        "chosen, not measured: the house's common plate — the thickness a drawing's blank starts at when no shelf plate holds it",
+    ),
     // #1102 — the tape under a blank, as the run sheet states it.
     (
         "tape.stripCount",
@@ -1120,6 +1127,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
+        "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
         "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
         "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),

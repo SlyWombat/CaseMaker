@@ -37,6 +37,8 @@ export function operationCreateBlocked(choice: OperationChoice | null, ctx: Crea
       ? 'Depth must be above 0 mm.'
       : null;
   }
+  // #1098 item 6 — a recognised project is the whole answer: the Stock step reads it at Create.
+  if (choice.type === 'design') return null;
   // #1098 — a drawing IS the field, so it is always read; only Pocket it asks for a number.
   if (choice.type === 'outline') {
     if (choice.use === 'pocket') {

@@ -18,8 +18,10 @@ export interface StockStepProps {
   onPending: (pending: PendingStock | null) => void;
   /** #1099 — the part drawn on the blank. */
   part?: PartFootprint | null;
+  /** #1098 item 6 — a file the question step already recognised: the step opens settled on it. */
+  presetFile?: File;
 }
 
-export function StockStep({ seed, onPending, part = null }: StockStepProps): JSX.Element {
-  return <StartStockStep onChange={onPending} seed={seed} part={part} />;
+export function StockStep({ seed, onPending, part = null, presetFile }: StockStepProps): JSX.Element {
+  return <StartStockStep onChange={onPending} seed={seed} part={part} presetFile={presetFile} />;
 }

@@ -407,7 +407,10 @@ export function StartStockStep({
   onChange,
   seed,
   part = null,
+  presetFile,
 }: {
+  /** #1098 item 6 — a file the question step recognised; read once on arrival, as if picked here. */
+  presetFile?: File;
   /** The current answer, or null when there is none yet (or the one there is was refused). */
   onChange: (pending: PendingStock | null) => void;
   /** The job's own stock when the step is re-opened to edit it (#681); absent for a new job. */
@@ -477,6 +480,13 @@ export function StartStockStep({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // #1098 item 6 — the question step already recognised this file: read it as the Stock step's own
+  // loader would, once, so the step arrives settled on it.
+  useEffect(() => {
+    if (presetFile !== undefined) void pickFile(presetFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetFile]);
 
   const shelf = useMemo(() => shelfFor(items, material), [items, material]);
   const shelfOk = shelfStatus === 'present';
