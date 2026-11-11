@@ -19,8 +19,8 @@ test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(240_000);
 
 const OLD_BUILD = 'build-A-1191';
-const NC1 = 'G90 G21\nM5\nM02\n; p1\n';
-const NC2 = 'G90 G21\nM5\nM02\n; p2\n';
+const NC1 = 'G90 G21\nG0 Z1\nM3 S10000\nG0 X5 Y5\nG1 Z-1 F100\nG1 X15 Y5 F300\nG1 X15 Y15\nG1 X5 Y15\nG1 X5 Y5\nG0 Z1\nM5\nM02\n';
+const NC2 = 'G90 G21\nG0 Z1\nM3 S10000\nG0 X25 Y5\nG1 Z-1 F100\nG1 X35 Y5 F300\nG1 X35 Y15\nG1 X25 Y15\nG1 X25 Y5\nG0 Z1\nM5\nM02\n';
 
 const DOC = JSON.parse(
   fs.readFileSync(path.join(process.cwd(), 'tests', 'unit', 'fixtures', 'location-doc.json'), 'utf8'),
@@ -79,8 +79,8 @@ async function seedOldBuildRun(page: Page): Promise<void> {
     const ids = job.labels.map((l) => l.id);
     job.setups = [{ id: 's1', orientation: { ...IDENTITY }, mount: { kind: 'vise' }, itemIds: ids, tools: ['flat-1.0'] }];
     const inputs = [
-      { setupIndex: 1, setupId: 's1', toolKey: 'flat-1.0', nc: 'G90 G21\nM5\nM02\n; p1\n', frameNc: null, programHash: 'h1' },
-      { setupIndex: 1, setupId: 's1', toolKey: 'flat-1.0', nc: 'G90 G21\nM5\nM02\n; p2\n', frameNc: null, programHash: 'h2' },
+      { setupIndex: 1, setupId: 's1', toolKey: 'flat-1.0', nc: 'G90 G21\nG0 Z1\nM3 S10000\nG0 X5 Y5\nG1 Z-1 F100\nG1 X15 Y5 F300\nG1 X15 Y15\nG1 X5 Y15\nG1 X5 Y5\nG0 Z1\nM5\nM02\n', frameNc: null, programHash: 'h1' },
+      { setupIndex: 1, setupId: 's1', toolKey: 'flat-1.0', nc: 'G90 G21\nG0 Z1\nM3 S10000\nG0 X25 Y5\nG1 Z-1 F100\nG1 X35 Y5 F300\nG1 X35 Y15\nG1 X25 Y15\nG1 X25 Y5\nG0 Z1\nM5\nM02\n', frameNc: null, programHash: 'h2' },
     ];
     const made = pkgMod.freezePackage(job, inputs, '2026-11-10T09:00:00.000Z');
     if (!made.ok || made.package === undefined) throw new Error(made.reason ?? 'the package did not freeze');
@@ -164,36 +164,9 @@ async function seedOldBuildRun(page: Page): Promise<void> {
     if (record === null) throw new Error('the run was not stored');
   });
 
-  // #1191 field 1 — the record's BUILD is what changes; its schema is readable, which is the only
-  // restore gate. Rewrite the stored build to a value this build cannot be.
-  await page.evaluate(async (oldBuild) => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('casemaker-runs', 1);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const record = await new Promise<{ id: string } & Record<string, unknown>>((resolve, reject) => {
-      const tx = db.transaction('runs', 'readonly');
-      const get = tx.objectStore('runs').getAll();
-      get.onsuccess = () => resolve(get.result[0] as { id: string } & Record<string, unknown>);
-      get.onerror = () => reject(get.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('runs', 'readwrite');
-      tx.objectStore('runs').put({ ...record, build: oldBuild, savedAt: '2026-11-10T09:00:00.000Z' });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-  }, OLD_BUILD);
 }
 
-// WIP (2026-11-11, manager's pause): the restore itself works — a reloaded build restores the stored
-// run, and one run showed the cross-build origin line — but the walk is not yet stable: the app's
-// own persistence can re-save the seeded record under the reloaded build's id between the seed and
-// the reload, masking the cross-build state. Finishing needs a deterministic write ordering (or a
-// seam that pauses the persistence subscription while the spec rewrites the record's build).
-test.fixme('#1191 — a job that started on build A continues on program 2 under build B, on A’s bytes', async ({ cm, page }) => {
+test('#1191 — a job that started on build A continues on program 2 under build B, on A’s bytes', async ({ cm, page }) => {
   await serveHouse(page, {
     location: locationWithProgramOne('h1'),
     defaults: DOC.defaults,
@@ -215,6 +188,51 @@ test.fixme('#1191 — a job that started on build A continues on program 2 under
     undefined,
     { timeout: 30_000 },
   );
+
+  // THE RECORD'S BUILD IS FORCED AT THE IO SEAM (D's diagnosis). Seeding the run store changes
+  // fields the persistence subscription watches, so a 150 ms debounced save is pending when the
+  // seed ends; without this wrapper it would put runBuildId() back and the reloaded page would see
+  // a same-build record, never the cross-build case. Every save in build A's page writes A's id.
+  await page.evaluate(async (oldBuild) => {
+    const m = (await import('/src/store/runPersistence.ts' as string)) as {
+      setRunRecordIO: (io: unknown) => void;
+    };
+    const open = (): Promise<IDBDatabase> =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('casemaker-runs', 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains('runs')) {
+            const store = db.createObjectStore('runs', { keyPath: 'id' });
+            store.createIndex('jobSha', 'jobSha');
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    m.setRunRecordIO({
+      put: async (record: Record<string, unknown> & { id: string }) => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction('runs', 'readwrite');
+          tx.objectStore('runs').put({ ...record, build: oldBuild, savedAt: '2026-11-10T09:00:00.000Z' });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
+      },
+      listByJob: async (jobSha: string) => {
+        const db = await open();
+        const all = await new Promise<{ jobSha?: string }[]>((resolve, reject) => {
+          const get = db.transaction('runs', 'readonly').objectStore('runs').getAll();
+          get.onsuccess = () => resolve(get.result as { jobSha?: string }[]);
+          get.onerror = () => reject(get.error);
+        });
+        db.close();
+        return all.filter((record) => record.jobSha === jobSha);
+      },
+    });
+  }, OLD_BUILD);
 
   // BUILD A: the job, its two programs, and the settled run stored with A's identity.
   await seedOldBuildRun(page);
@@ -244,6 +262,19 @@ test.fixme('#1191 — a job that started on build A continues on program 2 under
   await page.evaluate(async () => {
     await window.__caseMaker!.waitForIdle();
   });
+  // THE BOOT RESTORE IS ASYNCHRONOUS: it waits briefly for the house reads before reading the
+  // record. Wait for it to settle rather than sampling mid-flight.
+  await page.waitForFunction(
+    async () => {
+      const r = (await import('/src/store/engraveRunStore.ts' as string)) as {
+        useEngraveRunStore: { getState: () => { generated: unknown; restoreNote: string | null } };
+      };
+      const s = r.useEngraveRunStore.getState();
+      return s.generated !== null || s.restoreNote !== null;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
   // The machine observation is not persisted: the reloaded build learns it again (as a probe would).
   await rememberMachine(page, '<Idle|MPos:0,0,0|WPos:0,0,0|S:0.0,10000.0,100.0,0,25.8,24.0,0,0,0,0>');
   // The workspace record restores the CNC Cut half; the sidebar button toggles, so press it only
