@@ -51,19 +51,15 @@ test('#793/#794 — the Ready card is one line and the primary becomes Cut…', 
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
 
-  // One line: ✓ Program ready · about … ·, with the ticks behind the closed ›.
-  const ready = page.getByTestId('engrave-run-ready');
-  await expect(ready).toBeVisible();
-  await expect(page.getByTestId('engrave-run-ready-summary')).toContainText('Program ready');
-  await expect(page.getByTestId('engrave-run-ready-chevron')).toBeVisible();
-  await expect(page.getByTestId('engrave-run-rows')).toBeHidden();
+  // #1123 item 51 — ONE Ready line: the fixed progress row states 'Program ready · about …', and
+  // the four ticks are the rows beside it (no duplicate Ready card above them).
+  await expect(page.getByTestId('engrave-run-ready')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-progress-words')).toContainText('Program ready');
+  const rows = page.getByTestId('engrave-run-rows');
+  await expect(rows).toBeVisible();
+  await expect(rows).toContainText('matches the design');
   await expect(page.getByTestId('engrave-generate')).toHaveText('Cut…');
-  await page.getByTestId('engrave-footer').screenshot({ path: testInfo.outputPath('design-footer-ready-card.png') });
-  // The › really is a disclosure: the four ticks are one click away.
-  await page.getByTestId('engrave-run-ready-summary').click();
-  await expect(page.getByTestId('engrave-run-rows')).toBeVisible();
-  await expect(page.getByTestId('engrave-run-rows')).toContainText('matches the design');
-  await page.getByTestId('engrave-footer').screenshot({ path: testInfo.outputPath('design-footer-ready-expanded.png') });
+  await page.getByTestId('engrave-footer').screenshot({ path: testInfo.outputPath('design-footer-ready.png') });
 
   // #794 — pressing the primary is the next step: Cut, where the gate is approved.
   await page.getByTestId('engrave-generate').click();

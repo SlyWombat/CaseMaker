@@ -2893,59 +2893,6 @@ export function EngravePanel(): JSX.Element {
     </>
   );
 
-  /**
-   * #793/#794 — THE READY CARD: one line above the primary that states the fact ("Program ready"
-   * and the estimate), with the four ticks folded behind its `›`. #803 follow-up (manager, at the
-   * #792 hand-in): the card reads FACT, then ACTION — the line sits above the button, never below.
-   */
-  const readyCard = (
-    <>
-    <details data-testid="engrave-run-ready" style={{ marginTop: 6, marginBottom: 6 }}>
-      <summary
-        data-testid="engrave-run-ready-summary"
-        style={{
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: 6,
-          fontSize: 12,
-          color: '#c8d3de',
-          listStyle: 'none',
-        }}
-      >
-        <span aria-hidden style={{ color: ROW_COLOR.tick }}>
-          ✓
-        </span>
-        <span>Program ready</span>
-        {runTimeText !== null && (
-          <>
-            <span aria-hidden style={{ color: '#66707a' }}>
-              ·
-            </span>
-            <span data-testid="engrave-run-time" style={{ color: '#9aa4b0' }}>
-              {runTimeText}
-            </span>
-          </>
-        )}
-        <span aria-hidden data-testid="engrave-run-ready-chevron" style={{ marginLeft: 'auto', color: '#8fb8e0' }}>
-          ›
-        </span>
-      </summary>
-      <div
-        data-testid="engrave-run-rows"
-        style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
-      >
-        {runTicks}
-      </div>
-    </details>
-    {rotaryBenchNote !== null && (
-      <p data-testid="engrave-ready-rotary-bench" style={{ ...MUTED, margin: '0 0 6px', color: '#e0c07a' }}>
-        {rotaryBenchNote}
-      </p>
-    )}
-    </>
-  );
-
   // #432 review R11 — a FACING job has a second program, and a withheld facing file must not be
   // invisible: Save writes one file fewer than the sheet says, and the sheet's own sentence is the
   // explanation. The row mirrors `facingSteps`' vocabulary ("the facing program was not produced"),
@@ -5429,7 +5376,6 @@ export function EngravePanel(): JSX.Element {
         {/* 8 — generate → verify → simulate → oracle → save. #792 — no subheading: the primary
             button is the step. #794/#803 — the Ready card is the FACT above it, and it precedes
             the action. */}
-      {!blocked && runReady && readyCard}
       <div data-testid="engrave-generate-slot">
         {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
@@ -5469,7 +5415,16 @@ export function EngravePanel(): JSX.Element {
                   <RunProgressLine run={run} />
                 </span>
               ) : runReady ? (
-                `Program ready${runTimeText === null ? '' : ` · ${runTimeText}`}`
+                // #1123 item 51 — the fixed row is the ONLY 'Program ready · time' on the panel.
+                <>
+                  Program ready
+                  {runTimeText === null ? null : (
+                    <>
+                      {' · '}
+                      <span data-testid="engrave-run-time">{runTimeText}</span>
+                    </>
+                  )}
+                </>
               ) : null}
             </span>
             <button
@@ -5583,10 +5538,10 @@ export function EngravePanel(): JSX.Element {
             {/* #688 — four ticks and ONE labelled time (§3.6, audit B14/B15). The counts and the
                 under/over-cut numbers the old rows carried belong to the simulation's own panel
                 (#691), whose data is already the run view's. */}
-            {/* #793 — before any run there is nothing to report, so nothing is drawn. While a run
-                works, or after one that did not pass, the four ticks are the one line. A run that
-                passed and still matches the job is the Ready card ABOVE the primary (#794). */}
-            {runSaysSomething && !runReady && (
+            {/* #793/#1123 item 51 — before any run there is nothing to report, so nothing is drawn.
+                Whenever a run has something to say the four ticks are these rows; the READY words
+                and the estimate are the fixed progress row's own below (one Ready line, once). */}
+            {runSaysSomething && (
               <div
                 data-testid="engrave-run-rows"
                 style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, fontSize: 12, color: '#c8d3de' }}
@@ -5600,7 +5555,10 @@ export function EngravePanel(): JSX.Element {
                 ) : (
                   <>
                     {runTicks}
-                    {runTimeText !== null && (
+                    {/* #1123 item 51 — THE FIXED ROW OWNS THE READY LINE. In READY the time sits
+                        with 'Program ready' below, so it is not repeated here; while a run works or
+                        has not passed, these rows carry it. */}
+                    {!runReady && runTimeText !== null && (
                       <span data-testid="engrave-run-time" style={{ marginLeft: 'auto', color: '#9aa4b0' }}>
                         {runTimeText}
                       </span>
@@ -5608,6 +5566,11 @@ export function EngravePanel(): JSX.Element {
                   </>
                 )}
               </div>
+            )}
+            {!blocked && runReady && rotaryBenchNote !== null && (
+              <p data-testid="engrave-ready-rotary-bench" style={{ ...MUTED, margin: '6px 0 0', color: '#e0c07a' }}>
+                {rotaryBenchNote}
+              </p>
             )}
             {/* #893 — a run whose job changed while generating used to end at four "not … yet"
                 rows with no control: name the input that moved and offer the press that helps. */}

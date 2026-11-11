@@ -83,7 +83,9 @@ describe('#1127 the cutter checklist', () => {
     const rows = cutterChecklistRows(PROGRAMS);
     const onSet = vi.fn();
     render(<CutterChecklist rows={rows} entries={undefined} onSet={onSet} />);
-    expect(screen.getByTestId('engrave-cutter-missing').textContent).toContain('0 of 2');
+    // #1123 item 50 — the rows are the list; the count is the group's summary, not a paragraph of
+    // every missing cutter's name under them.
+    expect(screen.queryByTestId('engrave-cutter-missing')).toBeNull();
     fireEvent.click(screen.getByTestId('engrave-cutter-locate-inv:flat-25'));
     expect(onSet).toHaveBeenCalledWith('inv:flat-25', expect.objectContaining({ state: 'located' }));
     // The 6 mm shank is printed as the shank; no record states a collet, so no collet is named.

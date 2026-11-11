@@ -33,7 +33,7 @@ test('#800 — after a run the rows say generated · checked · simulated · mat
   await page.getByTestId('engrave-generate').click();
   await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   await expect(page.getByTestId('engrave-run-verified')).toContainText('checked');
-  await page.getByTestId('engrave-run-ready-summary').click();
+  // #1123 item 51 — the ticks are visible rows; there is no Ready fold to open.
   await expect(page.getByTestId('engrave-run-rows')).toContainText('checked');
   await page.getByTestId('engrave-footer').screenshot({ path: testInfo.outputPath('footer-run-words.png') });
 });
