@@ -1515,6 +1515,22 @@ describe('#430 the executor, on a fake machine', () => {
     if (!r.ok) expect(r.reason).toContain('found nothing down to machine Z');
   });
 
+  // #1199 field 7 (e) — THE TOP TOUCH ANSWERS "is the vise where the record says". A stored jaw
+  // top wrong by more than the slack puts the stock's own top outside the band; the stop keeps its
+  // words and names the bed setup, where the jaw is re-measured (a job never taps it).
+  it('#1199 (e) — a top reading far off a trusted jaw datum stops, and the words name the bed setup', async () => {
+    const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
+    const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    // The 3 mm error is beyond the seek's travel, so the top touch MISSES; its words are the
+    // existing miss sentence plus the bed-setup sentence.
+    expect(r.reason).toContain('found nothing down to machine Z');
+    expect(r.reason).toContain('re-measure the jaw in Manage › the machine');
+  });
+
   it('#518 a scan miss is a reading: no $X follows it; a stop after a TIMEOUT reads the State and sends G90 alone', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const flaky = {

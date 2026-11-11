@@ -877,7 +877,11 @@ function inBand(
   // #619 — a reading ABOVE the band is not a miss on the datum path: a normally mounted blank may
   // stand prouder than the ledge estimate, so the upper bound is widened; only the floor still stops.
   if (prb.z < band.min || prb.z > maxZ) {
-    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${maxZ}`);
+    // #1199 field 7 (e) — the caller's sentence rides too: on the datum path it names the bed
+    // setup when the stored jaw top may be the thing that is wrong ("re-measure the jaw").
+    throw new Stop(
+      `the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${maxZ} — ${band.expect}`,
+    );
   }
   return prb;
 }
