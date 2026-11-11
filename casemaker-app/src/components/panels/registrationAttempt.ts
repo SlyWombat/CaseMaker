@@ -142,10 +142,6 @@ export function planRegistrationAttempt(args: {
   setup: Setup;
   mount: MountSpec;
   mountDatum: MountDatum | null;
-  /** #611 — the datum's `by` when it names a probe other than the one checked out (null otherwise). */
-  mountDatumMismatch: string | null;
-  /** #640 — the same probe, by NAME, for the sentence (the id stays for the wiring). */
-  mountDatumMismatchName: string | null;
   /** #619 — the measured surface-top datum; when present the plan expects the found top, not the ledge estimate.
    *  #1189 — with the probe's reference it was measured at. */
   surfaceTopZ: { value: number; probeRefZ?: number | null } | null;
@@ -158,8 +154,6 @@ export function planRegistrationAttempt(args: {
    */
   placedSeed?: { x: number; y: number; by: 'grid' | 'touch'; measuredAt: string; at: [number, number] | null; probe: string | null } | null;
   probe: ProbeSpec | null;
-  /** #603 — the checked-out probe's display name (its product), or null when none is checked out. */
-  probeName: string | null;
   /** #599 — the mount tap point (machine XY), or null when the fixed jaw's frame is unknown. */
   mountTap: { x: number; y: number; fromMachineZ: number; label: string } | null;
   defaults: ShopDefaults | null;
