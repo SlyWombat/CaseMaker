@@ -68,16 +68,18 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   await expect(runPanel.getByTestId('engrave-run-done-title')).toContainText(/^Finished · /);
 
   // #819 — THE FINISHED SCREEN. The strip speaks for the MACHINE: it settles on the fake's own last
-  // answer (Idle), with no Stop and no finished program's bar. Both run buttons and the three steps
-  // are gone, so step 2's "no saved setup" cannot sit under a Done card. The card is its title, ONE
-  // line (the machine's end state) and ONE action.
+  // answer (Idle), with no Stop and no finished program's bar. The run buttons and the one-screen
+  // Go press are gone — a finished job cannot be started again by the same press. The THREE STEPS
+  // themselves STAY above the end card (#1123 item 39 replaced the old done-screen takeover, so the
+  // next program's press stays reachable on a multi-program job). The card is its title, ONE line
+  // (the machine's end state) and ONE action.
   const stripState = page.getByTestId('machine-status-state');
   await expect.poll(() => stripState.getAttribute('data-state'), { timeout: 30_000 }).toBe('Idle');
   await expect(page.getByTestId('machine-status-stop')).toHaveCount(0);
   await expect(page.getByTestId('machine-status-progress')).toHaveCount(0);
   await expect(page.getByTestId('engrave-cut-go')).toHaveCount(0);
   await expect(page.getByTestId('engrave-run-start')).toHaveCount(0);
-  await expect(page.getByTestId('engrave-cut-step-1')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-cut-step-1')).toHaveCount(1);
   // #1123 item 41 — the output is the DIRECT command (M852), not the M331 auto mode, and the
   // sentence names the code it sent.
   await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText('Vacuum off (M852); homed.');
