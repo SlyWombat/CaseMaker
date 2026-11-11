@@ -3340,31 +3340,35 @@ describe('EngravePanel — the release step routing (#469)', () => {
     resetCncMode();
   });
 
-  it('routes a multi-program job to the release step, not the single-file upload', async () => {
+  // #1123 item 8 — THE RUN CARD IS STEP 3'S ONE CONTROL SURFACE, for a single program and a
+  // multi-program job alike. The old release step / single-file upload are not rendered while it
+  // is up, and their two starts fold into the card's ONE Start.
+  it('routes a multi-program job to the run card, not a second release/upload control', async () => {
     show(generated([program(1, 'flat-1.0'), program(2, 'flat-3.175x12-metal')]));
     await locateEveryCutter();
 
-    expect(await screen.findByTestId('engrave-release')).toBeTruthy();
-    // The one-file upload is not offered beside it: there would be two run panels and one of them
-    // would play half the job with the vacuum left on.
+    expect(await screen.findByTestId('engrave-cut-card')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-release')).toBeNull();
     expect(screen.queryByTestId('engrave-upload-panel')).toBeNull();
-    expect(screen.getByTestId('engrave-release-upload').textContent).toContain('Upload all 2 programs');
+    expect(screen.getByTestId('engrave-cut-card-start').textContent).toBe('Start program 1 of 2');
   });
 
-  it('keeps the single-file upload for a one-program job', async () => {
+  it('keeps ONE start for a one-program job too — the run card’s', async () => {
     show(generated([program(1, 'flat-1.0')]));
 
-    expect(await screen.findByTestId('engrave-upload-panel')).toBeTruthy();
+    expect(await screen.findByTestId('engrave-cut-card')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-upload-panel')).toBeNull();
     expect(screen.queryByTestId('engrave-release')).toBeNull();
+    expect(screen.getByTestId('engrave-cut-card-start').textContent).toBe('Start program 1 of 1');
   });
 
-  it('shows the release blocker, and no run controls, when the release step may not own the job', async () => {
-    // A faced job: the face file is not in `programs`, so the release step refuses by name.
+  it('shows the release blocker as the card Start’s own reason, with no second start', async () => {
+    // A faced job: the face file is not in `programs`, so the release refuses by name.
     show(generated([program(1, 'flat-1.0'), program(2, 'flat-3.175x12-metal')], { facingNc: 'M02\n' }));
 
-    const blocked = await screen.findByTestId('engrave-release-blocked');
+    const blocked = await screen.findByTestId('engrave-cut-card-start-reason');
     expect(blocked.textContent).toContain('faces the stock first');
-    expect(screen.queryByTestId('engrave-release-upload')).toBeNull();
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByTestId('engrave-release-start')).toBeNull();
   });
 });

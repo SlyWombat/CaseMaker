@@ -10,7 +10,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MachineStatusStrip } from '@/components/viewport/MachineStatusStrip';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
-import { resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
+import { machineKey, resetMachineRunStore, useMachineRunStore, type RunEntry } from '@/store/machineRunStore';
+import { useCutRescueStore } from '@/components/panels/cutRescue';
 import { resetRegistrationTouchesStore, useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import { resetStripAccessoryStore, useStripAccessoryStore } from '@/store/stripAccessoryStore';
@@ -109,6 +110,7 @@ beforeEach(() => {
   useViewportStore.setState({ activeSidebarSection: null });
   resetLocationStore();
   resetCameraPaneStore();
+  useCutRescueStore.setState({ dismissedStopped: {} });
   useLocationStore.setState({ status: 'present', location: LOCATION, etag: '"e1"', reason: null });
   useEngraveJobStore.getState().replace({ ...defaultEngraveJob(), toolKey: 'flat-1.0' });
 });
@@ -747,5 +749,47 @@ describe('#1123 items 32/33 — Continue, Unlock and Home on the strip', () => {
     render(<MachineStatusStrip />);
     expect(screen.queryByTestId('machine-status-unlock')).toBeNull();
     expect(screen.queryByTestId('machine-status-home')).toBeNull();
+  });
+
+  // #1123 item 9 — EXACTLY ONE CONTINUE AND ONE STOP: while the waiting card is up, the strip
+  // states the state in words and carries no buttons.
+  it('#1123 item 9 — the waiting card owns Continue/Stop; the strip draws neither', () => {
+    remember('<Tool|MPos:-10.09,-12.83,-3|WPos:138.31,111.97,71.875|T:0,-9.757,1>');
+    useMachineRunStore.setState({
+      runs: {
+        [machineKey({ host: '192.0.2.10', port: 2222 })]: {
+          running: true,
+          toolWaiting: { awaited: 3 },
+          stopAsked: false,
+          paused: false,
+          lines: [],
+        } as never,
+      },
+    });
+    render(<MachineStatusStrip />);
+    expect(screen.getByTestId('machine-status-state').textContent).toBe('Waiting for a cutter');
+    expect(screen.queryByTestId('machine-status-tool-continue')).toBeNull();
+    expect(screen.queryByTestId('machine-status-stop')).toBeNull();
+  });
+
+  // #1123 item 9 — a STOPPED release puts its own card up (Unlock, home and the choices live
+  // there); the strip's alarm buttons and Stop fold away for as long as the card is up.
+  it('#1123 item 9 — the stopped card owns its recovery; the strip draws no buttons', () => {
+    remember('<Alarm|MPos:0,0,0>\nALARM: Probe fail');
+    useEngraveReleaseStore.setState({
+      records: {
+        [machineKey({ host: '192.0.2.10', port: 2222 })]: {
+          phase: 'failed',
+          files: [],
+          job: {},
+          active: null,
+          vacuum: 'unknown',
+        } as never,
+      },
+    });
+    render(<MachineStatusStrip />);
+    expect(screen.queryByTestId('machine-status-unlock')).toBeNull();
+    expect(screen.queryByTestId('machine-status-home')).toBeNull();
+    expect(screen.queryByTestId('machine-status-stop')).toBeNull();
   });
 });

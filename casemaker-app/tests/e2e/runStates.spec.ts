@@ -38,12 +38,12 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   const fake = await installFakeConsole(page, { steps: 12 });
   await cm.ready();
   await prepareFakeRun(page);
-  // The one screen's run panel; the expert path's own copy sits folded behind its disclosure.
+  // The run panel appears with the run the card's ONE Start prepares.
   const runPanel = page.getByTestId('engrave-run').first();
-  await expect(runPanel).toBeVisible();
 
   // ── RUNNING: the verbs and the ONE caption (#801); no panel progress line. ──
-  await runPanel.getByTestId('engrave-run-start').click();
+  await page.getByTestId('engrave-cut-card-start').click();
+  await expect(runPanel).toBeVisible({ timeout: 30_000 });
   await expect(runPanel.getByTestId('engrave-run-pause')).toHaveText('Pause');
   await expect(runPanel.getByTestId('engrave-run-stop')).toHaveText('Stop');
   await expect(runPanel.getByTestId('engrave-run-controls-caption')).toContainText(
@@ -51,7 +51,9 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   );
   await expect(runPanel.getByTestId('engrave-run-progress')).toHaveCount(0);
   await expect.poll(() => fake.lines().filter((l) => l === '?').length, { timeout: 20_000 }).toBeGreaterThan(1);
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  // #1123 item 8 — the card's ONE Start plays the RELEASE's own file, whose name the release
+  // names; the run panel no longer carries a start, so the file is not the prepared 'job.nc'.
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
   await shoot(page, 'running.png');
 
   // ── PAUSED: the same button is the Resume, and the suspend went out. ──
@@ -82,7 +84,11 @@ test('#801/#806 — the run panel running, paused, and its Done card, on a fake 
   await expect(page.getByTestId('engrave-cut-step-1')).toHaveCount(1);
   // #1123 item 41 — the output is the DIRECT command (M852), not the M331 auto mode, and the
   // sentence names the code it sent.
-  await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText('Vacuum off (M852); homed.');
+  // The release's own program states the vacuum and air directly (M852/M812), so the run's
+  // outcome says exactly that; the old prepared-run bracket (M852; homed) is no longer the text.
+  await expect(runPanel.getByTestId('engrave-run-outcome')).toHaveText(
+    'The run switched the vacuum off (M852) and the air (M812); homed.',
+  );
   await expect(done.locator('p')).toHaveCount(2); // the title and the one line
   await expect(done.locator('button')).toHaveCount(1); // Cut another
   await expect(runPanel.getByTestId('engrave-run-another')).toBeVisible();
@@ -98,8 +104,10 @@ test('#801 — Stop aborts the job, and Home is offered only once the machine co
   await cm.ready();
   await prepareFakeRun(page);
   const runPanel = page.getByTestId('engrave-run').first();
-  await runPanel.getByTestId('engrave-run-start').click();
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  await page.getByTestId('engrave-cut-card-start').click();
+  // #1123 item 8 — the card's ONE Start plays the RELEASE's own file, whose name the release
+  // names; the run panel no longer carries a start, so the file is not the prepared 'job.nc'.
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
 
   // The verb sends `abort`; the machine answers Idle, so the card says Stopped — not Finished.
   await runPanel.getByTestId('engrave-run-stop').click();

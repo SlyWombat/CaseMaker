@@ -34,9 +34,9 @@ test('#1197 — a Home press on a dead link offers its own report, and the repor
   await prepareFakeRun(page);
 
   const runPanel = page.getByTestId('engrave-run').first();
-  await expect(runPanel).toBeVisible();
-  await runPanel.getByTestId('engrave-run-start').click();
-  await expect.poll(() => fake.lines().includes('play /sd/gcodes/job.nc'), { timeout: 20_000 }).toBe(true);
+  await page.getByTestId('engrave-cut-card-start').click();
+  await expect.poll(() => fake.lines().some((l) => l.startsWith('play /sd/gcodes/')), { timeout: 20_000 }).toBe(true);
+  await expect(runPanel).toBeVisible({ timeout: 30_000 });
 
   // Stop is CONFIRMED by the fake (abort answered, Idle seen), so Home is offered — and it is the
   // operator's press that sends `$H`.
@@ -69,7 +69,7 @@ test('#1197 — a Home press on a dead link offers its own report, and the repor
   const transcript = report['transcript'] as { line: string; reply: string }[];
   expect(transcript.length).toBeGreaterThan(0);
   expect(transcript.every((entry) => entry.line === '')).toBe(true);
-  expect(transcript.some((entry) => entry.reply.includes('play /sd/gcodes/job.nc'))).toBe(true);
+  expect(transcript.some((entry) => entry.reply.includes('play /sd/gcodes/'))).toBe(true);
   // The machine and the job the entry names.
   const machine = report['machine'] as { host: string; port: number };
   expect(machine).toEqual({ host: '192.0.2.10', port: 2222 });

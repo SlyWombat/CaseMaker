@@ -56,8 +56,54 @@ async function prepareFakeRun(page: Page): Promise<void> {
     await page.getByTestId('engrave-cut-step-3-summary').click();
   }
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
-  const prepared = await page.evaluate(() => window.__caseMaker!.machineRunPrepare('192.0.2.10', 2222, 'job.nc', 'M03\nM05\n'));
-  expect(prepared, 'the machine run entry is prepared').toBe(true);
+
+  // #1127 — settle the cutter checklist the way the job's own action does (cutConfirm.spec drives
+  // the row's UI), then mark the release's files on the card and ready: the card's ONE Start
+  // (#1123 item 8) is the press under test, and it must not be spent on an upload the fake console
+  // does not serve.
+  await expect(page.getByTestId('engrave-cutter-row').first()).toBeVisible({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    const j = (await import('/src/store/engraveJobStore.ts' as string)) as {
+      useEngraveJobStore: {
+        getState: () => {
+          job: { package?: { hash: string; programs: { toolKey: string }[] } };
+          setCutterChecklistEntry: (hash: string, key: string, entry: { state: 'located'; at: string }) => void;
+        };
+      };
+    };
+    const job = j.useEngraveJobStore.getState().job;
+    const pkg = job.package;
+    if (pkg === undefined) return;
+    for (const key of [...new Set(pkg.programs.map((p) => p.toolKey))]) {
+      j.useEngraveJobStore.getState().setCutterChecklistEntry(pkg.hash, key, { state: 'located', at: new Date().toISOString() });
+    }
+  });
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 60_000 });
+  await page.evaluate(async () => {
+    const m = (await import('/src/store/engraveReleaseStore.ts' as string)) as {
+      useEngraveReleaseStore: {
+        getState: () => { records: Record<string, { phase: string; files: { upload: string }[]; walks: { airwalk: { upload: string } | null; clean: { upload: string } | null } }> };
+        setState: (v: unknown) => void;
+      };
+    };
+    const state = m.useEngraveReleaseStore.getState();
+    const key = '192.0.2.10:2222';
+    const rec = state.records[key];
+    if (rec === undefined) return;
+    const walk = (_w: unknown) => null;
+    m.useEngraveReleaseStore.setState({
+      records: {
+        ...state.records,
+        [key]: {
+          ...rec,
+          phase: rec.phase === 'idle' ? 'ready' : rec.phase,
+          files: rec.files.map((f) => ({ ...f, upload: 'uploaded' as const })),
+          walks: { airwalk: walk(rec.walks.airwalk), clean: walk(rec.walks.clean) },
+        },
+      },
+    });
+  });
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 30_000 });
 }
 
 /**
@@ -126,8 +172,7 @@ test('#1169 — the Tool wait shows the card; Continue sends M490.2 once and the
   const fake = await installFakeConsole(page, { steps: 20, toolWaitAtLine: 2 });
   await cm.ready();
   await prepareFakeRun(page);
-  const runPanel = page.getByTestId('engrave-run').first();
-  await runPanel.getByTestId('engrave-run-start').click();
+  await page.getByTestId('engrave-cut-card-start').click();
 
   const card = page.getByTestId('engrave-cut-recovery-waiting');
   await expect(card).toBeVisible({ timeout: 30_000 });
@@ -148,7 +193,7 @@ test('#1169 — the stopped card gates its choices behind Unlock and home; End d
   await cm.ready();
   await prepareFakeRun(page);
   const runPanel = page.getByTestId('engrave-run').first();
-  await runPanel.getByTestId('engrave-run-start').click();
+  await page.getByTestId('engrave-cut-card-start').click();
   // THE ALARM ENDS THE RUN FIRST — the product's own order. The card only exists after the stop,
   // and pressing Unlock while the run's console is still open made the card's own attach fail (no
   // `$X` ever reached the fake) while the run panel was still running.

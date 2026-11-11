@@ -3,11 +3,13 @@
 // the card's render is checked against the same model, so the list the operator reads and the list
 // the acceptance counts cannot disagree.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CutRunCard, cutCardModel, type CutCardProgramRow } from '@/components/panels/CutRunCard';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobSetups } from '@/engine/cnc/engrave/jobSetup';
+import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
 import type { RunPlan } from '@/engine/cnc/plan';
 import type { EngraveJob, FrozenPackage, JobSetup } from '@/types/engraveJob';
 
@@ -75,7 +77,72 @@ function planOf(count: number): RunPlan {
   } as unknown as RunPlan;
 }
 
-afterEach(cleanup);
+// #1123 item 8 — the card's own release record, as the release step would have planned it.
+const TARGET = { host: '192.0.2.10', port: 2222 };
+const KEY = machineKey(TARGET);
+
+function releaseRecord(phase: string, active: number | null, next: number | null) {
+  return {
+    target: TARGET,
+    phase,
+    active,
+    next,
+    atMachine: false,
+    stopAsked: false,
+    spanClosing: false,
+    vacuum: 'on',
+    job: trayJob(),
+    files: Array.from({ length: 20 }, (_, i) => ({
+      index: i + 1,
+      total: 20,
+      setupIndex: 1,
+      setupId: 's1',
+      toolKey: i % 2 === 0 ? 'flat-1.0' : 'user:flat-0.6',
+      done: phase === 'running' ? i === 0 : false,
+      nc: '',
+      hash: `h${i + 1}`,
+      filename: `p${i + 1}.nc`,
+      upload: 'pending',
+      uploadNote: null,
+      verify: null,
+    })),
+    walks: { airwalk: null, clean: null },
+  };
+}
+
+function seedReady(): void {
+  useEngraveReleaseStore.setState({ records: { [KEY]: releaseRecord('ready', null, 1) } } as never);
+}
+
+function seedRunning(): void {
+  useEngraveReleaseStore.setState({ records: { [KEY]: releaseRecord('running', 2, null) } } as never);
+  useMachineRunStore.setState({
+    runs: {
+      [KEY]: {
+        running: true,
+        runId: 1,
+        filename: 'p2.nc',
+        programHash: 'h2',
+        paused: false,
+        stopAsked: false,
+        progress: { state: 'Run', line: 5, percent: 20, elapsedS: null },
+        firstProgressAt: null,
+        pausedMs: 0,
+        lines: [],
+        outcome: null,
+        context: null,
+        end: null,
+        pendingStock: null,
+      } as never,
+    },
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  useEngraveReleaseStore.setState({ records: {} });
+  useMachineRunStore.setState({ runs: {} });
+});
 
 describe('#1167 the Cut card lists the whole job', () => {
   it('20 programs, two sides: every program plus the flip row between the sides', () => {
@@ -117,7 +184,7 @@ describe('#1167 the Cut card lists the whole job', () => {
     expect(model.sides).toBe(1);
   });
 
-  it('the card renders the header, every row, the flip, the footnote and the fixed controls', () => {
+  it('the card renders the header, every row, the flip, the footnote and — in READY — the ONE Start', () => {
     const job = trayJob();
     const pkg = packageOf(job, 20);
     render(<CutRunCard job={job} pkg={pkg} plan={planOf(20)} finishedHashes={['h1']} target={null} />);
@@ -129,24 +196,111 @@ describe('#1167 the Cut card lists the whole job', () => {
     expect(screen.getByTestId('engrave-cut-card-row-1').getAttribute('data-state')).toBe('done');
     expect(screen.getByTestId('engrave-cut-card-row-3').getAttribute('data-state')).toBe('bit-change');
     expect(screen.getByTestId('engrave-cut-card-footnote').textContent).toContain('bit change');
-    // The control row is part of the card in the idle state too; no run is active, so both wait —
-    // and each says WHY (A's acceptance rule: every disabled control carries its reason sentence;
-    // the rule reads a `title` when no *-reason node is in the control's scope).
-    expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByTestId('engrave-cut-card-stop') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-card-pause').getAttribute('title')).toBe('Nothing is running yet');
-    expect(screen.getByTestId('engrave-cut-card-stop').getAttribute('title')).toBe('Choose the machine first');
+    // #1123 item 8 — READY IS ONE START AND NO PAUSE/STOP. The old fixed control row waited here
+    // disabled with a reason; the ruling takes it out of READY entirely.
+    expect(screen.queryByTestId('engrave-cut-card-pause')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-stop')).toBeNull();
+    // The 150 px empty slot is gone: the card's height is its content.
+    expect(screen.queryByTestId('engrave-cut-card-running-slot')).toBeNull();
   });
 
-  it('with a machine but no run, Stop says the same reason Pause does', () => {
+  it('with a machine and no run, READY states the program and its bit, and one Start', () => {
     const job = trayJob();
     const pkg = packageOf(job, 20);
+    seedReady();
     render(
-      <CutRunCard job={job} pkg={pkg} plan={planOf(20)} finishedHashes={[]} target={{ host: '192.0.2.10', port: 2222 }} />,
+      <CutRunCard
+        job={job}
+        pkg={pkg}
+        plan={planOf(20)}
+        finishedHashes={[]}
+        target={{ host: '192.0.2.10', port: 2222 }}
+        programs={[]}
+      />,
     );
-    expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-card-pause').getAttribute('title')).toBe('Nothing is running yet');
-    expect(screen.getByTestId('engrave-cut-card-stop').getAttribute('title')).toBe('Nothing is running yet');
+    expect(screen.getByTestId('engrave-cut-card-ready').textContent).toContain('Ready · program 1 of 20 · next: ');
+    const start = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
+    expect(start.textContent).toBe('Start program 1 of 20');
+    expect(start.disabled).toBe(false);
+    expect(screen.queryByTestId('engrave-cut-card-pause')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-stop')).toBeNull();
+  });
+
+  it('the ONE Start uploads what is not on the card, then runs the release', async () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    seedReady();
+    const calls: string[] = [];
+    useEngraveReleaseStore.setState({
+      uploadAll: async () => {
+        calls.push('upload');
+        // The real action marks every file uploaded; the mock does the same so the card's
+        // after-upload check reads what the store would really hold.
+        const state = useEngraveReleaseStore.getState();
+        const rec = state.records[KEY];
+        if (rec !== undefined) {
+          useEngraveReleaseStore.setState({
+            records: { ...state.records, [KEY]: { ...rec, files: rec.files.map((f) => ({ ...f, upload: 'uploaded' as const })) } },
+          } as never);
+        }
+      },
+      startRelease: () => {
+        calls.push('start');
+      },
+    } as never);
+    render(
+      <CutRunCard
+        job={job}
+        pkg={pkg}
+        plan={planOf(20)}
+        finishedHashes={[]}
+        target={{ host: '192.0.2.10', port: 2222 }}
+        programs={[]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('engrave-cut-card-start'));
+    await waitFor(() => expect(calls).toEqual(['upload', 'start']));
+  });
+
+  it('RUNNING: the Start is gone and Pause/Stop are the card’s controls', () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    seedRunning();
+    render(
+      <CutRunCard
+        job={job}
+        pkg={pkg}
+        plan={planOf(20)}
+        finishedHashes={['h1']}
+        target={{ host: '192.0.2.10', port: 2222 }}
+        programs={[]}
+      />,
+    );
+    expect(screen.queryByTestId('engrave-cut-card-start')).toBeNull();
+    expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-stop') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('while the machine is WAITING the recovery card owns Continue/Stop: the run card offers neither', () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    seedRunning();
+    useMachineRunStore.setState({
+      runs: { [KEY]: { running: true, toolWaiting: { awaited: 3 }, stopAsked: false, paused: false, lines: [] } as never },
+    });
+    render(
+      <CutRunCard
+        job={job}
+        pkg={pkg}
+        plan={planOf(20)}
+        finishedHashes={['h1']}
+        target={{ host: '192.0.2.10', port: 2222 }}
+        programs={[]}
+      />,
+    );
+    expect(screen.queryByTestId('engrave-cut-card-start')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-pause')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-stop')).toBeNull();
   });
 
   it('stale finishedPrograms hashes from an OLD package do not count (17-program job)', () => {

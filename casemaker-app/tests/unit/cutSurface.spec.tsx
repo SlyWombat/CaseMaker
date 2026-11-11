@@ -780,9 +780,9 @@ describe('#419 §3 the Cut surface', () => {
     // are their own test below.)
 
     // Run is blocked with its ONE sentence.
-    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    const go = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('tick the statement in Cut, step 1');
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('tick the statement in Cut, step 1');
 
     // #726 W16 — the Design panel's Save gate reads the same run findings and the same flag: the
     // box that appears here is the one that clears Save there (one source, no deadlock).
@@ -798,7 +798,7 @@ describe('#419 §3 the Cut surface', () => {
     // clearance tick and the at-machine ask are the same statement now, not two.
     fireEvent.click(ack);
     expect(useEngraveRunStore.getState().acknowledged).toBe(true);
-    expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-start-reason')).toBeNull();
     expect(go.disabled).toBe(false);
     expect(screen.getByTestId('engrave-cut-step-1-summary').textContent).toContain('clearance acknowledged');
     expect(saveBlocker(gateView())).toBeNull();
@@ -878,14 +878,14 @@ describe('#419 §3 the Cut surface', () => {
     const sentence = 'The program is older than the design — press Generate in step 1.';
     // The statement is ticked so only the stale package can hold the press.
     fireEvent.click(screen.getByTestId('engrave-ack'));
-    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    const go = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe(sentence);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toBe(sentence);
 
     // The expert path's upload takes the same first blocker, and a disabled press sends nothing.
-    const upload = screen.getByTestId('engrave-upload') as HTMLButtonElement;
+    const upload = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(upload.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain(sentence);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain(sentence);
     fireEvent.click(upload);
     expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull();
     expect(uploads).toHaveLength(0);
@@ -907,13 +907,13 @@ describe('#419 §3 the Cut surface', () => {
 
     // The report row's own words, not a generic "clear step 1".
     fireEvent.click(screen.getByTestId('engrave-ack'));
-    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    const go = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toBe('the cutter cannot reach the label');
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toBe('the cutter cannot reach the label');
 
-    const upload = screen.getByTestId('engrave-upload') as HTMLButtonElement;
+    const upload = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(upload.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('the cutter cannot reach the label');
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('the cutter cannot reach the label');
     fireEvent.click(upload);
     expect(screen.queryByTestId('engrave-upload-confirm')).toBeNull();
     expect(uploads).toHaveLength(0);
@@ -952,10 +952,11 @@ describe('#419 §3 the Cut surface', () => {
     fireEvent.change(select, { target: { value: 'full' } });
     expect(screen.getByTestId('engrave-dry-run-note').textContent).toContain('spindle stays off');
 
-    // The single-file upload path is fed the lifted program under its own -dry file name.
-    fireEvent.click(screen.getByTestId('engrave-upload'));
+    // #1123 item 8 — the card's ONE Start plays the release the card planned; a full dry run
+    // names its files -dry.nc (they never overwrite the real programs on the card).
     await waitFor(() => {
-      expect(screen.getByTestId('engrave-upload-confirm').textContent).toContain('-dry.nc');
+      const rec = useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`];
+      expect(rec?.files[0]?.filename ?? '').toContain('-dry.nc');
     });
   });
 
@@ -1059,9 +1060,11 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg, generated: live });
     giveStatement();
 
-    fireEvent.click(await screen.findByTestId('engrave-release-upload'));
-    fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
-    await screen.findByTestId('engrave-release-start');
+    // #1123 item 8 — the card's ONE Start is the press that uploads and plays the release.
+    const start = (await screen.findByTestId('engrave-cut-card-start')) as HTMLButtonElement;
+    await waitFor(() => expect(start.disabled).toBe(false));
+    fireEvent.click(start);
+    await waitFor(() => expect(uploads).toHaveLength(2));
 
     const files = useEngraveReleaseStore.getState().records[`${TARGET.host}:${TARGET.port}`]?.files ?? [];
     expect(files.map((f) => f.nc)).toEqual([NC1, NC2]);
@@ -1078,12 +1081,14 @@ describe('#419 §3 the Cut surface', () => {
     draw({ job, report: reportOf(), pkg, generated: null });
     giveStatement();
 
+    // #1123 item 8 — the refusal is the card's Start's own visible reason; there is no second
+    // upload control to offer.
     await waitFor(() =>
-      expect(screen.getByTestId('engrave-release-blocked').textContent).toContain(
+      expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain(
         'program 1 has no verifier report in this session',
       ),
     );
-    expect(screen.queryByTestId('engrave-release-upload')).toBeNull();
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
 
     // The store refuses too: verified-only is not a disabled button.
     const sources = frozenReleaseSources(
@@ -1177,12 +1182,12 @@ describe('#419 §3 the Cut surface', () => {
     expect(screen.queryByTestId('engrave-cut-repost')).toBeNull();
 
     // Upload is gated until the operator confirms G32 ran for this clamping.
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('G32');
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('G32');
 
     // The tick lifts the gate.
     fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('#642 a fresh measurement is a fresh clamping: the G32 tick resets', async () => {
@@ -1210,7 +1215,7 @@ describe('#419 §3 the Cut surface', () => {
 
     // The tick is the operator saying "the grid was run for THIS clamping".
     fireEvent.click(screen.getByTestId('engrave-cut-dome-g32-ack'));
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(false);
 
     // A new registration measures the blank again — a new clamping, with a top the old grid may not
     // describe. Both confirmations belong to the old blank and must not carry over.
@@ -1219,8 +1224,8 @@ describe('#419 §3 the Cut surface', () => {
     });
 
     expect((screen.getByTestId('engrave-cut-dome-g32-ack') as HTMLInputElement).checked).toBe(false);
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('G32');
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('G32');
   });
 
   it('#631 (c) — a dome also offers "write the origin anyway", which records the decision and clears Upload', async () => {
@@ -1261,12 +1266,12 @@ describe('#419 §3 the Cut surface', () => {
     expect(accept.closest('label')?.textContent).toContain('up to 0.2 mm at the centre');
 
     // Upload is gated until one of the two routes is chosen.
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
 
     // Choosing "write the origin anyway" records the decision and clears the block.
     fireEvent.click(accept);
     expect(accept.checked).toBe(true);
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('#695 — a frozen mount the machine no longer holds: step 1 offers the change and its card names the machine', () => {
@@ -1525,9 +1530,9 @@ describe('#656 from the cutter prompt to the cut', () => {
     expect(screen.getByTestId('engrave-cut-confirm')).toBeTruthy();
     expect(screen.getByTestId('engrave-cut-confirm-program').textContent).toContain('job');
     // One press, held until the one statement is ticked.
-    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-ack'));
-    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(false);
     // The expert path is there, unchanged, folded.
     expect((screen.getByTestId('engrave-cut-expert') as HTMLDetailsElement).open).toBe(false);
     expect(screen.getByTestId('engrave-cut-plan')).toBeTruthy();
@@ -1559,8 +1564,8 @@ describe('#656 from the cutter prompt to the cut', () => {
     useEngraveRunStore.setState({ oracle: OK_ORACLE as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true, restoreChecking: true });
     fireEvent.click(screen.getByTestId('engrave-ack'));
-    expect((screen.getByTestId('engrave-cut-go') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain(
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain(
       'checking the restored run against this shop',
     );
   });
@@ -1618,7 +1623,7 @@ describe('#819 the finished screen', () => {
     useMachineRunStore.setState({ runs: { [machineKey(TARGET)]: ended('another-job') } as never });
     draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
-    expect(screen.getByTestId('engrave-cut-go')).toBeTruthy();
+    expect(screen.getByTestId('engrave-cut-card-start')).toBeTruthy();
     expect(screen.queryByTestId('engrave-cut-end-card')).toBeNull();
   });
 
@@ -1631,7 +1636,7 @@ describe('#819 the finished screen', () => {
     // step's press in the ordinary path; on a finished job it would start the same program again.
     // The steps themselves stay above the end card (#1123 item 39); the press does not.
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
-    expect(screen.queryByTestId('engrave-cut-go')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-start')).toBeNull();
     expect(screen.getByTestId('engrave-cut-end-card')).toBeTruthy();
   });
 
@@ -1644,8 +1649,13 @@ describe('#819 the finished screen', () => {
     // A 20-program release: the bench's side-1 job (19 programs left after program 1).
     const programs20 = Array.from({ length: 20 }, (_, i) => {
       const nc = `G90 ; program ${i + 1}\nM02`;
-      return { ...P1, nc, programHash: programHash(nc), verify: VERIFY };
+      // A BIT CHANGE needs a different cutter next: program 2 is the metal cutter.
+      return { ...P1, nc, programHash: programHash(nc), verify: VERIFY, toolKey: i === 0 ? P1.toolKey : 'flat-3.175x12-metal' };
     });
+    job.setups = (job.setups ?? []).map((s) => ({
+      ...s,
+      tools: [...new Set([...s.tools, 'flat-3.175x12-metal'])],
+    }));
     const pkg = frozen(job, programs20);
     const sources = frozenReleaseSources(job, pkg, new Map(programs20.map((p) => [p.programHash, VERIFY])));
     const machine = machineKey(TARGET);
@@ -1673,13 +1683,17 @@ describe('#819 the finished screen', () => {
     draw({ job, report: reportOf(), pkg, generated: generated(programs20), canDrive: true });
     giveStatement();
 
-    // The steps own the screen — the done card does not — and the next program's press is there.
+    // The steps own the screen — the done card does not — and the next program's press is the
+    // bit-change card's (#1123 item 39): the run card draws no Start while that card is up.
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
-    expect(screen.getByTestId('engrave-cut-run-ended').textContent).toContain('of 20 programs finished');
-    expect(screen.getByTestId('engrave-release-change-done').textContent).toBe('Run program 2 of 20');
-    fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
-    fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
-    fireEvent.click(screen.getByTestId('engrave-release-change-done'));
+    // The card's own plan must not wipe the seeded pause: the release is still at the bit change.
+    expect(useEngraveReleaseStore.getState().records[machine]?.phase).toBe('bit-change');
+    expect(screen.getByTestId('cut-bit-change-card')).toBeTruthy();
+    expect(screen.getByTestId('cut-bit-change-header').textContent).toContain('bit change');
+    expect(screen.queryByTestId('engrave-cut-card-start')).toBeNull();
+    fireEvent.click(screen.getByTestId('cut-bit-change-tick-in'));
+    fireEvent.click(screen.getByTestId('cut-bit-change-tick-hands'));
+    fireEvent.click(screen.getByTestId('cut-bit-change-go'));
     await waitFor(() => expect(prepare).toHaveBeenCalled());
   });
 
@@ -1740,7 +1754,9 @@ describe('#819 the finished screen', () => {
         },
       }),
     );
-    expect(screen.getByTestId('engrave-release-start').textContent).toBe('Run program 2 of 20');
+    // #1123 item 8 — the card's ONE Start names the program the reload must continue with:
+    // program 2 of 20, never a blanket "run the job".
+    expect(screen.getByTestId('engrave-cut-card-start').textContent).toBe('Start program 2 of 20');
     // And the steps own the screen: the done card cannot pre-empt after a reload.
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
   });
@@ -2232,10 +2248,10 @@ describe('#1127 the cutter checklist gates the Cut step', () => {
     giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
     // Nothing ticked: the blocker names the missing row, and the Load is disabled.
-    expect(screen.getByTestId('engrave-upload-blocked').textContent).toContain('0 of 1 cutters located');
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('0 of 1 cutters located');
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(true);
     act(() => tickChecklistForStoredPackage());
-    expect((screen.getByTestId('engrave-upload') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('the ONE Cut press waits too — the same rows gate the one-screen path', async () => {
@@ -2245,12 +2261,12 @@ describe('#1127 the cutter checklist gates the Cut step', () => {
     draw({ job, report: reportOf(), pkg: null, generated: made });
     giveStatement();
     await waitFor(() => expect(screen.getByTestId('engrave-package').dataset.state).toBe('current'));
-    const go = screen.getByTestId('engrave-cut-go') as HTMLButtonElement;
+    const go = screen.getByTestId('engrave-cut-card-start') as HTMLButtonElement;
     expect(go.disabled).toBe(true);
-    expect(screen.getByTestId('engrave-cut-go-blocked').textContent).toContain('0 of 1 cutters located');
+    expect(screen.getByTestId('engrave-cut-card-start-reason').textContent).toContain('0 of 1 cutters located');
     act(() => tickChecklistForStoredPackage());
     expect(go.disabled).toBe(false);
-    expect(screen.queryByTestId('engrave-cut-go-blocked')).toBeNull();
+    expect(screen.queryByTestId('engrave-cut-card-start-reason')).toBeNull();
   });
 });
 

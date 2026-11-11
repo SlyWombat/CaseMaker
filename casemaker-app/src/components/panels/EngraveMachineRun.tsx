@@ -30,6 +30,8 @@ import { resolveTool } from '@/engine/cnc/toolRegistry';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
 import { formatDuration } from '@/engine/cnc/plan';
 import { useCncModeStore } from '@/store/cncModeStore';
+import { useEngraveReleaseStore } from '@/store/engraveReleaseStore';
+import { stoppedPhase, useCutRescueStore, waitingCardUp } from './cutRescue';
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
 import { dryToolChange, TOOL_CHANGE_NOTE } from '@/platform/toolChangeDry';
@@ -61,10 +63,21 @@ export interface EngraveMachineRunProps {
    * whichever component started it.
    */
   controlled?: boolean;
+  /**
+   * #1123 item 8 — THE RUN CARD CARRIES THE STEP'S ONE START. `startless` draws the live run, the
+   * log, the end lines and the recoveries, but never a start of its own (nor the vacuum sentence
+   * that belongs to it). The operator's start is the run card above.
+   */
+  startless?: boolean;
 }
 
 /** The run panel for a machine, or nothing when no program has been prepared for it. */
-export function EngraveMachineRun({ target, onProgramLine, controlled = false }: EngraveMachineRunProps): JSX.Element | null {
+export function EngraveMachineRun({
+  target,
+  onProgramLine,
+  controlled = false,
+  startless = false,
+}: EngraveMachineRunProps): JSX.Element | null {
   const machine = machineKey(target);
   const entry = useMachineRunStore((s) => s.runs[machine]);
   const key = runKey(target, entry?.programHash ?? '');
@@ -131,6 +144,14 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
   useEffect(() => setToolTicked(false), [toolWaiting]);
   const toolFirstRun = toolWaiting && !routineCompleted(locationMachine, toolDry.identity);
   const toolHeadless = firstRunAutomationRefusal({ firstRun: toolFirstRun });
+  // #1123 item 9 — EXACTLY ONE CONTINUE AND ONE STOP. On the CUT STEP (the `startless` instance —
+  // the only screen that renders the rescue cards) the panel's own prompt and Pause/Stop fold away
+  // while a card is up; the card carries them, #1202's tool-change preview included. Elsewhere (the
+  // upload screen) no card exists, so the prompt stays: a safety preview never disappears because
+  // controls moved.
+  const cutRelease = useEngraveReleaseStore((s) => s.records[machine]);
+  const dismissedStopped = useCutRescueStore((s) => s.dismissedStopped[machine] === true);
+  const cutRescueUp = startless && (waitingCardUp(entry) || (stoppedPhase(cutRelease) && !dismissedStopped));
   if (!entry) return null;
   // #655 — the firmware's `Tool` stop, in our words: the tool it waits for, named by the run's own
   // cutter (its context key) so the operator reads the same name the strip and the sheet use.
@@ -224,7 +245,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
       {/* #819 — once a run has ENDED there is nothing left to start from here: the card's action is
           the next step, and a second Start beside it would be a second primary. A fresh upload
           resets the entry (end null), so the button returns for the next program. */}
-      {!controlled && entry.end === null && (
+      {!controlled && !startless && entry.end === null && (
         <button
           type="button"
           data-testid="engrave-run-start"
@@ -238,13 +259,13 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
           {running ? 'Running…' : `Run ${entry.filename}`}
         </button>
       )}
-      {!controlled && entry.end === null && (
+      {!controlled && !startless && entry.end === null && (
         <p style={MUTED} data-testid="engrave-run-vacuum">
           {vacuumLine}
         </p>
       )}
 
-      {!controlled && running && (
+      {!controlled && running && !cutRescueUp && (
         <>
           {entry.toolWaiting != null && (
             <div data-testid="engrave-run-tool-prompt" style={{ ...BOX, borderColor: '#5a6b7f' }}>

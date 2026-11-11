@@ -121,6 +121,8 @@ export interface EngraveCutConfirmProps {
    */
   surfaceCheck?: { gridPitchMm: number | null } | null;
   onLiveStatus?: (live: { busy: boolean; status: string }) => void;
+  /** Draw the start press. #1123 item 8: false while the run card carries the step's ONE Start. */
+  press?: boolean;
 }
 
 export function EngraveCutConfirm({
@@ -135,6 +137,11 @@ export function EngraveCutConfirm({
   runContext,
   surfaceCheck = null,
   onLiveStatus,
+  /**
+   * #1123 item 8 — THE ONE START IS THE RUN CARD'S while the card is up. This screen keeps its
+   * dossier (the program, the cutter, the check, the dome) and draws no start control at all.
+   */
+  press = true,
 }: EngraveCutConfirmProps): JSX.Element {
   // #797 — the ONE statement at Cut step 1 replaced this screen's own tick.
   const statement = useEngraveRunStore((s) => s.acknowledged);
@@ -247,29 +254,33 @@ export function EngraveCutConfirm({
           Camera — see the bed
         </button>
       )}
-      <button
-        type="button"
-        data-testid="engrave-cut-go"
-        disabled={!statement || pressing || refused !== null || !oracleOk}
-        style={{ width: '100%', padding: 8, marginTop: 8, fontWeight: 600 }}
-        onClick={() => void cut()}
-      >
-        {pressing ? 'Uploading and starting…' : `Cut ${job.name}`}
-      </button>
-      {refused !== null && (
-        <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-go-blocked">
-          {refused}
-        </p>
-      )}
-      {!oracleOk && oracle !== null && (
-        <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-go-oracle">
-          The check found a difference — this program is not cut until it is.
-        </p>
-      )}
-      {error !== null && (
-        <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-confirm-error">
-          {error}
-        </p>
+      {press && (
+        <>
+          <button
+            type="button"
+            data-testid="engrave-cut-go"
+            disabled={!statement || pressing || refused !== null || !oracleOk}
+            style={{ width: '100%', padding: 8, marginTop: 8, fontWeight: 600 }}
+            onClick={() => void cut()}
+          >
+            {pressing ? 'Uploading and starting…' : `Cut ${job.name}`}
+          </button>
+          {refused !== null && (
+            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-go-blocked">
+              {refused}
+            </p>
+          )}
+          {!oracleOk && oracle !== null && (
+            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-go-oracle">
+              The check found a difference — this program is not cut until it is.
+            </p>
+          )}
+          {error !== null && (
+            <p style={{ ...MUTED, color: BAD }} data-testid="engrave-cut-confirm-error">
+              {error}
+            </p>
+          )}
+        </>
       )}
     </section>
   );

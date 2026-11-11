@@ -62,7 +62,8 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   await expect(page.getByTestId('engrave-run-at-machine')).toHaveCount(0);
   await expect(page.getByTestId('engrave-registration-at-machine')).toHaveCount(0);
   // ONE statement arms the press: disabled while it is unticked, enabled once step 1's is given.
-  const go = page.getByTestId('engrave-cut-go');
+  // #1123 item 8 — the ONE Start is the run card's; the confirm keeps its dossier and no press.
+  const go = page.getByTestId('engrave-cut-card-start');
   await expect(go).toBeDisabled();
   const statementDir = path.join(path.resolve(process.cwd(), '..'), 'docs', 'bench', 'img', '2026-10-31-one-statement');
   fs.mkdirSync(statementDir, { recursive: true });
