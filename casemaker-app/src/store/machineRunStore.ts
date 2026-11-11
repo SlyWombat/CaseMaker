@@ -45,7 +45,9 @@ import { createStatusLog, readStatusFields, type StatusLog } from '@/engine/cnc/
 import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
-import { machineAt, useLocationStore } from './locationStore';
+import { machineAt, saveMachineWithRetry, useLocationStore } from './locationStore';
+import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
+import { toolChangeIdentity } from '@/platform/toolChangeDry';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
@@ -772,6 +774,26 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
                     ? {}
                     : { pausedMs: (entry.pausedMs ?? 0) + Math.max(0, Date.now() - entry.pausedAt), pausedAt: null }),
                 });
+              } else if (e.kind === 'tool-done') {
+                patch(machine, { lines: [...entry.lines, '(The tool change is done — the program is running again.)'] });
+                // #1202 — THE TOOL CHANGE COMPLETED HERE, by our own Continue (a hand at the
+                // console is the machine's act, not this app's): record the shape the card showed,
+                // so the next tool change on this machine is not marked a first run.
+                if (e.byApp) {
+                  const at = machine.lastIndexOf(':');
+                  const record =
+                    at < 0 ? null : machineAt({ host: machine.slice(0, at), port: Number(machine.slice(at + 1)) });
+                  if (record !== null) {
+                    void saveMachineWithRetry(record, (current) =>
+                      withRoutineCompletion(current, {
+                        routine: 'tool-change',
+                        shape: toolChangeIdentity().shape,
+                        at: new Date().toISOString(),
+                        build: buildStamp(),
+                      }),
+                    );
+                  }
+                }
               } else if (e.kind === 'resumed') {
                 patchRun({
                   paused: false,

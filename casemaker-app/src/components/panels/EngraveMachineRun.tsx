@@ -18,7 +18,7 @@
  * machine CONFIRMED (Idle, vacuum off).
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
 import { describeEndLine, programOwnsVacuum, runSettings } from '@/platform/machineRun';
 import { machineKey, useMachineRunStore } from '@/store/machineRunStore';
@@ -32,6 +32,14 @@ import { formatDuration } from '@/engine/cnc/plan';
 import { useCncModeStore } from '@/store/cncModeStore';
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
+import { dryToolChange, TOOL_CHANGE_NOTE } from '@/platform/toolChangeDry';
+import { RoutineDryPreview } from './RoutineDryPreview';
+import { routineCompleted } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
+import { useLocationStore } from '@/store/locationStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf } from '@/engine/cnc/machine';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 /** #655 — the waiting prompt's box: the same frame the panel's other notices use. */
@@ -97,6 +105,24 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     const lines = entry?.lines ?? [];
     setRunTranscript(lines.length > 0 ? lines.join('\n') : null);
   }, [entry?.lines, setRunTranscript]);
+  // #1202 — THE TOOL CHANGE'S OWN PREVIEW. The firmware's `Tool` stop is a motion routine of its
+  // own: the card shows the exact line the Continue sends, marks a shape this machine has never
+  // completed, and holds the press for the operator's own statement. The completion is recorded by
+  // the run store when the controller leaves `Tool` after OUR line (the watch's tool-done event).
+  const locationMachine = useLocationStore(
+    (s) => s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
+  );
+  const calibration = useSettingsStore((s) => s.machineCalibration);
+  const toolClearanceZ = useMemo(
+    () => clearanceZOf(jobMachine({ machineId: locationMachine?.profileId ?? 'Z1' }, calibration)) ?? 0,
+    [locationMachine?.profileId, calibration],
+  );
+  const toolDry = useMemo(() => dryToolChange(toolClearanceZ), [toolClearanceZ]);
+  const [toolTicked, setToolTicked] = useState(false);
+  const toolWaiting = entry?.toolWaiting != null;
+  useEffect(() => setToolTicked(false), [toolWaiting]);
+  const toolFirstRun = toolWaiting && !routineCompleted(locationMachine, toolDry.identity);
+  const toolHeadless = firstRunAutomationRefusal({ firstRun: toolFirstRun });
   if (!entry) return null;
   // #655 — the firmware's `Tool` stop, in our words: the tool it waits for, named by the run's own
   // cutter (its context key) so the operator reads the same name the strip and the sheet use.
@@ -218,10 +244,19 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
                 The machine is waiting for {toolWords}
                 {cutterName === null ? '' : ` — the ${cutterName} —`} to be in the spindle.
               </p>
+              <RoutineDryPreview
+                preview={toolDry}
+                firstRun={toolFirstRun}
+                ticked={toolTicked}
+                onTick={setToolTicked}
+                headless={toolHeadless}
+                note={TOOL_CHANGE_NOTE}
+                statement="I am at the machine — the bit is fitted in the spindle, the head is clear, and I will stay at the Stop."
+              />
               <button
                 type="button"
                 data-testid="engrave-run-tool-continue"
-                disabled={entry.stopAsked}
+                disabled={entry.stopAsked || (toolFirstRun && !toolTicked) || toolHeadless !== null}
                 style={{ width: '100%', padding: 7, marginTop: 4 }}
                 onClick={() => requestToolContinue(machine)}
               >

@@ -143,6 +143,7 @@ import { stopIsReportable } from '@/platform/machineStopReport';
 // #1202 + #1199 item 3 — the dry line view and the first-run mark.
 import { dryFlipRegistration, dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { RoutineDryPreview } from './RoutineDryPreview';
 import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
 import { firstRunAutomationRefusal } from '@/platform/automation';
 import { useMachineStore } from '@/store/machineStore';
@@ -170,84 +171,7 @@ const OK = '#9fd19b';
 const BAD = '#f0b4ad';
 const WARN = '#e0c07a';
 
-/**
- * #1202 + #1199 item 3 — A ROUTINE'S OWN DRY LINES, MARKED WHEN THIS MACHINE HAS NEVER RUN THEM.
- * One card serves every motion routine the registration step offers: the sequence the press will
- * run (the SAME executor, against a recording console), this machine's record of that exact shape,
- * the guard's refusals, and the operator's own first-run statement. The testids are the same for
- * whichever routine owns the card — only one routine's card is on screen at a time.
- */
-function RoutineDryPreview({
-  preview,
-  firstRun,
-  ticked,
-  onTick,
-  headless,
-}: {
-  preview: DryRoutine;
-  firstRun: boolean;
-  ticked: boolean;
-  onTick: (checked: boolean) => void;
-  headless: string | null;
-}) {
-  return (
-    <div
-      data-testid="engrave-registration-routine"
-      data-routine={preview.identity.routine}
-      data-shape={preview.identity.shape}
-      style={{ marginTop: 6 }}
-    >
-      {firstRun && (
-        <p style={{ ...MUTED, color: WARN, margin: '4px 0' }} data-testid="engrave-registration-first-run">
-          This measurement has not run on this machine before — stay at the Stop.
-        </p>
-      )}
-      <details data-testid="engrave-registration-dry">
-        <summary data-testid="engrave-registration-dry-summary">
-          What will be sent — {preview.lines.length} line{preview.lines.length === 1 ? '' : 's'}
-        </summary>
-        <ol style={{ ...MUTED, paddingLeft: 18, margin: '4px 0' }} data-testid="engrave-registration-dry-list">
-          {preview.lines.map((l, i) => (
-            <li
-              key={`${i}-${l.line}`}
-              data-testid={`engrave-registration-dry-line-${i}`}
-              data-refused={l.refused === null ? undefined : 'true'}
-              style={l.refused === null ? undefined : { color: BAD }}
-            >
-              <code>{l.line}</code>
-              {l.refused !== null && <span> — {l.refused}</span>}
-            </li>
-          ))}
-        </ol>
-        <p style={{ ...MUTED, margin: '2px 0 0' }} data-testid="engrave-registration-dry-note">
-          The routine’s own sequence, under the readings the plan expects. Every line is checked
-          again live as it is sent — this view previews; the guard enforces.
-        </p>
-      </details>
-      {headless !== null && (
-        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">
-          {headless}
-        </p>
-      )}
-      {preview.refused && (
-        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
-          The marked line would be refused — the press is disabled.
-        </p>
-      )}
-      {firstRun && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' }} data-testid="engrave-registration-first-run-statement">
-          <input
-            type="checkbox"
-            data-testid="engrave-registration-first-run-tick"
-            checked={ticked}
-            onChange={(e) => onTick(e.target.checked)}
-          />
-          <span>I am at the machine — the probe is fitted, the head is clear, and I will stay at the Stop.</span>
-        </label>
-      )}
-    </div>
-  );
-}
+
 
 export interface EngraveRegistrationStepProps {
   /** The job whose approved setup-1 registration is run. */

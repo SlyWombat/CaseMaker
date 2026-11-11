@@ -132,7 +132,13 @@ export type RunEvent =
    */
   | { kind: 'tool-waiting'; at: Progress; awaited: number | null }
   /** #655 — the operator's Continue (`M490.2`) went out; the program runs on past the tool change. */
-  | { kind: 'tool-continued'; at: Progress };
+  | { kind: 'tool-continued'; at: Progress }
+  /**
+   * #1202 — THE TOOL CHANGE IS DONE: the controller left its `Tool` state (the stage after the
+   * macro measured the tool and returned). `byApp` says whether OUR `M490.2` is what continued it;
+   * only then is the routine's shape recorded as completed on this machine.
+   */
+  | { kind: 'tool-done'; at: Progress; byApp: boolean };
 
 /**
  * Which vacuum words a program's text carries (#419 decision 4), when the app's upload knows and
@@ -381,6 +387,8 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
    * restarts when the state leaves `Tool`.
    */
   let toolWaiting = false;
+  /** #1202 — our Continue went out for the stop now in progress (recorded only when it completes). */
+  let toolContinuedByApp = false;
   let progressClock = playSentAt;
 
   /** Send one pause action's sequence; `wentOut` is whether the first line reached the machine. */
@@ -443,8 +451,10 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       deps.onEvent?.({ kind: 'tool-waiting', at: p, awaited: readToolWaiting(r.text) });
     } else if (!waitingForTool && toolWaiting) {
       toolWaiting = false;
+      const byApp = toolContinuedByApp;
+      toolContinuedByApp = false;
       progressClock = now();
-      deps.onEvent?.({ kind: 'note', text: 'The tool change is done — the program is running again.' });
+      deps.onEvent?.({ kind: 'tool-done', at: p, byApp });
     }
 
     // The END of the job is decided from the machine's own answer first, and only while not paused:
@@ -485,7 +495,9 @@ export async function runProgram(filename: string, deps: RunDeps): Promise<RunOu
       } else {
         const s = await sendPause('continue-tool');
         if (s.wentOut) {
-          // The store clears its own prompt on this event; the state leaves `Tool` on a later poll.
+          // The store clears its own prompt on this event; the state leaves `Tool` on a later poll,
+          // which is when the tool-done event (and the completion record) follows.
+          toolContinuedByApp = true;
           deps.onEvent?.({ kind: 'tool-continued', at: p });
         } else {
           deps.onEvent?.({ kind: 'note', text: 'M490.2 was not sent; the machine is still waiting for the tool.' });
