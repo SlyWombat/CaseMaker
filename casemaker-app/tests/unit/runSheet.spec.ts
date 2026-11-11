@@ -2703,6 +2703,21 @@ describe('#1087 the finish’s cusp is stated beside the scallop', () => {
     expect(cut).toContain('leaving a 0.02 mm cusp against the 0.027 mm the job asks for');
   });
 
+  it('states the cusp on the feeds row when no scallop is stated', () => {
+    // #1087 — a caller that states no scallop keeps the feeds row's step; the sheet still states
+    // the cusp that step leaves, against the goal check's first band (0.1 mm), so the operator
+    // can see that a 0.9 mm step on the ⌀2 ball stands above what the check counts as flat.
+    const job = dj();
+    const { finishScallopMm: _stated, ...rest } = facts;
+    const noScallop = { ...rest, finishCuspMm: 0.106971 };
+    const sheet = buildRunSheet(job, { ...stubGenerated(job), surface3d: noScallop }, NO_SIM, NOW);
+    const cut = cutWords(sheet);
+    expect(cut).toContain('Finishing follows the surface at 0.4 mm step-over');
+    expect(cut).toContain('0.107 mm cusp');
+    expect(cut).toContain('no scallop is stated');
+    expect(cut).toContain('the goal check’s first band is 0.1 mm');
+  });
+
   it('names the grid when it could not reach the promise', () => {
     const job = dj();
     const limited = { ...facts, finishStepOverMm: 0.5, finishCuspMm: 0.031754, finishGridLimited: true, gridPitchMm: 0.5 };

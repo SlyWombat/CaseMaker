@@ -164,7 +164,10 @@ export interface RotaryReliefArgs {
 export interface RotaryReliefFinish {
   /** The step-over the finish's rows are cut at, mm — a whole number of field cells. */
   stepOverMm: number;
-  /** The cusp that step leaves on a flat, mm; null when the caller stated no scallop. */
+  /**
+   * The cusp that step leaves on a flat, mm — from the stated scallop when there is one, else from
+   * the feeds row's own step. Null only for a non-ball finish (a flat's cusp is slope-dependent).
+   */
   cuspMm: number | null;
   /** The cusp the caller asked the finish to hold, mm; null when none was stated. */
   scallopMm: number | null;
@@ -309,6 +312,12 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     args.finishScallopMm === undefined || tool.shape !== 'ball'
       ? null
       : reliefFinishStepOver(toolRadius, args.finishScallopMm, hf.pitch);
+  // #1087 — WITH NO STATED SCALLOP the step stays the caller's (the feeds row's); the cusp it
+  // leaves is still STATED for a ball: the goal check's first band (0.1 mm) judges it, and 0.9 mm
+  // on a ⌀2 ball leaves 0.107 mm — two constants must not disagree in silence. A flat leaves no
+  // ball cusp to state (its cusp is slope-dependent), so it keeps null.
+  const feedsCuspMm =
+    finishRule === null && tool.shape === 'ball' ? ballScallopCusp(toolRadius, feeds.finishStepOver) : null;
   const tip = flatCutter
     ? finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool), { wrapRows: true })
     : rotaryFinishTipField(planningField, tipTool, { maxOps: args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool) });
@@ -358,7 +367,7 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     // sheet quotes these numbers, never a second resolution of the same rule.
     finish: {
       stepOverMm: finishRule?.stepOverMm ?? feeds.finishStepOver,
-      cuspMm: finishRule?.cuspMm ?? null,
+      cuspMm: finishRule?.cuspMm ?? feedsCuspMm,
       scallopMm: args.finishScallopMm ?? null,
       gridLimited: finishRule?.gridLimited ?? false,
     },
