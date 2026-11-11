@@ -221,7 +221,7 @@ Every change lands only after the same checks, run from `casemaker-app/`:
 - `npx playwright test` — the e2e gate, every project. The long walks have their own nightly tier
   (`npm run test:e2e:nightly`); the land gate includes them.
 - `npm run check:platform-gate` — builds **both** targets. The web bundle must carry neither the
-  machine bridge's marker nor any Tauri runtime code (`__TAURI_INTERNALS__`, #1198 — a desktop
+  machine bridge's marker nor any Tauri runtime code (the runtime's internals global — a desktop
   import guarded through the imported `BUILD_TARGET` const can survive as an orphan chunk); the
   desktop bundle must carry the bridge. It is not part of `npm test` because it builds twice.
 - Rust, when `src-tauri/` changed: `cargo test --lib` in the `rust:1.90-bookworm` container (the
