@@ -71,12 +71,20 @@ export function previewHolds(preview: DryRoutine | null, firstRun: boolean, tick
  * above the machine's clearance; the scripted executor then stopped partway and the card showed a
  * truncated sequence — 23 lines of 36 (#1202 analyst defect, 2026-11-11).
  */
-export function scriptedReply(opts: { band?: { min: number; max: number } } = {}): (line: string) => string {
+export function scriptedReply(
+  opts: { band?: { min: number; max: number }; m491Z?: number | null } = {},
+): (line: string) => string {
   // The machine's Z and the mode. A relative `G38.3 Z-…` answers from where the head IS; the fast
   // top touch contacts at the level the plan expects (the middle of its band) and the slow touch
   // answers at that same level. X/Y probes keep the shape the scans were shaped on (`half the
   // travel` on the probed axis) — only Z needed the machine's own position.
   let z = 0;
+  // #1202 bench blocker — THE M491 THE PLAN WAS MEASURED WITH. The plan's expected band carries
+  // the datum's probe reference; the executor corrects the band by today's M491 less that
+  // reference (#1189), so a scripted −80 for a seat measured at −75.467 shifts the band by
+  // −4.533 and every scripted touch reads above it. Answer the plan's own reference (else the
+  // long-standing −80) and the correction is zero.
+  const m491Z = opts.m491Z !== undefined && opts.m491Z !== null && Number.isFinite(opts.m491Z) ? opts.m491Z : -80;
   let absolute = true;
   const expected = opts.band === undefined ? null : (opts.band.min + opts.band.max) / 2;
   /** The level the fast touch found; the slow touch starts just above it and triggers there. */
@@ -89,7 +97,7 @@ export function scriptedReply(opts: { band?: { min: number; max: number } } = {}
     const upper = text.toUpperCase();
     if (text === '?') return DRY_STATUS;
     if (text === 'M119') return 'X_max:0 Y_max:0 Z_max:0 Probe: 0';
-    if (text === 'M491') return DRY_M491;
+    if (text === 'M491') return `[PRB:0,0,${m491Z.toFixed(3)}:1]\r\nok`;
     // Homing parks at the top of travel; the Z1 reports -1,-1,-1 (#1202).
     if (upper === '$H') {
       z = -1;
@@ -139,12 +147,12 @@ export function scriptedReply(opts: { band?: { min: number; max: number } } = {}
       z = hit;
       return `[PRB:0.000,0.000,${hit.toFixed(3)}:1]\r\nok`;
     }
-    // Probe-away (G38.5): a move that must NOT trigger; a Z one moves the head back up.
+    // Probe-away (G38.5): the stylus release, NOT a head travel — the bench measured the axis
+    // moving 0.057 mm of the commanded 3 before the trigger cleared (2026-10-30 survey), and the
+    // executor's slow touch is placed on the fast hit + 1 mm on that reading. The head's Z stays
+    // where the probe found the surface.
     m = /^G38\.5\s+([XYZ])([-+]?[\d.]+)(?:\s|$)/.exec(upper);
-    if (m !== null) {
-      if (m[1]!.toUpperCase() === 'Z') applyZ(Number(m[2]));
-      return 'ok';
-    }
+    if (m !== null) return 'ok';
     // Any other move with a Z word: apply it so the next probe answers from the right place.
     // G10/G92 write offsets and move nothing.
     m = /^G([0-9]+)\s+(.+)$/.exec(upper);
@@ -262,7 +270,7 @@ export async function dryRegistration(
 ): Promise<DryRoutine> {
   // The scripted machine is seeded with the plan's OWN band: the fast touch contacts where the
   // plan expects the top, and the slow touch answers at that level (#1202 analyst defect).
-  const console_ = recordingConsole(scriptedReply({ band: plan.seek.band }));
+  const console_ = recordingConsole(scriptedReply({ band: plan.seek.band, m491Z: plan.probeRefZ ?? null }));
   const heights = registrationHeights(plan, opts.clearanceZ);
   let error: string | null = null;
   try {
@@ -324,7 +332,7 @@ export async function dryFlipRegistration(
   attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
   opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
 ): Promise<DryRoutine> {
-  const console_ = recordingConsole(scriptedReply({ band: attempt.ctx.seek.band }));
+  const console_ = recordingConsole(scriptedReply({ band: attempt.ctx.seek.band, m491Z: attempt.ctx.probeRefZ ?? null }));
   const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
   let error: string | null = null;
   try {
