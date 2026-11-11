@@ -149,10 +149,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // not trusted measures the top ON the blank, and the seek stops above the bed's known floor by
   // this much. It only bounds a MISSING blank — the probe stops on contact above it.
   'registration.guardedFloorMarginMm': { label: 'guarded top seek, margin above the bed floor (chosen)', unit: 'mm', rule: z.number().min(0.1).max(5), fallback: 1 },
-  // #1201/#1207 — THE GUARDED CHECK POINTS' least inset from the stock edge (chosen): a touch must
-  // stand on the blank, clear of its edge by the probe's rim and the job's edge margin or this,
-  // whichever is larger.
-  'registration.minTouchInsetMm': { label: 'guarded touch point, least inset from the stock edge (chosen)', unit: 'mm', rule: z.number().min(0.1).max(10), fallback: 1 },
   // #475 — the surface touches at the cut regions' extents. Five is the floor (a centre plus both
   // extents on each axis); the seed is the issue's own 5. The labelled fallback IS the seed.
   'registration.surfaceTouchCount': { label: 'surface touches across the cut', unit: 'touches', rule: z.number().int().min(5).max(9), fallback: 5 },

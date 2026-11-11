@@ -296,9 +296,9 @@ export function planRegistrationAttempt(args: {
       // area's centre. The area is the cut region when the job states one, else the blank.
       const region = cutRegionOf(job);
       const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
-      // #1207 — the least inset is a shop default (chosen); the probe's rim plus the job's margin
-      // still wins when it is larger.
-      const inset = Math.max(readDefault(defaults, 'registration.minTouchInsetMm').value, args.settings.tipRadiusMm + job.edgeMargin);
+      // #1207 — the 1 mm floor here is D's shared `topTouchEdgeMarginMm` (the footprint slice); it
+      // is not a second local default.
+      const inset = Math.max(1, args.settings.tipRadiusMm + job.edgeMargin);
       const ix = Math.min(inset, Math.max(0.001, (area.maxX - area.minX) / 2));
       const iy = Math.min(inset, Math.max(0.001, (area.maxY - area.minY) / 2));
       const clampToStock = (x: number, y: number): { x: number; y: number } => ({

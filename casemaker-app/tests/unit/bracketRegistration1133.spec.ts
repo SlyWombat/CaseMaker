@@ -353,15 +353,15 @@ describe('#1201 a bracket hold with no trusted seat measures the top on the blan
     expect(plan.seek.band.max).toBeCloseTo(plan.seek.fromMachineZ - SETTINGS.parkAboveSurfaceMm, 3);
   });
 
-  // #1207 — the guarded seek's two chosen figures are REGISTRY values, read at the call site: a
-  // location that raises them moves the band's floor and the check points' inset. Before the
-  // registry change these two were literals (`1`), and this test fails against them.
-  it('reads the floor margin and the least touch inset from the shop defaults (#1207)', () => {
+  // #1207 — the guarded seek's floor margin is a REGISTRY value, read at the call site: a location
+  // that raises it moves the band's floor. Before the registry change it was the literal `1`, and
+  // this test fails against it. (The check points' edge inset is D's shared `topTouchEdgeMarginMm`,
+  // not a second default here.)
+  it('reads the floor margin from the shop defaults (#1207)', () => {
     const job = bracketJob();
     const tuned: ShopDefaults = {
       ...LOCATION.defaults,
       'registration.guardedFloorMarginMm': { ...LOCATION.defaults['registration.guardedFloorMarginMm']!, value: 2.5 },
-      'registration.minTouchInsetMm': { ...LOCATION.defaults['registration.minTouchInsetMm']!, value: 3 },
     };
     const attempt = attemptFor(job, null, { defaults: tuned });
     expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
@@ -370,10 +370,6 @@ describe('#1201 a bracket hold with no trusted seat measures the top on the blan
     const floor = jobMachine(job, CALIBRATION).envelope.z.min;
     expect(plan.guarded!.marginMm).toBeCloseTo(2.5, 3);
     expect(plan.seek.band.min).toBeCloseTo(floor + 2.5, 3);
-    // 3 mm beats the tip + margin (1.2), so the path-origin point sits 3 mm in from the area.
-    const checks = plan.surfaceChecks ?? [];
-    expect(checks[0]!.x).toBeCloseTo(40 + 3, 3);
-    expect(checks[0]!.y).toBeCloseTo(18 + 3, 3);
   });
 
   it('with a LEGACY seat: still guarded, and the seat is stated as not used', () => {
