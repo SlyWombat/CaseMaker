@@ -5,20 +5,26 @@
 // fx-probe-1's shaft) is `G53 G0 Z-81.25` AT HOME then `G53 G0 X-175 Y-35` — a 177 mm traverse
 // 7 mm above the board. The guard must refuse its second line; the corrected order must pass.
 import { describe, expect, it } from 'vitest';
-import { motionOrderGuard } from '@/engine/cnc/registration/motionOrder';
+import { motionOrderGuard, planTravelProblem } from '@/engine/cnc/registration/motionOrder';
 
 const CLEARANCE = -3;
 const SEAT_FROM = -81.25; // band.max (−84.25) + parkAboveSurfaceMm (3)
 const PRB_SEAT = 'ok\n[PRB:-175.000,-35.000,-88.083:1]';
 
 describe('#1199 — the shared motion-order guard', () => {
+  it('refuses a plan travel height below the machine clearance (the datum is the machine\'s)', () => {
+    expect(planTravelProblem(-81.25, -3, 'plan’s travel height')).toContain('below the machine');
+    expect(planTravelProblem(-3, -3, 'plan’s travel height')).toBeNull();
+    expect(planTravelProblem(-81.25, Number.NaN, 'plan’s travel height')).toContain('not known');
+  });
+
   it('REFUSES the c8fa03a6 seat sequence: a 177 mm XY traverse at machine Z −81.25', () => {
     const guard = motionOrderGuard(CLEARANCE);
     expect(guard.observe('$H')).toBeNull();
     expect(guard.observe(`G53 G0 Z${SEAT_FROM}`)).toBeNull();
     const problem = guard.observe('G53 G0 X-175 Y-35');
     expect(problem).not.toBeNull();
-    expect(problem).toContain('refusing to move X/Y from machine Z -81.25');
+    expect(problem).toContain('refusing to move X/Y/A from machine Z -81.25');
     expect(problem).toContain('-3');
   });
 
@@ -49,7 +55,7 @@ describe('#1199 — the shared motion-order guard', () => {
     guard.observe('G38.3 Z-11 F150', PRB_SEAT);
     // The head is at the trigger, −88.083. An XY rapid from here is the same class of hazard.
     const problem = guard.observe('G0 X-100 Y-35');
-    expect(problem).toContain('refusing to move X/Y from machine Z -88.083');
+    expect(problem).toContain('refusing to move X/Y/A from machine Z -88.083');
   });
 
   it('refuses an XY move when the Z is unknown (a relative Z move hides it)', () => {
@@ -58,6 +64,95 @@ describe('#1199 — the shared motion-order guard', () => {
     guard.observe('G91');
     guard.observe('G0 Z-5');
     expect(guard.observe('G0 X-100')).toContain('the head is at an unknown Z');
+  });
+
+  // #1199 review (Manager) — DENY BY DEFAULT: classify by the line's WORDS, not a G-prefix shape.
+  it('refuses a COMBINED XY+Z move below the clearance: a diagonal is still a traverse', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    const problem = guard.observe('G53 G0 X-175 Y-35 Z-81.25');
+    expect(problem).toContain('combined');
+    expect(problem).toContain('-81.25');
+  });
+
+  it('refuses a combined XY+Z move even from the clearance when its own Z is below it', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    guard.observe('G53 G0 Z-3');
+    expect(guard.observe('G0 X10 Y10 Z-40')).toContain('combined');
+  });
+
+  it('accepts a combined XY+Z at or above the clearance', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    expect(guard.observe('G53 G0 X10 Y10 Z0')).toBeNull();
+  });
+
+  it('refuses G00/G01 spellings and modal continuations below the clearance', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    guard.observe('G53 G0 Z-81.25');
+    expect(guard.observe('G00 X-10 Y-10')).toContain('refusing to move X/Y/A');
+    expect(guard.observe('G01 X-10 Y-10')).toContain('refusing to move X/Y/A');
+    expect(guard.observe('X-10 Y-10')).toContain('refusing to move X/Y/A');
+  });
+
+  it('refuses an A turn below the clearance, and allows it from the clearance', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    guard.observe('G53 G0 Z-40');
+    expect(guard.observe('G0 A90')).toContain('refusing to move X/Y/A from machine Z -40');
+    guard.observe('G53 G0 Z0');
+    expect(guard.observe('G91')).toBeNull();
+    expect(guard.observe('G0 A90')).toBeNull();
+  });
+
+  it('refuses a motion line it cannot classify (deny by default)', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    expect(guard.observe('G2 X10 Y10 I5 J0')).toContain('unrecognised');
+  });
+
+  it('treats G10/G92 offset writes as non-motion (no Z state, no refusal)', () => {
+    const guard = motionOrderGuard(CLEARANCE);
+    guard.observe('$H');
+    guard.observe('G53 G0 Z-3');
+    expect(guard.observe('G10 L20 P0 A0')).toBeNull();
+    expect(guard.observe('G10 L2 P1 X-1 Y-2 Z-3')).toBeNull();
+    // The offsets did not consume the Z state: an XY move at the clearance still passes.
+    expect(guard.observe('G0 X-10 Y-10')).toBeNull();
+  });
+
+  it('#1200 — refuses a lateral G38.3 X/Y when the unit allows top touches only', () => {
+    const topOnly = motionOrderGuard(CLEARANCE, { lateralProbes: false });
+    topOnly.observe('$H');
+    topOnly.observe('G53 G0 Z-3');
+    expect(topOnly.observe('G91')).toBeNull();
+    expect(topOnly.observe('G38.3 X-3 F100')).toContain('top touches only');
+    // A Z probe stays allowed; the default (no option) allows lateral probes.
+    expect(topOnly.observe('G38.3 Z-10 F100')).toBeNull();
+    const all = motionOrderGuard(CLEARANCE);
+    all.observe('$H');
+    all.observe('G91');
+    expect(all.observe('G38.3 X-3 F100')).toBeNull();
+  });
+
+  it('#1199 field 7 — a descent below the clearance is allowed only over the stock footprint', () => {
+    const stock = (machine: boolean, x: number, y: number) => !machine && x >= 0 && x <= 100 && y >= 0 && y <= 60;
+    const guard = motionOrderGuard(CLEARANCE, { descentAllowed: stock });
+    guard.observe('$H');
+    guard.observe('G53 G0 Z-3');
+    // Over the stock: the park descent is allowed.
+    guard.observe('G0 X50 Y30');
+    expect(guard.observe('G53 G0 Z-53')).toBeNull();
+    // Beside the blank (the bench's seat point): refused.
+    guard.observe('G53 G0 Z-3');
+    guard.observe('G0 X-175 Y-35');
+    expect(guard.observe('G53 G0 Z-81.25')).toContain('outside the stock');
+    // An unknown XY before a descent: refused too.
+    const fresh = motionOrderGuard(CLEARANCE, { descentAllowed: stock });
+    fresh.observe('$H');
+    expect(fresh.observe('G53 G0 Z-40')).toContain('XY is not known');
   });
 
   it('leaves probe moves, lifts and non-motion lines alone', () => {

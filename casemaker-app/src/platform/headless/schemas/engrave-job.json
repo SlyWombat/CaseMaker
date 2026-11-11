@@ -2332,6 +2332,10 @@
                         ],
                         "description": "The probe reference of the seek floor’s own datum, when it differs."
                       },
+                      "machineClearanceZ": {
+                        "description": "The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.",
+                        "type": "number"
+                      },
                       "mount": {
                         "description": "How the stock is held: in the vise, on the bracket, or with tape.",
                         "enum": [
@@ -4324,6 +4328,10 @@
                       }
                     ],
                     "description": "The probe reference of the seek floor’s own datum, when it differs."
+                  },
+                  "machineClearanceZ": {
+                    "description": "The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.",
+                    "type": "number"
                   },
                   "mount": {
                     "description": "How the stock is held: in the vise, on the bracket, or with tape.",

@@ -1300,6 +1300,18 @@ describe('#599 the standalone mount tap', () => {
 });
 
 describe('#430 the executor, on a fake machine', () => {
+  it('#1199 — a plan whose travel height is a band approach (−81.25) refuses before ANY line: the datum is the machine', async () => {
+    // The bench's plan shape: a seat band's approach named as the seek start. The machine's own
+    // clearance is −3, so the executor must refuse instead of handing the guard a floor of −81.25.
+    const bad = { ...plan('bracket'), seek: { ...plan('bracket').seek, fromMachineZ: -81.25 }, machineClearanceZ: -3 };
+    const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
+    const r = await runRegistration(bad, { console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('below the machine');
+    expect(z1.lines).toEqual([]);
+  });
+
   it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at the clearance, never below the cap', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
