@@ -192,6 +192,12 @@ describe('#1200 the unit’s default and the stored decision', () => {
     seed(probe({}));
     expect(probeFor(machine as never)?.touches).toBe('all');
     expect(probeFor(machine as never)?.tipLateralUncertaintyMm).toBe(1);
+    // #1203 — the fitted shank rides the same read; an unrecorded one is null (the prompts say
+    // to check the collet).
+    seed(probe({ unit: { tipDiameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05, shankMm: 6 } }));
+    expect(probeFor(machine as never)?.shankMm).toBe(6);
+    seed(probe({}));
+    expect(probeFor(machine as never)?.shankMm).toBeNull();
 
     seed(probe({ variant: 'wired-touch' }));
     expect(probeFor(machine as never)?.touches).toBe('z-only');
@@ -252,6 +258,23 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     const r = await runRegistration(p, { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(z1.lines.filter((l) => /^G38\.3 [XY]-?[\d.]+ F/.test(l))).toHaveLength(p.scans.length);
+  });
+
+  // #1203 — the runtime prompt names the collet the fitted post needs; the same fake captures it.
+  it('#1203 — the fit-probe prompt names the collet from the unit’s shank', async () => {
+    const wired = { ...PROBE_3D, variant: 'wired-touch', instrument: 'z-only' as const, touches: 'z-only' as const, shankMm: 6 };
+    const p = plan('tape', wired);
+    const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
+    const prompts: string[] = [];
+    const r = await runRegistration(p, {
+      console: z1.console,
+      operator: async (step) => {
+        prompts.push(step.text);
+        return true;
+      },
+    });
+    if (!r.ok) throw new Error(r.reason);
+    expect(prompts.some((text) => text.includes('Fit the wired probe in the spindle — 6 mm collet'))).toBe(true);
   });
 
   it('a top touch keeps the unit’s lateral uncertainty plus the tip radius clear of every edge', () => {

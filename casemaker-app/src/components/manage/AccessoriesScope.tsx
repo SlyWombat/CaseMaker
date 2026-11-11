@@ -25,6 +25,7 @@
 import { useState } from 'react';
 import type { FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
+import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import { accessoryNameFor, mountUnitReading, MOUNT_TAP_UNIT_KEY, MOUNT_TAP_WORD } from '@/engine/cnc/registration/mountContext';
 import { RotaryAxisTap } from './RotaryAxisTap';
 import { newId } from '@/utils/id';
@@ -571,6 +572,46 @@ function AccessoryRegister({ onSaved, onClose }: { onSaved: (id: string) => void
 }
 
 /** The detail rail: the record read-only, the label and variant editable, and the three moves. */
+/** #1203 — one post the probe unit owns: its diameter, and whether it is fitted, spare or broken. */
+interface ProbePost {
+  id: string;
+  label: string;
+  diameterMm: number;
+  condition: 'fitted' | 'spare' | 'broken';
+}
+
+/** The posts recorded on the unit, or the two stock Makera posts when the record states none. */
+function postsFor(item: FixtureRecord): ProbePost[] {
+  const raw = item.unit.posts;
+  if (Array.isArray(raw)) {
+    const posts: ProbePost[] = [];
+    for (const entry of raw) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const e = entry as Record<string, unknown>;
+      const diameterMm = typeof e.diameterMm === 'number' && Number.isFinite(e.diameterMm) ? e.diameterMm : null;
+      const condition = e.condition === 'broken' ? 'broken' : e.condition === 'spare' ? 'spare' : 'fitted';
+      if (typeof e.id !== 'string' || diameterMm === null) continue;
+      posts.push({ id: e.id, label: typeof e.label === 'string' ? e.label : e.id, diameterMm, condition });
+    }
+    if (posts.length > 0) return posts;
+  }
+  const shank = typeof item.unit.shankMm === 'number' && Number.isFinite(item.unit.shankMm) ? item.unit.shankMm : null;
+  return [
+    { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: shank !== null && Math.abs(shank - 6.35) <= 0.05 ? 'fitted' : 'spare' },
+    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: shank !== null && Math.abs(shank - 6) <= 0.05 ? 'fitted' : 'spare' },
+  ];
+}
+
+/** The fitted shank in words, for the rail and the fit-probe prompts' source of truth. */
+function shankLine(item: FixtureRecord): string {
+  const shank = typeof item.unit.shankMm === 'number' && Number.isFinite(item.unit.shankMm) ? item.unit.shankMm : null;
+  if (shank === null) return 'no shank recorded — the fit-probe prompts will say to check the collet';
+  const post = postsFor(item).find((p) => p.condition === 'fitted');
+  return post === undefined
+    ? `fitted shank ${mm(shank)} mm — ${probeColletWords(shank)}`
+    : `${post.label} fitted — ${mm(shank)} mm shank, ${probeColletWords(shank)}`;
+}
+
 function AccessoryDetail({
   item,
   machines,
@@ -645,6 +686,24 @@ function AccessoryDetail({
       ...item,
       whereabouts: { kind: 'box' },
       history: [...item.history, { at: new Date().toISOString(), what: 'returned to the box' }],
+    });
+
+  /** #1203 — fit another post: the shank moves, the posts' conditions follow, a history line is
+   *  written, and NOTHING else about the unit changes (the tip values belong to the sensor). */
+  const swapPost = (post: ProbePost) =>
+    void save({
+      ...item,
+      unit: {
+        ...item.unit,
+        shankMm: post.diameterMm,
+        posts: postsFor(item).map((p) => ({
+          id: p.id,
+          label: p.label,
+          diameterMm: p.diameterMm,
+          condition: p.id === post.id ? 'fitted' : p.condition === 'fitted' ? 'spare' : p.condition,
+        })),
+      },
+      history: [...item.history, { at: new Date().toISOString(), what: `fitted the ${post.label} (${mm(post.diameterMm)} mm shank)` }],
     });
 
   const retire = () => void removeAccessory(item.id).then((ok) => ok && onClose());
@@ -743,6 +802,42 @@ function AccessoryDetail({
               {probeReadings}
             </p>
           )}
+          {/* #1203 — THE SHANK IS A SWAPPABLE POST. The fitted post's diameter decides the collet
+              every "fit the probe" prompt names; the posts the unit owns carry their condition,
+              and a swap is a history line that never touches the sensor's tip values. */}
+          <div className="panel-subhead">Shank</div>
+          <p className="hint" data-testid="manage-acc-shank-line">
+            {shankLine(item)}
+          </p>
+          {postsFor(item).length > 0 && (
+            <ul className="hint" data-testid="manage-acc-posts">
+              {postsFor(item).map((post) => (
+                <li key={post.id} data-testid={`manage-acc-post-${post.id}`}>
+                  {post.label} ({mm(post.diameterMm)} mm shank) — {post.condition}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="btn-row" data-testid="manage-acc-post-swap-row">
+            <select
+              className="fld"
+              data-testid="manage-acc-post-select"
+              defaultValue=""
+              onChange={(e) => {
+                const picked = postsFor(item).find((post) => post.id === e.target.value);
+                if (picked !== undefined) void swapPost(picked);
+              }}
+            >
+              <option value="">Fit a post…</option>
+              {postsFor(item)
+                .filter((post) => post.condition !== 'fitted' && post.condition !== 'broken')
+                .map((post) => (
+                  <option key={post.id} value={post.id}>
+                    {post.label} — {mm(post.diameterMm)} mm
+                  </option>
+                ))}
+            </select>
+          </div>
         </>
       ) : (
         <ul className="hint" data-testid="manage-acc-measured">

@@ -1,4 +1,5 @@
 import type { ProbeFitInstrument } from '@/engine/cnc/probeFitDiagram';
+import { probeColletWords } from '@/engine/cnc/probeFitWords';
 import type { PlanStatement } from '@/engine/cnc/cam/model/types';
 import type { PlanComparisonStatement } from '@/engine/cnc/cam/model/tradeoff';
 import {
@@ -2740,6 +2741,11 @@ export interface RunSheetOptions {
    * with no probe checked out, and the sheet then draws no diagram.
    */
   probeInstrument?: ProbeFitInstrument;
+  /**
+   * #1203 — the fitted post's shank, mm. The wired probe's shank is a swappable threaded post
+   * (1/8" = 6.35, 6 mm), so a step that asks for the probe names the collet; absent says to check.
+   */
+  probeShankMm?: number | null;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
   /** #513 — the bed line the header prints (`bedLine`), resolved by the caller from the machine's
@@ -5263,7 +5269,8 @@ export function buildRunSheet(
       ? [
           {
             text:
-              'Fit the wired probe, not a cutter. Run tool-length calibration from the app’s console ' +
+              // #1203 — the collet the fitted post needs, when the record states its shank.
+              `Fit the wired probe (${probeColletWords(options.probeShankMm)}), not a cutter. Run tool-length calibration from the app’s console ` +
               'or Studio (M491) and record the PROBE’s PRB: this job is skimmed before it is ' +
               'cut, so the probe sets Z0 and its reading is the reference each cutter’s Z0 is ' +
               'worked out against — the facing cutter’s below, and the engraving cutter’s after the ' +

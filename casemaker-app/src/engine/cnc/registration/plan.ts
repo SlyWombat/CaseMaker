@@ -156,6 +156,13 @@ export interface ProbeSpec {
    * can drop onto the roll-off and read low, and a bent stylus makes that worse.
    */
   tipLateralUncertaintyMm?: number;
+  /**
+   * #1203 — THE SHANK (POST) FITTED TO THIS UNIT, its diameter in mm. The wired V2's sensor and
+   * tip are one unit; the shank is a threaded post that swaps for different collets (1/8" =
+   * 6.35 mm, 6 mm), so the fit-probe prompt names the collet the operator must have in the
+   * spindle. The tip values belong to the sensor and survive a swap; only this changes.
+   */
+  shankMm?: number | null;
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
@@ -624,6 +631,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         ...(input.probe?.tipLateralUncertaintyMm === undefined
           ? {}
           : { tipLateralUncertaintyMm: input.probe.tipLateralUncertaintyMm }),
+        // #1203 — the fitted post's shank rides the plan so the executor can name the collet.
+        ...(input.probe?.shankMm === undefined || input.probe.shankMm === null ? {} : { shankMm: input.probe.shankMm }),
       },
       settings: {
         scanInsideMm: s.scanInsideMm,
