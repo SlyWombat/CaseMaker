@@ -18,6 +18,7 @@ import { attachConsole } from '@/platform/machineConsole';
 import { applyCorrection, runCentreFind, type CentreRunResult } from '@/engine/cnc/registration/execute';
 import { planCentreFind, type CentreKind } from '@/engine/cnc/registration/centreFind';
 import { probeInstrumentOf, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { topTouchEdgeMarginsMm } from '@/engine/cnc/registration/cutBlank';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
@@ -108,6 +109,14 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
     alive.current = true;
     const handle = attachConsole(target);
     try {
+      // #1211 field 5 — the hold the find must respect, resolved here per #1207: the top-touch
+      // margin from the existing rule, the band and the footprint from the plan, the body radius
+      // from the unit. (This panel is NOT mounted yet; a mount must also state a boss's expected
+      // radius — the routine refuses a boss by name without it.)
+      const margins = topTouchEdgeMarginsMm(
+        { tipRadiusMm: settings.tipRadiusMm, tipLateralUncertaintyMm: probe.tipLateralUncertaintyMm ?? 0 },
+        { floorMm: settings.probeFootprintShrinkMm ?? 0, hold: { xMm: 0, yMm: 0 } },
+      );
       const r = await runCentreFind(
         {
           plan: made.plan,
@@ -116,6 +125,14 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
           surfaceFeed: settings.surfaceSlowFeed,
           parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
           ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
+          hold: {
+            footprint: { xMin: plan.stock.xMin, xMax: plan.stock.xMax, yMin: plan.stock.yMin, yMax: plan.stock.yMax },
+            marginMm: Math.max(margins.xMm, margins.yMm),
+            bandMm: settings.edgeBandMm,
+            bodyRadiusMm: (probe.bodyDiameterMm ?? 0) / 2,
+            expectedRadiusMm: null,
+            obstacles: plan.mountObstacles,
+          },
         },
         { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: plan.seek.fromMachineZ },
       );
