@@ -742,6 +742,13 @@
       "unit": "ms",
       "note": "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"
     },
+    "report.statusPollsKept": {
+      "value": 30.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls",
+      "note": "chosen, not measured: how many status (`?`) exchanges a run's stop report keeps, in a fixed ring; commands are never dropped. At the 2 s poll, 30 is about a minute of the machine's heartbeat"
+    },
     "power.probeTries": {
       "value": 3.0,
       "source": "seeded",

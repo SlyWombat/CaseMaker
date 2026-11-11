@@ -27,10 +27,22 @@ export interface StopReportActionProps {
   /** The stopped action's own failure sentence. */
   error: string;
   transcript: readonly StopTranscriptEntry[];
+  /**
+   * #1208 — status exchanges a run's ring dropped before its transcript's first entry, so the
+   * report never presents a tail as the whole conversation. Absent (or 0) when it has them all.
+   */
+  droppedStatusPolls?: number;
   job: { id: string; name: string; packageHash: string | null } | null;
 }
 
-export function StopReportAction({ action, target, error, transcript, job }: StopReportActionProps): JSX.Element {
+export function StopReportAction({
+  action,
+  target,
+  error,
+  transcript,
+  droppedStatusPolls,
+  job,
+}: StopReportActionProps): JSX.Element {
   const sending = useMachineStopReportStore((s) => s.sending);
   const sent = useMachineStopReportStore((s) => s.sent);
   const sendError = useMachineStopReportStore((s) => s.error);
@@ -43,7 +55,7 @@ export function StopReportAction({ action, target, error, transcript, job }: Sto
           data-testid="stop-report-send"
           style={LINK}
           disabled={sending}
-          onClick={() => void send({ action, target, error, transcript, job })}
+          onClick={() => void send({ action, target, error, transcript, droppedStatusPolls, job })}
         >
           {sending ? 'Sending…' : 'Send a report of this stop'}
         </button>

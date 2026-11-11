@@ -14,7 +14,7 @@ import { setMachineUploadLoader } from '@/platform/machineUpload';
 import { resetRunConfirmStore } from '@/store/runConfirmStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useCncModeStore } from '@/store/cncModeStore';
-import { machineKey, resetMachineRunStore, runContextFor, useMachineRunStore } from '@/store/machineRunStore';
+import { machineKey, resetMachineRunStore, runContextFor, runTranscriptFor, useMachineRunStore } from '@/store/machineRunStore';
 import type { MachineStopReport } from '@/platform/machineStopReport';
 import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -294,7 +294,6 @@ describe('#1197 — the run panel’s stop reports', () => {
 
     fireEvent.click(screen.getByTestId('stop-report-send'));
     await advanceUntil(() => expect(reports).toHaveLength(1));
-    const entry = useMachineRunStore.getState().runs[machineKey(TARGET)]!;
     const report = reports[0]!;
     expect(report.action).toBe('run');
     expect(report.error).toBe('read failed: Connection reset by peer (os error 104)');
@@ -302,7 +301,7 @@ describe('#1197 — the run panel’s stop reports', () => {
     // that went out and its own reply are separate fields. The `play` line is the app's, with the
     // controller's answer beside it; every status poll is a real `?` line; nothing reads as a
     // machine reply with an empty line.
-    expect(report.transcript).toEqual(entry.transcript);
+    expect(report.transcript).toEqual(runTranscriptFor(machineKey(TARGET)).entries);
     expect(report.transcript.find((t) => t.line.startsWith('play '))).toEqual({
       line: 'play /sd/gcodes/job.nc',
       reply: 'File size 10',
@@ -318,7 +317,56 @@ describe('#1197 — the run panel’s stop reports', () => {
     expect(report.lastStatus).toMatch(/^</);
     // An upload outside the job flow names the file; there is no package to claim.
     expect(report.job).toEqual({ id: 'job.nc', name: 'job.nc', packageHash: null });
+    // #1208 (bounded) — a short run's report carries everything, so it says nothing was dropped.
+    expect('droppedStatusPolls' in report).toBe(false);
   }, 30000);
+
+  // #1208 (bounded) — A LONG RUN'S REPORT KEEPS THE TAIL: every command whole, the last 30
+  // status exchanges (the shop's `report.statusPollsKept` seed), and the count of polls it dropped.
+  // The transcript's size is the ring's, never the run's length.
+  it('keeps every command and only the last 30 status exchanges, and says how many polls it dropped', async () => {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-run-long.json' };
+    });
+    setMachineConsoleLoader(async () =>
+      client(10_000, {
+        abort: {
+          ok: false,
+          reason: 'refused',
+          line: 'abort',
+          detail: 'read failed: Connection reset by peer (os error 104)',
+          text: '',
+        },
+      }),
+    );
+    await startRun();
+    // Poll well past the ring: 45 exchanges at the 2 s floor is 90 s of simulated run.
+    await advanceUntil(() => expect(sent.filter((line) => line === '?').length).toBeGreaterThanOrEqual(45), {
+      timeoutMs: 120_000,
+    });
+    fireEvent.click(screen.getByTestId('engrave-run-stop'));
+    await advanceUntil(() => expect(screen.getByTestId('engrave-run-outcome').dataset.state).toBe('aborted'), {
+      timeoutMs: 120_000,
+    });
+    fireEvent.click(screen.getByTestId('stop-report-send'));
+    await advanceUntil(() => expect(reports).toHaveLength(1));
+
+    const report = reports[0]!;
+    const kept = report.transcript.filter((entry) => entry.line === '?');
+    expect(kept).toHaveLength(30);
+    expect(report.droppedStatusPolls).toBeGreaterThan(0);
+    // The commands are whole and in place: the play line and the failed abort with its answer.
+    expect(report.transcript.find((entry) => entry.line.startsWith('play '))!.reply).toBe('File size 10');
+    expect(report.transcript.find((entry) => entry.line === 'abort')?.reply).toBe(
+      'read failed: Connection reset by peer (os error 104)',
+    );
+    // The ring's own view is exactly what the report carried.
+    const talk = runTranscriptFor(machineKey(TARGET));
+    expect(report.transcript).toEqual(talk.entries);
+    expect(report.droppedStatusPolls).toBe(talk.droppedPolls);
+  }, 60000);
 
   it('offers the home’s report when the Home press fails on the transport', async () => {
     const reports: MachineStopReport[] = [];
@@ -350,12 +398,11 @@ describe('#1197 — the run panel’s stop reports', () => {
 
     fireEvent.click(screen.getByTestId('stop-report-send'));
     await advanceUntil(() => expect(reports).toHaveLength(1));
-    const entry = useMachineRunStore.getState().runs[machineKey(TARGET)]!;
     expect(reports[0]!.action).toBe('home');
     expect(reports[0]!.error).toBe('timeout — no reply within 60000 ms');
     // #1208 — the same conversation, not the display strings. The Home press happens outside the
     // run's own watch, so the report carries the run that preceded it.
-    expect(reports[0]!.transcript).toEqual(entry.transcript);
+    expect(reports[0]!.transcript).toEqual(runTranscriptFor(machineKey(TARGET)).entries);
     expect(reports[0]!.transcript.every((t) => t.line !== '')).toBe(true);
     expect(reports[0]!.transcript.some((t) => t.line === '?')).toBe(true);
     expect(reports[0]!.lastStatus).toMatch(/^</);
