@@ -1801,6 +1801,22 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
     expect(cut).toContain('8 tabs to cut by hand');
   });
 
+  it('says how many tabs were asked for and placed when some do not fit (#1206)', () => {
+    const job = dj();
+    const facts = {
+      ...throughFacts(),
+      cutouts: [
+        { id: 'cut-1', name: 'Badge', tabs: { count: 4, widthMm: 6, heightMm: 1 }, spans: 2, unplaceable: 2, added: 0 },
+      ],
+    };
+    const cut = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: facts }, NO_SIM, NOW), 'cut');
+    // The analyst's condition 2: asked, placed and why, on the tab line; never silent.
+    expect(cut).toContain('Badge: 2 tabs, 6 mm wide and 1 mm high');
+    expect(cut).toContain('4 asked, 2 placed');
+    expect(cut).toContain('the remaining edges are too short for another tab clear of the corners');
+    expect(cut).toContain('2 tabs to cut by hand');
+  });
+
   it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
     const job = dj();
     const noTabs: RunSheetGenerated['through'] = {

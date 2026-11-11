@@ -20,7 +20,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
-import { generateProfile, placeTabs, profilePath, type ProfileCut } from '@/engine/cnc/cam/profile';
+import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabPlacement } from '@/engine/cnc/cam/profile';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import { cutterKeyOf } from '../sequence';
 import type { FeatureTree } from '../features';
@@ -142,20 +142,61 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   // SAME `placeTabs` call `generateProfile` makes one level down (same path, same count, width and
   // radius — a pure function), so the mask protects exactly the tabs the file keeps; nothing is
   // re-derived from moves.
+  const placements: TabPlacement[] =
+    cut.tabs.count > 0
+      ? path.map((ring) =>
+          placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
+            ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
+          }),
+        )
+      : [];
+
+  // #1206 (the analyst's condition 3) — THE SPAN LIMIT IS CHECKED ON THE TABS AS PLACED. A drop
+  // that leaves a stretch of outline longer than the shop's limit is a REFUSAL with its reason,
+  // never a quieter program. (The limit is what `placeTabs` tried to meet; it can fail when the
+  // edges' corner margins leave no room for the tabs the gaps ask for.)
+  if (cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
+    path.forEach((ring, i) => {
+      const spans = placements[i]!.spans;
+      if (spans.length === 0) return;
+      let perimeter = 0;
+      for (let k = 0; k < ring.length; k++) {
+        const a = ring[k]!;
+        const b = ring[(k + 1) % ring.length]!;
+        perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      }
+      const gap = longestTabGap(spans, perimeter);
+      if (gap > cut.tabs.maxSpanMm! + 1e-9) {
+        throw new Error(
+          `the freeing contour's tabs leave a ${gap.toFixed(1)} mm stretch of outline without one, ` +
+            `past the shop's ${cut.tabs.maxSpanMm} mm span limit — the edges' corners leave no room ` +
+            'for the tabs that stretch asks for',
+        );
+      }
+    });
+  }
+
   const throughKerf =
     opts.through === true
       ? {
           path,
-          spans: path.map(
-            (ring) =>
-              placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
-                ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
-              }).spans,
-          ),
+          spans: placements.map((placement) => placement.spans),
           toolRadius,
           tabHeight: cut.tabs.height,
         }
       : undefined;
+
+  // #1206 (the analyst's condition 2) — A JOB THAT PLACES FEWER TABS THAN ASKED SAYS SO. The note
+  // travels with the plan's notes and the sheet prints every one; a count the operator asked for
+  // and did not get is never silent.
+  const asked = cut.tabs.count * path.length;
+  const placed = placements.reduce((sum, placement) => sum + placement.spans.length, 0);
+  const tabNotes =
+    cut.tabs.count > 0 && placed < asked
+      ? [
+          `release tabs: ${asked} asked, ${placed} placed — the remaining edges are too short for another tab clear of the corners`,
+        ]
+      : [];
 
   const clampedTabHeightMm =
     tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
@@ -167,6 +208,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+    ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
 }
 

@@ -3193,6 +3193,20 @@ describe('through-cuts and cut-outs (#218)', () => {
     });
   }
 
+  it('refuses tabs that leave a stretch past the span limit (#1206)', async () => {
+    // The j12 medallion's 60 mm round cut-out asked to hold the part by ONE 4 mm tab: the placed
+    // tab leaves ~181 mm of circumference unsupported, past the shop's 80 mm limit, so the job is
+    // REFUSED with the reason, not posted as a quiet program.
+    const job = j12Job('j12-alu-medallion-proxy.json');
+    job.cutouts = (job.cutouts ?? []).map((c) => ({ ...c, tabs: { count: 1, width: 4, height: 1 } }));
+    const g = await generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'tab-unplaceable' && x.severity === 'error');
+    expect(f, JSON.stringify(g.findings)).toBeDefined();
+    expect(f!.message).toMatch(/span limit/);
+  });
+
   it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', async () => {
     // A 100 mm inset on the 100 × 60 blank shrinks the profile past the cutter radius: the old
     // behaviour was `profilePath` returning [] and the cut-out simply vanishing from the program.

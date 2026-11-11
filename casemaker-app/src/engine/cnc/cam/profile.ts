@@ -77,6 +77,30 @@ export interface ProfileSpan {
   points: [number, number][];
 }
 
+/**
+ * #1206 — the longest stretch of the contour's outline with NO tab on it, mm — the span limit's
+ * measure on the tabs AS PLACED (after any drop). A caller that states `tabs.maxSpanMm` refuses a
+ * job whose placed tabs leave a longer run unsupported; the check is on the placed spans, never on
+ * the plan before the drops.
+ */
+export function longestTabGap(spans: readonly ProfileSpan[], perimeter: number): number {
+  if (spans.length === 0) return perimeter;
+  let worst = 0;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    const next = spans[(i + 1) % spans.length]!;
+    let gap: number;
+    if (spans.length === 1) {
+      gap = perimeter - (span.endArc - span.startArc);
+    } else {
+      gap = (next.startArc - span.endArc) % perimeter;
+      if (gap < 0) gap += perimeter;
+    }
+    if (gap > worst) worst = gap;
+  }
+  return worst;
+}
+
 /** What tab placement did on one contour: spans placed and requested tabs it could not place. */
 export interface TabPlacement {
   spans: ProfileSpan[];

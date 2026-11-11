@@ -158,6 +158,7 @@ import {
   enclosedPath,
   generateProfile,
   kerfPolygons,
+  longestTabGap,
   placeTabs,
   profilePath,
   signedArea,
@@ -2490,6 +2491,37 @@ export function engraveRegions(
         spans.push(placement.spans);
         placed += placement.spans.length;
         unplaceable += placement.unplaceable;
+      }
+      // #1206 (the analyst's condition 3) — THE SPAN LIMIT ON THE TABS AS PLACED. A drop that
+      // leaves a stretch of the cut path longer than the shop's limit is a REFUSAL with its
+      // reason, not a quieter program.
+      if (c.tabs.count > 0) {
+        for (let i = 0; i < path.length; i++) {
+          const spansHere = spans[i]!;
+          if (spansHere.length === 0) continue;
+          const ring = path[i]!;
+          let perimeter = 0;
+          for (let k = 0; k < ring.length; k++) {
+            const a = ring[k]!;
+            const b = ring[(k + 1) % ring.length]!;
+            perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+          }
+          const gap = longestTabGap(spansHere, perimeter);
+          if (gap > tabMaxSpanMm + 1e-9) {
+            tabFindings.push({
+              severity: 'error',
+              code: 'tab-unplaceable',
+              labelId: c.id,
+              message:
+                `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide: ` +
+                `${placed} are placed, and the stretch they leave without one is ${mm3(gap)} mm — past ` +
+                `the shop's ${mm3(tabMaxSpanMm)} mm span limit. The edges' corners leave no room for ` +
+                'the tabs that stretch asks for. Use more tabs of a smaller width, a larger outline, ' +
+                'or a holding method that suits a freed part.',
+            });
+            break;
+          }
+        }
       }
       profiles.push({
         id: c.id,

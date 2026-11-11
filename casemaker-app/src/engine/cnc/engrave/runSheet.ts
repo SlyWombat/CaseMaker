@@ -3849,11 +3849,16 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
     const total = tabbed.reduce((sum, c) => sum + c.spans, 0);
     const added = tabbed.reduce((sum, c) => sum + (c.added ?? 0), 0);
     const detail = tabbed
-      .map(
-        (c) =>
+      .map((c) => {
+        const placedWords =
           `${c.name}: ${c.spans} tab${c.spans === 1 ? '' : 's'}, ` +
-          `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`,
-      )
+          `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`;
+        // #1206 (the analyst's condition 2) — a job that places fewer tabs than asked says so:
+        // how many were asked, how many are placed, and why. Never silent.
+        return c.spans < c.tabs.count
+          ? `${placedWords} (${c.tabs.count} asked, ${c.spans} placed — the remaining edges are too short for another tab clear of the corners)`
+          : placedWords;
+      })
       .join('; ');
     const addedWords =
       added === 0
