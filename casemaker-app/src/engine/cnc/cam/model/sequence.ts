@@ -610,7 +610,17 @@ export function candidateSequences(
   // only while it leaves at least one flat that can actually cut something.
   const eligiblePrimaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
   const shortlisted = eligiblePrimaries.filter(mayPrimary);
-  const primaries = shortlisted.length > 0 ? shortlisted : eligiblePrimaries;
+  const chosenPrimaries = shortlisted.length > 0 ? shortlisted : eligiblePrimaries;
+  // #1195 — THE SHORTLIST MAY NOT STARVE THE FREEING CONSTRAINT. Set B's shortlist picked the
+  // ⌀3.175 ×25 by price, and only the ×42 proves the 25.3 mm profile: with the ×42 off the
+  // shortlist, every chain was excluded and the plan refused on a part main freed. When none of
+  // the shortlisted cutters can free the profile, the eligible cutters that CAN join them.
+  const canFree = (c: CandidateCutter): boolean =>
+    contourFeatures.every((f) => coversFeature(c.tool, f) && reachesContour(c.tool, f));
+  const freed = contourFeatures.some((f) => (f.depthMm ?? 0) > 0);
+  const primaries = freed && !chosenPrimaries.some(canFree)
+    ? [...chosenPrimaries, ...eligiblePrimaries.filter((c) => canFree(c) && !chosenPrimaries.includes(c))]
+    : chosenPrimaries;
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   // #1192/#1195 — THE BALL FALLBACK IS NOT THE SHORTLIST'S. The shortlist is a rule about FLATS
   // (the incumbent and the best own-row flat); the fallback exists precisely for the demand NO
