@@ -143,7 +143,10 @@ describe.skipIf(TRAY === undefined)('#970/#1031 the real tray — shadow-on neve
     expect(strays, strays.slice(0, 8).map((c) => `cell ${c.k}: design ${c.design.toFixed(4)} vs cut ${c.offZ.toFixed(4)}`).join('\n')).toEqual([]);
     // (c) THE TRAY'S DIFFERENCE, AS NUMBERS. Reverting 802d2be43's bound makes the count 0, so
     // this pin can tell the exact bound from the old gate; the block case below stays green.
-    expect(differenceCells, 'the tray\'s difference — 0 means the exact bound is not in').toBe(446);
+    // RE-PINNED 2026-11-11 at 6216eaa89: the tray-top group (#1219's step-over, #1227's 0.001
+    // ring inset and #1223's lobe order) leaves 400 difference cells where it left 446 — green at
+    // 88e280183 before the group, unchanged across #1225 (attribution on k3).
+    expect(differenceCells, 'the tray\'s difference — 0 means the exact bound is not in').toBe(400);
     expect(materialCells, 'difference cells with material standing above the cut level').toBe(421);
     expect(airCells.length, 'difference cells over the deeper slots (air passes)').toBe(25);
     expect(deepestStandMm, 'the deepest material stand above the cut level, mm').toBeCloseTo(0.0029, 3);
