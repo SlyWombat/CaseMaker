@@ -478,6 +478,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // price depends on the program before it — attended while the operator is there, a return once
     // they have walked away. All four are RECOMMENDATIONS (the thresholds rule); `bitChange.ts` and
     // `defaultsClient.ts` state the same curve, bounds and fallbacks.
+    ("routines.recordLimit", 60.0, "entries", "recommended, not measured: how many completed motion-routine shapes one machine record keeps (#1202); oldest fall off first"),
     ("bitChange.attendedMinutes", 5.0, "min", "recommended, not measured: a program up to this long leaves the operator at the machine, so the change after it costs only the attended change"),
     ("bitChange.attendedChangeSeconds", 120.0, "s", "recommended, not measured: what a bit change costs while the operator is still at the machine — fit by hand plus the M491 touch, rounded to two minutes"),
     ("bitChange.walkAwayMinutes", 30.0, "min", "recommended, not measured: a program at least this long means the operator has left; the maintainer's own number for when people walk away"),
@@ -727,6 +728,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         // #1114 — the four bit-change numbers. Zero is allowed on every one (a shop may make the
         // change free, or attend every program); the upper bounds are well past any bench
         // observation. `bitChange.ts` handles thresholds that meet or invert.
+        // #1202 — a whole number of entries, 1 to 500.
+        "routines.recordLimit" => Some(need(
+            n.is_some_and(|v| (1.0..=500.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of entries, 1 to 500",
+        )),
         "bitChange.attendedMinutes" => Some(need(
             n.is_some_and(|v| (0.0..=240.0).contains(&v)),
             "0 to 240 minutes",

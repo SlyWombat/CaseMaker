@@ -1315,6 +1315,15 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     act(() => {
       useEngraveRunStore.getState().acknowledgeProgram('program-key');
     });
+    // #1202 — this routine has never completed on this machine: the card marks it and holds the
+    // press until the operator's own at-machine statement for THIS press.
+    const firstRun = await screen.findByTestId('engrave-registration-first-run', undefined, { timeout: 5000 });
+    expect(firstRun.textContent).toContain('has not run on this machine before');
+    expect(register.disabled).toBe(true);
+    const tick = screen.getByTestId('engrave-registration-first-run-tick');
+    act(() => {
+      fireEvent.click(tick);
+    });
     expect(register.disabled).toBe(false);
 
     // One press approves it AND starts: the job's setup carries the plan the card showed.
@@ -2339,6 +2348,11 @@ describe('#1179 — blank identity on the Register card', () => {
       useEngraveRunStore.setState({ acknowledged: true });
     });
     const startButton = await screen.findByTestId('engrave-registration-start', undefined, { timeout: 5000 });
+    // #1202 — a first-run routine is held until its own statement; tick it, then press.
+    const firstRunTick = await screen.findByTestId('engrave-registration-first-run-tick', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(firstRunTick);
+    });
     await act(async () => {
       fireEvent.click(startButton);
     });

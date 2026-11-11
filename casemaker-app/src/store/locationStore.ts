@@ -469,6 +469,16 @@ export function mergeMachine(
   const sameHost = obs !== null && server?.address?.host === obs.host;
   return {
     record: {
+      // #1202 — THE SERVED RECORD IS THE BASE, FIELD FOR FIELD. This write-through OWNS the fields
+      // named below (its sections, the observation's name/address, the clock); every other field
+      // belongs to the service and to whoever wrote it there. Rebuilding the record from a
+      // hardcoded list dropped whole SECTIONS this merge does not model — `currentBlank` (#1179),
+      // `registrations` (#1123-40, the per-setup memos) and `completedRoutines` (#1202) — every
+      // time the status poller noted a live line, silently erasing them ~10 s after a load. The
+      // spread is the fix: a field this build has never heard of rides through a settings or
+      // status write instead of being deleted, and `sameRecord` then sees no change and writes
+      // nothing at all.
+      ...(server ?? {}),
       id: server?.id ?? newId('machine'),
       profileId: obs?.profileId ?? server?.profileId ?? local.calibration?.machineId ?? null,
       // A typed address announces no name: the old one is kept only for the same host.

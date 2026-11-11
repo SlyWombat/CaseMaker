@@ -140,6 +140,10 @@ import { useMachineStopReportStore } from '@/store/machineStopReportStore';
 // #1187 — a stopped action's own report (the transport/controller error's card action).
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
+// #1202 + #1199 item 3 — the dry line view and the first-run mark.
+import { dryFlipRegistration, dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
 import { useMachineStore } from '@/store/machineStore';
 import { useRegistrationTouchesStore } from '@/store/registrationTouchesStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -164,6 +168,85 @@ const BOX: CSSProperties = {
 const OK = '#9fd19b';
 const BAD = '#f0b4ad';
 const WARN = '#e0c07a';
+
+/**
+ * #1202 + #1199 item 3 — A ROUTINE'S OWN DRY LINES, MARKED WHEN THIS MACHINE HAS NEVER RUN THEM.
+ * One card serves every motion routine the registration step offers: the sequence the press will
+ * run (the SAME executor, against a recording console), this machine's record of that exact shape,
+ * the guard's refusals, and the operator's own first-run statement. The testids are the same for
+ * whichever routine owns the card — only one routine's card is on screen at a time.
+ */
+function RoutineDryPreview({
+  preview,
+  firstRun,
+  ticked,
+  onTick,
+  headless,
+}: {
+  preview: DryRoutine;
+  firstRun: boolean;
+  ticked: boolean;
+  onTick: (checked: boolean) => void;
+  headless: string | null;
+}) {
+  return (
+    <div
+      data-testid="engrave-registration-routine"
+      data-routine={preview.identity.routine}
+      data-shape={preview.identity.shape}
+      style={{ marginTop: 6 }}
+    >
+      {firstRun && (
+        <p style={{ ...MUTED, color: WARN, margin: '4px 0' }} data-testid="engrave-registration-first-run">
+          This measurement has not run on this machine before — stay at the Stop.
+        </p>
+      )}
+      <details data-testid="engrave-registration-dry">
+        <summary data-testid="engrave-registration-dry-summary">
+          What will be sent — {preview.lines.length} line{preview.lines.length === 1 ? '' : 's'}
+        </summary>
+        <ol style={{ ...MUTED, paddingLeft: 18, margin: '4px 0' }} data-testid="engrave-registration-dry-list">
+          {preview.lines.map((l, i) => (
+            <li
+              key={`${i}-${l.line}`}
+              data-testid={`engrave-registration-dry-line-${i}`}
+              data-refused={l.refused === null ? undefined : 'true'}
+              style={l.refused === null ? undefined : { color: BAD }}
+            >
+              <code>{l.line}</code>
+              {l.refused !== null && <span> — {l.refused}</span>}
+            </li>
+          ))}
+        </ol>
+        <p style={{ ...MUTED, margin: '2px 0 0' }} data-testid="engrave-registration-dry-note">
+          The routine’s own sequence, under the readings the plan expects. Every line is checked
+          again live as it is sent — this view previews; the guard enforces.
+        </p>
+      </details>
+      {headless !== null && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-first-run-headless">
+          {headless}
+        </p>
+      )}
+      {preview.refused && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
+          The marked line would be refused — the press is disabled.
+        </p>
+      )}
+      {firstRun && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, margin: '4px 0' }} data-testid="engrave-registration-first-run-statement">
+          <input
+            type="checkbox"
+            data-testid="engrave-registration-first-run-tick"
+            checked={ticked}
+            onChange={(e) => onTick(e.target.checked)}
+          />
+          <span>I am at the machine — the probe is fitted, the head is clear, and I will stay at the Stop.</span>
+        </label>
+      )}
+    </div>
+  );
+}
 
 export interface EngraveRegistrationStepProps {
   /** The job whose approved setup-1 registration is run. */
@@ -295,7 +378,14 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   // Design → Setups stays the place to edit it.
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
-  const machineRecord = target === null ? null : machineAt(target);
+  // #1202 — a LIVE subscription: the first-run mark is read from this machine's record, and the
+  // location may arrive after the card mounts (a fresh load). A one-shot read left the mark stuck
+  // on "never run" even when the record already said it had.
+  const machineRecord = useLocationStore((s) =>
+    target === null
+      ? null
+      : s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
+  );
   /**
    * #1179 D/B4 — THE LAST TOP RECORDED FOR THIS BLANK. A finished run of this job keeps the top its
    * origin was accepted at (`registration.surfaceMachineZ`, measured or derived); the derived offer
@@ -612,6 +702,83 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const planDrift = plan !== null && proposalPlan !== null && canonicalJson(plan) !== canonicalJson(proposalPlan.plan);
 
   const [proposalOpen, setProposalOpen] = useState(false);
+  // #1202 + #1199 item 3 — THE PRESS PREVIEW. The routine the press would run is executed against
+  // a RECORDING console (no socket) and every line is shown with the motion-order guard's verdict,
+  // BEFORE the press. The same list's shape is the routine's identity: a shape this machine has
+  // never completed marks the press as a first run, which needs its own at-machine statement.
+  const [preview, setPreview] = useState<DryRoutine | null>(null);
+  const [routineTicked, setRoutineTicked] = useState(false);
+  const previewPlan: RegistrationPlan | null = plan ?? (proposal?.kind === 'plan' ? proposal.plan : null);
+  const previewFloor = jobMachine(job, calibration).envelope.z.min;
+  useEffect(() => {
+    if (previewPlan === null || target === null) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    const clearanceZ = previewPlan.machineClearanceZ ?? seekFromMachineZ;
+    const seat = seatTapArgs(previewPlan);
+    void (async () => {
+      try {
+        const dry =
+          seat !== null
+            ? await dryMountTap(seat, {
+                clearanceZ,
+                settings: regSettings,
+                workEnvelopeFloorZ: previewFloor,
+                mount: 'bracket',
+                planTravelMm: seat.planTravelMm,
+                routine: 'seat-press',
+                liveClearanceZ: seekFromMachineZ,
+              })
+            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings, liveClearanceZ: seekFromMachineZ });
+        if (live) setPreview(dry);
+      } catch {
+        if (live) setPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [previewPlan, target, seekFromMachineZ, regSettings, previewFloor]);
+  // A fresh statement per routine shape: the tick that satisfied the last press is not this one.
+  const previewShape = preview?.identity.shape ?? null;
+  useEffect(() => setRoutineTicked(false), [previewShape]);
+  const firstRun = preview !== null && !routineCompleted(machineRecord, preview.identity);
+  // The press is refused when the guard would refuse a line, and held until the operator's own
+  // statement when this exact routine has never completed on this machine (#1202 field 2).
+  const routineGate = (preview !== null && preview.refused) || (firstRun && !routineTicked);
+  // #1202 — the FLIP registration's own preview: side 2's frame plan, through the same executor
+  // the press runs, against the same live clearance. A routine of its own (its own id and shape).
+  const [flipPreview, setFlipPreview] = useState<DryRoutine | null>(null);
+  const [flipTicked, setFlipTicked] = useState(false);
+  useEffect(() => {
+    if (flipAttempt?.kind !== 'plan' || target === null) {
+      setFlipPreview(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const dry = await dryFlipRegistration(flipAttempt.attempt, { liveClearanceZ: seekFromMachineZ });
+        if (live) setFlipPreview(dry);
+      } catch {
+        if (live) setFlipPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flipAttempt, target, seekFromMachineZ]);
+  const flipShape = flipPreview?.identity.shape ?? null;
+  useEffect(() => setFlipTicked(false), [flipShape]);
+  const flipFirstRun = flipPreview !== null && !routineCompleted(machineRecord, flipPreview.identity);
+  const flipGate = (flipPreview !== null && flipPreview.refused) || (flipFirstRun && !flipTicked);
+  // #1202 field 4 — the same refusal for the flip's own first run.
+  const flipHeadlessRefusal = firstRunAutomationRefusal({ firstRun: flipFirstRun });
+  // #1202 field 4 — a first run under automation against a real controller is REFUSED, in words.
+  const headlessRefusal = firstRunAutomationRefusal({ firstRun });
   // #1070 (C8) — the placed bracket's position press (the bed profile's seed, from the hole grid).
   const [gridBusy, setGridBusy] = useState(false);
   const [gridNote, setGridNote] = useState<string | null>(null);
@@ -958,6 +1125,26 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         await handle.close();
         return;
       }
+      // #1202 — THE FLIP REGISTRATION COMPLETED: its identity is recorded on the machine (the
+      // guarded PUT). A refused write only means the next press marks the routine again. The
+      // card's preview is the identity's source; a press taken before it resolved computes the
+      // same identity from the same plan (the dry console never touches the wire).
+      if (target !== null) {
+        const flipMachine = machineAt(target);
+        if (flipMachine !== null) {
+          const flipIdentity =
+            flipPreview?.identity ??
+            (await dryFlipRegistration(attempt.attempt, { liveClearanceZ: seekFromMachineZ })).identity;
+          void saveMachineWithRetry(flipMachine, (current) =>
+            withRoutineCompletion(current, {
+              routine: 'flip-registration',
+              shape: flipIdentity.shape,
+              at: new Date().toISOString(),
+              build: buildStamp(),
+            }),
+          );
+        }
+      }
       setResult(r);
       setPhase('measured');
       if (writerRefusal(r.outcome) !== null) {
@@ -1158,6 +1345,23 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         handleRef.current = null;
         await handle.close();
         return;
+      }
+      // #1202 — THE REGISTRATION COMPLETED. Its routine identity (the line sequence the press
+      // sent) is recorded on the machine BEFORE any house write that may fail: the MOTION finished
+      // without a stop, which is what the record claims, and an unreadable save only means the
+      // next press marks the routine again — the safe direction.
+      if (preview !== null && target !== null) {
+        const recordMachine = machineAt(target);
+        if (recordMachine !== null) {
+          void saveMachineWithRetry(recordMachine, (current) =>
+            withRoutineCompletion(current, {
+              routine: preview.identity.routine,
+              shape: preview.identity.shape,
+              at: new Date().toISOString(),
+              build: buildStamp(),
+            }),
+          );
+        }
       }
       // #636 — THE MEASUREMENT IS ON SCREEN BEFORE ANY HOUSE WRITE. A throw or a refused save in
       // the chain below used to land in the outer catch as `failed`, and the successful probe result
@@ -1480,6 +1684,29 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     );
   }
 
+  // #1202 + #1199 item 3 — WHAT WILL BE SENT, the first-run mark, and the press's own statement.
+  const routinePreview =
+    preview === null ? null : (
+      <RoutineDryPreview
+        preview={preview}
+        firstRun={firstRun}
+        ticked={routineTicked}
+        onTick={setRoutineTicked}
+        headless={headlessRefusal}
+      />
+    );
+
+  const flipRoutinePreview =
+    flipPreview === null ? null : (
+      <RoutineDryPreview
+        preview={flipPreview}
+        firstRun={flipFirstRun}
+        ticked={flipTicked}
+        onTick={setFlipTicked}
+        headless={flipHeadlessRefusal}
+      />
+    );
+
   return (
     <div
       data-testid="engrave-registration"
@@ -1586,12 +1813,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               {summarizePlan(proposal.plan)}
             </p>
           )}
+          {routinePreview}
           <button
             type="button"
             data-testid="engrave-registration-approve-start"
             // #1201 — REGISTER, never a seat press: the seat is a bed-setup datum now. The
             // statement is still required (the executor moves the probe only on the operator's word).
-            disabled={busy || !statementGiven}
+            // #1202 — and a FIRST-RUN routine is refused at the guard level (a marked line) or
+            // held until its own statement, whichever press this is.
+            disabled={busy || !statementGiven || routineGate || headlessRefusal !== null}
             style={{ width: '100%', padding: 7, marginTop: 6, fontWeight: 600 }}
             onClick={() => void approveAndStart(proposal)}
           >
@@ -1660,15 +1890,18 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               : `The corner Z touches check the carried side-2 top ${flipAttempt.attempt.z0.topMachineZ} ± ${Math.round(((flipAttempt.attempt.z0.checkBand.maxMm - flipAttempt.attempt.z0.checkBand.minMm) / 2) * 1000) / 1000} mm; a reading outside that band stops the run before a bore is entered.`}
           </p>
           {(phase === 'idle' || phase === 'failed' || phase === 'recorded') && target !== null && (
-            <button
-              type="button"
-              data-testid="engrave-registration-start"
-              disabled={!statementGiven}
-              style={{ width: '100%', padding: 7, marginTop: 6 }}
-              onClick={() => void start()}
-            >
-              {phase === 'idle' ? 'Register side 2' : 'Register side 2 again'}
-            </button>
+            <>
+              {flipRoutinePreview}
+              <button
+                type="button"
+                data-testid="engrave-registration-start"
+                disabled={!statementGiven || flipGate || flipHeadlessRefusal !== null}
+                style={{ width: '100%', padding: 7, marginTop: 6 }}
+                onClick={() => void start()}
+              >
+                {phase === 'idle' ? 'Register side 2' : 'Register side 2 again'}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -1716,10 +1949,11 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             <>
               {/* #797 — the at-machine statement is the ONE statement at Cut step 1 (which names
                   the probe), so this step asks nothing of its own; it reads whether it was given. */}
+              {routinePreview}
               <button
                 type="button"
                 data-testid="engrave-registration-start"
-                disabled={!statementGiven}
+                disabled={!statementGiven || routineGate || headlessRefusal !== null}
                 style={{ width: '100%', padding: 7, marginTop: 6 }}
                 onClick={() => void start()}
               >

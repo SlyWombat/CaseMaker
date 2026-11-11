@@ -3752,6 +3752,7 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            completed_routines: None,
             current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }

@@ -23,6 +23,10 @@ import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
 import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
+// #1202 — a completed tap records its routine identity on the machine, so a later press can say
+// whether this exact motion has run here before.
+import { routineIdentityOf } from '@/engine/cnc/registration/routineIdentity';
+import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
 
 /**
  * #637 — ONE TAP AT A TIME, ACROSS HOSTS. The hook is used by the Setups row and by the machine
@@ -266,6 +270,23 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
       if (r.ok) {
         const record = machineAt(inputs.target);
         if (record !== null) {
+          // #1202 — THE COMPLETION RIDES THE DATUM WRITE. A separate PUT raced the datum save
+          // (its record was read before the datum landed, and whichever arrived second won), so
+          // the routine's identity is folded into the SAME update: one write, one record, and a
+          // refused save leaves no claim that the routine completed.
+          const seatRoutine = tap.reference === 'bracket-seat' && (tap.datumOffsetMm ?? 0) === 0;
+          const completion = {
+            routine: seatRoutine ? ('seat-press' as const) : ('mount-tap' as const),
+            shape: routineIdentityOf(seatRoutine ? 'seat-press' : 'mount-tap', r.transcript.map((t) => t.line), {
+              clearance: inputs.clearanceZ,
+              ...(Number.isFinite(tap.fromMachineZ) ? { approach: tap.fromMachineZ } : {}),
+              ...(tap.planTravelMm !== undefined && tap.planTravelMm !== null && tap.planTravelMm > 0
+                ? { seek: -tap.planTravelMm }
+                : {}),
+            }).shape,
+            at: new Date().toISOString(),
+            build: buildStamp(),
+          };
           const now = new Date().toISOString();
           // #595 — the tap's reading lands on the mount's OWN record as well: the unit's record is
           // the one the planner prefers (`mountDatumFor`), and a measurement that happened must not
@@ -296,7 +317,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             // #636 — the write's answer is read: a stale guard retries once against the re-read, and
             // a record that did not land is never reported as one that did.
             const update: MachineUpdate = (current) =>
-              withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now, r.probe.lengthZ);
+              withRoutineCompletion(
+                withBracketSeatDatum(bed(current), { z: seat, at: r.at }, inputs.probeId, now, r.probe.lengthZ),
+                completion,
+              );
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -322,7 +346,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
             }
           } else {
             const update: MachineUpdate = (current) =>
-              withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now, r.probe.lengthZ);
+              withRoutineCompletion(
+                withViseJawTopDatum(bed(current), { z: r.z, at: r.at }, inputs.probeId, now, r.probe.lengthZ),
+                completion,
+              );
             const outcome = await saveMachineWithRetry(record, update);
             if (outcome !== 'ok') {
               noteNow(
@@ -420,13 +447,21 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         const now = new Date().toISOString();
         const bed = await createFirstBed(held, null, now);
         const update: MachineUpdate = (current) =>
-          withRotaryAxisDatum(
-            bed(current),
-            { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
-            inputs.probeId,
-            now,
-            // #1189 — the seating this tap was taken in (runRotaryTap returns the run's M491).
-            r.probeRefZ,
+          withRoutineCompletion(
+            withRotaryAxisDatum(
+              bed(current),
+              { axisZ: r.circle.axisZ, axisY: r.circle.axisY, radiusMm: r.circle.radiusMm, atX: req.atX },
+              inputs.probeId,
+              now,
+              // #1189 — the seating this tap was taken in (runRotaryTap returns the run's M491).
+              r.probeRefZ,
+            ),
+            {
+              routine: 'rotary-tap',
+              shape: routineIdentityOf('rotary-tap', r.transcript.map((t) => t.line), { clearance: req.seekFromMachineZ }).shape,
+              at: now,
+              build: buildStamp(),
+            },
           );
         const outcome = await saveMachineWithRetry(held, update);
         if (outcome !== 'ok') {
@@ -480,11 +515,19 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         const now = new Date().toISOString();
         const bed = await createFirstBed(held, null, now);
         const update: MachineUpdate = (current) =>
-          withRotaryFaceAngleDatum(
-            bed(current),
-            { aOffsetDeg: r.thetaDeg, atX: planned.x, axisY: (planned.yPlus + planned.yMinus) / 2, residualMm: r.residualMm },
-            inputs.probeId,
-            now,
+          withRoutineCompletion(
+            withRotaryFaceAngleDatum(
+              bed(current),
+              { aOffsetDeg: r.thetaDeg, atX: planned.x, axisY: (planned.yPlus + planned.yMinus) / 2, residualMm: r.residualMm },
+              inputs.probeId,
+              now,
+            ),
+            {
+              routine: 'face-angle',
+              shape: routineIdentityOf('face-angle', r.transcript.map((t) => t.line), {}).shape,
+              at: now,
+              build: buildStamp(),
+            },
           );
         const outcome = await saveMachineWithRetry(held, update);
         if (outcome !== 'ok') {

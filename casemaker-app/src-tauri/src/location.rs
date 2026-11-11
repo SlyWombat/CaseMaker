@@ -1002,6 +1002,12 @@ pub struct MachineRecord {
     /// while absent, so a record written before the section round-trips without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrations: Option<serde_json::Value>,
+    /// #1202 — the motion routines that have COMPLETED on this machine, as the client sent them:
+    /// a routine id, the shape hash of its line sequence, when it last completed and by which
+    /// build. A routine absent here has never run on this controller. Omitted while absent, so a
+    /// record written before the section round-trips without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_routines: Option<serde_json::Value>,
     /// #1179 blank identity — the current blank id per JOB on this machine (issue comment
     /// 6776457695): a blank sits on one machine's bed, so a job file never carries one. Omitted
     /// while absent, so a record written before the section round-trips without it.
@@ -1329,6 +1335,7 @@ mod tests {
             finished_programs: Vec::new(),
             finished_runs: Vec::new(),
             registrations: None,
+            completed_routines: None,
             current_blank: None,
             updated_at: "2026-10-15T00:00:00.000Z".into(),
         }
@@ -1696,6 +1703,38 @@ mod tests {
         machine.current_blank = None;
         let v = serde_json::to_value(&machine).unwrap();
         assert!(v.get("currentBlank").is_none(), "{v}");
+    }
+
+    #[test]
+    fn the_machine_record_round_trips_its_completed_routines() {
+        // #1202 — the motion routines that have completed on this machine, with their line-sequence
+        // shape, date and build. Omitted while absent, so a record written before the section
+        // round-trips unchanged; present, it comes back exactly as the client sent it.
+        let mut machine = a_machine("m-1");
+        machine.completed_routines = Some(serde_json::json!([
+            {
+                "routine": "seat-press",
+                "shape": "0f3c9a11",
+                "at": "2026-11-11T09:12:00.000Z",
+                "build": { "version": "1.0.0", "commit": "abc1234" },
+            },
+            {
+                "routine": "registration",
+                "shape": "aa11bb22",
+                "at": "2026-11-11T09:40:00.000Z",
+                "build": { "version": "1.0.0", "commit": "abc1234" },
+            },
+        ]));
+        machine.validate().unwrap();
+        let v = serde_json::to_value(&machine).unwrap();
+        assert_eq!(v["completedRoutines"][0]["routine"], serde_json::json!("seat-press"));
+        assert_eq!(v["completedRoutines"][0]["shape"], serde_json::json!("0f3c9a11"));
+        assert_eq!(v["completedRoutines"][1]["build"]["commit"], serde_json::json!("abc1234"));
+        let back: MachineRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(back, machine);
+        machine.completed_routines = None;
+        let v = serde_json::to_value(&machine).unwrap();
+        assert!(v.get("completedRoutines").is_none(), "{v}");
     }
 
     #[test]
