@@ -113,7 +113,9 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
       parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
       ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
       // #1211 field 6 — a top-touch-only probe refuses the wall touches before anything is sent.
-      probeTouches: probe?.touches ?? 'z-only',
+      // An UNSTATED probe is a legacy wired unit, which does touch sideways (the k3 3D probe now
+      // states 'z-only' explicitly); the deny-by-default part is the REQUIRED hold block, not this.
+      probeTouches: probe?.touches ?? 'all',
     };
   }, [made, plan, probe, settings.surfaceSlowFeed, settings.parkAboveSurfaceMm, kind, topTouchAt]);
   const [preview, setPreview] = useState<DryRoutine | null>(null);
