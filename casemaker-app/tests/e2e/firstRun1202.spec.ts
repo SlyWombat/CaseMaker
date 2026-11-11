@@ -112,7 +112,10 @@ async function openSeatProposal(page: Page): Promise<void> {
   if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
     await page.getByTestId('engrave-cut-step-2-summary').click();
   }
-  await expect(page.getByTestId('engrave-registration-approve-start')).toHaveText('Measure the bracket seat');
+  // #1201 supersedes the seat press on this card: the seat is a bed-setup datum now and the
+  // press is REGISTER ("never a seat press"). The later issue's wording wins; the card's guard
+  // work from #1202 is unchanged.
+  await expect(page.getByTestId('engrave-registration-approve-start')).toHaveText('Register');
 }
 
 /** After a reload the job is restored: the Cut card is reached without the wizard door. */
