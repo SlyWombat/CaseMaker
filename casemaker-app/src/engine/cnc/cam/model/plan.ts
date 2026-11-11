@@ -3528,6 +3528,18 @@ export interface PlanPocketsResult {
  * reserved id for the tree's outer contour) and caches the resulting `OpOutcome`s by step
  * signature — `chooseSequence` calls `planStep` once per candidate it prices, not just the winner.
  */
+/**
+ * planner v3 A3 — THE POCKET'S STEP-OVER IS THE FEED ROW'S OWN. `rowStepOverMm` is the step-over
+ * the cutter's resolved feed row states (mm). It is used when it is a number above 0, and never
+ * more than the cutter's radius (contour-parallel rings wider than that leave an uncut spine,
+ * #191). With no row it is a quarter of the diameter, the value this planner used before.
+ */
+export function pocketStepOverMm(diameterMm: number, rowStepOverMm: number | null | undefined): number {
+  const quarter = diameterMm / 4;
+  if (typeof rowStepOverMm !== 'number' || !Number.isFinite(rowStepOverMm) || !(rowStepOverMm > 0)) return quarter;
+  return Math.min(rowStepOverMm, diameterMm / 2);
+}
+
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
   // #1018 — ONE Z DATUM, by construction: `zPasses`, SAFE_Z/HOP_Z (ir.ts) and the post's own
   // `probed-top-face` convention all assume IR Z 0 is the STOCK top, and `tree` already is —
@@ -3713,9 +3725,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #990 — EVERY CANDIDATE FLAT, ITS OWN ROW. `opts.paramsFor`, when the caller supplies it
   // (`planModelCam` now does, for every tool in the house), resolves feed/plunge/step-down/RPM
   // from THAT cutter's own catalogue row; absent, every existing caller that never passes it
-  // keeps the old (primary-wide) numbers unchanged. `stepOver` here stays this function's own
-  // quarter-diameter convention either way — `opts.paramsFor`'s own `.stepOver` is a different,
-  // catalogue-row number no pocket-chain call site reads from this result.
+  // keeps the old (primary-wide) numbers unchanged.
+  // planner v3 A3 — the step-over the cutter's own row states, or null when the caller gave no
+  // row lookup or the lookup refuses this cutter.
+  const rowStepOverOf = (cutter: Tool): number | null => {
+    if (opts.paramsFor === undefined) return null;
+    try {
+      return opts.paramsFor(cutter).stepOver;
+    } catch {
+      return null;
+    }
+  };
   const cutParamsFor = (cutter: Tool): CutParams => ({
     ...(opts.paramsFor?.(cutter) ?? {
       rpm: opts.spindleRpm,
@@ -3725,14 +3745,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       peck: 0,
       air: opts.air,
     }),
-    // Only feed/plunge/step-down/RPM vary by cutter here (#990); `stepOver` keeps this
-    // function's own quarter-diameter convention and `peck`/`air` keep the pocket chain's own
-    // values regardless of what the resolved row's own catalogue entry happens to carry —
-    // `opts.paramsFor`'s result is a full `CutParams` (its OWN peck/air, meant for a DIFFERENT
-    // consumer), not this function's contract.
+    // Feed, plunge, step-down and RPM come from the cutter's own row (#990), and so does the
+    // step-over (planner v3 A3). `peck` and `air` keep the pocket chain's own values.
     peck: 0,
     air: opts.air,
-    stepOver: (cuttingDiameter(cutter) ?? 1) / 4,
+    stepOver: pocketStepOverMm(cuttingDiameter(cutter) ?? 1, rowStepOverOf(cutter)),
   });
 
   /**
@@ -3767,7 +3784,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     if (ref === undefined) return null;
     const cutter = step.cutter.tool;
     const floorZ = cutFloor(node.floorZ);
-    const stepOverMm = (cuttingDiameter(cutter) ?? 1) / 4;
+    const stepOverMm = pocketStepOverMm(cuttingDiameter(cutter) ?? 1, rowStepOverOf(cutter));
     const radius = (cuttingDiameter(cutter) ?? 0) / 2;
     // The chain so far, as IRs (each prefix step planned with its own prefix; all memoized).
     const prefixIrs: ToolpathIR[] = [];
@@ -4016,7 +4033,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       cutter,
       node: { ...node, mouthZ, floorZ: cutFloor(node.floorZ) },
       region: ref,
-      stepOverMm: diameter / 4,
+      // planner v3 A3 — the primary pocket's passes take the cutter's own row step-over. (The
+      // issue's line 3763 quote lives in the rest path above; this is the call the tray's wide
+      // recess is actually cleared by, and the issue's own planner test requires it.)
+      stepOverMm: pocketStepOverMm(diameter, rowStepOverOf(cutter)),
       // #990 — this cutter's own row (a nested/coverage node can be assigned a rest flat, not
       // necessarily the primary).
       stepDownMm: cutParamsFor(cutter).stepDown,
