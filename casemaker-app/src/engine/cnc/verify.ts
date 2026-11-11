@@ -61,6 +61,7 @@ import {
   ROTARY_TAILSTOCK_BAND_MM,
 } from './rotary/wrap';
 import { segmentEntersTailstock, tailstockSpan } from './rotary/tailstock';
+import type { RotaryLimits } from './rotary/limits';
 
 /** Deepest permitted cut (positive mm below the top face) at a work-frame XY. 0 = no cutting allowed here. */
 export type DepthLimit = (x: number, y: number) => number;
@@ -113,6 +114,8 @@ export interface VerifyContext {
     stickout: number;
     /** The tailstock is in, so the last {@link ROTARY_TAILSTOCK_BAND_MM} mm are a keep-out. */
     tailstock: boolean;
+    /** #1222 — the shop's rotary limits; absent leaves every rule on the recommended value. */
+    limits?: RotaryLimits;
   };
 }
 
@@ -819,12 +822,14 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           for (const p of [fromW, toW]) {
             if (p[0] === null) continue;
             const left = p[0] - edgeRadius;
-            if (left < ROTARY_JAW_KEEP_OUT_MM - BAND_EPS_MM) {
-              push('wrap-into-clamp', m.line, jawsSentence(left));
+            const jawKeepOut = rotary.limits?.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM;
+            if (left < jawKeepOut - BAND_EPS_MM) {
+              push('wrap-into-clamp', m.line, jawsSentence(left, jawKeepOut));
               break;
             }
-            if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - ROTARY_TAILSTOCK_BAND_MM + BAND_EPS_MM) {
-              push('wrap-into-clamp', m.line, tailstockSentence(p[0] + edgeRadius, rotary.stickout));
+            const band = rotary.limits?.tailstockBandMm ?? ROTARY_TAILSTOCK_BAND_MM;
+            if (rotary.tailstock && p[0] + edgeRadius > rotary.stickout - band + BAND_EPS_MM) {
+              push('wrap-into-clamp', m.line, tailstockSentence(p[0] + edgeRadius, rotary.stickout, band));
               break;
             }
             // #724 B3 review — the tailstock-out twin: the map ends at the stick-out, and past it
@@ -899,9 +904,10 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
           const turns = m.a !== null && Math.abs(m.a - (lastA ?? 0)) > 1e-6;
           if (turns || movedX) {
             const zStart = fromW[2];
-            const clear = rotary.radius + ROTARY_CLEARANCE_MM;
+            const clearance = rotary.limits?.turnClearanceMm ?? ROTARY_CLEARANCE_MM;
+            const clear = rotary.radius + clearance;
             if (zStart === null || zStart < clear - 1e-6) {
-              push('rotary-rapid-engaged', m.line, turningInCutSentence(zStart ?? (toW[2] ?? 0), rotary.radius));
+              push('rotary-rapid-engaged', m.line, turningInCutSentence(zStart ?? (toW[2] ?? 0), rotary.radius, clearance));
             }
           }
           // #1061 (the maintainer's rule, 2026-11-07) — THE CHUCK AND JAWS ARE A FULL-HEIGHT
@@ -919,13 +925,14 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
               const t = (limit - 1e-6 - p0) / d;
               return d > 0 ? (t > 0 ? [0, Math.min(1, t)] : null) : t < 1 ? [Math.max(0, t), 1] : null;
             };
-            const sx = span(fromW[0], toW[0], ROTARY_JAW_KEEP_OUT_MM + edge);
+            const jawKeepOut = rotary.limits?.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM;
+            const sx = span(fromW[0], toW[0], jawKeepOut + edge);
             if (sx !== null) {
               push(
                 'rapid-into-chuck',
                 m.line,
                 `moves over the chuck: the jaws' reach depends on the grip, so no height over them is clear — ` +
-                  `every move stays right of the jaw tips (X ≥ ${Number(ROTARY_JAW_KEEP_OUT_MM.toFixed(3))} mm)`,
+                  `every move stays right of the jaw tips (X ≥ ${Number(jawKeepOut.toFixed(3))} mm)`,
               );
             }
           }
@@ -939,7 +946,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             toW[0] !== null && toW[1] !== null && toW[2] !== null
           ) {
             const edge = toolRadiusOf(ctx.tool, 0);
-            const body = tailstockSpan(rotary.stickout, rotary.radius * 2, rotary.radius);
+            const body = tailstockSpan(rotary.stickout, rotary.radius * 2, rotary.radius, rotary.limits);
             if (segmentEntersTailstock([fromW[0], fromW[1], fromW[2]], [toW[0], toW[1], toW[2]], edge, body)) {
               push(
                 'rapid-into-tailstock',

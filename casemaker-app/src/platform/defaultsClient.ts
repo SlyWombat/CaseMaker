@@ -449,8 +449,14 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // session guard; the verifier and the relief CAM still hold the constant, which derives from
   // this key's fallback.
   'rotary.jawKeepOutMm': { label: 'rotary chuck keep-out past the jaw tips (chosen)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
-  // ── #1211 field 7 (#1207 fix-on-touch) — the tailstock's keep-out band at the free end, mm.
+  // ── #1211 field 7 (#1207 fix-on-touch) / #1222 — the tailstock's keep-out band at the free end, mm.
   'rotary.tailstockBandMm': { label: 'rotary tailstock keep-out band (chosen)', unit: 'mm', rule: z.number().min(0).max(50), fallback: 10 },
+  // #1222 — the rotary module's other limits, as the shop states them (recommended values keep
+  // today's programs, findings and sentences byte-identical).
+  'rotary.turnClearanceMm': { label: 'clearance above the stock before the rod may turn or traverse (Makera’s rule)', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  'rotary.tailstockCentreMm': { label: 'tailstock live centre length (provisional)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 12 },
+  'rotary.tailstockBodyMm': { label: 'tailstock body length (provisional)', unit: 'mm', rule: z.number().min(0).max(200), fallback: 40 },
+  'rotary.tailstockHousingRadiusMm': { label: 'tailstock housing radius about the axis (provisional)', unit: 'mm', rule: z.number().min(0).max(150), fallback: 45 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
@@ -763,8 +769,10 @@ export function readMeasured(map: ShopDefaults | null, key: string): { value: nu
 
 /** The whole section: well-formed keys, each value valid, and each known key within its rule. */
 export const ShopDefaultsSchema = z.record(z.string(), ShopDefaultSchema).superRefine((map, ctx) => {
-  if (Object.keys(map).length > 200) {
-    ctx.addIssue({ code: 'custom', message: 'the shop defaults hold more than 200 keys' });
+  // #1222 — raised from 200 for the five rotary limits (and the planner v3 records still to
+  // come); `defaults.rs` states the same cap.
+  if (Object.keys(map).length > 256) {
+    ctx.addIssue({ code: 'custom', message: 'the shop defaults hold more than 256 keys' });
   }
   // #430 review: the surface band inside the touch cap, as `defaults.rs` checks it.
   const band = map['registration.surfaceBandMm']?.value;

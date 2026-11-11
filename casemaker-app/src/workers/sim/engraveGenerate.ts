@@ -2077,7 +2077,7 @@ export function engraveRegions(
   // (R10): `r_t` along X, `r_t·R/(R − d)` around. The measurement reads the same radius/depth
   // pair `generateEngrave` scales the CAM by, so what the panel calls reachable and what the
   // file cuts cannot disagree. The flat path passes nothing and is unchanged.
-  const rotaryMap = rotaryMapOf(job);
+  const rotaryMap = rotaryMapOf(job, shop.defaults ?? null);
   // #737 — the neck for parting, as the plan places it. Null when the job is not rotary or has no
   // neck. The bands it must clear are the map's own, so the REFUSALS read this exact span
   // (`rotaryJobFindings`), the CAM cuts this exact span and the run sheet states it.
@@ -3777,7 +3777,7 @@ function simulateProgram(
 ): SimLoadResult {
   const mill = jobMachine(job, calibration);
   // #725 B7 — the wasteboard rides the setup as the under-board (a through cut may enter it).
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   const session = createSimSession(tl);
   try {
     return session.load(nc, setup, tool, job.machineId, {
@@ -5747,7 +5747,7 @@ export async function postModelPlan(
     );
   }
 
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   // #943 (10) — A THROUGH FREEING CONTOUR GRANTS THE BOARD'S BREAKTHROUGH AT ITS OWN KERF, and
   // only there: the plan states that kerf (`OpOutcome.throughKerf`, path + tab spans + radius +
   // tab height), and the verifier's through mask is built from it — the same mask the item
@@ -6955,7 +6955,7 @@ async function generateFaceProgram(
   const mill = jobMachine(job, calibration);
   const feeds = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return fail('feeds', feeds.reason, { feeds, findings: documentFindings });
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, shop.defaults ?? null);
   if (map === null) return fail('findings', 'the face operations need the rotary chuck', { findings: documentFindings });
 
   const planned = planFaceCuts(job, map, tool, feeds.params);
@@ -7125,7 +7125,7 @@ async function generateFaceProgram(
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
       }
-      const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+      const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
       const fineVerify = verifyProgram(postedFine.text, {
         setup: fineSetup,
         machine: mill,
@@ -7134,7 +7134,7 @@ async function generateFaceProgram(
         dialect: postKey(mill),
         depthLimit: jobDepthLimit(job, margins.boundaryMargin),
         minRapidZ: fineIr.hopZ,
-        rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
+        rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock, limits: map.limits },
       });
       if (fineVerify.findings.some((f) => f.severity === 'error')) {
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
@@ -7215,7 +7215,7 @@ async function generateFaceProgram(
     return fail('post', e instanceof Error ? e.message : String(e), { findings: allFindings, feeds });
   }
 
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   const limit: DepthLimit = jobDepthLimit(job, margins.boundaryMargin);
   const verify = verifyProgram(nc, {
     setup,
@@ -7224,7 +7224,7 @@ async function generateFaceProgram(
     dialect: postKey(mill),
     depthLimit: limit,
     minRapidZ: ir.hopZ,
-    rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock },
+    rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock, limits: map.limits },
   });
   if (verify.findings.some((f) => f.severity === 'error')) {
     return fail('verify', `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)`, {
@@ -7426,10 +7426,10 @@ export async function engraveGenerate(
     // indexed face program and a relief, so the two are cut and posted in order in one mounting:
     // the faces, then the relief — planned from the SECTION THE FACES LEAVE (the octagon after an
     // A 45 corner ring, not the block's 31.466 mm corners).
-    if (goal !== null && rotaryMapOf(job) !== null) {
+    if (goal !== null && rotaryMapOf(job, shop.defaults ?? null) !== null) {
       const faces = await generateFaceProgram(tl, job, tool, catalogue, calibration, margins, shop);
       if (!faces.ok) return faces;
-      const rotary = rotaryMapOf(job)!;
+      const rotary = rotaryMapOf(job, shop.defaults ?? null)!;
       const processed = processedSectionOf(rotary.section, job.faces ?? []);
       const relief = generateRotaryGoalProgram(job, goal, { ...rotary, section: processed }, tool, catalogue, calibration, shop);
       if (!relief.ok) {
@@ -7488,7 +7488,7 @@ export async function engraveGenerate(
   if (job.setups !== undefined && !jobHasItems(job)) {
     const sides = goalSides(job);
     if (sides.length > 0) {
-      const rotary = rotaryMapOf(job);
+      const rotary = rotaryMapOf(job, shop.defaults ?? null);
       if (rotary !== null) {
         // A relief on a rod is ONE indexed program: its frame is the chuck's, not a hand flip.
         return {
@@ -7516,7 +7516,7 @@ export async function engraveGenerate(
   if (goal !== null) {
     // #723 R-3 — A ROTARY GOAL IS THE RELIEF: a goal on a rod in the chuck is turned from the
     // radial heightfield (`cam/rotaryRelief`), not surfaced flat over an (x, y) grid.
-    const rotary = rotaryMapOf(job);
+    const rotary = rotaryMapOf(job, shop.defaults ?? null);
     if (rotary !== null) {
       return { ...generateRotaryGoalProgram(job, goal, rotary, tool, catalogue, calibration, shop), surface: null };
     }
@@ -8205,8 +8205,9 @@ async function generateOneProgram(
   const errors: EngraveFailure[] = [];
   // #240 slice 2 — the map this job is authored on, or null for a flat job. Every rotary branch
   // below reads this ONE value, `rotaryMapOf`'s, so the CAM, the post, the verifier and the
-  // success result cannot disagree about whether this run is wrapped.
-  const rotaryMap = rotaryMapOf(job);
+  // success result cannot disagree about whether this run is wrapped. #1222 — the shop's limits
+  // travel with it.
+  const rotaryMap = rotaryMapOf(job, shop.defaults ?? null);
 
   const stop = (
     stage: EngraveStage,
@@ -8911,7 +8912,7 @@ async function generateOneProgram(
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
   // #725 B7 — the wasteboard rides the setup as the under-board (a through cut may enter it).
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
 
   // 5. the post-processor (#173). Its `ctx` comes first because the facing file is posted from it
   // too (step 6), and the two files share one job name, stock and frame.
@@ -9007,7 +9008,7 @@ async function generateOneProgram(
       ...(limitReasonAt ? { limitReasonAt } : {}),
       ...(rotaryMap === null
         ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
-        : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock } }),
+        : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock, limits: rotaryMap.limits } }),
     });
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
@@ -9046,7 +9047,7 @@ async function generateOneProgram(
         ...(limitReasonAt ? { limitReasonAt } : {}),
         ...(rotaryMap === null
           ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
-          : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock } }),
+          : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock, limits: rotaryMap.limits } }),
       });
       if (neckVerify.findings.some((f) => f.severity === 'error')) {
         errors.push({ stage: 'verify', message: `the neck file: ${neckVerify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });

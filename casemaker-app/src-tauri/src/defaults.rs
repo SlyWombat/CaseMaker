@@ -393,8 +393,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // #1211 field 7 (#1207 fix-on-touch) — the chuck keep-out past the jaw tips: nothing moves at X
     // inside it, at any Z.
     ("rotary.jawKeepOutMm", 3.0, "mm", "chosen, not measured: how far past the jaw tips a rotary session keeps every move; the jaws' reach varies with the grip, so no height over the chuck is clear"),
-    // #1211 field 7 (#1207 fix-on-touch) — the tailstock's keep-out band at the free end.
+    // #1211 field 7 (#1207 fix-on-touch) / #1222 — the tailstock's keep-out band at the free end.
     ("rotary.tailstockBandMm", 10.0, "mm", "chosen, not measured: the last millimetres of the stick-out the tailstock holds, kept clear of every move"),
+    // #1222 — the rotary module's other limits (recommended values = today's behaviour).
+    ("rotary.turnClearanceMm", 3.0, "mm", "Makera's own rule, not measured: clearance above the stock before a rapid may turn or traverse the rod"),
+    ("rotary.tailstockCentreMm", 12.0, "mm", "provisional, not measured: the live centre's length from the stock's free end to the tailstock body"),
+    ("rotary.tailstockBodyMm", 40.0, "mm", "provisional, not measured: the tailstock body's length along the rod"),
+    ("rotary.tailstockHousingRadiusMm", 45.0, "mm", "provisional, not measured: the tailstock housing's radius about the rotary axis"),
     // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
     ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
     // ── #451 runSheet (end)
@@ -1261,6 +1266,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "rotary.jawKeepOutMm" => Some(need(n.is_some_and(|v| (0.0..=20.0).contains(&v)), "0 to 20 mm")),
         "rotary.tailstockBandMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
+        // #1222 — the rotary limits' ranges (defaultsClient.ts states the same).
+        "rotary.turnClearanceMm" => Some(need(n.is_some_and(|v| (0.0..=20.0).contains(&v)), "a clearance in mm, 0 to 20")),
+        "rotary.tailstockCentreMm" => Some(need(n.is_some_and(|v| (0.0..=100.0).contains(&v)), "a length in mm, 0 to 100")),
+        "rotary.tailstockBodyMm" => Some(need(n.is_some_and(|v| (0.0..=200.0).contains(&v)), "a length in mm, 0 to 200")),
+        "rotary.tailstockHousingRadiusMm" => Some(need(n.is_some_and(|v| (0.0..=150.0).contains(&v)), "a radius in mm, 0 to 150")),
         // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
         // playback speed is one of the transport's multipliers, not any number in a range.
         "sim.playbackSpeed" => Some(need(
@@ -1466,8 +1476,9 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
 pub const PARK_CLEARANCE_MM: f64 = 0.5;
 
 /// The most keys the section holds, and the longest unit. Caps, so a client cannot grow the
-/// document without bound (#416/#417 review).
-pub const MAX_KEYS: usize = 200;
+/// document without bound (#416/#417 review). #1222 raised the key cap from 200 for the five
+/// rotary limits, with headroom for the planner v3 records still to come.
+pub const MAX_KEYS: usize = 256;
 pub const MAX_UNIT: usize = 16;
 
 /// The seed for `key`, if it has one.

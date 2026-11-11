@@ -1360,6 +1360,8 @@ export function toSetup(
   bed?: BedUnderFacts | null,
   /** #1082 — the box THIS setup is cut from (its own stock), or absent for the job's blank. */
   setupStock?: { length: number; width: number; thickness: number },
+  /** #1222 — the shop defaults, when the caller has them: the rotary limits travel to the setup. */
+  defaults?: ShopDefaults | null,
 ): Setup {
   const thickness = setupStock?.thickness ?? job.stock.thickness;
   const box = setupStock === undefined ? job.stock : { ...job.stock, ...setupStock };
@@ -1367,7 +1369,7 @@ export function toSetup(
   // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
   // WCS there — the slice-1 fix). The chuck's facts are the job's own; the jaw diameter is the
   // stock's unless the job states the capacity it closes on.
-  const rotary = rotaryMapOf(job);
+  const rotary = defaults === undefined ? rotaryMapOf(job) : rotaryMapOf(job, defaults);
   if (rotary !== null) {
     const chuck = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
     return stubSetup(
@@ -1383,6 +1385,8 @@ export function toSetup(
         // #241 slice 4 — the job's own tailstock fact, so the sweep can model the obstacle. A
         // setup built without a chuck (a direct caller) leaves the flag absent: the old notice.
         ...(chuck === null ? {} : { tailstock: chuck.tailstock }),
+        // #1222 — the shop's rotary limits travel with the setup to the verifier and the sweeps.
+        ...(rotary.limits === undefined ? {} : { limits: rotary.limits }),
       },
       { startingTool: 1 },
       machine,

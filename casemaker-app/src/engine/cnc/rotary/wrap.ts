@@ -25,13 +25,14 @@
  * own or a named Case Maker / Makera constant below.
  */
 
-import { readDefault } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import { chuckStockOf } from '@/engine/cnc/stockStart';
 import type { CamMove, CamOperation, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { SAFE_Z, estimateCycleSeconds, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { liveShopDefaults, readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { rotaryLimits, type RotaryLimits } from './limits';
 
 /**
  * The keep-out past the jaw face, mm — Case Maker's DEFAULT, not a measurement: Makera publishes
@@ -48,15 +49,16 @@ export const ROTARY_JAW_KEEP_OUT_MM = readDefault(null, 'rotary.jawKeepOutMm').v
  * The tailstock's band at the free end, mm, while the tailstock is in — Case Maker's DEFAULT:
  * Makera does not publish the tailstock's reach (#626, design §5, §9 Q8).
  */
-// #1211 field 7 (#1207 fix-on-touch): the number is the shop's `rotary.tailstockBandMm`; this
-// constant IS that key's labelled fallback, so modules with no defaults map still speak it.
+// #1211 field 7 (#1207 fix-on-touch) / #1222 — the number is the shop's `rotary.tailstockBandMm`;
+// this constant IS that key's labelled fallback, so modules with no defaults map still speak it.
 export const ROTARY_TAILSTOCK_BAND_MM = readDefault(null, 'rotary.tailstockBandMm').value;
 
 /**
  * Clearance above the stock's surface a rapid needs before it may turn or traverse, mm — Makera's
  * own rule (`/Rotary.md` §1: the clearance above the axis is ½⌀ + 3 mm, the CAM guide's number).
  */
-export const ROTARY_CLEARANCE_MM = 3;
+// #1222 — the registry's labelled fallback.
+export const ROTARY_CLEARANCE_MM = readDefault(null, 'rotary.turnClearanceMm').value;
 
 /** The module's stock envelope, mm — Makera's published ⌀80 × 150 (`t_MachineType`, design §5). */
 export const ROTARY_MAX_DIAMETER_MM = 80;
@@ -139,6 +141,8 @@ export interface RotaryMap {
   length: number;
   /** The tailstock is in. */
   tailstock: boolean;
+  /** #1222 — the shop's rotary limits, resolved when the map is built; absent on a hand-made map. */
+  limits?: RotaryLimits;
 }
 
 /**
@@ -151,7 +155,7 @@ export interface RotaryMap {
  * map is authored on the turned envelope, the circle that circumscribes the section. A cylinder
  * is the round section it always was.
  */
-export function rotaryMapOf(job: EngraveJob): RotaryMap | null {
+export function rotaryMapOf(job: EngraveJob, defaults: ShopDefaults | null = liveShopDefaults()): RotaryMap | null {
   if (job.workholding.kind !== 'rotary-chuck') return null;
   // #777 — ONE classifier for the chuck's stock: a round rod (a cylinder, a rod/tube form, or a
   // legacy square standing box with no form) or a block's own section. A disc is null.
@@ -169,6 +173,9 @@ export function rotaryMapOf(job: EngraveJob): RotaryMap | null {
     grip: Math.max(0, held.length - stickout),
     length: held.length,
     tailstock: job.workholding.rotary.tailstock,
+    // #1222 — the shop's limits travel with the map: the verifier, the generators and both
+    // simulators read them from here.
+    limits: rotaryLimits(defaults).limits,
   };
 }
 
@@ -185,13 +192,15 @@ export function isRotaryJob(job: EngraveJob): boolean {
  * into the longer one. The findings pass judges the same span, so a placement and the sentence
  * that refuses it cannot disagree.
  */
-export function rotaryFreeSpan(map: Pick<RotaryMap, 'stickout' | 'tailstock'>): {
+export function rotaryFreeSpan(map: Pick<RotaryMap, 'stickout' | 'tailstock' | 'limits'>): {
   from: number;
   to: number;
   centre: number;
 } {
-  const from = Math.min(ROTARY_JAW_KEEP_OUT_MM, map.stickout);
-  const to = map.tailstock ? Math.max(from, map.stickout - ROTARY_TAILSTOCK_BAND_MM) : map.stickout;
+  const from = Math.min(map.limits?.jawKeepOutMm ?? ROTARY_JAW_KEEP_OUT_MM, map.stickout);
+  const to = map.tailstock
+    ? Math.max(from, map.stickout - (map.limits?.tailstockBandMm ?? ROTARY_TAILSTOCK_BAND_MM))
+    : map.stickout;
   return { from, to, centre: (from + to) / 2 };
 }
 
@@ -421,8 +430,8 @@ export function offAxisSentence(y: number): string {
 }
 
 /** "runs into the jaws" — a cut inside the jaws' keep-out band at the map's left end. */
-export function jawsSentence(x: number): string {
-  return `runs into the jaws: it reaches X ${Math.round(x * 1000) / 1000} mm, inside the first ${ROTARY_JAW_KEEP_OUT_MM} mm of the stick-out, where the chuck's jaws are`;
+export function jawsSentence(x: number, keepOutMm: number = ROTARY_JAW_KEEP_OUT_MM): string {
+  return `runs into the jaws: it reaches X ${Math.round(x * 1000) / 1000} mm, inside the first ${keepOutMm} mm of the stick-out, where the chuck's jaws are`;
 }
 
 /**
@@ -434,15 +443,15 @@ export function freeEndSentence(x: number, stickout: number): string {
 }
 
 /** "runs into the tailstock's band" — a cut in the free end's keep-out. */
-export function tailstockSentence(x: number, stickout: number): string {
-  const from = Math.round((stickout - ROTARY_TAILSTOCK_BAND_MM) * 1000) / 1000;
-  return `runs into the tailstock's band: it reaches X ${Math.round(x * 1000) / 1000} mm, and the tailstock holds the last ${ROTARY_TAILSTOCK_BAND_MM} mm of the stick-out (X ${from}–${Math.round(stickout * 1000) / 1000} mm)`;
+export function tailstockSentence(x: number, stickout: number, bandMm: number = ROTARY_TAILSTOCK_BAND_MM): string {
+  const from = Math.round((stickout - bandMm) * 1000) / 1000;
+  return `runs into the tailstock's band: it reaches X ${Math.round(x * 1000) / 1000} mm, and the tailstock holds the last ${bandMm} mm of the stick-out (X ${from}–${Math.round(stickout * 1000) / 1000} mm)`;
 }
 
 /** "turns the stock while the cutter is in it" — an A or X rapid below the clearance. */
-export function turningInCutSentence(z: number, radius: number): string {
+export function turningInCutSentence(z: number, radius: number, clearanceMm: number = ROTARY_CLEARANCE_MM): string {
   const inside = Math.round((radius - z) * 1000) / 1000;
-  return `turns the stock while the cutter is in it: the cutter is ${inside > 0 ? `${inside} mm inside the stock` : 'not clear of the stock'} at Z ${Math.round(z * 1000) / 1000} mm, and a turn or a traverse needs ${ROTARY_CLEARANCE_MM} mm of clearance above the surface (Z ${Math.round((radius + ROTARY_CLEARANCE_MM) * 1000) / 1000} mm)`;
+  return `turns the stock while the cutter is in it: the cutter is ${inside > 0 ? `${inside} mm inside the stock` : 'not clear of the stock'} at Z ${Math.round(z * 1000) / 1000} mm, and a turn or a traverse needs ${clearanceMm} mm of clearance above the surface (Z ${Math.round((radius + clearanceMm) * 1000) / 1000} mm)`;
 }
 
 /**
