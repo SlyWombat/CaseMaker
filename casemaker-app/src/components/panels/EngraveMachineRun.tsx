@@ -113,8 +113,10 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
     (s) => s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
   );
   const calibration = useSettingsStore((s) => s.machineCalibration);
+  // D's #1199 — the clearance is REQUIRED, never defaulted: an unread frame leaves it null and the
+  // preview refuses the line (the card says so); a made-up 0 would make every verdict meaningless.
   const toolClearanceZ = useMemo(
-    () => clearanceZOf(jobMachine({ machineId: locationMachine?.profileId ?? 'Z1' }, calibration)) ?? 0,
+    () => clearanceZOf(jobMachine({ machineId: locationMachine?.profileId ?? 'Z1' }, calibration)),
     [locationMachine?.profileId, calibration],
   );
   const toolDry = useMemo(() => dryToolChange(toolClearanceZ), [toolClearanceZ]);
@@ -256,7 +258,7 @@ export function EngraveMachineRun({ target, onProgramLine, controlled = false }:
               <button
                 type="button"
                 data-testid="engrave-run-tool-continue"
-                disabled={entry.stopAsked || (toolFirstRun && !toolTicked) || toolHeadless !== null}
+                disabled={entry.stopAsked || toolDry.refused || (toolFirstRun && !toolTicked) || toolHeadless !== null}
                 style={{ width: '100%', padding: 7, marginTop: 4 }}
                 onClick={() => requestToolContinue(machine)}
               >

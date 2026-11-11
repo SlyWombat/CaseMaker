@@ -25,17 +25,30 @@ export function toolChangeIdentity(): RoutineIdentity {
   return routineIdentityOf('tool-change', toolChangeLines(), {});
 }
 
+/** What the card says when the machine's clearance has not been read: no verdict is possible. */
+export const TOOL_CHANGE_NO_CLEARANCE = 'clearance unknown — the line can’t be reviewed';
+
 /**
  * The dry view the bit-change card shows before the press: the exact lines, in send order, each
  * with the motion-order guard's verdict. `clearanceZ` is the live machine clearance, the same
- * source the run's own console session is proven against.
+ * source the run's own console session is proven against; D's #1199 makes it REQUIRED — a null
+ * (unread frame, a stated GRBL model) is refused rather than reviewed against an invented 0.
  */
-export function dryToolChange(clearanceZ: number): DryRoutine {
+export function dryToolChange(clearanceZ: number | null): DryRoutine {
   const lines = toolChangeLines();
+  const identity = toolChangeIdentity();
+  if (clearanceZ === null || !Number.isFinite(clearanceZ)) {
+    return {
+      lines: lines.map((line) => ({ line, refused: TOOL_CHANGE_NO_CLEARANCE })),
+      identity,
+      refused: true,
+      error: TOOL_CHANGE_NO_CLEARANCE,
+    };
+  }
   const reviewed = reviewLines(lines, clearanceZ);
   return {
     lines: reviewed,
-    identity: toolChangeIdentity(),
+    identity,
     refused: reviewed.some((l) => l.refused !== null),
     error: null,
   };

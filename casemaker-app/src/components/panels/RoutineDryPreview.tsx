@@ -78,6 +78,11 @@ export function RoutineDryPreview({
           {headless}
         </p>
       )}
+      {preview.error !== null && (
+        <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-error">
+          {preview.error}
+        </p>
+      )}
       {preview.refused && (
         <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-refused">
           The marked line would be refused — the press is disabled.

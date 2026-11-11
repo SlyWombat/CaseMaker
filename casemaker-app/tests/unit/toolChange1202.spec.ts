@@ -35,6 +35,20 @@ describe('#1202 — the tool change’s own dry line view', () => {
     expect(toolChangeIdentity().shape).toBe(dryToolChange(-3).identity.shape);
   });
 
+  it('an unknown clearance is refused, never guessed at zero', () => {
+    // D's #1199 rule: `liveClearanceZ` is REQUIRED — an unread clearance cannot be reviewed. The
+    // card must say so and hold the press, not hand the guard a clearance of 0 (#1207: no hidden
+    // literal standing in for a real reading).
+    const dry = dryToolChange(null);
+    expect(dry.refused).toBe(true);
+    expect(dry.error).toContain('clearance unknown');
+    expect(dry.lines.length).toBeGreaterThan(0);
+    expect(
+      dry.lines.every((l) => l.refused !== null && l.refused.includes('clearance unknown')),
+      'every shown line carries the unknown-clearance refusal',
+    ).toBe(true);
+  });
+
   it('a recorded completion is the permission: the card is unmarked only for that exact shape', () => {
     const identity = toolChangeIdentity();
     expect(routineCompleted(machine(), identity)).toBe(false);
