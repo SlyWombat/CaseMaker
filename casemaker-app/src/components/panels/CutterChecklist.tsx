@@ -106,7 +106,9 @@ export function CutterChecklist({
   disabledReason?: string | null;
 }): JSX.Element | null {
   if (rows.length === 0) return null;
-  const missing = missingCuttersWords(rows, entries);
+  // #1123 item 50 — ONE LIST, ONE COUNT. The count lives in the Cutters group's summary (and the
+  // gate's own sentence where a control is refused); the paragraph that repeated every missing
+  // cutter's name under the rows is gone.
   return (
     <div data-testid="engrave-cutter-checklist" style={{ display: 'grid', gap: 6 }}>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 3 }}>
@@ -172,11 +174,6 @@ export function CutterChecklist({
           );
         })}
       </ul>
-      {missing !== null && (
-        <p style={{ ...MUTED_ROW, margin: 0 }} data-testid="engrave-cutter-missing">
-          {missing}
-        </p>
-      )}
     </div>
   );
 }

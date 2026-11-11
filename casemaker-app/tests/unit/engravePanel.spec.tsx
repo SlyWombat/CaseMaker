@@ -5027,20 +5027,22 @@ describe('#793/#794 — the idle footer is silent and the Ready card is the next
     expect(screen.getByTestId('engrave-generate').textContent).toBe('Generate');
   });
 
-  it('#793 — a passing run collapses to one Ready line, the four ticks kept behind its ›', () => {
+  // #1123 item 51 — ONE READY LINE. The fixed progress row owns 'Program ready · time'; the four
+  // run ticks are the rows beside it. Before this, a Ready card repeated the same sentence above
+  // the fixed row (and the ticks again in a fold).
+  it('#793 — a passing run states the Ready line once, with the four ticks beside it', () => {
     render(<EngravePanel />);
     pass();
-    const ready = screen.getByTestId('engrave-run-ready');
-    expect(ready.tagName).toBe('DETAILS');
-    expect((ready as HTMLDetailsElement).open).toBe(false);
-    const summary = screen.getByTestId('engrave-run-ready-summary');
-    expect(summary.textContent).toContain('✓');
-    expect(summary.textContent).toContain('Program ready');
-    expect(summary.textContent).toContain('about 5 s');
-    expect(summary.textContent).toContain('›');
-    // The four ticks survive — folded inside the Ready line, not deleted.
+    expect(screen.queryByTestId('engrave-run-ready')).toBeNull();
+    const words = screen.getByTestId('engrave-progress-words');
+    expect(words.textContent).toContain('Program ready');
+    expect(words.textContent).toContain('about 5 s');
+    // The time lives in the fixed row, once.
+    expect(screen.getAllByTestId('engrave-run-time')).toHaveLength(1);
+    expect(words.contains(screen.getByTestId('engrave-run-time'))).toBe(true);
+    // The four ticks survive — visible, not folded behind a duplicate summary.
     const rows = screen.getByTestId('engrave-run-rows');
-    expect(ready.contains(rows)).toBe(true);
+    expect(rows.tagName).toBe('DIV');
     for (const [testid, label] of [
       ['engrave-run-toolpath', 'generated'],
       ['engrave-run-verified', 'checked'],

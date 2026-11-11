@@ -109,12 +109,13 @@ async function generateAndRead(page: import('@playwright/test').Page): Promise<'
   await expect(oracle).toHaveAttribute('data-state', /^(tick|cross)$/, { timeout: 550_000 });
   const verdict = (await oracle.getAttribute('data-state')) === 'tick' ? 'pass' : 'cross';
   if (verdict === 'pass') {
-    await expect(page.getByTestId('engrave-run-ready')).toBeVisible();
-    await openFold(page, 'engrave-run-ready');
+    // #1123 item 51 — the fixed row states Ready; the ticks are rows, not a fold.
+    await expect(page.getByTestId('engrave-progress-words')).toContainText('Program ready');
+    await expect(page.getByTestId('engrave-run-rows')).toContainText('matches the design');
     await expect(oracle).toHaveAttribute('data-state', 'tick');
     await expect(oracle).toContainText('matches the design');
   } else {
-    await expect(page.getByTestId('engrave-run-ready')).toHaveCount(0);
+    await expect(page.getByTestId('engrave-progress-words')).not.toContainText('Program ready');
     await expect(oracle).toContainText('does not match the design');
   }
 
