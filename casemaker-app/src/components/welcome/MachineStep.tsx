@@ -54,6 +54,8 @@ const STATE: CSSProperties = {
   fontSize: 11,
   color: '#e8eef4',
 };
+/** #1106 — what a row says where nothing can be checked (the web build) or the record has no address. */
+const PROFILE_ONLY_WORDS = 'profile only — vendor defaults; connect it at Cut';
 const MUTED_INLINE: CSSProperties = { color: '#8a97a5' };
 const FOLD: CSSProperties = {
   display: 'block',
@@ -174,7 +176,9 @@ export function MachineStep({
     onCheck(host);
   }
 
-  const checking = busy || !checkStarted || outcome === null;
+  // #1106 item 2 — "checking" only where a check can run. The web build never calls `onCheck`, so
+  // `outcome` stays null and the selected row read "Checking…" for ever.
+  const checking = canReachMachine && (busy || !checkStarted || outcome === null);
   const found = !checking && outcome === 'found' && machine !== null;
   const line = machine?.statusLine ?? (machine?.status ? readStatusLine(machine.status) : null);
 
@@ -236,6 +240,14 @@ export function MachineStep({
 
   return (
     <div data-testid="start-wizard-step-machine" style={{ marginTop: 8 }}>
+      {/* #821 — the same one sentence the Manage card carries
+          (#1106 item 2: it HEADS the step, above the list): the relay-less deploy cannot drive
+          a machine, and says where it can. The job can still be set up here. */}
+      {!canReachMachine && (
+        <p style={NOTE} data-testid="start-wizard-machine-note-build">
+          {NO_MACHINE_RELAY_SENTENCE}
+        </p>
+      )}
       {orderedMachines.length > 0 && (
         <div data-testid="start-wizard-machine-list" style={{ display: 'grid', gap: 4, margin: '2px 0 10px' }}>
           <p style={{ ...MUTED, margin: 0 }}>Which machine?</p>
@@ -243,19 +255,22 @@ export function MachineStep({
             const selected = record.id === (selectedMachineId ?? house?.id ?? null);
             const profile = activeProfileOf(record);
             const bed = profile === null ? null : `${MACHINE_MOUNT_WORDS[activeMountOf(record)]} · ${surfaceWords(profile.surface)}`;
-            const state = selected
+            const state = !canReachMachine
+              ? PROFILE_ONLY_WORDS
+              : selected
               ? checking
                 ? 'Checking…'
                 : found
                   ? `Online · ${wordBase}`
                   : 'Offline — you can still write, check and simulate; the machine is needed at Cut'
               : record.address === null
-                ? 'profile only — vendor defaults; connect it at Cut'
+                ? PROFILE_ONLY_WORDS
                 : 'Offline — you can still write, check and simulate; the machine is needed at Cut';
             return (
               <button
                 key={record.id}
                 type="button"
+                className="sw-btn"
                 data-testid={`start-wizard-machine-row-${record.id}`}
                 data-mount={activeMountOf(record)}
                 aria-pressed={selected}
@@ -268,6 +283,9 @@ export function MachineStep({
                   {bed === null ? '' : ` · ${bed}`}
                 </span>
                 <span style={{ display: 'block', ...MUTED, margin: 0 }}>{state}</span>
+                {record.profileId === null && (
+                  <span style={{ display: 'block', ...MUTED, margin: 0 }}>no profile — set it in Manage › Machines</span>
+                )}
               </button>
             );
           })}
@@ -430,13 +448,6 @@ export function MachineStep({
         </>
       )}
 
-      {/* #821 — the same one sentence the Manage card carries: the relay-less deploy cannot drive
-          a machine, and says where it can. The job can still be set up here. */}
-      {!canReachMachine && (
-        <p style={NOTE} data-testid="start-wizard-machine-note-build">
-          {NO_MACHINE_RELAY_SENTENCE}
-        </p>
-      )}
     </div>
   );
 }
