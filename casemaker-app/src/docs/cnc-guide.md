@@ -524,13 +524,18 @@ with the name plate's three words engraved to different depths. It is written in
 app asks the questions, because that is the order the answer is needed in — and every answer is
 also a section of the **same job document**, so a job can be put down and picked up at any point.
 
-A **new job starts with one question — what are you cutting?** — and the operation types are its
-answer: **Engrave** (text or single-stroke lines), **V-carve**, **Pocket**, **Profile**,
-**Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, **Surface a mesh** (a goal mesh or
-a picture relief), **Texture a surface** (a seeded pattern of short strokes), **Flute along a line**
-(a groove that ramps in and out) or **Raise a prism** (a shape standing on sloped sides). Every operation added
-afterwards is one row in the job's list, its type on the row, and its expert fields behind the
-row's fold.
+A **new job starts with one question — what are you making?** — and its answer is one of the
+illustrated cards: **A sign or name plate**, **A part from a 3D model**, **Cut out a shape**, **A
+pocket or tray**, **A design from a file**, **A circuit board**, or **Something else…**, which
+opens the full list of operation types: **Engrave** (text or single-stroke lines), **V-carve**,
+**Pocket**, **Profile**, **Chamfer the edge**, **Hole**, **Bore to size**, **Thread**, **Surface a
+mesh** (a goal mesh or a picture relief), **Texture a surface** (a seeded pattern of short
+strokes), **Flute along a line** (a groove that ramps in and out) or **Raise a prism** (a shape
+standing on sloped sides). When the shop owns a rotary module, its own intents join the cards in
+an **On a rod** group (**Name on a dowel**, **Faces on a rod**, **A relief on a rod**). A file
+dropped on the question step opens the card it belongs to with the file already read. Every
+operation added afterwards is one row in the job's list, its type on the row, and its expert
+fields behind the row's fold.
 
 **Threads, internal and external, metric and imperial.** The picker offers **Thread** (a
 threaded hole, milled inside a pilot the shop has already drilled) and **Thread a boss (external)**
@@ -783,7 +788,7 @@ the question can have. The **location** behind the job — its machines, tools, 
 consumables — is managed under **Manage** (chapter 7), and a job binds to it by reference with
 snapshots.
 
-**2. What stock?** The wizard asks **what you are cutting** first, because the work sizes the
+**2. What stock?** The wizard asks **what you are making** first, because the work sizes the
 blank: a mesh gives its box, a board its outline, a line its measured width — each plus a stated
 margin — and the stock step opens on those numbers. They are a starting point, not a rule: change
 any of them and the sentence that said where they came from goes with the first edit. The stock
