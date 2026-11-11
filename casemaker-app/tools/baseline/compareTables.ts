@@ -185,7 +185,14 @@ export interface RefFacts {
   /** The refusal sentence, when refused. */
   reason?: string | null;
   makeraCutters?: string | null;
+  /** Makera's cycle as its own header states it (a display string), printed beside the one-clock figure and never divided by. */
   makeraCycle?: string | null;
+  /** The header in seconds. */
+  makeraHeaderS?: Maybe;
+  /** Makera's program timed on OUR estimator, tool changes priced (tools/baseline/vendorClock.ts). Every ratio is taken on this. */
+  makeraClockS?: Maybe;
+  /** Our cycle on the same clock: the receipt's total, tool changes priced. */
+  oursTotalS?: Maybe;
   cutters?: Maybe;
   cycleSeconds?: Maybe;
   /** Generate wall: the card's own compute seconds. */
@@ -195,18 +202,27 @@ export interface RefFacts {
 export const REF_HEADERS = [
   'part',
   'Makera cutters',
-  'Makera cycle',
+  'Makera header (s)',
+  'Makera on our clock (s)',
   'verdict before',
   'verdict after',
   'ours cutters before',
   'ours cutters after',
-  'ours cycle before (s)',
-  'ours cycle after (s)',
-  'cycle change',
+  'ours total before (s)',
+  'ours total after (s)',
+  'ours change',
+  'ratio before (ours ÷ Makera, our clock)',
+  'ratio after (ours ÷ Makera, our clock)',
   'Generate wall before (s)',
   'Generate wall after (s)',
   'wall change',
 ];
+
+/** ours ÷ Makera, both on our clock; "not recorded" when the vendor program was not put on our clock — never a ratio against the header. */
+function clockRatio(ours: Maybe, clock: Maybe): string {
+  if (!finite(clock) || clock <= 0) return 'not recorded';
+  return finite(ours) ? `${(ours / clock).toFixed(2)}×` : MISSING;
+}
 
 export interface HighlightRow {
   part: string;
@@ -215,24 +231,28 @@ export interface HighlightRow {
 
 const isRefused = (v: string | null | undefined): boolean => v === 'refused';
 
-export function referenceRows(before: RefFacts[], after: RefFacts[]): { rows: string[][]; highlighted: HighlightRow[] } {
+export function referenceRows(before: RefFacts[], after: RefFacts[]): { headers: string[]; rows: string[][]; highlighted: HighlightRow[] } {
   const parts = [...new Set([...before.map((r) => r.part), ...after.map((r) => r.part)])].sort();
   const rows: string[][] = [];
   const highlighted: HighlightRow[] = [];
   for (const part of parts) {
     const b = before.find((r) => r.part === part);
     const a = after.find((r) => r.part === part);
+    const clock = (b ?? a)?.makeraClockS ?? (a ?? b)?.makeraClockS;
     rows.push([
       part,
       (b ?? a)?.makeraCutters ?? MISSING,
-      (b ?? a)?.makeraCycle ?? MISSING,
+      fmtNumber((b ?? a)?.makeraHeaderS),
+      finite(clock) ? fmtNumber(clock) : 'not recorded',
       b?.verdict ?? MISSING,
       a?.verdict ?? MISSING,
       fmtNumber(b?.cutters),
       fmtNumber(a?.cutters),
-      fmtNumber(b?.cycleSeconds),
-      fmtNumber(a?.cycleSeconds),
-      changeText(b?.cycleSeconds, a?.cycleSeconds),
+      fmtNumber(b?.oursTotalS ?? b?.cycleSeconds),
+      fmtNumber(a?.oursTotalS ?? a?.cycleSeconds),
+      changeText(b?.oursTotalS ?? b?.cycleSeconds, a?.oursTotalS ?? a?.cycleSeconds),
+      clockRatio(b?.oursTotalS, clock),
+      clockRatio(a?.oursTotalS, clock),
       fmtNumber(b?.wall, 1),
       fmtNumber(a?.wall, 1),
       changeText(b?.wall, a?.wall, { digits: 1, noise: true }),
@@ -242,7 +262,7 @@ export function referenceRows(before: RefFacts[], after: RefFacts[]): { rows: st
       highlighted.push({ part, text: `**${part}**: ${b.verdict} → ${a.verdict} (${refusedSide})` });
     }
   }
-  return { rows, highlighted };
+  return { headers: REF_HEADERS, rows, highlighted };
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -496,6 +516,7 @@ export function buildComparison(i: ComparisonInput): string {
   out.push('');
 
   out.push('## 3. Reference parts against Makera\n');
+  out.push('Makera\'s own program is timed here on **our** estimator, with its tool changes priced on the same curve as ours ("Makera on our clock"); its header figure is printed beside it and is **never** divided by. Every ratio is ours ÷ Makera on our clock.\n');
   const refs = referenceRows(i.references.before, i.references.after);
   const refGap = missingSide('Reference parts', i.references.before.length, i.references.after.length);
   if (refGap) {
@@ -505,7 +526,7 @@ export function buildComparison(i: ComparisonInput): string {
     for (const h of refs.highlighted) out.push(`- ${h.text}`);
     out.push('');
   }
-  if (!refGap) out.push(mdTable(REF_HEADERS, refs.rows));
+  if (!refGap) out.push(mdTable(refs.headers, refs.rows));
   out.push('');
 
   out.push('## 4. Cut-into, like for like\n');
