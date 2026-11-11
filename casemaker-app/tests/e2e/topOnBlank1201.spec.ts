@@ -20,9 +20,6 @@ test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(240_000);
 
 const SEAT = -85.788;
-/** The e2e house's resolved machine travel height (tests/unit/fixtures/location-doc.json). */
-const SEAT_CLEARANCE = -3;
-const NEW_SEAT = -84.64; // the seat as the refitted probe finds it (the bench's hypothesis)
 
 /** The bench's location: a LEGACY bracket seat at its own verified point (no probeRefZ yet), the
  *  bracket placed at anchor 1, and a write answer that applies — so the tap's datum write lands
@@ -141,4 +138,75 @@ test('#1201 — a bracket job with a legacy seat: the top is measured on the bla
   await expect(page.getByTestId('engrave-registration-approve-start')).toContainText('Register');
   // The stored seat's own point is never named on the card.
   await expect(page.getByTestId('engrave-registration')).not.toContainText('-175');
+});
+
+test('#1201 — Register runs the two top touches, writes the origin, and every line passes the guard', async ({ cm, page }) => {
+  await serveHouse(page, {
+    location: benchLocation(),
+    defaults: DOC.defaults,
+    writes: 'applied',
+    movingEtag: true,
+  });
+  const fake = await installFakeConsole(page);
+  // The blank's top at the bench's seat + 25 mm; a wide boss so both check points meet it.
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: -60.788 });
+  await cm.ready();
+  await rememberMachine(page);
+  await typePlate(page, [100, 60, 25]);
+  await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
+  await page.getByTestId('engrave-setup-next').click();
+  await expect(page.getByTestId('start-wizard')).toHaveCount(0);
+
+  // A pocket at the stock's centre, then Generate: the statement (and so Register) needs a program.
+  await page.getByTestId('engrave-shape-name-0').fill('Tray');
+  await page.getByTestId('engrave-shape-width-0').fill('40');
+  await page.getByTestId('engrave-shape-height-0').fill('30');
+  await page.getByTestId('engrave-shape-x-0').fill('50');
+  await page.getByTestId('engrave-shape-y-0').fill('30');
+  await page.getByTestId('engrave-shape-depth-0').fill('2');
+  await page.waitForTimeout(1500);
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+
+  await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  const step1 = page.getByTestId('engrave-cut-step-1');
+  if (!(await step1.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-1-summary').click();
+  }
+  await page.getByTestId('engrave-ack').check();
+  const step2 = page.getByTestId('engrave-cut-step-2');
+  if (!(await step2.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-2-summary').click();
+  }
+  await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('the top on the blank', {
+    timeout: 60_000,
+  });
+  await page.getByTestId('engrave-registration-approve-start').click();
+  await page.getByTestId('engrave-registration-continue').click();
+
+  // The two guarded touches prove the top; the record says so on the blank.
+  await expect(page.getByTestId('engrave-registration-notes')).toContainText('the top on the blank', {
+    timeout: 120_000,
+  });
+  const touches = fake.lines().filter((l) => l.startsWith('G38.3'));
+  expect(touches.length, 'the two check points were touched').toBeGreaterThanOrEqual(2);
+
+  // Write the origin, as the card's next press does.
+  const step2b = page.getByTestId('engrave-cut-step-2');
+  if (!(await step2b.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await page.getByTestId('engrave-cut-step-2-summary').click();
+  }
+  await page.getByTestId('engrave-registration-write').click();
+  await page.getByTestId('engrave-registration-continue').click();
+  await expect.poll(() => fake.lines().find((l) => l.startsWith('G10 L2 P1')) ?? null, { timeout: 60_000 }).not.toBeNull();
+  expect(fake.lines().find((l) => l.startsWith('G10 L2 P1'))).toContain('Z-60.788');
+
+  // #1199/#1201 — EVERY LINE THE RUN SENT PASSES THE SAFE-Z GUARD, and the stored seat's point is
+  // never visited by a job.
+  const guard = motionOrderGuard(-3);
+  for (const line of fake.lines()) {
+    expect(guard.observe(line), `the sent line ${line}`).toBeNull();
+  }
+  expect(fake.lines().some((l) => l.includes('X-175') && l.includes('Y-35'))).toBe(false);
 });
