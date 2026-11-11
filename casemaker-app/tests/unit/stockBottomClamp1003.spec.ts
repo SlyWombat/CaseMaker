@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
-const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 
 /** An axis-aligned box, top at z = 0, `size` mm on each axis (so its bottom is −size). */
 function cube(size: number): ModelPlanInput['geometry'] {

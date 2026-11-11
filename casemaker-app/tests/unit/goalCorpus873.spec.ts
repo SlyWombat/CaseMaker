@@ -27,7 +27,7 @@ import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
 import { Z1 } from '@/engine/cnc/machine';
 import { createSimSession } from '@/workers/sim/session';
 import type { FlatField } from '@/workers/geometry/carriedField';
-import type { Tool } from '@/engine/cnc/tool';
+import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 
 afterEach(() => clearTargetObjectMeshCache());
@@ -61,6 +61,14 @@ function targetOf(
   };
 }
 
+/**
+ * #1195 — THE CORPUS JOB'S OWN CUTTER, WITH ITS FLUTE STATED. The library's `flat-1.0` deliberately
+ * invents no lengths, and the freeing cut may only be taken by a STATED-reaching flute; a job left
+ * on the library record now refuses to free a 32 mm part. The corpus measures coverage, not the
+ * missing-flute refusal, so it hands the pipeline the same ⌀1 flat with its flute stated.
+ */
+const FLAT1_STATED: Tool = { ...flatEndMill(1, { number: 1, name: '1 mm flat end', handleDiameter: 3.175 }), fluteLength: 42 };
+
 /** A pure-goal job on a blank sized to the mesh. */
 function goalJob(target: EngraveTargetObject, stock: { length: number; width: number; thickness: number }): EngraveJob {
   const base = defaultEngraveJob();
@@ -72,6 +80,7 @@ function goalJob(target: EngraveTargetObject, stock: { length: number; width: nu
     drills: [],
     stock: { ...stock, material: 'softwood' },
     toolKey: 'flat-1.0',
+    tool: FLAT1_STATED,
     targetObject: target,
   };
 }
@@ -461,7 +470,11 @@ describe('#873 the goal corpus: generated, swept, and measured against the goal'
     const r = await runFixture('figure.stl', { length: 100, width: 60, thickness: 40 });
     expect(r.ok).toBe(true);
     expect(r.loadOk).toBe(true);
-    expect(r.fraction).toBeCloseTo(0.205, 2); // today: 0.2055 on 1003-stock-bottom (#1003 landed: the contour frees at the stock bottom)
+    // #1195 RE-PIN — the corpus job's cutter now states a 42 mm flute (the freeing cut may
+    // only be taken by a stated reach; the figure's profile is 40 mm), and this fraction
+    // follows the cutter's stated numbers: 0.2027. The case it demonstrates — the top setup
+    // leaves most of the figure unreached — stands.
+    expect(r.fraction).toBeCloseTo(0.2027, 2);
     // Some of the unreached area faces away (legs, belly, tail underside) and some is shadowed.
     expect(r.facingAway).toBeGreaterThan(0);
     expect(r.seconds).toBeLessThan(97_000); // today: 92 828 s

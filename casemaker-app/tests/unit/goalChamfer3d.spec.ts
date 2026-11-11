@@ -59,7 +59,8 @@ function boxBall(): string {
 const BALL: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1 };
 // The model engine's pocket chain prices a primary FLAT even when the tree finds no pocket — a
 // real shop carries one, and the model-path blocks below plan through that same house.
-const FLAT: Tool = { ...flatEndMill(6), id: 'flat-6-989', name: 'flat-6' };
+// #1195 — the fixture's flat states a flute: the freeing cut needs a STATED reach.
+const FLAT: Tool = { ...flatEndMill(6, { fluteLength: 30 }), id: 'flat-6-989', name: 'flat-6' };
 const VBIT: Tool = {
   ...flatEndMill(3.175),
   name: '3.175mm*90º Chamfer',

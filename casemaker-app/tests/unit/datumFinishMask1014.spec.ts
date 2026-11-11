@@ -20,8 +20,8 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob } from '@/types/engraveJob';
 import { buildDatumGoal } from './helpers/datumTwoSetup966';
 
-const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
-const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
+const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 });
+const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3', fluteLength: 30 });
 const entry = (key: string, tool: Tool): ToolLibraryEntry => ({ key, tool, provenance: 'test' });
 const SHOP = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3', FLAT)] };
 

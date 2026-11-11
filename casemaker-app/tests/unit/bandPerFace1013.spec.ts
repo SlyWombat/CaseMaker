@@ -62,6 +62,8 @@ function jobOf(target: EngraveTargetObject, thickness: number): EngraveJob {
   };
 }
 
+// #1195 — this shop flat stays UNSTATED on purpose: the reach band must come from the CHOSEN
+// cutter (10 mm), not from a shop flat's stated flute.
 const FLAT: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 /** A 10 mm flute: `cutWithinReach` derives band 9 (reach less the 1 mm holder clearance). */
 const REACH_TOOL: Tool = flatEndMill(6, { number: 1, id: 'flat-6-r10', name: 'flat-6 (10 mm flute)', fluteLength: 10 });
@@ -91,11 +93,15 @@ describe('#1013 the depth band is per face', () => {
     const goal = goalOf(20, { underside: { kind: 'plinth', plinthMm: 14 } });
     const job = jobOf(goal, 20);
 
-    const top = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, 'top');
+    // #1195 — the chosen cutter states a 16 mm flute: the BOTTOM face's band is 14 mm, so that is
+    // the freeing contour's actual posted depth on that side and the cutter must prove it reaches
+    // it. The stated plinth floor sets the band; the reach does not.
+    const BAND_TOOL: Tool = flatEndMill(6, { number: 1, id: 'flat-6-b16', name: 'flat-6 (16 mm flute)', fluteLength: 16 });
+    const top = await buildModelPlanInputForGoal(job, goal, BAND_TOOL, SHOP, 'top');
     expect(top.setups).toHaveLength(1);
     expect(top.setups[0]!.bandMm).toBeCloseTo(6, 6);
 
-    const bottom = await buildModelPlanInputForGoal(job, goal, FLAT, SHOP, 'bottom');
+    const bottom = await buildModelPlanInputForGoal(job, goal, BAND_TOOL, SHOP, 'bottom');
     expect(bottom.setups).toHaveLength(1);
     expect(bottom.setups[0]!.frame.up).toEqual([0, 0, -1]);
     // RED at the parent: 6 — the same top-face number on a face whose own top is the stock's bottom.

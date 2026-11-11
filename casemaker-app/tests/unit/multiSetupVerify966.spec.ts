@@ -136,8 +136,8 @@ function jobForGoal(target: EngraveTargetObject, stock: { length: number; width:
   };
 }
 
-const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
-const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3-datum', name: 'flat-3-datum' });
+const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 });
+const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3-datum', name: 'flat-3-datum', fluteLength: 30 });
 const DATUM_SHOP: EngraveShopOpts = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3-datum', FLAT)] };
 
 describe('#966 — every program a multi-setup goal posts passes the real verifier end to end', () => {

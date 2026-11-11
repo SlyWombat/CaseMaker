@@ -81,7 +81,7 @@ describe('#1025 — the plan names corrupt pocket metadata instead of posting it
 // ---------------------------------------------------------------------------------------------
 
 const CHAIN_RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
-const FLAT = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const FLAT = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 
 /**
  * A 30×14 part, part top at 0, TWO 12×8 pockets 3 mm deep — two regions in the same primary

@@ -68,7 +68,7 @@ async function plateInput(): Promise<ModelPlanInput> {
 describe('#1052 the trace names which plan it is', () => {
   it('planTwoOutcomes’ run yields plan:start tagged owned, then ideal', async () => {
     // A catalogue cutter the owned set does not carry: the ideal half runs, so both start rows exist.
-    const small = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1' });
+    const small = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1', fluteLength: 30 });
     const input = { ...(await plateInput()) };
     input.cutters = { house: input.cutters.house, catalogue: [small] };
     const rows: string[] = [];

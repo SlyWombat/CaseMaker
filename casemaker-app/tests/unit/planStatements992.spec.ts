@@ -26,9 +26,9 @@ import { stlBase64 } from './helpers/meshes';
 
 const tl = await import('@/workers/geometry/ManifoldRuntime').then((m) => m.getToplevel());
 
-const FLAT: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const BALL: Tool = { ...flatEndMill(2, { number: 2, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
-const VBIT: Tool = { ...flatEndMill(3.175, { number: 3, id: 'v90', name: 'V 90', shape: 'chamfer', typeText: 'V-Bit', angle: 90, halfAngle: 45, tipDiameter: 0.1 }), cornerRadius: null };
+const FLAT: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const BALL: Tool = { ...flatEndMill(2, { number: 2, id: 'ball-2', name: 'ball-2', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose' };
+const VBIT: Tool = { ...flatEndMill(3.175, { number: 3, id: 'v90', name: 'V 90', shape: 'chamfer', typeText: 'V-Bit', angle: 90, halfAngle: 45, tipDiameter: 0.1, fluteLength: 30 }), cornerRadius: null };
 
 /** A flat slab at z = 0: its top is one plane, so every fabricated rim on it reads COVERED. */
 function slabTree(rims: Rim[]): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {

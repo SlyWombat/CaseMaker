@@ -488,6 +488,16 @@ function reachesFeature(tool: Tool, f: SequenceFeature): boolean {
   return !(f.depthMm > 0 && tool.fluteLength !== null && tool.fluteLength + EPS < f.depthMm);
 }
 
+/**
+ * #1195 — THE FREEING CUT'S STATED-REACH RULE. `reachesFeature` lets an UNSTATED flute "reach" a
+ * floor, because for a pocket unknown is not excluded and the op states the risk. The freeing
+ * contour must be decided on stated numbers only: an unstated or short flute cannot take it.
+ */
+function reachesContour(tool: Tool, f: SequenceFeature): boolean {
+  if (!(f.depthMm > 0)) return true;
+  return tool.fluteLength !== null && tool.fluteLength + EPS >= f.depthMm;
+}
+
 /** Whether a flat's radius fits a feature's tightest inside corner. */
 function fitsCorner(tool: Tool, f: SequenceFeature): boolean {
   const d = diameterOf(tool);
@@ -577,6 +587,10 @@ export function candidateSequences(
   // contour being one of the "pocket" features; now it is said explicitly.
   const canCutSomething = (c: CandidateCutter): boolean =>
     canRoughPocket(c)
+    // #1195 — geometry only HERE: a primary may still be proposed for a contour it cannot PROVE
+    // it frees; such a chain posts no freeing step, is stated with the contour unreachable, and
+    // loses the rank's completeness key to a chain that frees. Refusing the plan outright would
+    // hide the pocket work the cutter CAN do (and turned 31 fixture files red on the guard alone).
     || contourFeatures.some((f) => coversFeature(c.tool, f))
     || (searchPockets.length === 0 && contourFeatures.length === 0);
   // #1186 — EVERY FLAT THAT CAN ROUGH THE PART IS PROPOSED. "The largest flat is the one primary"
@@ -605,8 +619,8 @@ export function candidateSequences(
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
     : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
-  if (curvedFeatures.length > 0 && balls.length === 0) return [];
-  if (rimFeatures.length > 0 && chamfers.length === 0) return [];
+  if (curvedFeatures.length > 0 && balls.length === 0) { return []; }
+  if (rimFeatures.length > 0 && chamfers.length === 0) { return []; }
   // #1019 — a demand whose pockets are ALL un-enterable, with no contour to cut, is trivially
   // satisfied the way #987 treats an empty demand: nothing for the pocket chain, every pocket
   // stated by its own number. It is NOT the line-902 refusal, which is reserved for a demand a
@@ -616,7 +630,7 @@ export function candidateSequences(
     // the id off the sentence), so the operator sees one line per pocket, never two.
     return [{ steps: [], unreachable: [...unenterable], leftBehind: 0 }];
   }
-  if (searchPockets.length > 0 && roughs.length === 0) return [];
+  if (searchPockets.length > 0 && roughs.length === 0) { return []; }
 
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
@@ -710,16 +724,22 @@ export function candidateSequences(
   };
 
   // The freeing step's cutter is a CHAIN cutter, never a new one: the chain was sized for the
-  // pockets. `coversContour` is the geometry check a pocket gets (floor reach, stated opening and
-  // corner). Moving it to the chain's LAST cutter (so no return change) needs more — the flute
-  // must be STATED to reach the profile's floor: an unstated flute is unknown, and the freeing
-  // cut is the one cut that must not be guessed (a rest cutter one flute-length short would rub
-  // its shank through the part on the last pass).
-  const coversContour = (c: CandidateCutter): boolean => contourFeatures.every((f) => coversFeature(c.tool, f));
-  const canFreeLast = (c: CandidateCutter): boolean =>
-    contourFeatures.every((f) =>
-      coversFeature(c.tool, f)
-      && !(f.depthMm > 0 && (c.tool.fluteLength === null || c.tool.fluteLength + EPS < f.depthMm)));
+  // pockets. Both links that can take it — the cover link (the first chain cutter that covers the
+  // profile, usually the primary) and the chain's LAST cutter (so no return change) — need the
+  // same two clauses: the geometry a pocket gets (floor reach, stated opening and corner) AND a
+  // STATED flute at least as long as the profile's floor. An unstated flute is unknown, and the
+  // freeing cut is the one cut that must not be guessed (a cutter one flute-length short would
+  // rub its shank through the part on the last pass). `coversFeature` deliberately lets an
+  // unstated flute "reach" a pocket floor — right for a pocket, wrong here.
+  const coversContour = (c: CandidateCutter): boolean =>
+    contourFeatures.every((f) => coversFeature(c.tool, f) && reachesContour(c.tool, f));
+  // #1195 — the cover link used to check GEOMETRY ONLY, so a chain whose primary's flute fell
+  // short of the profile handed the freeing cut to the first link `coversFeature` accepted — an
+  // unstated-flute rest bit. On Set B top (1186-planner-time @ 079d3f75c, 2026-11-10) that posted
+  // a 1 h 51 min contour for a 25.3 mm profile on the ⌀0.9 PCB router bit. Both links now share
+  // the one rule; a chain with no stated-reaching cutter posts NO freeing step, is STATED with
+  // the contour unreachable, and loses the rank's completeness key to a chain that frees.
+  const canFreeLast = coversContour;
 
   for (const primary of roughs) {
     const geometric = chainFrom(primary);
@@ -776,9 +796,13 @@ export function candidateSequences(
         freeLinks.push(coverLink);
         if (lastLink !== coverLink && canFreeLast(lastLink.cutter)) freeLinks.push(lastLink);
       }
-      const freeChoices: (ChainLink | null)[] = contourFeatures.length === 0
-        ? [null]
-        : freeLinks.length > 0 ? freeLinks : [null];
+      // #1195 (the analyst's field, 6784826782) — THE FREEING REACH IS A HARD CONSTRAINT ON THE
+      // PICK: a chain with no cutter whose STATED flute reaches the profile (plus the cut-through)
+      // is not a candidate at all, not merely out-ranked. It is #1114's "sufficient" applied to
+      // the freeing cut. The refusal below is the last line of defence, for when NO owned cutter
+      // reaches or the operator pinned one that does not.
+      if (contourFeatures.length > 0 && freeLinks.length === 0) continue;
+      const freeChoices: (ChainLink | null)[] = contourFeatures.length === 0 ? [null] : freeLinks;
       for (const ball of ballChoices) {
         for (const chamfer of chamferChoices) {
           for (const free of freeChoices) {
@@ -1048,6 +1072,41 @@ export function chooseSequence(
 ): SequenceChoice {
   const candidates = candidateSequences(demand, cutters, opts);
   if (candidates.length === 0) {
+    // #1195 (the analyst's field) — THE REFUSAL IS NAMED AND ONLY WHEN IT MUST BE: no owned
+    // cutter with a STATED flute reaches the profile, or the operator pinned a cutter that does
+    // not. The sentence always carries the way out — the cutters that reach, or the ones whose
+    // flute needs stating. A cutter the PLANNER wrote back into the job is not a pin; only
+    // `job.sources.tool === 'user'` sets `pinned.contour` (engraveGenerate).
+    const contourDepth = demand.features
+      .filter((f) => f.kind === 'contour')
+      .reduce((m, f) => Math.max(m, f.depthMm ?? 0), 0);
+    if (contourDepth > 0) {
+      const all = [...cutters.house, ...cutters.catalogue];
+      const reaching = all.filter((tool) => tool.fluteLength !== null && tool.fluteLength + 1e-9 >= contourDepth);
+      const unstated = all.filter((tool) => tool.fluteLength === null);
+      const names = (list: readonly Tool[]): string => list.map((tool) => tool.name || tool.id || 'cutter').join(', ');
+      const pinnedContourKey = cutters.pinned?.['contour'];
+      const pinnedTool = pinnedContourKey === undefined ? undefined : all.find((tool) => cutterKeyOf(tool) === pinnedContourKey);
+      const pinnedReaches = pinnedTool !== undefined
+        && pinnedTool.fluteLength !== null
+        && pinnedTool.fluteLength + 1e-9 >= contourDepth;
+      if (pinnedTool !== undefined && !pinnedReaches) {
+        const what = pinnedTool.name || pinnedTool.id || 'the chosen cutter';
+        const flute = pinnedTool.fluteLength === null ? 'not stated' : `${pinnedTool.fluteLength} mm`;
+        throw new Error(
+          `the chosen cutter ${what} cannot free this part: its flute is ${flute} against a ${contourDepth} mm profile — `
+          + (reaching.length > 0
+            ? `${names(reaching)} reaches it; choose that cutter, or state this one's flute length`
+            : 'none of your cutters has a stated flute of that length; state a flute length on: ' + (names(unstated) || 'no cutter')),
+        );
+      }
+      if (reaching.length === 0) {
+        throw new Error(
+          `nothing can free this part: none of your cutters has a stated flute of ${contourDepth} mm or more — `
+          + 'state a flute length on: ' + (names(unstated) || 'no cutter'),
+        );
+      }
+    }
     throw new Error(
       'no cutter sequence can be planned for this demand: no cutter in the house or catalogue '
       + 'can cut every feature (a flat wide for the tightest corner, a flute short of the deepest '

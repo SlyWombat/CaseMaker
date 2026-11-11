@@ -29,11 +29,11 @@ import { buildRandomPart } from '../tools/randomParts';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const BALL2: Tool = { ...flatEndMill(2, { number: 2, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose' };
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const BALL2: Tool = { ...flatEndMill(2, { number: 2, id: 'ball-2', name: 'ball-2', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose' };
 // A chamfer whose cone the house does not state: `profileOf` returns null and `clSurface` throws.
 // The organizer's own catalogue V is this class (the gate's "chamfer has no drop-cutter profile").
-const V_NO_CONE: Tool = flatEndMill(3.175, { number: 3, id: 'v-no-cone', name: '', shape: 'chamfer', typeText: 'Chamfer' });
+const V_NO_CONE: Tool = flatEndMill(3.175, { number: 3, id: 'v-no-cone', name: '', shape: 'chamfer', typeText: 'Chamfer', fluteLength: 30 });
 
 function input(house: Tool[]): ModelPlanInput {
   const part = buildRandomPart(1, 'sloped', tl);

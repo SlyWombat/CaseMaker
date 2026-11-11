@@ -25,12 +25,12 @@ import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
 describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever way the house arrives', () => {
-  const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-  const ten: Tool = { ...flatEndMill(3.175, { number: 3, id: '132112313810', name: 'metal 10' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 10 };
-  const twentyTwo: Tool = { ...flatEndMill(3.175, { number: 4, id: '131012313822', name: 'plain 22' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 22 };
+  const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+  const ten: Tool = { ...flatEndMill(3.175, { number: 3, id: '132112313810', name: 'metal 10', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 10 };
+  const twentyTwo: Tool = { ...flatEndMill(3.175, { number: 4, id: '131012313822', name: 'plain 22', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 22 };
 
-  const flat25: Tool = { ...flatEndMill(3.175, { number: 5, id: 'inv:kz-o-flute-3-175-25', name: '25 mm O-flute' }), fluteLength: 25 };
-  const flat12: Tool = { ...flatEndMill(3.175, { number: 6, id: 'inv:kz-o-flute-m-3-175-12', name: '12 mm O-flute' }), fluteLength: 12 };
+  const flat25: Tool = { ...flatEndMill(3.175, { number: 5, id: 'inv:kz-o-flute-3-175-25', name: '25 mm O-flute', fluteLength: 30 }), fluteLength: 25 };
+  const flat12: Tool = { ...flatEndMill(3.175, { number: 6, id: 'inv:kz-o-flute-m-3-175-12', name: '12 mm O-flute', fluteLength: 30 }), fluteLength: 12 };
 
   async function plan(house: Tool[]): Promise<{ finishCutters: Set<string>; allCutters: Set<string>; rank: string | null; notes: string; primaryCutter: string | null }> {
     const part = buildRandomPart(1, 'sloped', tl);

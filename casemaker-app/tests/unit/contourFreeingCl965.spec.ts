@@ -60,7 +60,7 @@ const fakeRectOffset: OffsetFn = (region, delta) => {
   return [[[minX - delta, minY - delta], [maxX + delta, minY - delta], [maxX + delta, maxY + delta], [minX - delta, maxY + delta]]];
 };
 
-const flat6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const flat6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
 const params: CutParams = { rpm: 12000, feed: 1000, plungeFeed: 300, stepDown: 2.5, stepOver: 3, peck: 0, air: true };
 
@@ -145,7 +145,7 @@ function flatPlaneMesh(z: number, xRange: [number, number], yRange: [number, num
   return { positions, indices, triangleCount: 2 };
 }
 
-const probeFlat: Tool = flatEndMill(6, { number: 2, id: 'probe-flat-6', name: 'probe-flat-6' });
+const probeFlat: Tool = flatEndMill(6, { number: 2, id: 'probe-flat-6', name: 'probe-flat-6', fluteLength: 30 });
 const flatProfile = profileOf(probeFlat)!;
 
 describe('#965 oppositeSurfaceSafeDepthMm — the flipped block, hand-computed', () => {
@@ -221,8 +221,8 @@ function box(w: number, d: number, h: number): ParsedMesh {
 }
 
 const HOUSE: Tool[] = [
-  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
-  { ...flatEndMill(3, { number: 2, id: 'ball-3', name: 'ball-3' }), typeText: 'Ball Nose', shape: 'ball' },
+  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
+  { ...flatEndMill(3, { number: 2, id: 'ball-3', name: 'ball-3', fluteLength: 30 }), typeText: 'Ball Nose', shape: 'ball' },
 ];
 
 describe('#965 planModelCam — a plain two-setup box, the freeing contour wiring', () => {

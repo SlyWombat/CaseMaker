@@ -25,10 +25,10 @@ import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 /** The tray's own T4: 3.175 mm 90° chamfer, 0.1 mm tip. */
 const CHAMFER90: Tool = {
-  ...flatEndMill(3.175, { number: 4, id: '122111013890', name: '3.175mm 90° chamfer' }),
+  ...flatEndMill(3.175, { number: 4, id: '122111013890', name: '3.175mm 90° chamfer', fluteLength: 30 }),
   shape: 'chamfer',
   typeText: 'V-Bit',
   tipDiameter: 0.1,

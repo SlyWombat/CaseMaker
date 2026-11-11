@@ -106,8 +106,8 @@ describe('#964 batchSameCutterRuns — the function itself', () => {
 // ---------------------------------------------------------------------------------------------
 
 const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
-const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const ball: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
+const flat: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const ball: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose' };
 
 function twoRegionTree(): { tree: FeatureTree; geometry: { triangles: { positions: Float32Array; indices: Uint32Array; triangleCount: number; bbox: { min: [number, number, number]; max: [number, number, number] } } } } {
   // Two separate floors, side by side, well apart — no interaction, each its own remainder
@@ -226,7 +226,7 @@ describe('#964 — the curved pipeline really does alternate across independent 
 //    natural op order alternates cutters, and whose contour shares a cutter with an earlier op.
 // ---------------------------------------------------------------------------------------------
 
-const V90: Tool = { ...flatEndMill(3.175, { number: 3, id: 'chamfer-90', name: '90° chamfer' }), typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, angle: 90, halfAngle: 45 };
+const V90: Tool = { ...flatEndMill(3.175, { number: 3, id: 'chamfer-90', name: '90° chamfer', fluteLength: 30 }), typeText: 'V-Bit', shape: 'chamfer', tipDiameter: 0.1, angle: 90, halfAngle: 45 };
 
 describe('#964 — end to end through planModelCam: the freeing contour still posts last after batching', () => {
   it('a scooped part (bowl=ball, shoulder+through-hole+contour=flat): the natural ops alternate cutters, and the LAST posted program still ends in the contour\'s own moves', async () => {

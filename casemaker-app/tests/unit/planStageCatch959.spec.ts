@@ -44,9 +44,9 @@ vi.mock('@/engine/cnc/cam/model/ops/finish', async (importOriginal) => {
   return { ...real, finish: wrap('finish', real.finish) };
 });
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
-const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' };
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
+const BALL2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2', fluteLength: 30 }), typeText: 'Ball Nose', shape: 'ball' };
 
 async function planSloped(): Promise<SetupPlan> {
   const part = buildRandomPart(1, 'sloped', tl);

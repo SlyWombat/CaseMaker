@@ -124,8 +124,11 @@ const BELOW_HOUSE = ORGANIZER_ROWS.filter(([, narrowest]) => narrowest < 3.175 -
 /** The 27 the ⌀3.175 fits once the ⌀6 primary has done what it can. */
 const CUTTABLE_REST = ORGANIZER_ROWS.filter(([, narrowest]) => narrowest >= 3.175 - 1e-9 && narrowest < 6 - 1e-9).map(([id]) => id);
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+// #1195 — the ⌀6 states a flute (30 mm, over the 26.8 mm profile): the freeing cut may only be
+// taken by a STATED-reaching flute, so a house whose records state none cannot free this demand
+// at all — the fixture's original unstated ⌀6 was relying on the hole #1195 closes.
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 const HOUSE: CutterCandidates = { house: [FLAT6, FLAT3175], catalogue: [] };
 
 function ir(tool: SequenceStep['cutter']['tool'], moves: number): ToolpathIR {
@@ -211,9 +214,12 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
 describe('#961 the freeing cut is priced, not left as an unpriced return', () => {
   it('the contour is its own LAST step; an unstated flute means the last cutter cannot take it, so the return change is charged', () => {
     // #1186 rule 1 RE-PIN: the ⌀3.175 alone is now the cheapest chain, so this test prices its
-    // cutting dear to keep the flat-6 primary + rest shape the mechanic is about. What it pins —
-    // the free cut is its own step, and an unstated flute cannot take it — is unchanged.
-    const choice = chooseSequence(DEMAND, HOUSE, opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 50 : 10)));
+    // cutting dear to keep the flat-6 primary + rest shape the mechanic is about. #1195 RE-PIN: the
+    // small flat is UNSTATED here (the shared fixture states 30 so other tests can free at all), so
+    // the last-cutter path is refused and the return change is charged — the mechanic this test is
+    // about. A stated small flat is the next test's case.
+    const UNSTATED_SMALL = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+    const choice = chooseSequence(DEMAND, { house: [FLAT6, UNSTATED_SMALL], catalogue: [] }, opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 50 : 10)));
     const last = choice.steps[choice.steps.length - 1]!;
     expect(last.kind).toBe('contour');
     expect(last.cutter.key).toBe('flat-6');
@@ -319,9 +325,9 @@ describe('#961 the coverage rest pays its way — full catalogue, no maxCutters'
   // A house ⌀6 with a catalogue holding every smaller flat: with no budget the picker offers each
   // of them as a coverage rest, so only the PRICE may prune them. The first rest buys a real
   // surface; each further one shaves a cell and costs a long pass.
-  const FLAT2 = flatEndMill(2, { number: 3, id: 'cat-2', name: 'cat-2' });
-  const FLAT15 = flatEndMill(1.5, { number: 4, id: 'cat-1.5', name: 'cat-1.5' });
-  const FLAT1 = flatEndMill(1, { number: 5, id: 'cat-1', name: 'cat-1' });
+  const FLAT2 = flatEndMill(2, { number: 3, id: 'cat-2', name: 'cat-2', fluteLength: 30 });
+  const FLAT15 = flatEndMill(1.5, { number: 4, id: 'cat-1.5', name: 'cat-1.5', fluteLength: 30 });
+  const FLAT1 = flatEndMill(1, { number: 5, id: 'cat-1', name: 'cat-1', fluteLength: 30 });
   const CATALOGUE_SET: CutterCandidates = { house: [FLAT6], catalogue: [FLAT3175, FLAT2, FLAT15, FLAT1] };
   // pocket-15 is 28.5 mm wide — every flat enters it, so every smaller one is a COVERAGE rest.
   const ONE_WIDE: SequenceDemand = {

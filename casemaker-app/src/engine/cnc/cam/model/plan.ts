@@ -3868,6 +3868,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return planRestRegion(id, step, prefix);
     }
     if (id === 'contour') {
+      // #1195 — THE SUITE-WIDE INVARIANT, ENFORCED AT THE POST. The pick excludes every chain whose
+      // freeing cutter cannot prove its reach; this makes it impossible for ANY path to post a
+      // freeing contour deeper than its cutter's STATED flute — so every plan the suite (or the
+      // 33-sample bench) posts carries the invariant. It should never fire.
+      if (contourDepthMm > 0 && (cutter.fluteLength === null || cutter.fluteLength + 1e-9 < contourDepthMm)) {
+        const who = cutter.name || cutter.id || 'the cutter';
+        const flute = cutter.fluteLength === null ? 'no stated flute' : `a ${cutter.fluteLength} mm flute`;
+        throw new Error(
+          `#1195 invariant: the plan tried to post a ${contourDepthMm} mm freeing contour on ${who} with ${flute} — the pick must never offer this chain`,
+        );
+      }
       return contourOp({
         cutter,
         contour: tree.contour,

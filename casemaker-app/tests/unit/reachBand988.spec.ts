@@ -74,6 +74,7 @@ describe('#988 — the setup depth band on planModelCam', () => {
   }, 120_000);
 
   it('without the band the 12 mm flute cannot reach the pocket — the sequencer refuses, unchanged', async () => {
-    await expect(planModelCam(input(undefined))).rejects.toThrow(/no cutter sequence can be planned/);
+    // #1195 — the refusal is NAMED now: no owned cutter with a stated flute reaches the profile.
+    await expect(planModelCam(input(undefined))).rejects.toThrow(/nothing can free this part: none of your cutters has a stated flute/);
   }, 120_000);
 });

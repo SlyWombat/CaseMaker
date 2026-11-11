@@ -25,8 +25,8 @@ import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 
 /** A 40 x 20 plate with one 36 x 16 pocket whose floor stands at −2. */
 function tree(): FeatureTree {
@@ -71,7 +71,8 @@ function plan(mask: [number, number][][], restDilationMm?: number): PlanPocketsR
 }
 
 function restFeeds(result: PlanPocketsResult): { x: number; y: number }[] {
-  const rest = result.ops.filter((op) => op.outcome.cutter === 'flat-3.175' || op.outcome.ir.tool.id === 'flat-3.175');
+  // #1195 RE-PIN — by STEP KIND: the ⌀3.175 may be the primary now; only the rest step is the rest.
+  const rest = result.ops.filter((op) => op.kind !== 'contour' && op.outcome.ir.tool.id === 'flat-3.175');
   return rest.flatMap((op) => op.outcome.ir.operations.flatMap((o) => o.moves.filter((m) => m.kind === 'feed').map((m) => ({ x: m.x, y: m.y }))));
 }
 
@@ -121,12 +122,12 @@ describe('#962 — a rest that cuts nothing is STATED, never silent', () => {
     // positions all fall outside the pocket.
     const thin: [number, number][][] = [[[10, 10], [14, 10], [14, 10.2], [10, 10.2]]];
     const thinResult = plan(thin, 0);
-    const thinRest = thinResult.ops.filter((op) => op.outcome.ir.tool.id === 'flat-3.175');
+    const thinRest = thinResult.ops.filter((op) => op.kind !== 'contour' && op.outcome.ir.tool.id === 'flat-3.175');
     expect(
       thinRest.every((op) => op.outcome.ir.operations.every((o) => o.moves.length > 0)),
       'a thin centre-space mask must be traced, never posted as an empty op',
     ).toBe(true);
-    const restProgram = result.ops.filter((op) => op.outcome.ir.tool.id === 'flat-3.175');
+    const restProgram = result.ops.filter((op) => op.kind !== 'contour' && op.outcome.ir.tool.id === 'flat-3.175');
     // Either the op is dropped from the ops (its planning threw) or it emits moves; an op with
     // ZERO moves on non-empty standing material is the silent failure this pins against.
     const silent = restProgram.filter((op) => op.outcome.ir.operations.every((o) => o.moves.length === 0));

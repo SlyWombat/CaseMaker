@@ -23,9 +23,9 @@ import { planIdealAgainst, planIdealOnly, planTwoOutcomes } from '@/engine/cnc/c
 import { comparePlanOutcomes } from '@/engine/cnc/cam/model/tradeoff';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 
-const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
-const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1' });
+const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose' };
+const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1', fluteLength: 30 });
 
 /**
  * The `sloped` random part (seed 1) — the same synthetic mesh the #959/#961 plan specs use —

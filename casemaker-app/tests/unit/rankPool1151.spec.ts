@@ -24,7 +24,7 @@ import {
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import { slopedInput } from './helpers/goalFixtures';
 
-const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const ball = (d: number): Tool => ({
   ...flatEndMill(d, { number: Math.round(d * 10) + 2, id: `ball-${d}`, name: `ball-${d}` }),
   shape: 'ball',

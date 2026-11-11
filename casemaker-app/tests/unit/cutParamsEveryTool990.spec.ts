@@ -17,8 +17,8 @@ import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-990', name: 'flat-6' });
-const FLAT15 = flatEndMill(1.5, { number: 2, id: 'flat-1.5-990', name: 'flat-1.5' });
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-990', name: 'flat-6', fluteLength: 30 });
+const FLAT15 = flatEndMill(1.5, { number: 2, id: 'flat-1.5-990', name: 'flat-1.5', fluteLength: 30 });
 
 function meshOf(solid: ReturnType<typeof tl.Manifold.cube>): ParsedMesh {
   const m = solid.getMesh();

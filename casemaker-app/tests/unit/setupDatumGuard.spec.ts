@@ -44,8 +44,8 @@ import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { Z1 } from '@/engine/cnc/machine';
 import { buildDatumGoal } from './helpers/datumTwoSetup966';
 
-const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
-const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
+const BALL: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 });
+const FLAT: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3', fluteLength: 30 });
 const entry = (key: string, tool: Tool): ToolLibraryEntry => ({ key, tool, provenance: 'test' });
 const SHOP = { tools: [entry('inv:ball-2', BALL), entry('inv:flat-3', FLAT)] };
 

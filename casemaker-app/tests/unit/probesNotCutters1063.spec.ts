@@ -25,14 +25,14 @@ import { flatEndMill, isCuttingRecord, shapeFromType, type Tool } from '@/engine
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-1063', name: 'flat-6' });
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-1063', name: 'flat-6', fluteLength: 30 });
 const PROBE_V2: Tool = {
-  ...flatEndMill(3.175, { number: 9999, id: 'probe-v2', name: 'Makera wired probe V2' }),
+  ...flatEndMill(3.175, { number: 9999, id: 'probe-v2', name: 'Makera wired probe V2', fluteLength: 30 }),
   typeText: 'Probe',
   shape: 'unknown',
 };
 const PROBE_3D: Tool = {
-  ...flatEndMill(3.175, { number: 8888, id: 'probe-3d', name: 'Makera 3D probe' }),
+  ...flatEndMill(3.175, { number: 8888, id: 'probe-3d', name: 'Makera 3D probe', fluteLength: 30 }),
   typeText: 'Probe',
   // #1053 — the real shape and the survey's measured trigger radius (the stylus ball's ⌀ stays
   // null until someone calipers it).

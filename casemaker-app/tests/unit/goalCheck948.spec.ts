@@ -104,6 +104,9 @@ function goalJob(target: EngraveTargetObject, stock: { length: number; width: nu
     drills: [],
     stock: { ...stock, material: 'softwood' },
     toolKey: 'flat-1.0',
+    // #1195 — the job's own cutter, with its flute stated: the freeing cut needs a STATED reach
+    // (the library's flat-1.0 invents no lengths, by design).
+    tool: { ...flatEndMill(1, { number: 1, name: '1 mm flat end', handleDiameter: 3.175 }), fluteLength: 10 },
     targetObject: target,
   };
 }
