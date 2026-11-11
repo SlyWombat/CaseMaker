@@ -2075,8 +2075,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           ? undefined
           : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
     // #1206 — the shop's span limit rides whichever spec the plan uses; a job that states its
-    // own tabs is not exempt from "no unsupported stretch longer than the limit".
-    const tabSpec = tabs !== undefined && input.tabMaxSpanMm !== undefined ? { ...tabs, maxSpanMm: input.tabMaxSpanMm } : tabs;
+    // own tabs is not exempt from "no unsupported stretch longer than the limit", and a job that
+    // states none still gets the DEFAULT release tabs' span checked (condition 3 is on the tabs
+    // as placed, not on the plan before the contour's own fallback).
+    const tabSpec =
+      tabs === undefined
+        ? input.tabMaxSpanMm === undefined
+          ? undefined
+          : { ...DEFAULT_RELEASE_TABS, maxSpanMm: input.tabMaxSpanMm }
+        : input.tabMaxSpanMm === undefined
+          ? tabs
+          : { ...tabs, maxSpanMm: input.tabMaxSpanMm };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
