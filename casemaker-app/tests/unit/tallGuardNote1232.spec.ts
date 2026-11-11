@@ -1,58 +1,38 @@
 /**
- * #1232 (planner v3 A6) — THE TALL RULE KEPT A SLOWER SET: the helper that says so.
+ * #1232 (planner v3 A6) — THE TALL RULE KEPT A SLOWER SET: the helper that states what the
+ * displacement cost.
  *
- * The leftover tolerance (#1217) treats sets within a share of each other as equal on leftover,
- * and time decides. The tall rule (#1224) refuses to take a faster set that leaves more material
- * standing above `plan.leftoverTallMm`. When that rule is what kept a slower set, the sheet has
- * had no reason to give; this helper finds the faster, taller set that was passed over, so the
- * sentence can name it.
+ * The set that counts is the one the pick WOULD have been with the tall term taken out and
+ * everything else the same (chooseSequence sorts a copy that way); this helper compares the
+ * chosen set with that displaced set. The analyst's first rule — the fastest set inside the
+ * tolerance — was withdrawn (it named a set that had already lost on an earlier rank key).
  */
 import { describe, expect, it } from 'vitest';
 
-import { tallGuardNote } from '@/engine/cnc/cam/model/sequence';
-
-const SETS = [
-  { tallCells: 0, leftoverCells: 100, totalSeconds: 1000 },
-  { tallCells: 5, leftoverCells: 120, totalSeconds: 800 },
-  { tallCells: 0, leftoverCells: 90, totalSeconds: 1500 },
-  { tallCells: 7, leftoverCells: 130, totalSeconds: 700 },
-  { tallCells: 9, leftoverCells: 400, totalSeconds: 100 },
-];
+import { tallGuardOf } from '@/engine/cnc/cam/model/sequence';
 
 describe('#1232 the tall-guard note', () => {
-  it('the fastest set the tall rule passed over', () => {
-    expect(tallGuardNote(SETS, 0, 0.5, 10000)).toEqual({ refusedIndex: 3, extraTallCells: 7, givenUpSeconds: 300 });
+  it('a displaced set that is taller and faster gives its numbers', () => {
+    expect(tallGuardOf({ tallCells: 0, totalSeconds: 1000 }, { tallCells: 48, totalSeconds: 775 })).toEqual({
+      extraTallCells: 48,
+      givenUpSeconds: 225,
+    });
   });
 
-  it('measured against the chosen set', () => {
-    expect(tallGuardNote(SETS, 2, 0.5, 10000)).toEqual({ refusedIndex: 3, extraTallCells: 7, givenUpSeconds: 800 });
+  it('a set that leaves no more tall cells was not passed over for tall material', () => {
+    expect(tallGuardOf({ tallCells: 6, totalSeconds: 1000 }, { tallCells: 6, totalSeconds: 700 })).toBeNull();
+    expect(tallGuardOf({ tallCells: 6, totalSeconds: 1000 }, { tallCells: 2, totalSeconds: 700 })).toBeNull();
   });
 
-  it('a set outside the tolerance is not mentioned', () => {
-    expect(tallGuardNote([SETS[0]!, SETS[4]!], 0, 0.5, 10000)).toBeNull();
+  it('a set that is not faster was not passed over for time', () => {
+    expect(tallGuardOf({ tallCells: 0, totalSeconds: 1000 }, { tallCells: 48, totalSeconds: 1000 })).toBeNull();
+    expect(tallGuardOf({ tallCells: 0, totalSeconds: 1000 }, { tallCells: 48, totalSeconds: 1200 })).toBeNull();
   });
 
-  it('nothing faster and taller: no note', () => {
-    expect(tallGuardNote([SETS[0]!, SETS[2]!], 0, 0.5, 10000)).toBeNull();
-  });
-
-  it('a faster set with no more tall cells is not this rule’s business', () => {
-    expect(
-      tallGuardNote([SETS[0]!, { tallCells: 0, leftoverCells: 110, totalSeconds: 500 }], 0, 0.5, 10000),
-    ).toBeNull();
-  });
-
-  it('tolerance off: no note', () => {
-    expect(tallGuardNote(SETS, 0, 0, 10000)).toBeNull();
-  });
-
-  it('a tie on time goes to the earlier set', () => {
-    const tied = SETS.map((s, i) => (i === 1 ? { ...s, totalSeconds: 700 } : s));
-    expect(tallGuardNote(tied, 0, 0.5, 10000)?.refusedIndex).toBe(1);
-  });
-
-  it('bad index', () => {
-    expect(tallGuardNote(SETS, -1, 0.5, 10000)).toBeNull();
-    expect(tallGuardNote(SETS, 5, 0.5, 10000)).toBeNull();
+  it('the given-up seconds are whole seconds, rounded', () => {
+    expect(tallGuardOf({ tallCells: 0, totalSeconds: 1000.4 }, { tallCells: 3, totalSeconds: 999.6 })).toEqual({
+      extraTallCells: 3,
+      givenUpSeconds: 1,
+    });
   });
 });
