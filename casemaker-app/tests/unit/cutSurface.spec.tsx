@@ -1761,6 +1761,58 @@ describe('#819 the finished screen', () => {
     expect(screen.getByTestId('engrave-cut-step-1')).toBeTruthy();
   });
 
+  // #1123 item 10 (manager's review, 2026-11-11) — A STOP WHILE THE OPERATOR IS IN STEP 1 OR 2 IS
+  // SEEN. The rescue cards live at the top of step 3; when the machine stops during registration,
+  // step 3 must open and be current, or the card is in the DOM but invisible inside a closed fold.
+  it('#1123 item 10 — a stop while step 2 is current opens step 3 and shows the stopped card', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    giveStatement();
+    // The card plans the release; the stop then lands on the planned record (the real order).
+    await waitFor(() => expect(useEngraveReleaseStore.getState().records[machineKey(TARGET)]).toBeDefined());
+    const key = machineKey(TARGET);
+    const rec = useEngraveReleaseStore.getState().records[key]!;
+    act(() =>
+      useEngraveReleaseStore.setState({
+        records: {
+          [key]: { ...rec, phase: 'stopped', active: null, next: null, files: rec.files.map((f) => ({ ...f, done: false })) },
+        },
+      }),
+    );
+    // The operator is not on step 3: the current step is 1 or 2, and its fold is open.
+    const earlier = [1, 2].map((n) => (screen.getByTestId(`engrave-cut-step-${n}`) as HTMLDetailsElement).open);
+    expect(earlier.some(Boolean), 'a step before 3 is the one open').toBe(true);
+    const step3 = screen.getByTestId('engrave-cut-step-3') as HTMLDetailsElement;
+    expect(step3.open, 'step 3 opens so its rescue card is visible').toBe(true);
+    expect(screen.getByTestId('engrave-cut-recovery-stopped')).toBeTruthy();
+  });
+
+  // #1123 item 8 parity (manager's review) — THE CARD'S PLAN CALL IS THE OLD RELEASE STEP'S, on the
+  // same triggers. A re-render with the SAME programs must not reset a running release to idle:
+  // plan() keeps the phase and the active program when the hashes match.
+  it('#1123 item 8 — a re-render with the same programs keeps a running release’s phase and active', async () => {
+    const job = plannedJob();
+    const pkg = frozen(job, [P1]);
+    const props = { job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true };
+    const view = draw(props);
+    giveStatement();
+    const key = machineKey(TARGET);
+    await waitFor(() => expect(useEngraveReleaseStore.getState().records[key]).toBeDefined());
+    act(() =>
+      useEngraveReleaseStore.setState({
+        records: { [key]: { ...useEngraveReleaseStore.getState().records[key]!, phase: 'running', active: 1 } },
+      }),
+    );
+    // A fresh job object with the same content: the card's effect re-runs plan().
+    view.show({ ...props, job: { ...job } });
+    await waitFor(() => {
+      const after = useEngraveReleaseStore.getState().records[key];
+      expect(after?.phase).toBe('running');
+      expect(after?.active).toBe(1);
+    });
+  });
+
   // #927 — THE DONE CARD'S ONE TIME LINE. The last measured run of this job's program, against the
   // estimate that run's own record carries: 270 s against 250 s is 8 % over.
   it('#927 prints the last measured run against its record’s estimate, and says so when there is none', () => {

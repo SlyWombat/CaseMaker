@@ -1831,7 +1831,17 @@ export function EngraveCutSurface({
         )}
       </Step>
 
-      <Step number={3} title="Start cut" done={ran} current={currentStep === 3} summary={step3Summary} forceOpen={flipPending}>
+      {/* #1123 item 10 (manager's review) — A RESCUE CARD IS SEEN FROM ANY STEP. The waiting and
+          stopped cards live at the top of step 3, which is a fold: a stop during registration would
+          leave the card in the DOM but invisible. While one is up, step 3 is current and open. */}
+      <Step
+        number={3}
+        title="Start cut"
+        done={ran}
+        current={currentStep === 3 || rescueUp}
+        summary={step3Summary}
+        forceOpen={flipPending || rescueUp}
+      >
         {/* #1123 items 9/10 — THE RESCUE CARDS AT THE TOP OF STEP 3, above the program list, and
             scrolled into view once when they appear. While one is up it is the step's ONE control
             surface: the run card below offers no Start/Pause/Stop, and the status strip carries
