@@ -210,6 +210,23 @@ The File System Access API (planned for issue #70) requires HTTPS — without it
 
 Repo operators can wire up a one-command deploy via whatever automation their host supports (rsync, FTP, S3 sync, host-specific API). Keep host-specific credentials in a `.env` at the repo root (already gitignored). Project-specific deploy walkthroughs live in the operator's local notes — they're not committed because they reference account names, hostnames, and tokens.
 
+## The land gate
+
+Every change lands only after the same checks, run from `casemaker-app/`:
+
+- `npm run -s typecheck` — `tsc -b` **and** the tests config (`tsc --noEmit -p tsconfig.tests.json`);
+  a bare `tsc -b` does not see `tests/`.
+- `npx vitest run` — the full unit and acceptance suite. A change with its own targeted spec runs
+  that first; the full suite is still the gate.
+- `npx playwright test` — the e2e gate, every project. The long walks have their own nightly tier
+  (`npm run test:e2e:nightly`); the land gate includes them.
+- `npm run check:platform-gate` — builds **both** targets. The web bundle must carry neither the
+  machine bridge's marker nor any Tauri runtime code (`__TAURI_INTERNALS__`, #1198 — a desktop
+  import guarded through the imported `BUILD_TARGET` const can survive as an orphan chunk); the
+  desktop bundle must carry the bridge. It is not part of `npm test` because it builds twice.
+- Rust, when `src-tauri/` changed: `cargo test --lib` in the `rust:1.90-bookworm` container (the
+  build recipe in §3 shows the package list and the cached registry mount).
+
 ## Asking for a specific deployment
 
 If you need a particular target validated (kiosk PC, shared LAN server, browser-only client served from a Pi), open an issue with the scenario; the answer will be a concrete spec, not a generic "should work."
