@@ -67,7 +67,9 @@ import {
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
+  BedFence,
   BracketHold,
+  BracketObstacle,
   EngraveAnyItem,
   EngraveChamfer,
   EngraveCutout,
@@ -1204,7 +1206,33 @@ function derivedMount(job: EngraveJob): MountSpec {
  * bracket job is given (`defaultBracketHold`).
  */
 export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampPlacement[] | null {
+  // #1102 — a fenced tape job has NO clamps (an empty list is a real answer: nothing stands over
+  // the stock, the tape holds it); only the arms are the fixture.
+  if (jobFence(job) !== null) return [];
   return job.workholding.kind === 'bracket' ? job.workholding.bracket.clamps : null;
+}
+
+/** #1102 — the bracket as a fence the job states (a taped hold with a fence), or null. */
+export function jobFence(job: Pick<EngraveJob, 'workholding'>): BedFence | null {
+  return job.workholding.kind === 'tape' ? (job.workholding.tape.fence ?? null) : null;
+}
+
+/**
+ * #1102 — THE MOUNT WHOSE BOXES ARE THE FIXTURE. `jobMount`'s word, except that a taped job with a
+ * fence is the bracket's arms (the tape holds, the bracket locates): the verifier, the sweep, the
+ * preview and the laser-surface check all ask THIS, so the arms are posted once and the same way
+ * for a clamped job and a fenced one. The setups engine keeps reading `jobMount` (a taped job is
+ * still `tape` there: the board flag, the hold).
+ */
+export function fixtureMountOf(job: EngraveJob, setupIndex = 0): Mount {
+  const mount = jobMount(job, setupIndex);
+  return mount === 'tape' && jobFence(job) !== null ? 'bracket' : mount;
+}
+
+/** The job's own obstacle boxes: the bracket hold's, or the fence's. */
+export function jobFixtureVoids(job: Pick<EngraveJob, 'workholding'>): BracketObstacle[] | null {
+  if (job.workholding.kind === 'bracket') return job.workholding.bracket.obstacles ?? null;
+  return jobFence(job)?.obstacles ?? null;
 }
 
 /**
@@ -1223,11 +1251,11 @@ export function clampPlacementsFor(job: Pick<EngraveJob, 'workholding'>): ClampP
 export function jobMountObstacles(job: EngraveJob, defaults: ShopDefaults | null): MountObstacles | null {
   return bracketMount(
     { x: job.stock.length, y: job.stock.width, z: job.stock.thickness },
-    jobMount(job),
+    fixtureMountOf(job),
     defaults,
     job.sacrificial.under?.thickness ?? 0,
     clampPlacementsFor(job),
-    job.workholding.kind === 'bracket' ? job.workholding.bracket.obstacles : null,
+    jobFixtureVoids(job),
   );
 }
 

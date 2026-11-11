@@ -42,7 +42,7 @@ import {
   traceSweptProfile,
 } from '@/engine/cnc/engrave/partPlan';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
-import { clampPlacementsFor, dedupeFindings, jobMount, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
+import { clampPlacementsFor, dedupeFindings, fixtureMountOf, jobSetups, setupTools, toolItemsFor } from '@/engine/cnc/engrave/jobSetup';
 import { setupPrograms } from '@/engine/cnc/engrave/programs';
 import { restDepthShortfallFindings } from '@/engine/cnc/engrave/restPass';
 import { toolDisplayName } from '@/engine/cnc/toolDisplay';
@@ -959,7 +959,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // jaws for a vise job, the bracket's arms and the job's own clamps for a bracket job, and
     // nothing above the part for tape (the tape is under the stock). A bed job used to be drawn
     // with the vise's jaws, a fixture that is not on the machine at all.
-    const mountKind = jobMount(job);
+    const mountKind = fixtureMountOf(job);
     const fixtureBoxes: ObstacleBox[] =
       mountKind === 'bracket'
         ? (bracketMount(
