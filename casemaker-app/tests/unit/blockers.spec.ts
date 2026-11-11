@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { operationCreateBlocked } from '@/components/welcome/operationCreate';
 import { boxProblem } from '@/engine/cnc/stockStart';
 import type { OperationChoice } from '@/components/welcome/OperationStep';
-import type { SizedMachine } from '@/engine/cnc/stockStart';
+import type { SizedMachine } from '@/engine/cnc/machine';
 
 const SUGGESTS = /\d|type|pick/i;
 
