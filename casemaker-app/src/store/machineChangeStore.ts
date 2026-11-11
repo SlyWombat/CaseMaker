@@ -50,6 +50,11 @@ export interface MachineChangeResult {
 export interface MachineChangeRequest {
   /** The mount the caller needs; omitted when the wizard should offer the house's mounts (Manage). */
   target?: MachineMountKind;
+  /**
+   * #1106 item 10 — the LOCATION RECORD the caller means (step 1's selected row). Omitted, the
+   * wizard edits the location's first machine, as Manage always has.
+   */
+  machineId?: string;
   /** The job that asked, or null for a change made from Manage. */
   forJob?: MachineChangeJob | null;
   /**

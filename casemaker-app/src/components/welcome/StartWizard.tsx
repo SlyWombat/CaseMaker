@@ -5,7 +5,6 @@ import { DEFAULT_FONT_ID, ensureLabelFontsLoaded, ensureSeedFontsLoaded } from '
 import { defaultRotaryChuck } from '@/engine/cnc/engrave/setupFlow';
 import { jobVise } from '@/engine/cnc/fixture';
 import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
-import { canReachMachine } from '@/platform/capabilities';
 import { probeMachine } from '@/platform/machineProbe';
 import { useSettingsStore } from '@/store/settingsStore';
 import { findTemplateAcrossSources } from '@/library/templateRegistry';
@@ -293,6 +292,18 @@ export function StartWizard(): JSX.Element {
   // THE ONE STEP INDEX. It starts where the opener asked (the panel's Stock/Hold `edit` names a
   // step), and from then on only this shell moves it.
   const [step, setStep] = useState<WizardStepId>(initialStep);
+  // #1106 item 4 — the machine check's request counter; see runCheck.
+  const checkSeq = useRef(0);
+  useEffect(() => {
+    // Leaving step 1 discards whatever the check still has in flight; the unmount does too.
+    if (step !== 'machine') checkSeq.current += 1;
+  }, [step]);
+  useEffect(
+    () => () => {
+      checkSeq.current += 1;
+    },
+    [],
+  );
   // #726 W19/P12 — the phone layout: a 16 px content edge, and Holding stacks (HoldingStep reads
   // the same query for its own grid, so the two never disagree at the breakpoint).
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -328,7 +339,6 @@ export function StartWizard(): JSX.Element {
     setJobStarted(true);
     setProjectCreatedHere(true);
   }
-  const [address, setAddress] = useState('');
   const [answers, setAnswers] = useState<SetupAnswers>(() =>
     defaultSetupAnswers(useEngraveJobStore.getState().job),
   );
@@ -497,7 +507,11 @@ export function StartWizard(): JSX.Element {
 
   // `probeMachine` resolves every failure into one of its four outcomes, so there is nothing to
   // catch here: a thrown probe would be a bug in the probe, not an error to swallow.
-  async function runCheck(host?: string): Promise<void> {
+  async function runCheck(): Promise<void> {
+    // #1106 item 4 — ONE probe batch, and a late result is NEVER written: each request carries a
+    // number, and leaving the step or selecting another row bumps it, so only the current request
+    // may set the result. The recorded rows are probed in parallel by the one existing batch.
+    const seq = ++checkSeq.current;
     setBusy(true);
     try {
       // #882 — THE LOCATION'S MACHINES GO WITH THE SEARCH. A LAN server on a bridge network cannot
@@ -506,7 +520,8 @@ export function StartWizard(): JSX.Element {
       const recorded = (machines ?? []).flatMap((m) =>
         m.address === null ? [] : [{ host: m.address.host, port: m.address.port, profileId: m.profileId }],
       );
-      const result = await probeMachine(host === undefined ? { recorded } : { host });
+      const result = await probeMachine({ recorded });
+      if (seq !== checkSeq.current) return;
       setProbeResult(result);
       // The machine's own coordinate frame, saved where its provenance lives (#279). Only a
       // COMPLETE read ever produces one, so this cannot half-apply; a read that failed leaves the
@@ -594,6 +609,8 @@ export function StartWizard(): JSX.Element {
   async function startFromStock(p: PendingStock): Promise<void> {
     setStarting(true);
     setStartError(null);
+    // #1106 item 5 — creating a job is using the machine: remember the selected record.
+    if (selectedMachine !== null) writeLastMachineId(selectedMachine.id);
     try {
       const store = useEngraveJobStore.getState();
       const machineId = store.job.machineId;
@@ -857,6 +874,8 @@ export function StartWizard(): JSX.Element {
   }
 
   function createEmptyJobNow(): void {
+    // #1106 item 5 — the empty-job door creates a job too: the machine in step 1 is the last used.
+    if (selectedMachine !== null) writeLastMachineId(selectedMachine.id);
     const store = useEngraveJobStore.getState();
     const machineId = store.job.machineId;
     // A NEW document: the machine chosen in step 1 is kept, everything else is the shipped
@@ -1064,10 +1083,8 @@ export function StartWizard(): JSX.Element {
           machine={machine}
           reason={reason}
           route={machineRoute}
-          address={address}
-          onAddress={setAddress}
-          onCheck={(host) => {
-            void runCheck(host);
+          onCheck={() => {
+            void runCheck();
           }}
           // #1106 — the step is a picker: the job's machine is the selected row, the last used is
           // first, and the bed is changed from here.
@@ -1075,6 +1092,8 @@ export function StartWizard(): JSX.Element {
           selectedMachineId={selectedMachine?.id ?? null}
           lastMachineId={readLastMachineId()}
           onSelectMachine={(id) => {
+            // #1106 item 4 — a selection change discards a check still in flight.
+            checkSeq.current += 1;
             setSelectedRecordId(id);
             const record = machines?.find((m) => m.id === id);
             if (record?.profileId) useEngraveJobStore.getState().setMachine(record.profileId);
@@ -1082,6 +1101,8 @@ export function StartWizard(): JSX.Element {
           }}
           onChangeBed={() =>
             openMachineChange({
+              // #1106 item 10 — the SELECTED row's record, not "the location's first machine".
+              machineId: selectedMachine?.id,
               forJob: { name: job.name, holding: job.workholding.kind },
               onDone: () => undefined,
             })
@@ -1284,8 +1305,10 @@ export function StartWizard(): JSX.Element {
 
             {step === 'machine' && (
               // The SAME test id either way: it is the button that advances, whatever it says.
+              // #1106 item 9 — ONE label on both builds: a job can always be written, checked and
+              // simulated, so the press is never "without a machine" (title per #1100 item 4).
               <button type="button" className="sw-btn sw-btn--primary" data-testid="start-wizard-next" onClick={next}>
-                {canReachMachine ? wizardStep('machine').nextLabel : 'Continue without a machine'}
+                {wizardStep('machine').nextLabel}
               </button>
             )}
             {step === 'stock' && confirmReplace === null && (

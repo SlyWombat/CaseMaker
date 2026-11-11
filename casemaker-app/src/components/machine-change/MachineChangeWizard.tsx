@@ -217,7 +217,12 @@ function Wizard({
   onClose: () => void;
 }): JSX.Element {
   const location = useLocationStore((s) => s.location);
-  const machine = location?.machines[0] ?? null;
+  // #1106 item 10 — the request may name the record (step 1's selected row); Manage still gets the
+  // location's first machine.
+  const machine =
+    (request.machineId === undefined ? undefined : location?.machines.find((m) => m.id === request.machineId)) ??
+    location?.machines[0] ??
+    null;
   const accessories = location?.accessories ?? [];
   const active = activeProfileOf(machine);
   const from = activeMountOf(machine);

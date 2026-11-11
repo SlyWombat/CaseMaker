@@ -9,27 +9,30 @@
 import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
+import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(180_000);
 
 test('#1109 — the four wizard steps on the desktop bundle, one screenshot each', async ({ cm, page }) => {
+  // The location is served BEFORE the console so the console's own routes stay the most recent
+  // (Playwright runs the last-registered handler first).
+  await serveHouse(page, { location: locationView(locationDocument()) });
   const fake = await installFakeConsole(page);
   await cm.ready();
 
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
 
-  // Step 1 — the machine. The health fold is the manual route; the fake controller answers the
-  // status ask, so the check finds it and the step says so in the operator's words.
-  await page.getByTestId('start-wizard-machine-another').click();
-  await page.getByTestId('start-wizard-address').fill('192.0.2.10');
-  await page.getByTestId('start-wizard-connect-address').click();
+  // Step 1 — the machine: the location's record is the selected ROW (#1106 item 7: the old
+  // "another machine…" address fold is gone). The check on open can race the location load on this
+  // bundle, so the walk presses the step's own Check again once the row (and its address) is in;
+  // the recorded batch is what finds the fake controller.
+  await expect(page.getByTestId('start-wizard-machine-row-machine-1a2b3c')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('start-wizard-check').click();
   await expect(page.getByTestId('start-wizard-machine-state')).toContainText('Online', { timeout: 30_000 });
   expect(fake.lines()).toContain('?');
-  // The manual route folds away again: the baseline is the step as it settles, not the form that
-  // reached it (the route line still says how).
-  await page.getByTestId('start-wizard-machine-another').click();
+  // The baseline is the step as it settles, not a form that reached it (the route line still says how).
   await page.screenshot({ path: 'test-results/1109-dev-step1-machine.png' });
 
   // Step 2 — the question.
