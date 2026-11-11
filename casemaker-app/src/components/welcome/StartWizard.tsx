@@ -1315,6 +1315,12 @@ export function StartWizard(): JSX.Element {
               {sentence(mountBlocked)}
             </p>
           )}
+          {/* #1109 item 8 — the primary's blocked reason is a VISIBLE line, not only a title. */}
+          {step === 'operation' && operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null && (
+            <p style={UNBLOCK} data-testid="start-wizard-operation-unblock">
+              {sentence(operationCreateBlocked(operationChoice, { reEntry: jobStarted })!)}
+            </p>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* #726 P10 — step 1 has no Back, and no footer Cancel: the header's ✕ is the one way
                 out every step carries; the footer offers only what moves the flow. */}
@@ -1389,9 +1395,6 @@ export function StartWizard(): JSX.Element {
                 // picked the step draws no sentence (its line speaks for a picked item), so a
                 // disabled control would otherwise say nothing at all.
                 disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
-                title={
-                  operationCreateBlocked(operationChoice, { reEntry: jobStarted }) ?? undefined
-                }
                 onClick={next}
               >
                 {operationChoice === null

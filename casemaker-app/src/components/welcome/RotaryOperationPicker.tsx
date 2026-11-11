@@ -41,19 +41,30 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
             {group.operations.map((op) => {
               const disabled = op.reason !== null;
               const on = !disabled && selected === op.id;
+              // #1109 item 8 — the hover help is a VISIBLE line under the chip, in the blurb's own
+              // words (rotaryOperations.ts); a refused chip shows its reason there instead.
+              const help = op.reason ?? op.blurb;
               return (
-                <button
-                  key={op.id}
-                  type="button"
-                  data-testid={testidFor(op.id)}
-                  aria-pressed={on}
-                  disabled={disabled}
-                  title={op.reason ?? op.blurb}
-                  style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
-                  onClick={() => onPick(op.id)}
-                >
-                  {op.label}
-                </button>
+                <div key={op.id} style={{ display: 'grid', gap: 2 }}>
+                  <button
+                    type="button"
+                    data-testid={testidFor(op.id)}
+                    aria-pressed={on}
+                    disabled={disabled}
+                    style={disabled ? SELECTION_CHIP_DISABLED : on ? SELECTION_CHIP_ON : SELECTION_CHIP}
+                    onClick={() => onPick(op.id)}
+                  >
+                    {op.label}
+                  </button>
+                  {help !== null && (
+                    <span
+                      data-testid={`${testidFor(op.id)}-help`}
+                      style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}
+                    >
+                      {help}
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>

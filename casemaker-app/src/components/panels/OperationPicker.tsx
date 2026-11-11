@@ -134,22 +134,29 @@ export function OperationPicker({
                 <span style={OPTIONS_LABEL}>{row.label}</span>
                 {row.options.map((option) => {
                   const enabled = optionEnabled?.(option) ?? true;
+                  // #1109 item 8 — the hover title becomes a VISIBLE line under its chip: the same
+                  // text, on the screen, for touch and for anyone who never hovers.
+                  const help =
+                    enabled
+                      ? option.title
+                      : `A ${option.label.toLowerCase()} follows another item; add a label or a shape first.`;
                   return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      data-testid={option.testId}
-                      disabled={!enabled}
-                      title={
-                        enabled
-                          ? option.title
-                          : `A ${option.label.toLowerCase()} follows another item; add a label or a shape first.`
-                      }
-                      style={enabled ? OPTION_CHIP : OPTION_CHIP_DISABLED}
-                      onClick={() => onOption?.(option)}
-                    >
-                      {option.label}
-                    </button>
+                    <div key={option.id} style={{ display: 'grid', gap: 2 }}>
+                      <button
+                        type="button"
+                        data-testid={option.testId}
+                        disabled={!enabled}
+                        style={enabled ? OPTION_CHIP : OPTION_CHIP_DISABLED}
+                        onClick={() => onOption?.(option)}
+                      >
+                        {option.label}
+                      </button>
+                      {help !== undefined && (
+                        <span style={HINT} data-testid={`${option.testId}-help`}>
+                          {help}
+                        </span>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -161,26 +168,37 @@ export function OperationPicker({
         <div style={IMPORTS} data-testid="operation-picker-imports">
           <span style={OPTIONS_LABEL}>From a file</span>
           {onImportOutline !== undefined && (
-            <button
-              type="button"
-              data-testid="engrave-add-import-outline"
-              disabled={importing}
-              title="Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open paths become Engrave (line) operations. Text and images are reported, not dropped."
-              onClick={onImportOutline}
-            >
-              {importing ? 'Reading…' : 'Import outline or lines…'}
-            </button>
+            <div style={{ display: 'grid', gap: 2 }}>
+              <button
+                type="button"
+                data-testid="engrave-add-import-outline"
+                disabled={importing}
+                onClick={onImportOutline}
+              >
+                {importing ? 'Reading…' : 'Import outline or lines…'}
+              </button>
+              {/* #1109 item 8 — the long help is a visible line, not a title. */}
+              <span style={HINT} data-testid="engrave-add-import-outline-help">
+                Import an SVG or DXF drawing: its closed, filled shapes become a pocket, and its open
+                paths become Engrave (line) operations. Text and images are reported, not dropped.
+              </span>
+            </div>
           )}
           {onImportImage !== undefined && (
-            <button
-              type="button"
-              data-testid="engrave-add-trace-image"
-              disabled={importing}
-              title="Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold, despeckle and corner smoothing are live in the dialog."
-              onClick={onImportImage}
-            >
-              {importing ? 'Reading…' : 'Trace image…'}
-            </button>
+            <div style={{ display: 'grid', gap: 2 }}>
+              <button
+                type="button"
+                data-testid="engrave-add-trace-image"
+                disabled={importing}
+                onClick={onImportImage}
+              >
+                {importing ? 'Reading…' : 'Trace image…'}
+              </button>
+              <span style={HINT} data-testid="engrave-add-trace-image-help">
+                Trace a bitmap — PNG, JPEG, GIF, WebP or BMP — into a cut region. Threshold,
+                despeckle and corner smoothing are live in the dialog.
+              </span>
+            </div>
           )}
         </div>
       )}

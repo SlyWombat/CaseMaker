@@ -118,6 +118,11 @@ only caller of `createEmptyJob()`.
 | `stockStart.ts:440` | "the <field> needs a number in mm, above 0" | *<Field> needs a size — type a number above 0 (for example 80).* | Sentence case; a value |
 | `stockStart.ts:475` | "the <field> needs a number in mm, above 0" | the same, with the field's own example | as above |
 | `StartStockStep.tsx:515` (copper) | "the copper thickness needs a number in mm, above 0" | *The copper thickness needs a size above 0 — 1 oz is 0.035 mm.* | Proposes a value |
+| `operationCreate.ts` cut-out length | "The shape needs a length above 0 mm." | *The shape needs a length above 0 — type a number in mm (for example 60).* | #1109 item 3: the card's decided default |
+| `operationCreate.ts` cut-out width | "The shape needs a width above 0 mm." | *The shape needs a width above 0 — type a number in mm (for example 40).* | as above |
+| `operationCreate.ts` pocket length | "The pocket needs a length above 0 mm." | *The pocket needs a length above 0 — type a number in mm (for example 60).* | as above |
+| `operationCreate.ts` pocket width | "The pocket needs a width above 0 mm." | *The pocket needs a width above 0 — type a number in mm (for example 40).* | as above |
+| `operationCreate.ts` pocket depth | "Depth must be above 0 mm." | *The pocket depth needs a size above 0 — type a number in mm (for example 6).* | as above |
 | `stockStart.ts` rod problems | "the vise holds a rod up to 20 mm standing on its end — this rod is 100 mm; hold it in the rotary chuck" | *The vise holds a rod up to 20 mm standing on its end — this one is 100 mm; hold it in the rotary chuck.* | Sentence case; the action stays |
 
 ## 7. Component set
@@ -134,7 +139,9 @@ only caller of `createEmptyJob()`.
 
 - `wizardCopy.spec.tsx`: no element whose only help is a `title`; `glossaryTerms.json` covers every
   term the steps render (a new term without an entry fails).
-- `blockers.spec.ts`: every blocker contains a digit, or the words "type"/"pick".
+- `blockers.spec.ts`: every blocker carries an explicit verb (type / pick / try / choose) — the digit alone is
+  not a suggestion ("above 0 mm" satisfied the old rule by accident) — and a numeric one has the one
+  `blocker()` shape with the field's decided example.
 - RTL: the provenance sentence survives typing "3" then "36" and disappears after blur with 40.
 - Playwright baselines of all four steps on the house app (web) and the dev build (vise), approved by
   the maintainer.
