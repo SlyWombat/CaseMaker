@@ -1,208 +1,273 @@
 {
-  "_note": "Set B, VERSIONED WITH THE RULES (11 files: top p1..p8, bottom p1..p3). tableVersion 1195-1 — the bytes are IDENTICAL to 1114-1: the setup-boundary gate (a one-setup job no longer merges same-diameter siblings) restores the ⌀3.175 × 12 metal O-flute primary, the ⌀3.175 ball × 10 finish, the ⌀2 × 12 rest and the ⌀1.5 × 6 curved rough, and the freeing contour stays on the ⌀3.175 × 42 whose STATED 42 mm flute proves the 25.3 mm profile (#1195). The priced pick then lands on the same cutters the 2026-11-09 bench used, byte for byte. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1195-1",
-  "rule": "(a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE (#1186 rule 1), ties to fewer bit changes then owned; (b) EVERY FLAT MAY PROPOSE AS A PRIMARY, shortlisted to the incumbent and the best own-row flat (#1192), and a cutter that can FREE the profile always joins when none shortlisted can (#1195); (c) THE FREEING CONTOUR IS A HARD CONSTRAINT (#1195, the analyst’s field): no chain is a candidate without a cutter whose STATED flute reaches the profile’s actual posted depth; the pick refuses only when nothing owned reaches or the operator pinned a cutter that does not, with a named sentence; (d) ONE CUTTER PER SHAPE AND DIAMETER, only on a job with a setup boundary (#1186 rule 6, gated by the setup count).",
-  "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1195-freeing-reach @ 9338152b2 (1186-bench + the setup-boundary gate + #1195), k3, 2026-11-10; the CLI output is byte-identical to tableVersion 1114-1",
-  "changedSince1129": [
-    {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p5.nc",
-      "old": "5d5a8990…",
-      "oldBytes": 48344,
-      "new": "8590bf68c8298b8f752b19ebac085b33",
-      "newBytes": 187222
-    },
-    {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p6.nc",
-      "old": "90221d576fa54974b61ec32ee0f5f6db",
-      "oldBytes": 48388,
-      "new": "c554cdd25c1875f5f47f61081a131e10",
-      "newBytes": 200144
-    },
-    {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p7.nc",
-      "old": "ee46eba4…",
-      "oldBytes": 200122,
-      "new": "f38d4859d22da8d99c30fc38be45384b",
-      "newBytes": 373662
-    },
-    {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p8.nc",
-      "old": "f60f59bd…",
-      "oldBytes": 161747,
-      "new": "114ed00b170b6ba4a0dd3c5486507009",
-      "newBytes": 45454
-    },
-    {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p1.nc",
-      "old": "a052318ff9644cab390ba11de395fc8b",
-      "oldBytes": 100890,
-      "new": "1b368039f8cc8087033b92e2a5a68f62",
-      "newBytes": 100912
-    },
-    {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p2.nc",
-      "old": "cda22e06…",
-      "oldBytes": 4233,
-      "new": "5217422ee680f77f751e8a25278fa5a1",
-      "newBytes": 1958074
-    },
-    {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p3.nc",
-      "old": "1eb40dd9…",
-      "oldBytes": 3246780,
-      "new": "e5f5bc692f9e47256235ac962394b59d",
-      "newBytes": 3146573
-    }
-  ],
-  "_droppedFrom1129": "m1trayB-top-p9.nc (114ed00b…, the contour — now top p8) and m1trayB-bottom-p2.nc (cda22e06…, the 0.9 flat) + m1trayB-bottom-p4.nc (259fd058…, the 22 ball's run — now bottom p2). Where the 1129-1 md5 is known the full value is quoted; the rest carry its sha prefix.",
-  "jobs": {
-    "m1trayB-top": {
-      "programs": 8,
-      "files": [
-        {
-          "name": "m1trayB-top-p1.nc",
-          "bytes": 124288,
-          "md5": "c674717adeb75440f480580b2628a87e",
-          "note": "pocket/rough on the ⌀3.175 × 42 O-flute — 7 ops, 51 min 40 s"
-        },
-        {
-          "name": "m1trayB-top-p2.nc",
-          "bytes": 1289,
-          "md5": "8cdac279a793ccb1a7bbd6fcb236868d",
-          "note": "⌀1 × 7 flat — 14 s"
-        },
-        {
-          "name": "m1trayB-top-p3.nc",
-          "bytes": 2002,
-          "md5": "cf327e2a3cb7c71401905b387cd63985",
-          "note": "⌀0.9 flat — 22 s"
-        },
-        {
-          "name": "m1trayB-top-p4.nc",
-          "bytes": 6667,
-          "md5": "5275f401e7ad0eda0aeb0439e2ddfc58",
-          "note": "⌀0.6 × 3 flat — 29 s"
-        },
-        {
-          "name": "m1trayB-top-p5.nc",
-          "bytes": 187222,
-          "md5": "8590bf68c8298b8f752b19ebac085b33",
-          "note": "curved rough on the ⌀1.5 × 6 flat — shortest sufficient over the XCAN 1.5 × 8; 16 min 33 s"
-        },
-        {
-          "name": "m1trayB-top-p6.nc",
-          "bytes": 200144,
-          "md5": "c554cdd25c1875f5f47f61081a131e10",
-          "note": "finish on the ⌀3.175 ball × 10 — shortest sufficient (both 3.175 balls pass the top's cuts); 6 min"
-        },
-        {
-          "name": "m1trayB-top-p7.nc",
-          "bytes": 373662,
-          "md5": "f38d4859d22da8d99c30fc38be45384b",
-          "note": "rest/pencil on the ⌀1 × 4 ball — 7 min 17 s"
-        },
-        {
-          "name": "m1trayB-top-p8.nc",
-          "bytes": 45454,
-          "md5": "114ed00b170b6ba4a0dd3c5486507009",
-          "note": "the freeing contour, RETURN on the ⌀3.175 × 42 O-flute — 14 min 47 s"
-        }
-      ]
-    },
-    "m1trayB-bottom": {
-      "programs": 3,
-      "files": [
-        {
-          "name": "m1trayB-bottom-p1.nc",
-          "bytes": 100912,
-          "md5": "1b368039f8cc8087033b92e2a5a68f62",
-          "note": "rough + pocket on the ⌀3.175 × 12 metal O-flute — the primary satisfies the shortest sufficient flute; 2 ops, 2 h 21 min"
-        },
-        {
-          "name": "m1trayB-bottom-p2.nc",
-          "bytes": 1958074,
-          "md5": "5217422ee680f77f751e8a25278fa5a1",
-          "note": "finish on the ⌀3.175 ball × 22 — the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 13 s"
-        },
-        {
-          "name": "m1trayB-bottom-p3.nc",
-          "bytes": 3146573,
-          "md5": "e5f5bc692f9e47256235ac962394b59d",
-          "note": "rest/pencil on the ⌀2 ball × 12 — the shortest sufficient rest ball; 1 h 26 min"
-        }
-      ]
-    }
+ "_note": "Set B, VERSIONED WITH THE RULES (12 files: top p1..p8, bottom p1..p4). tableVersion 1224-1 — the planner at 93ae32bf8 (planner v3 A1 #1217 + A1b #1224 + A3 #1219): the pocket's passes take the cutter's own row step-over, and the leftover tolerance never forgives tall material. Bottom gains the ⌀0.9 flat's own program (3→4); top keeps 8 with the pocket and curved-rough programs changed. The e2e reads this table as the cross-door check.",
+ "tableVersion": "1224-1",
+ "rule": "(a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE (#1186 rule 1), ties to fewer bit changes then owned; (b) EVERY FLAT MAY PROPOSE AS A PRIMARY, shortlisted to the incumbent and the best own-row flat (#1192), and a cutter that can FREE the profile always joins when none shortlisted can (#1195); (c) THE FREEING CONTOUR IS A HARD CONSTRAINT (#1195, the analyst’s field): no chain is a candidate without a cutter whose STATED flute reaches the profile’s actual posted depth; the pick refuses only when nothing owned reaches or the operator pinned a cutter that does not, with a named sentence; (d) ONE CUTTER PER SHAPE AND DIAMETER, only on a job with a setup boundary (#1186 rule 6, gated by the setup count). (e) planner v3 A1/A1b: a leftover tolerance between chains within 0.5 % of the surface, applied only between chains leaving the same number of TALL cells (standing >1 mm above the goal) (#1217, #1224); (f) planner v3 A3: a pocket's step-over is the cutter's own feed row's step-over, capped at its radius (#1219).",
+ "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1219-pocket-stepover @ 93ae32bf8 (A1 #1217 + A1b #1224 + A3 #1219), dave-1, 2026-11-11",
+ "changedSince1129": [
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p5.nc",
+   "old": "5d5a8990…",
+   "oldBytes": 48344,
+   "new": "8590bf68c8298b8f752b19ebac085b33",
+   "newBytes": 187222
   },
-  "changedSince1186": [
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p6.nc",
+   "old": "90221d576fa54974b61ec32ee0f5f6db",
+   "oldBytes": 48388,
+   "new": "c554cdd25c1875f5f47f61081a131e10",
+   "newBytes": 200144
+  },
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p7.nc",
+   "old": "ee46eba4…",
+   "oldBytes": 200122,
+   "new": "f38d4859d22da8d99c30fc38be45384b",
+   "newBytes": 373662
+  },
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p8.nc",
+   "old": "f60f59bd…",
+   "oldBytes": 161747,
+   "new": "114ed00b170b6ba4a0dd3c5486507009",
+   "newBytes": 45454
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p1.nc",
+   "old": "a052318ff9644cab390ba11de395fc8b",
+   "oldBytes": 100890,
+   "new": "1b368039f8cc8087033b92e2a5a68f62",
+   "newBytes": 100912
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p2.nc",
+   "old": "cda22e06…",
+   "oldBytes": 4233,
+   "new": "5217422ee680f77f751e8a25278fa5a1",
+   "newBytes": 1958074
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p3.nc",
+   "old": "1eb40dd9…",
+   "oldBytes": 3246780,
+   "new": "e5f5bc692f9e47256235ac962394b59d",
+   "newBytes": 3146573
+  }
+ ],
+ "_droppedFrom1129": "m1trayB-top-p9.nc (114ed00b…, the contour — now top p8) and m1trayB-bottom-p2.nc (cda22e06…, the 0.9 flat) + m1trayB-bottom-p4.nc (259fd058…, the 22 ball's run — now bottom p2). Where the 1129-1 md5 is known the full value is quoted; the rest carry its sha prefix.",
+ "jobs": {
+  "m1trayB-top": {
+   "programs": 8,
+   "files": [
     {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p2.nc",
-      "old": "138bb22e81ec975cdc37de2202e44d97",
-      "oldBytes": 240503,
-      "new": "8cdac279a793ccb1a7bbd6fcb236868d",
-      "newBytes": 1289,
-      "why": "the ⌀1×7 returns to its 14 s pocket; the curved remainder is the ⌀1.5×6’s again (the gate restores the unmerged house)"
+     "name": "m1trayB-top-p1.nc",
+     "bytes": 78186,
+     "md5": "85ab3d9354031126b380ad84e086e059",
+     "note": "pocket/rough on the ⌀3.175 × 42 O-flute — the pocket's passes at the row's step-over (#1219); 31 min 32 s"
     },
     {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p5.nc",
-      "old": "de1b561ce343babc8c91872bfe13932e",
-      "oldBytes": 48252,
-      "new": "8590bf68c8298b8f752b19ebac085b33",
-      "newBytes": 187222,
-      "why": "curved rough on the ⌀1.5×6 (16 min 33 s) — no merge, so the shorter flute is a candidate again and the shortest-sufficient tie picks it"
+     "name": "m1trayB-top-p2.nc",
+     "bytes": 1289,
+     "md5": "8cdac279a793ccb1a7bbd6fcb236868d",
+     "note": "⌀1 × 7 flat — 14 s"
     },
     {
-      "job": "m1trayB-top",
-      "name": "m1trayB-top-p6.nc",
-      "old": "ee46eba48da7b8ee30f2ce0ea8843dec",
-      "oldBytes": 200122,
-      "new": "c554cdd25c1875f5f47f61081a131e10",
-      "newBytes": 200144,
-      "why": "finish on the ⌀3.175 ball × 10 — the unmerged house offers both balls and the shorter sufficient one wins again"
+     "name": "m1trayB-top-p3.nc",
+     "bytes": 2002,
+     "md5": "cf327e2a3cb7c71401905b387cd63985",
+     "note": "⌀0.9 flat — 22 s"
     },
     {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p1.nc",
-      "old": "c9459629d45d5524b11e6cc9590e3330",
-      "oldBytes": 35572,
-      "new": "1b368039f8cc8087033b92e2a5a68f62",
-      "newBytes": 100912,
-      "why": "the ⌀3.175 × 12 metal O-flute is the primary again (2 h 21 min), the shortest sufficient flute — the ×42 the merge had forced is gone from this job"
+     "name": "m1trayB-top-p4.nc",
+     "bytes": 6667,
+     "md5": "5275f401e7ad0eda0aeb0439e2ddfc58",
+     "note": "⌀0.6 × 3 flat — 29 s"
     },
     {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p2.nc",
-      "old": "fbcdb28fdbdded95bdbc46d2d8a6aac8",
-      "oldBytes": 90800,
-      "new": null,
-      "newBytes": 0,
-      "why": "the separate ⌀3.0 corn curved-rough program is gone: the unmerged ×12 roughs its own curves in the primary’s program again"
+     "name": "m1trayB-top-p5.nc",
+     "bytes": 212912,
+     "md5": "26760050b33167be193de04327c7b8e7",
+     "note": "curved rough on the ⌀1.5 × 6 flat at the row's step-over (#1219) — 15 min 28 s"
     },
     {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p3.nc",
-      "old": "5217422ee680f77f751e8a25278fa5a1",
-      "oldBytes": 1958074,
-      "new": "5217422ee680f77f751e8a25278fa5a1",
-      "newBytes": 1958074,
-      "why": "unchanged bytes; the finish (ball × 22, 57 min 13 s) keeps its place"
+     "name": "m1trayB-top-p6.nc",
+     "bytes": 200144,
+     "md5": "c554cdd25c1875f5f47f61081a131e10",
+     "note": "finish on the ⌀3.175 ball × 10 — 6 min 0 s"
     },
     {
-      "job": "m1trayB-bottom",
-      "name": "m1trayB-bottom-p4.nc",
-      "old": "89beb84ba68e03ce42d694ec99932ebb",
-      "oldBytes": 3146574,
-      "new": "e5f5bc692f9e47256235ac962394b59d",
-      "newBytes": 3146573,
-      "why": "the rest returns to the ⌀2 × 12 ball (1 h 28 min) — the Ucheer ×15 the merge had forced is gone"
+     "name": "m1trayB-top-p7.nc",
+     "bytes": 373662,
+     "md5": "f38d4859d22da8d99c30fc38be45384b",
+     "note": "rest/pencil on the ⌀1 × 4 ball — 7 min 17 s"
+    },
+    {
+     "name": "m1trayB-top-p8.nc",
+     "bytes": 45454,
+     "md5": "114ed00b170b6ba4a0dd3c5486507009",
+     "note": "the freeing contour, RETURN on the ⌀3.175 × 42 O-flute — 14 min 47 s"
     }
+   ]
+  },
+  "m1trayB-bottom": {
+   "programs": 4,
+   "files": [
+    {
+     "name": "m1trayB-bottom-p1.nc",
+     "bytes": 87114,
+     "md5": "1e761b7bcd63fc158c51e5a6ae7cea05",
+     "note": "rough + pocket on the ⌀3.175 × 12 metal O-flute at the row's step-over (#1219) — 1 h 26 min"
+    },
+    {
+     "name": "m1trayB-bottom-p2.nc",
+     "bytes": 3011,
+     "md5": "9c9d86198693f688fa4d4cb22a4e8c11",
+     "note": "⌀0.9 flat — 1 min 49 s"
+    },
+    {
+     "name": "m1trayB-bottom-p3.nc",
+     "bytes": 1958074,
+     "md5": "5217422ee680f77f751e8a25278fa5a1",
+     "note": "finish on the ⌀3.175 ball × 22 — 57 min 13 s"
+    },
+    {
+     "name": "m1trayB-bottom-p4.nc",
+     "bytes": 3146573,
+     "md5": "e5f5bc692f9e47256235ac962394b59d",
+     "note": "rest/pencil on the ⌀2 ball × 12 — 1 h 28 min"
+    }
+   ]
+  }
+ },
+ "changedSince1186": [
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p2.nc",
+   "old": "138bb22e81ec975cdc37de2202e44d97",
+   "oldBytes": 240503,
+   "new": "8cdac279a793ccb1a7bbd6fcb236868d",
+   "newBytes": 1289,
+   "why": "the ⌀1×7 returns to its 14 s pocket; the curved remainder is the ⌀1.5×6’s again (the gate restores the unmerged house)"
+  },
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p5.nc",
+   "old": "de1b561ce343babc8c91872bfe13932e",
+   "oldBytes": 48252,
+   "new": "8590bf68c8298b8f752b19ebac085b33",
+   "newBytes": 187222,
+   "why": "curved rough on the ⌀1.5×6 (16 min 33 s) — no merge, so the shorter flute is a candidate again and the shortest-sufficient tie picks it"
+  },
+  {
+   "job": "m1trayB-top",
+   "name": "m1trayB-top-p6.nc",
+   "old": "ee46eba48da7b8ee30f2ce0ea8843dec",
+   "oldBytes": 200122,
+   "new": "c554cdd25c1875f5f47f61081a131e10",
+   "newBytes": 200144,
+   "why": "finish on the ⌀3.175 ball × 10 — the unmerged house offers both balls and the shorter sufficient one wins again"
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p1.nc",
+   "old": "c9459629d45d5524b11e6cc9590e3330",
+   "oldBytes": 35572,
+   "new": "1b368039f8cc8087033b92e2a5a68f62",
+   "newBytes": 100912,
+   "why": "the ⌀3.175 × 12 metal O-flute is the primary again (2 h 21 min), the shortest sufficient flute — the ×42 the merge had forced is gone from this job"
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p2.nc",
+   "old": "fbcdb28fdbdded95bdbc46d2d8a6aac8",
+   "oldBytes": 90800,
+   "new": null,
+   "newBytes": 0,
+   "why": "the separate ⌀3.0 corn curved-rough program is gone: the unmerged ×12 roughs its own curves in the primary’s program again"
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p3.nc",
+   "old": "5217422ee680f77f751e8a25278fa5a1",
+   "oldBytes": 1958074,
+   "new": "5217422ee680f77f751e8a25278fa5a1",
+   "newBytes": 1958074,
+   "why": "unchanged bytes; the finish (ball × 22, 57 min 13 s) keeps its place"
+  },
+  {
+   "job": "m1trayB-bottom",
+   "name": "m1trayB-bottom-p4.nc",
+   "old": "89beb84ba68e03ce42d694ec99932ebb",
+   "oldBytes": 3146574,
+   "new": "e5f5bc692f9e47256235ac962394b59d",
+   "newBytes": 3146573,
+   "why": "the rest returns to the ⌀2 × 12 ball (1 h 28 min) — the Ucheer ×15 the merge had forced is gone"
+  }
+ ],
+ "changedSince1224": {
+  "reason": "planner v3 A1 + A1b + A3: leftover tolerance with the tall guard (#1217, #1224) and the pocket's step-over from the feed row (#1219); tray top 8,005 → 6,675 s, coverage and tall cells unchanged",
+  "files": [
+   {
+    "job": "m1trayB-top",
+    "name": "m1trayB-top-p1.nc",
+    "old": "c674717adeb75440f480580b2628a87e",
+    "oldBytes": 124288,
+    "new": "85ab3d9354031126b380ad84e086e059",
+    "newBytes": 78186,
+    "why": "the pocket’s step-over is the cutter’s feed row’s (#1219): 45 % of the ⌀3.175 instead of a fixed quarter; 124,288 → 78,186 bytes"
+   },
+   {
+    "job": "m1trayB-top",
+    "name": "m1trayB-top-p5.nc",
+    "old": "8590bf68c8298b8f752b19ebac085b33",
+    "oldBytes": 187222,
+    "new": "26760050b33167be193de04327c7b8e7",
+    "newBytes": 212912,
+    "why": "the curved rough / rest pass takes the ⌀1.5’s row step-over (#1219)"
+   },
+   {
+    "job": "m1trayB-bottom",
+    "name": "m1trayB-bottom-p1.nc",
+    "old": "1b368039f8cc8087033b92e2a5a68f62",
+    "oldBytes": 100912,
+    "new": "1e761b7bcd63fc158c51e5a6ae7cea05",
+    "newBytes": 87114,
+    "why": "the pocket’s step-over is the ⌀3.175 × 12’s row step-over (#1219)"
+   },
+   {
+    "job": "m1trayB-bottom",
+    "name": "m1trayB-bottom-p2.nc",
+    "old": "5217422ee680f77f751e8a25278fa5a1",
+    "oldBytes": 1958074,
+    "new": "9c9d86198693f688fa4d4cb22a4e8c11",
+    "newBytes": 3011,
+    "why": "the ⌀0.9 flat’s own program enters at p2 (the tall guard #1224 and the row step-over #1219 move the pick)"
+   },
+   {
+    "job": "m1trayB-bottom",
+    "name": "m1trayB-bottom-p3.nc",
+    "old": "e5f5bc692f9e47256235ac962394b59d",
+    "oldBytes": 3146573,
+    "new": "5217422ee680f77f751e8a25278fa5a1",
+    "newBytes": 1958074,
+    "why": "the same bytes as the OLD p2 (the ⌀3.175 ball × 22 finish), now posted as p3 after the ⌀0.9 pass entered ahead of it"
+   },
+   {
+    "job": "m1trayB-bottom",
+    "name": "m1trayB-bottom-p4.nc",
+    "old": null,
+    "oldBytes": 0,
+    "new": "e5f5bc692f9e47256235ac962394b59d",
+    "newBytes": 3146573,
+    "why": "the same bytes as the OLD p3 (the ⌀2 ball × 12 rest), now posted as p4"
+   }
   ]
+ }
 }
