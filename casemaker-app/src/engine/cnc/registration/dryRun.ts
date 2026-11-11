@@ -72,7 +72,7 @@ export function previewHolds(preview: DryRoutine | null, firstRun: boolean, tick
  * truncated sequence — 23 lines of 36 (#1202 analyst defect, 2026-11-11).
  */
 export function scriptedReply(
-  opts: { band?: { min: number; max: number }; m491Z?: number | null } = {},
+  opts: { band?: { min: number; max: number }; m491Z?: number | null; tapZ?: number | null } = {},
 ): (line: string) => string {
   // The machine's Z and the mode. A relative `G38.3 Z-…` answers from where the head IS; the fast
   // top touch contacts at the level the plan expects (the middle of its band) and the slow touch
@@ -85,6 +85,12 @@ export function scriptedReply(
   // −4.533 and every scripted touch reads above it. Answer the plan's own reference (else the
   // long-standing −80) and the correction is zero.
   const m491Z = opts.m491Z !== undefined && opts.m491Z !== null && Number.isFinite(opts.m491Z) ? opts.m491Z : -80;
+  // #1202 — THE MOUNT TAP'S STORED LEVEL. The first Z probe of a registration is the mount tap; a
+  // real machine meets the jaw top (or the bracket's top) the record stores, and the executor
+  // checks the reading against `expectZ`. A midpoint answer reads millimetres above it and the dry
+  // run stops — the card shows an error and holds a real Register.
+  const tapZ = opts.tapZ !== undefined && opts.tapZ !== null && Number.isFinite(opts.tapZ) ? opts.tapZ : null;
+  let tapPending = tapZ !== null;
   let absolute = true;
   const expected = opts.band === undefined ? null : (opts.band.min + opts.band.max) / 2;
   /** The level the fast touch found; the slow touch starts just above it and triggers there. */
@@ -133,6 +139,18 @@ export function scriptedReply(
       const target = absolute ? amount : z + amount;
       const lo = Math.min(from, target);
       const hi = Math.max(from, target);
+      // THE MOUNT TAP IS TWO STAGES (execute.ts `mountTapTouch`): a FAST touch that ends just above
+      // the stored level and must MISS, then a SLOW touch down past it that meets the jaw there.
+      // Fabricating a fast-stage contact in the air is what stopped the dry run.
+      if (tapPending && target < from && tapZ !== null) {
+        if (target <= tapZ) {
+          z = tapZ;
+          tapPending = false;
+          return `[PRB:0.000,0.000,${tapZ.toFixed(3)}:1]\r\nok`;
+        }
+        z = target;
+        return `[PRB:0.000,0.000,${target.toFixed(3)}:0]\r\nok`;
+      }
       let hit: number;
       if (found !== null && found >= lo && found <= hi) {
         // The slow touch (and any re-seek): the surface is where the fast touch found it.
@@ -270,7 +288,13 @@ export async function dryRegistration(
 ): Promise<DryRoutine> {
   // The scripted machine is seeded with the plan's OWN band: the fast touch contacts where the
   // plan expects the top, and the slow touch answers at that level (#1202 analyst defect).
-  const console_ = recordingConsole(scriptedReply({ band: plan.seek.band, m491Z: plan.probeRefZ ?? null }));
+  const console_ = recordingConsole(
+    scriptedReply({
+      band: plan.seek.band,
+      m491Z: plan.probeRefZ ?? null,
+      tapZ: plan.mountTap?.expectZ ?? null,
+    }),
+  );
   const heights = registrationHeights(plan, opts.clearanceZ);
   let error: string | null = null;
   try {
@@ -296,9 +320,11 @@ export async function dryMountTap(
     planTravelMm?: number | null;
     routine: Extract<MotionRoutineId, 'seat-press' | 'mount-tap'>;
     liveClearanceZ?: number;
+    /** #1202 — the stored level this tap expects (a jaw or bracket top), when the caller has one. */
+    expectZ?: number | null;
   },
 ): Promise<DryRoutine> {
-  const console_ = recordingConsole();
+  const console_ = recordingConsole(scriptedReply({ tapZ: opts.expectZ ?? null }));
   const heights: Record<string, number> = { clearance: opts.clearanceZ };
   if (tap.fromMachineZ !== undefined && Number.isFinite(tap.fromMachineZ)) heights.approach = tap.fromMachineZ;
   if (opts.planTravelMm !== undefined && opts.planTravelMm !== null && opts.planTravelMm > 0) {
@@ -332,7 +358,11 @@ export async function dryFlipRegistration(
   attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
   opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
 ): Promise<DryRoutine> {
-  const console_ = recordingConsole(scriptedReply({ band: attempt.ctx.seek.band, m491Z: attempt.ctx.probeRefZ ?? null }));
+  // No tapZ here: the flip run never taps the mount (`runFlipRegistration` reads the ctx for
+  // its stock, settings and probe only), so seeding it would misplace its first Z probe.
+  const console_ = recordingConsole(
+    scriptedReply({ band: attempt.ctx.seek.band, m491Z: attempt.ctx.probeRefZ ?? null }),
+  );
   const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
   let error: string | null = null;
   try {

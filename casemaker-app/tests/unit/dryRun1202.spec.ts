@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
-import { dryMountTap, recordingConsole, reviewLines } from '@/engine/cnc/registration/dryRun';
+import { dryMountTap, recordingConsole, reviewLines, scriptedReply } from '@/engine/cnc/registration/dryRun';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS: ShopDefaults = ShopDefaultsSchema.parse(
@@ -83,5 +83,36 @@ describe('#1202 — the recording console', () => {
     expect(dry.identity.shape).toBe(other.identity.shape);
     // The named heights are in the identity: the clearance traverse is named, not a number.
     expect(dry.identity.lines.some((l) => l.height === 'clearance')).toBe(true);
+  }, 120_000);
+});
+
+// #1202 — THE MOUNT TAP MEETS THE STORED LEVEL. A real tap lands on the jaw top (or the bracket's
+// top) the machine record stores; a scripted midpoint reads millimetres above it, the executor's
+// tap check stops, and the card's preview error holds a real Register ("#797 follow-up" went red).
+describe('#1202 — the mount tap’s stored jaw top', () => {
+  it('the scripted tap meets the jaw where the record stores it, not the middle of its travel', () => {
+    const reply = scriptedReply({ tapZ: -57.491 });
+    for (const line of ['$H', 'G53 G0 Z-50', 'G91']) reply(line);
+    const prb = reply('G38.3 Z-20 F100');
+    expect(prb).toContain('[PRB:0.000,0.000,-57.491:1]');
+  });
+
+  it('a standalone tap preview with a stored jaw top is clean', async () => {
+    const dry = await dryMountTap(
+      { x: -175, y: -35, fromMachineZ: -50 },
+      {
+        clearanceZ: CLEARANCE,
+        settings: S,
+        workEnvelopeFloorZ: FLOOR,
+        mount: 'vise',
+        routine: 'mount-tap',
+        planTravelMm: 20,
+        expectZ: -57.491,
+        liveClearanceZ: CLEARANCE,
+      },
+    );
+    expect(dry.error).toBeNull();
+    expect(dry.refused).toBe(false);
+    expect(dry.identity.routine).toBe('mount-tap');
   }, 120_000);
 });

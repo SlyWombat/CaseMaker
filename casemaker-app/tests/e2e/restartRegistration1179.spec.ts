@@ -285,6 +285,9 @@ test('#1179 blank identity — a no-id job on a legacy machine: three touches, t
   fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
   await cm.ready();
   await prepare(page);
+  // The step-2 fold may close itself after the run has started (see `ensureStep2`); the banner and
+  // its press live inside it, so open it before reading them.
+  await ensureStep2(page);
 
   // The safe default, said on the card, with the press.
   const banner = page.getByTestId('engrave-registration-blank');
