@@ -52,7 +52,7 @@ describe('#1213 plan-counts — the summariser', () => {
       stamps: { computed: 2, cached: 1, failed: 1 },
       sweeps: 1,
       goalFields: 1,
-      shadow: { choices: 0, agree: 0, candidates: 0, errors: 0, fieldMs: 0, estimateMs: 0 },
+      shadow: { choices: 0, agree: 0, candidates: 0, errors: 0, fieldMs: 0, estimateMs: 0, shortlist: {} },
       peakRssBytes: 500,
       wallMs: 300,
       incomplete: false,
@@ -82,7 +82,7 @@ describe('#1213 plan-counts — the summariser', () => {
       stamps: { computed: 0, cached: 0, failed: 0 },
       sweeps: 0,
       goalFields: 0,
-      shadow: { choices: 0, agree: 0, candidates: 0, errors: 0, fieldMs: 0, estimateMs: 0 },
+      shadow: { choices: 0, agree: 0, candidates: 0, errors: 0, fieldMs: 0, estimateMs: 0, shortlist: {} },
       peakRssBytes: 0,
       wallMs: 0,
       incomplete: false,
@@ -131,5 +131,20 @@ describe('#1225 cutter rows join the two sides', () => {
       { signature: 'pocket:t6+rest:t3', cutterKey: 't3', estSeconds: 25, realSeconds: 40, realChangeSeconds: 91.4 },
       { signature: 'pocket:t6', cutterKey: 't6', estSeconds: 90, realSeconds: null, realChangeSeconds: null },
     ]);
+  });
+});
+
+describe('#1231 the shortlist table', () => {
+  it('counts shortlist rows per k', () => {
+    const rows: TraceRow[] = [
+      { t: 0, stage: 'shadow:shortlist', k: 3, holdsRealPick: 1 },
+      { t: 1, stage: 'shadow:shortlist', k: 3, holdsRealPick: 0 },
+      { t: 2, stage: 'shadow:shortlist', k: 5, holdsRealPick: 1 },
+    ];
+    expect(summarizeTrace(rows).shadow.shortlist).toEqual({ '3': { choices: 2, held: 1 }, '5': { choices: 1, held: 1 } });
+  });
+
+  it('an empty table when the trace has none', () => {
+    expect(summarizeTrace([{ t: 0, stage: 'pipeline:start' }]).shadow.shortlist).toEqual({});
   });
 });
