@@ -585,7 +585,7 @@ export function rodViseProblem(
   const rodLength = axisFrame ? stock.length : stock.thickness;
   if (rodLength <= ROD_VISE_MAX_LENGTH_MM) return null;
   return (
-    `The vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this rod is ` +
+    `The vise holds a rod up to ${fmt(ROD_VISE_MAX_LENGTH_MM)} mm standing on its end — this one is ` +
     `${fmt(rodLength)} mm; hold it in the rotary chuck.`
   );
 }

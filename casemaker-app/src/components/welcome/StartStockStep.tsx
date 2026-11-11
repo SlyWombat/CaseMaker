@@ -575,7 +575,7 @@ export function StartStockStep({
     if (box === null) return { pending: null, problem: null, notes: [] };
     const copperMm = material === 'pcb' ? Number(copper) : undefined;
     if (material === 'pcb' && !(Number.isFinite(copperMm) && (copperMm as number) > 0)) {
-      return { pending: null, problem: 'The copper thickness needs a size above 0 — 1 oz is 0.035 mm', notes: [] };
+      return { pending: null, problem: 'The copper thickness needs a size above 0 — 1 oz is 0.035 mm.', notes: [] };
     }
     const made = {
       ...box,
