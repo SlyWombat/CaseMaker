@@ -194,6 +194,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank",
     ),
     (
+        "probe.colletMatchMm",
+        0.05,
+        "mm",
+        "chosen, not measured: a probe unit's recorded shank within this of a post's nominal diameter (1/8\" = 6.35 mm, 6 mm) is that post's collet, and the fit-probe prompts name it; the bench's posts are nominal",
+    ),
+    (
         "bracket.originOffsetXMm",
         0.0,
         "mm",
@@ -831,6 +837,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "clean.rowSpacingMm" => Some(need(
             n.is_some_and(|v| (2.0..=50.0).contains(&v)),
             "2 to 50 mm",
+        )),
+        // #1207 / #1203 — the collet match tolerance (`defaultsClient.ts` states the same).
+        "probe.colletMatchMm" => Some(need(
+            n.is_some_and(|v| (0.001..=0.5).contains(&v)),
+            "0.001 to 0.5 mm",
         )),
         // ── #448 (end)
         "run.pollMs" => Some(need(

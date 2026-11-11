@@ -17,7 +17,9 @@ import { useState } from 'react';
 import { canReachMachine } from '@/platform/capabilities';
 import { homeMachine } from '@/platform/machineChangeRun';
 import { stopProgram, stopSettings } from '@/platform/machineStop';
+import { stopIsReportable } from '@/platform/machineStopReport';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { StopReportAction } from '@/components/panels/StopReportAction';
 
 export function MachineStop({
   host,
@@ -40,6 +42,9 @@ export function MachineStop({
 function StopControl({ host, port, stopLive, canHome }: { host: string; port: number; stopLive: boolean; canHome: boolean }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // #1205 / #1187 rule 3 — a Home that failed on the transport keeps the CONSOLE's sentence for
+  // the stop report; the note above stays the operator's words.
+  const [homeFailure, setHomeFailure] = useState<string | null>(null);
 
   async function stop(): Promise<void> {
     if (busy) return;
@@ -70,6 +75,7 @@ function StopControl({ host, port, stopLive, canHome }: { host: string; port: nu
   async function home(): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setHomeFailure(null);
     try {
       const r = await homeMachine({ host, port });
       setNote(
@@ -79,6 +85,7 @@ function StopControl({ host, port, stopLive, canHome }: { host: string; port: nu
             : 'Already home — nothing was sent.'
           : `Home did not complete: ${r.detail}`,
       );
+      setHomeFailure(r.kind === 'homed' ? null : r.detail);
     } finally {
       setBusy(false);
     }
@@ -117,6 +124,12 @@ function StopControl({ host, port, stopLive, canHome }: { host: string; port: nu
         <p className="hint" data-testid="manage-stop-note">
           {note}
         </p>
+      )}
+      {/* #1205 — the Home press's own report, under #1187 rule 3's gate: a transport or controller
+          failure offers it; the app's own refusal (not Idle, an alarm) does not. No job: this
+          press belongs to the machine card, not to a job. */}
+      {homeFailure !== null && stopIsReportable(homeFailure) && (
+        <StopReportAction action="home" target={{ host, port }} error={homeFailure} transcript={[]} job={null} />
       )}
     </div>
   );
