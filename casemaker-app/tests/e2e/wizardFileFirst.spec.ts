@@ -21,6 +21,8 @@ test.setTimeout(300_000);
 
 const STL = fileURLToPath(new URL('../fixtures/goals/thin-wall-box.stl', import.meta.url));
 const COASTER = fileURLToPath(new URL('../fixtures/outlines/coaster-60.svg', import.meta.url));
+// The maintainer's own PrusaSlicer project: a blank plus a negative-volume pocket (#410).
+const PROJECT_3MF = fileURLToPath(new URL('../../../samples/badge-blank/single.3mf', import.meta.url));
 
 type Json = Record<string, unknown>;
 type Doc = {
@@ -142,4 +144,68 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   for (const id of TICKS) {
     await expect(page.getByTestId(id), id).toHaveAttribute('data-state', 'tick', { timeout: 180_000 });
   }
+});
+
+
+/** A job with its minted ids and times removed, so two routes' jobs can be compared by value. */
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([k]) => !['id', 'createdAt', 'updatedAt', 'savedAt'].includes(k))
+        .map(([k, v]) => [k, stable(v)]),
+    );
+  }
+  return value;
+}
+
+test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same job as the Stock step’s loader', async ({
+  cm,
+  page,
+  browser,
+}) => {
+  await fakeLocation(page);
+
+  // Route A — the drop on the question step: recognised there, settled on the Stock step, read at Next.
+  await cm.ready();
+  await page.getByTestId('welcome-start-cnc').click();
+  await page.getByTestId('start-wizard-next').click();
+  await page.getByTestId('start-wizard-drop-input').setInputFiles(PROJECT_3MF);
+  await expect(page.getByTestId('start-wizard-op-design-fact')).toContainText('a PrusaSlicer project');
+  await page.getByTestId('start-wizard-operation-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  // The Stock step arrives settled on that file and says what it is — it does not ask for it again.
+  await expect(page.getByTestId('start-wizard-load-name')).toContainText('single.3mf');
+  await page.getByTestId('start-wizard-stock-next').click();
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  const viaDrop = await readJob(page);
+  expect(viaDrop.stockEntry?.kind).toBe('file');
+
+  // Route B — the Stock step's own loader, in a fresh browser context with another operation picked.
+  const context = await browser.newContext();
+  const fresh = await context.newPage();
+  await fakeLocation(fresh);
+  await fresh.goto('/', { waitUntil: 'domcontentloaded' });
+  await fresh.waitForFunction(() => Boolean(window.__caseMaker?.apiVersion === 1), undefined, { timeout: 30_000 });
+  await fresh.evaluate(async () => window.__caseMaker!.waitForIdle());
+  await fresh.getByTestId('welcome-start-cnc').click();
+  await fresh.getByTestId('start-wizard-next').click();
+  await fresh.getByTestId('start-wizard-preset-something-else').click();
+  await fresh.getByTestId('engrave-setup-what-pocket').click();
+  await fresh.getByTestId('start-wizard-operation-next').click();
+  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
+  await fresh.getByTestId('start-wizard-load-file').setInputFiles(PROJECT_3MF);
+  await expect(fresh.getByTestId('start-wizard-load-name')).toContainText('single.3mf');
+  await fresh.getByTestId('start-wizard-stock-next').click();
+  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  const viaLoader = await readJob(fresh);
+  await context.close();
+
+  // The same job: stock, stockEntry, the file record and the design's items.
+  expect(stable(viaDrop.stock)).toEqual(stable(viaLoader.stock));
+  expect(stable(viaDrop.stockEntry)).toEqual(stable(viaLoader.stockEntry));
+  expect(stable(viaDrop.labels)).toEqual(stable(viaLoader.labels));
+  expect(stable(viaDrop.shapes)).toEqual(stable(viaLoader.shapes));
+  expect(stable(viaDrop.sources)).toEqual(stable(viaLoader.sources));
 });

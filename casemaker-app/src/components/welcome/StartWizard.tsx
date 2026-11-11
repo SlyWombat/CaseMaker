@@ -1003,6 +1003,9 @@ export function StartWizard(): JSX.Element {
           useEngraveJobStore.getState().addLine(line);
           id ??= line.id;
         }
+      } else if (choice.type === 'design') {
+        // #1098 item 6 — the PrusaSlicer project's cut volumes wrote the job's items at the Stock
+        // step's Next (`startFromStock`'s design branch); Create adds nothing.
       } else if (choice.type === 'pcb') {
         // #874 — the board's Gerber set wrote the job's items as it read; Create adds nothing.
         // `id` stays null, so no row is opened and the wizard simply closes onto the work.
@@ -1096,7 +1099,14 @@ export function StartWizard(): JSX.Element {
 
       {step === 'stock' && (
         <>
-          <StockStep seed={stockSeed} onPending={onStockPending} part={partFootprintFor(work)} />
+          <StockStep
+            seed={stockSeed}
+            onPending={onStockPending}
+            part={partFootprintFor(work)}
+            // #1098 item 6 — a PrusaSlicer project dropped on the question step arrives here already
+            // read: the step opens settled on that file and does not ask for it again.
+            presetFile={operationChoice?.type === 'design' ? operationChoice.file : undefined}
+          />
           {startError !== null && (
             <p style={{ ...MUTED, color: '#f0b4ad' }} data-testid="start-wizard-start-error">
               {startError}

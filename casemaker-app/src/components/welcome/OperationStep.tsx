@@ -23,6 +23,8 @@ import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
 import { pcbReHoldNote } from '@/engine/import/pcbHold';
 import { readGoalObjectFile } from '@/engine/import/targetObject';
+import { readStockFile } from '@/engine/import/meshStock';
+import { featureSim } from '@/platform/features';
 import { parseOutlineFile, type OutlineImport } from '@/engine/import/outlineImport';
 import { shopDefault } from '@/store/shopDefaultsStore';
 import { proposeStock } from '@/engine/cnc/stockProposal';
@@ -206,6 +208,12 @@ export type OperationChoice =
    * region — the job's cutter decides the V, exactly as the panel's own chips do).
    */
   | { type: 'outline'; outline: OutlineImport; use: 'profile' | 'pocket' | 'v-carve'; depth?: number }
+  /**
+   * #1098 item 6 — A PRUSASLICER PROJECT WITH CUT VOLUMES: the blank AND the design in one file
+   * (#410). Step 2 only RECOGNISES it (`readStockFile`); the Stock step arrives settled on the file
+   * and `startFromStock` reads it at Create, exactly as the Stock step's own loader does.
+   */
+  | { type: 'design'; file: File; sha256: string; negativeVolumes: number }
   | {
       type: Exclude<OperationTypeId, 'engrave' | 'surface' | 'pcb'>;
       text?: string;
@@ -330,6 +338,7 @@ export function OperationStep({
     setPickedByOperator(true);
     setPicked(null);
     setOutline(null);
+    setDesign(null);
     setOutlineFileName(null);
     setOutlineError(null);
     setDropError(null);
@@ -389,6 +398,10 @@ export function OperationStep({
   // no chip for it: the format chose the operation. A chip click puts the drawing away again.
   // #897's rule applies to the drawing too: Back from the stock step is an edit, not a reset.
   const [outline, setOutline] = useState<OutlineImport | null>(seed?.type === 'outline' ? seed.outline : null);
+  // #1098 item 6 — a recognised PrusaSlicer project (the design route); null when none was dropped.
+  const [design, setDesign] = useState<{ file: File; sha256: string; negativeVolumes: number } | null>(
+    seed?.type === 'design' ? { file: seed.file, sha256: seed.sha256, negativeVolumes: seed.negativeVolumes } : null,
+  );
   const [outlineFileName, setOutlineFileName] = useState<string | null>(
     seed?.type === 'outline' ? seed.outline.sourceName : null,
   );
@@ -423,6 +436,7 @@ export function OperationStep({
     setFrameRotary(false);
     // #1098 — the picker is the alternative to the file; clicking a chip clears the drawing.
     setOutline(null);
+    setDesign(null);
     setOutlineFileName(null);
     setOutlineError(null);
     setDropError(null);
@@ -549,6 +563,8 @@ export function OperationStep({
         { type: 'engrave', text: answers.text, depth: newItemDepthFor(job), font: answers.font, sizeMm: letterSizeMm(answers.letterSize) }
       : preset === 'cutout' || preset === 'pocket'
       ? presetChoice(preset, answers)
+      : design !== null
+      ? { type: 'design', file: design.file, sha256: design.sha256, negativeVolumes: design.negativeVolumes }
       : outline !== null
       ? { type: 'outline', outline, use: outlineUse, ...(outlineUse === 'pocket' ? { depth: outlineDepth } : {}) }
       : picked === 'engrave'
@@ -674,16 +690,43 @@ export function OperationStep({
     setDropError(null);
     const dot = file.name.lastIndexOf('.');
     const ext = dot < 0 ? '' : file.name.slice(dot).toLowerCase();
+    if (ext === '.3mf') {
+      // #1098 item 6 — a PrusaSlicer project with cut volumes is the blank AND the design: the
+      // file is recognised here and routed to the design route; a plain 3MF is a mesh as before.
+      const read = await readStockFile(file);
+      if (read.kind === 'refused') {
+        setDropError(`${read.name}: ${read.reason}`);
+        return;
+      }
+      if (read.kind === 'design') {
+        if (!featureSim) {
+          setDropError(
+            `${read.name} is a PrusaSlicer project with ${read.negativeVolumes} cut volumes — reading a design needs the simulator, which is not enabled in this build`,
+          );
+          return;
+        }
+        pickFlat('surface');
+        setSurface(null);
+        setSurfaceFileName(null);
+        setOutline(null);
+        setOutlineFileName(null);
+        setDesign({ file, sha256: read.sha256, negativeVolumes: read.negativeVolumes });
+        return;
+      }
+    }
     if (MESH_FILE_EXTENSIONS.includes(ext) || ext === '.png') {
+      setDesign(null);
       pickFlat('surface');
       await chooseGoal(file);
       return;
     }
     if (OUTLINE_FILE_EXTENSIONS.includes(ext)) {
+      setDesign(null);
       await readOutline(file);
       return;
     }
     if (GERBER_FILE_EXTENSIONS.includes(ext)) {
+      setDesign(null);
       pickFlat('pcb');
       await readPcbSet(files);
       return;
@@ -789,6 +832,14 @@ export function OperationStep({
           inputTestId="start-wizard-drop-input"
           errorTestId="start-wizard-drop-error"
         />
+      )}
+      {!rotary && design !== null && (
+        <div data-testid="start-wizard-op-design-field" style={FIELD_BOX}>
+          <p style={MUTED} data-testid="start-wizard-op-design-fact">
+            {design.file.name} · the blank and {design.negativeVolumes} cut volume
+            {design.negativeVolumes === 1 ? '' : 's'} — a PrusaSlicer project
+          </p>
+        </div>
       )}
       {!rotary && outline !== null && (
         <div data-testid="start-wizard-op-outline-field" style={FIELD_BOX}>
