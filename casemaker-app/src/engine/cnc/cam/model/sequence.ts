@@ -1090,6 +1090,7 @@ export function chooseSequence(
     const contourDepth = demand.features
       .filter((f) => f.kind === 'contour')
       .reduce((m, f) => Math.max(m, f.depthMm ?? 0), 0);
+    const depthWords = Number(contourDepth.toFixed(3));
     if (contourDepth > 0) {
       const all = [...cutters.house, ...cutters.catalogue];
       const reaching = all.filter((tool) => tool.fluteLength !== null && tool.fluteLength + 1e-9 >= contourDepth);
@@ -1104,7 +1105,7 @@ export function chooseSequence(
         const what = pinnedTool.name || pinnedTool.id || 'the chosen cutter';
         const flute = pinnedTool.fluteLength === null ? 'not stated' : `${pinnedTool.fluteLength} mm`;
         throw new Error(
-          `the chosen cutter ${what} cannot free this part: its flute is ${flute} against a ${contourDepth} mm profile — `
+          `the chosen cutter ${what} cannot free this part: its flute is ${flute} against a ${depthWords} mm profile — `
           + (reaching.length > 0
             ? `${names(reaching)} reaches it; choose that cutter, or state this one's flute length`
             : 'none of your cutters has a stated flute of that length; state a flute length on: ' + (names(unstated) || 'no cutter')),
@@ -1112,7 +1113,7 @@ export function chooseSequence(
       }
       if (reaching.length === 0) {
         throw new Error(
-          `nothing can free this part: none of your cutters has a stated flute of ${contourDepth} mm or more — `
+          `nothing can free this part: none of your cutters has a stated flute of ${depthWords} mm or more — `
           + 'state a flute length on: ' + (names(unstated) || 'no cutter'),
         );
       }
