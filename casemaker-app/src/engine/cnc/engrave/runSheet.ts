@@ -11,6 +11,8 @@ import {
 } from '@/engine/cnc/cam/ir';
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { itemLabel, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
+// #1087 — the goal check's first leftover band: the number the no-scallop cusp line is stated against.
+import { GOAL_LEFTOVER_BANDS_MM } from '@/engine/cnc/engrave/designCheck';
 // #1193 — the run's own cycle (every posted program) rides the generated result.
 import type { RunCycle } from '@/engine/cnc/engrave/runTotals';
 import {
@@ -3616,13 +3618,19 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
   // contours, then the pencil paths along the corners. #862 — the rim laps open the finish.
   // #1087 — the step's PROMISE and its result in one clause: the cusp the rows leave beside the
   // cusp the job asks for, and the grid named when it could not reach it.
+  // #1087 — NO STATED SCALLOP still states its cusp: the step is the feeds row's then, and the
+  // goal check's first band (0.1 mm) judges what that step leaves. A stated scallop reads as the
+  // promise and the result in one clause; the grid is named when it could not reach the promise.
   const cuspWords =
-    facts.finishCuspMm === undefined || facts.finishScallopMm === undefined
+    facts.finishCuspMm === undefined
       ? ''
-      : facts.finishGridLimited === true
-        ? ` — the finest the ${fmtNum(facts.gridPitchMm ?? 0)} mm surface grid allows — leaving a ` +
-          `${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`
-        : `, leaving a ${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`;
+      : facts.finishScallopMm === undefined
+        ? `, leaving a ${fmtNum(facts.finishCuspMm)} mm cusp — no scallop is stated ` +
+          `(the goal check’s first band is ${fmtNum(GOAL_LEFTOVER_BANDS_MM[0])} mm)`
+        : facts.finishGridLimited === true
+          ? ` — the finest the ${fmtNum(facts.gridPitchMm ?? 0)} mm surface grid allows — leaving a ` +
+            `${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`
+          : `, leaving a ${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`;
   const passes = [
     facts.rim == null
       ? `Finishing follows the surface at ${fmtNum(facts.finishStepOverMm)} mm step-over${cuspWords}.`

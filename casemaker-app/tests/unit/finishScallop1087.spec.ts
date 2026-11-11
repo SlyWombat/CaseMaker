@@ -129,10 +129,13 @@ describe('#1087 the rotary finish takes its step from the stated scallop', () =>
     expect(out.finish.cuspMm!).toBeGreaterThan(SCALLOP);
   });
 
-  it('a caller that states no scallop keeps the feeds row’s step and reports no cusp', () => {
+  it('a caller that states no scallop keeps the feeds row’s step and STATES the cusp it leaves', () => {
     const out = build(0.1);
     expect(out.finish.stepOverMm).toBe(FEEDS.finishStepOver);
-    expect(out.finish.cuspMm).toBeNull();
+    // #1087 — the step stays the feeds row's; the cusp that step leaves is still stated, because
+    // 0.9 mm on a ⌀2 ball is 0.107 mm — above the goal check's 0.1 mm band — and two constants
+    // must not disagree in silence. Only `scallopMm` (nothing was asked for) stays null.
+    expect(out.finish.cuspMm).toBeCloseTo(ballScallopCusp(1, FEEDS.finishStepOver), 9);
     expect(out.finish.scallopMm).toBeNull();
     expect(out.finish.gridLimited).toBe(false);
   });
