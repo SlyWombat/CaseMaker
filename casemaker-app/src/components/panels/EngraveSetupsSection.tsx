@@ -209,6 +209,7 @@ export function EngraveSetupsSection({
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
   const tapBusy = useMountTapBusyFlag();
   const mountTapApi = useMountTap({
+    clearanceZ: seekFromMachineZ,
     target,
     settings: regSettings,
     floor: jobMachine(job, calibration).envelope.z.min,

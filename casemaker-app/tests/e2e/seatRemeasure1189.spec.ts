@@ -12,11 +12,14 @@ import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect, openSomethingElse } from './fixtures/caseMaker';
 import { locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { installFakeConsole } from './fixtures/fakeConsole';
+import { motionOrderGuard } from '@/engine/cnc/registration/motionOrder';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
 test.setTimeout(240_000);
 
 const SEAT = -85.788;
+/** The e2e house's resolved machine travel height (tests/unit/fixtures/location-doc.json). */
+const SEAT_CLEARANCE = -3;
 const NEW_SEAT = -84.64; // the seat as the refitted probe finds it (the bench's hypothesis)
 
 /** The bench's location: a LEGACY bracket seat at its own verified point (no probeRefZ yet), the
@@ -155,4 +158,17 @@ test('#1189 — the seat re-measure draws its prompt on the card, takes the read
   await expect(page.getByTestId('engrave-registration-proposal-line')).toContainText('then the top', {
     timeout: 60_000,
   });
+
+  // #1199 — THE WIRE SEQUENCE ITSELF PASSES THE SAFE-Z GUARD. The bench build (c8fa03a6) sent
+  // `G53 G0 Z-81.25` at home and then a 177 mm traverse; replaying this run's lines through the
+  // shared guard must find no XY move below the machine's clearance, and the seat's XY move must
+  // come AFTER a lift to the clearance, with the band's approach taken at the point.
+  const guard = motionOrderGuard(SEAT_CLEARANCE);
+  const wire = fake.lines();
+  for (const line of wire) {
+    expect(guard.observe(line), `the sent line ${line}`).toBeNull();
+  }
+  const seatXY = wire.findIndex((l) => l.replace(/\s+/g, ' ').trim() === `G53 G0 X-175 Y-35`);
+  expect(seatXY).toBeGreaterThan(-1);
+  expect(wire.slice(0, seatXY).filter((l) => /^G53 G0 Z/.test(l)).at(-1)).toBe(`G53 G0 Z${SEAT_CLEARANCE}`);
 });

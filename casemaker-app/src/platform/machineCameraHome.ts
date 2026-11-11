@@ -38,11 +38,30 @@ export interface CameraHomePose {
 export type CameraHomeBasis = 'calibration' | 'profile' | 'unknown-machine';
 
 /**
+ * #1199 — THE POSE MUST BE AT OR ABOVE THE MACHINE'S CLEARANCE, proven at the press, not assumed
+ * of the datum. This move has the bench accident's exact shape (a `G53 G0 Z`, then an X/Y rapid);
+ * it is safe only because `pose.z` is the clearance key. The caller passes the machine's resolved
+ * `toolChange.clearanceZ` beside the pose, and a pose below it refuses with a sentence.
+ */
+export function cameraHomeLiftProblem(pose: CameraHomePose, clearanceZ: number): string | null {
+  if (!Number.isFinite(clearanceZ)) return 'the machine’s travel height is not known';
+  if (!(pose.z >= clearanceZ - 1e-9)) {
+    return `the camera-home pose's Z (machine Z ${zText(pose.z)}) is below the machine's clearance (machine Z ${zText(clearanceZ)}) — the X/Y move would traverse under it`;
+  }
+  return null;
+}
+
+/**
  * The move, as console lines: lift in machine Z first, then X/Y at that height. Both in `G53`
  * (machine coordinates), so the pose means the same thing whatever work offset is active — the
  * clearance keys are the controller's own machine-frame numbers.
+ *
+ * @throws when the pose is below `clearanceZ` ({@link cameraHomeLiftProblem}): the lines are never
+ *         built for a traverse that the invariant forbids.
  */
-export function cameraHomeLines(pose: CameraHomePose): string[] {
+export function cameraHomeLines(pose: CameraHomePose, clearanceZ: number): string[] {
+  const problem = cameraHomeLiftProblem(pose, clearanceZ);
+  if (problem !== null) throw new Error(problem);
   return [`G53 G0 Z${zText(pose.z)}`, `G53 G0 X${zText(pose.x)} Y${zText(pose.y)}`];
 }
 

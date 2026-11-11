@@ -8,15 +8,20 @@
  *      read one, so none is left to sit silently between the touches and the origin).
  *   3. The OPERATOR fits the wired probe (a callback — a person, not this code). `M491`: its last
  *      `[PRB:…]` is the probe's tool-length reading, the Z0 reference.
- *   4. The surface at the plan's clean point, from the plan's seek height (`seek.fromMachineZ`): a fast `G38.3` that travels only to the
- *      expected surface − tolerance, `G0 Z1`, a slow `G38.3`. BOTH readings must land inside the
- *      expected surface ± tolerance, or the run stops. The probe then PARKS at surface + park.
- *   5. Each edge scan, touch by touch, every XY move AT THE PARK HEIGHT: `G0 X Y`, `?` until Idle,
- *      `G91`, `G38.3 Z-(park + cap)` — so a touch can never go below the surface − cap — `G90`, the
- *      lift to park. Coarse, then fine; the scan stops at the first touch off the stock, then takes
- *      ONE touch midway back toward the stock to halve the last step (never further out than the miss).
- *      A scan whose FIRST touch misses the stock steps inward by the coarse step until it finds the
- *      stock (bounded by the opposite edge), then runs the outward fine pass (#593).
+ *   4. #1199 — EVERY XY MOVE IS TAKEN AT THE MACHINE'S CLEARANCE, and every descent AT the point to
+ *      be probed. The surface at the plan's own point: lift to the clearance (`seek.fromMachineZ`,
+ *      the plan's required machine travel height), move XY there, descend to the band's approach
+ *      ONLY at that point, then a fast `G38.3` that travels only to the expected surface −
+ *      tolerance, `G0 Z1`, a slow `G38.3`. BOTH readings must land inside the expected surface ±
+ *      tolerance, or the run stops. The probe then PARKS at surface + park.
+ *   5. Each edge scan, touch by touch: lift to the clearance, `G0 X Y`, descend to the park AT the
+ *      point, `?` until Idle, `G91`, `G38.3 Z-(park + cap)` — so a touch can never go below the
+ *      surface − cap — `G90`, the lift to park. Coarse, then fine; the scan stops at the first
+ *      touch off the stock, then takes ONE touch midway back toward the stock to halve the last
+ *      step (never further out than the miss). A scan whose FIRST touch misses the stock steps
+ *      inward by the coarse step until it finds the stock (bounded by the opposite edge), then
+ *      runs the outward fine pass (#593). The guard at {@link session} refuses any XY line below
+ *      the clearance, so a routine cannot reintroduce a park-height traverse.
  *
  * EVERY PROBE IS `G38.3`, NEVER `G38.2` (#518, maintainer 2026-10-18: "why do we need to error, it causes
  * user panic that something bad happened"). A scan touch past the edge is the EXPECTED answer of a scan,
@@ -100,6 +105,7 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, shiftedRecordedTopMachineZ } from './probeShift';
+import { motionOrderGuard } from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -315,6 +321,13 @@ function session(
    * release still back the stylus off.
    */
   let probeDown: { axis: 'X' | 'Y' | 'Z'; travelSign: number } | null = null;
+  /**
+   * #1199 — THE SAFE-Z INVARIANT, at the one layer every probing routine shares. `seekFromMachineZ`
+   * is the machine's clearance (see the parameter's contract above), and the guard refuses any XY
+   * line sent from below it — so a routine that lifts to a band height and traverses is stopped
+   * before the line reaches the wire, and a descent is only ever taken at the point to be probed.
+   */
+  const motion = motionOrderGuard(seekFromMachineZ);
 
   /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
   function stoppedByOperator(): boolean {
@@ -323,10 +336,15 @@ function session(
 
   async function send(line: string, opts: { missOk?: boolean; timing?: Partial<ConsoleTiming> } = {}): Promise<string> {
     if (stoppedByOperator()) throw new Stop('stopped: the operator pressed Stop');
+    // #1199 — BEFORE THE WIRE: a line that would traverse XY below the clearance never goes out.
+    const refusal = motion.check(line);
+    if (refusal !== null) throw new Stop(refusal);
     const r = await deps.console.send(line, opts.timing);
     const reply = r.kind === 'sent' || r.kind === 'timeout' ? r.text : r.detail;
     const carried = r.kind === 'sent' || r.kind === 'timeout' ? (r.carried?.text ?? '') : '';
     transcript.push({ line, reply: carried ? `${reply}\n(between lines) ${carried}` : reply });
+    // #1199 — the line moved the head (or may have): the guard's bookkeeping follows the reply.
+    motion.commit(line, carried ? `${reply}\n${carried}` : reply);
     if (r.kind !== 'sent') throw new Stop(`${line}: ${r.kind} — ${reply}`);
     for (const text of [reply, carried]) {
       if (/\berror:/i.test(text)) throw new Stop(`${line}: the controller answered ${text.trim()}`);
@@ -394,6 +412,8 @@ function session(
         const alarm = /ALARM[^\n]*/i.exec(text)?.[0];
         if (alarm) throw new Stop(`$H: ${alarm.trim()}`);
       }
+      // #1199 — home puts the head at the top of its travel: the guard may now allow a traverse.
+      motion.commit('$H');
       return;
     }
     if (r.kind !== 'timeout') throw new Stop(`$H: ${r.kind} — ${reply}`);
@@ -404,7 +424,11 @@ function session(
       transcript.push({ line: '?', reply: poll.kind === 'sent' ? poll.text : poll.kind });
       if (poll.kind !== 'sent') continue;
       const state = controllerState(poll.text);
-      if (state === 'Idle') return;
+      if (state === 'Idle') {
+        // #1199 — the timeout was a long home, not a failed one; the head is at the top.
+        motion.commit('$H');
+        return;
+      }
       if (state === 'Alarm') throw new Stop('$H: the machine is in alarm after homing — check the machine before anything moves');
     }
     throw new Stop(`$H did not answer and the machine did not read Idle in ${HOME_POLLS} status polls — home it by hand`);
@@ -567,19 +591,22 @@ function probeNeedsRelease(probe: ProbeSpec | null): boolean {
 }
 
 /**
- * One scan touch at `at`: XY at the park height, Idle, probe down at most to the cap, clear a miss, lift.
- * `travelHigh` (#427): the move that STARTS a scan on the bracket goes at the seek height (the plan's
- * `seek.fromMachineZ`) and only then down to the park — the clamps and the bracket's arms stand above the
- * stock, higher than the park, and the move between two scan lines (or from the surface point) is not
- * checked against them.
- * The touches ALONG a scan line stay at the park: the line itself is kept clear of the clamps.
+ * One scan touch at `at`: lift to the clearance, XY there, down to the park AT the point, Idle,
+ * probe down at most to the cap, clear a miss, lift.
+ *
+ * #1199 — EVERY scan move traverses at the clearance. #427's `travelHigh` lifted only the FIRST
+ * touch of a bracket scan (to `seek.fromMachineZ`, which the builders fill from the machine's
+ * clearance); every other touch and stepover moved at whatever park height was left over — safe by
+ * VALUE (the park is above the measured surface), not by construction, and the same shape as the
+ * bench accident. That conditional is gone: the lift is the clearance every time, and the guard at
+ * `session()` refuses any routine that moves XY from below it.
  */
-async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: number, parkZ: number, surfaceZ: number, travelHigh = false): Promise<ScanTouch> {
+async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: number, parkZ: number, surfaceZ: number): Promise<ScanTouch> {
   const s = plan.settings;
   const [x, y] = scan.edge === 'left' || scan.edge === 'right' ? [at, scan.along] : [scan.along, at];
-  if (travelHigh) await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send(moveXY(plan, x, y));
-  if (travelHigh) await io.send(`G53 G0 Z${f(parkZ)}`);
+  await io.send(`G53 G0 Z${f(parkZ)}`);
   await io.idle();
   io.at(`as low as ${s.capBelowSurfaceMm} mm below the surface (a scan touch)`);
   await io.send('G91');
@@ -612,11 +639,11 @@ async function touch(io: Session, plan: RegistrationPlan, scan: EdgeScan, at: nu
  */
 async function scanEdge(io: Session, plan: RegistrationPlan, scan: EdgeScan, parkZ: number, surfaceZ: number): Promise<ScanRecord> {
   const touches: ScanTouch[] = [];
-  const probe = (p: number, travelHigh = false) => touch(io, plan, scan, p, parkZ, surfaceZ, travelHigh);
+  const probe = (p: number) => touch(io, plan, scan, p, parkZ, surfaceZ);
   // The known-on coordinate along this scan's axis: the surface touch answered there a moment ago.
   const surfaceCoord = scan.edge === 'left' || scan.edge === 'right' ? plan.surfacePoint.x : plan.surfacePoint.y;
 
-  const start = await probe(scan.start, plan.mount === 'bracket');
+  const start = await probe(scan.start);
   touches.push(start);
   if (start.kind === 'above' && scan.aboveIsEdge !== true) return { scan, touches };
 
@@ -679,7 +706,11 @@ async function scanEdgeSideways(
   if (!setup.ok) throw new Stop(setup.reason);
   const t = setup.touch;
   const what = scan.label ?? `the ${scan.edge} edge`;
-  if (plan.mount === 'bracket') await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
+  // #1199 — the sideways touch's approach traverses at the CLEARANCE whatever the mount; the
+  // descent to the touch depth follows at the point. The bracket branch used to lift to
+  // `seek.fromMachineZ`, which on a bracket plan is the seat's band approach (the bench's −81.25);
+  // the other branches moved at whatever park the previous step left.
+  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send(moveXY(plan, t.x, t.y));
   // #643 — THE DESCENT AT THE LIMIT IS GUARDED. The limit stands the edge band's width OUTSIDE
   // the expected edge (#1133), so a blank that sits that far toward the edge is UNDER this point:
@@ -1148,9 +1179,12 @@ async function seekSurface(
   const point = opts.point ?? plan.surfacePoint;
   const fromMachineZ = opts.fromMachineZ ?? plan.seek.fromMachineZ;
   const travel = Math.round((fromMachineZ - band.min) * 1000) / 1000;
-  await io.send(`G53 G0 Z${f(fromMachineZ)}`);
+  // #1199 — the clearance for the traverse, the band's approach ONLY at the point. A spread's
+  // extent touch used to travel at its approach height; that height is a descent, never a travel.
+  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send('G90');
   await io.send(moveXY(plan, point.x, point.y));
+  await io.send(`G53 G0 Z${f(fromMachineZ)}`);
   await io.idle();
   io.at(band.at);
   await io.send('G91');
@@ -1230,9 +1264,11 @@ async function seekDeeper(
 ): Promise<Prb> {
   const s = plan.settings;
   const from = r3(Math.max(plan.seek.band.max, band.max) + s.parkAboveSurfaceMm);
-  await io.send(`G53 G0 Z${f(from)}`);
+  // #1199 — the same rule: traverse at the clearance, descend to the band's approach at the point.
+  await io.send(`G53 G0 Z${f(plan.seek.fromMachineZ)}`);
   await io.send('G90');
   await io.send(moveXY(plan, plan.surfacePoint.x, plan.surfacePoint.y));
+  await io.send(`G53 G0 Z${f(from)}`);
   await io.idle();
   io.at(`as low as machine Z ${f(cap)} (the deeper surface search)`);
   await io.send('G91');
@@ -1281,7 +1317,10 @@ const MOUNT_TAP_SLACK_MM = 2;
 async function mountTapTouch(
   io: Session,
   tap: { x: number; y: number },
+  /** Where the tap's own descent starts, at the tap point: a band approach, machine Z. */
   seekFromMachineZ: number,
+  /** #1199 — the machine's clearance: the ONLY height the XY move to the tap point is taken at. */
+  travelZ: number,
   settings: RegistrationSettings,
   floorZ: number,
   /** #615 — the machine Z the touch expects to meet, or null to descend the full height at the touch feed. */
@@ -1295,8 +1334,12 @@ async function mountTapTouch(
   _probe: ProbeSpec | null,
 ): Promise<Prb | null> {
   await io.idle();
-  await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
+  // #1199 — TRAVERSE AT THE CLEARANCE, DESCEND AT THE TAP POINT. The bench's bent probe came of
+  // these two lines the other way round: a seek-start height (the seat band's approach, −81.25) is
+  // a DESCENT height, never a travel height.
+  await io.send(`G53 G0 Z${f(travelZ)}`);
   await io.send(`G53 G0 X${f(tap.x)} Y${f(tap.y)}`);
+  await io.send(`G53 G0 Z${f(seekFromMachineZ)}`);
   await io.idle();
   io.at(`as low as machine Z ${f(floorZ)} (the mount tap)`);
   await io.send('G91');
@@ -1335,7 +1378,13 @@ export type MountTapResult =
  * → M491 → the tap → $H, transcript like a registration; the caller writes the datum and re-plans.
  */
 export async function runMountTap(
-  tap: { x: number; y: number },
+  /**
+   * #1199 — the tap point, and (when the caller plans one) `fromMachineZ`: the band approach the
+   * tap DESCENDS to at that point. Absent, the descent starts at the clearance (the pre-#1070
+   * standalone tap, whose only seek height was the clearance itself).
+   */
+  tap: { x: number; y: number; fromMachineZ?: number },
+  /** The machine's clearance (`toolChange.clearanceZ`): the session's travel height and safe Z. */
   seekFromMachineZ: number,
   settings: RegistrationSettings,
   deps: ExecDeps,
@@ -1357,9 +1406,13 @@ export async function runMountTap(
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe));
   // The floor the tap may reach: the PLAN's bound when it states one, never the envelope's alone.
+  // #1199 — the bound is stated below the tap's own APPROACH (`tap.fromMachineZ`, the band start),
+  // not below the clearance: the two heights were one parameter before, and splitting them must
+  // not move the floor (which it did: a clearance-based floor stopped the seat seek 1.1 mm short).
+  const tapApproachZ = tap.fromMachineZ ?? seekFromMachineZ;
   const tapFloorZ =
     planTravelMm !== null && Number.isFinite(planTravelMm) && planTravelMm > 0
-      ? Math.max(workEnvelopeFloorZ, seekFromMachineZ - planTravelMm)
+      ? Math.max(workEnvelopeFloorZ, tapApproachZ - planTravelMm)
       : workEnvelopeFloorZ;
   const bad = settingsProblem(settings);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
@@ -1380,7 +1433,9 @@ export async function runMountTap(
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
-    const prb = await mountTapTouch(io, tap, seekFromMachineZ, settings, tapFloorZ, null, probe);
+    // #1199 — the descent starts at the tap's own planned approach (the seat's band), at the point;
+    // the travel to it is at the clearance.
+    const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, tap.fromMachineZ ?? seekFromMachineZ, seekFromMachineZ, settings, tapFloorZ, null, probe);
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
@@ -2104,7 +2159,7 @@ export async function runRegistration(
     if (chosenTop === null && plan.mountTap !== null && tapExpectZ !== null) {
       const tap = plan.mountTap;
       const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
-      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, s, floorZ, tapExpectZ, plan.probe);
+      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, plan.seek.fromMachineZ, s, floorZ, tapExpectZ, plan.probe);
       if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
         const vise = tap.reference === undefined || tap.reference === 'vise-jaw-top';
         // #633 — a TOUCH outside the slack is not a miss. The fast stage meets the fixed jaw (or an
@@ -2936,8 +2991,12 @@ export async function runFlipRegistration(
       const zMachine = r3(surfaceZ - find.entryDepthMm);
       const balls: Record<'x' | 'y', [number, number]> = { x: [0, 0], y: [0, 0] };
       for (const t of find.touches) {
-        await io.send(`G53 G0 Z${f(zMachine)}`);
+        // #1199 — travel to the touch's start point at the CLEARANCE, then descend to the bore's
+        // touch depth AT that point. The point is inside a mouth the entry seek has proved open;
+        // the old order descended first and traversed at the depth.
+        await io.send(`G53 G0 Z${f(ctx.seek.fromMachineZ)}`);
         await io.send(moveXY(ctx, t.from.x, t.from.y));
+        await io.send(`G53 G0 Z${f(zMachine)}`);
         await io.idle();
         io.at(`sideways to the ${t.sign > 0 ? '+' : '−'}${t.axis.toUpperCase()} wall of bore ${step.index}, at machine Z ${f(zMachine)}`);
         await io.send('G91');

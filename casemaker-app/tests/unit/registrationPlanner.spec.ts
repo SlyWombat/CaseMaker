@@ -1300,7 +1300,7 @@ describe('#599 the standalone mount tap', () => {
 });
 
 describe('#430 the executor, on a fake machine', () => {
-  it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at park, never below the cap', async () => {
+  it('runs the bench’s sequence safely: one command per line, Idle before every probe, XY only at the clearance, never below the cap', async () => {
     const z1 = fakeZ1({ actual: SHIFTED, jaw: true, polls: 2 });
     const r = await runRegistration(plan('vise'), { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
@@ -1313,10 +1313,11 @@ describe('#430 the executor, on a fake machine', () => {
     z1.lines.forEach((l, i) => {
       if (l.startsWith('G38.3')) expect(z1.lines.slice(0, i).filter((x) => x !== 'G91').at(-1)).toBe('?');
     });
-    // Every XY move after the surface happens at the park height (surface + 3), the first at Z −3.
-    const park = SURFACE + S.parkAboveSurfaceMm;
-    expect(z1.xyMovesAtZ[0]).toBe(-3);
-    for (const z of z1.xyMovesAtZ.slice(1)) expect(z).toBeCloseTo(park, 6);
+    // #1199 — EVERY XY move is taken at the machine's clearance (Z −3): the park height is a
+    // descent at the point, never a traverse. The old pin expected the scans to step over at the
+    // park, safe only by value; the guard now refuses that, and this is the contract it enforces.
+    expect(z1.xyMovesAtZ.length).toBeGreaterThan(1);
+    for (const z of z1.xyMovesAtZ) expect(z).toBe(-3);
     expect(z1.lowest()).toBeGreaterThanOrEqual(SURFACE - S.capBelowSurfaceMm - 1e-9);
 
     // #594 — each scan brackets the edge and bisects: it holds both an on and an off touch, and the
