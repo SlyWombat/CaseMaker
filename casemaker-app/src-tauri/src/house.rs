@@ -2832,6 +2832,47 @@ mod tests {
         assert_eq!(bytes, b"[]");
     }
 
+    // #1172 — THE THREE NEW INVENTORY FIELDS SURVIVE THE FILE, and an older document reads the
+    // agreed defaults: case colour and place are optional and absent stays absent; the plans switch
+    // is ON unless the document says otherwise (an item that never carried it still plans).
+    #[tokio::test]
+    async fn the_inventory_carries_case_place_and_the_plans_switch() {
+        let (dir, store) = store();
+        let mut yellow = an_item("inv-1");
+        yellow.case_colour = Some("yellow".to_string());
+        yellow.kept_in = Some("box A".to_string());
+        yellow.use_in_plans = false;
+        store.create_inventory(yellow).await.unwrap();
+        store.create_inventory(an_item("inv-2")).await.unwrap();
+
+        let reopened = HouseStore::open(dir.path().to_path_buf());
+        let (bytes, _) = reopened.inventory().await.unwrap();
+        let items: Vec<InventoryItem> = serde_json::from_slice(&bytes).unwrap();
+        let switched = items.iter().find(|item| item.id == "inv-1").unwrap();
+        assert_eq!(switched.case_colour.as_deref(), Some("yellow"));
+        assert_eq!(switched.kept_in.as_deref(), Some("box A"));
+        assert!(!switched.use_in_plans);
+        // The served document says the switch, so the next build of the app reads the same fact.
+        let raw = serde_json::to_value(switched).unwrap();
+        assert_eq!(raw["use_in_plans"], serde_json::json!(false));
+
+        // An item that states no case/place carries none, and a document written before the fields
+        // existed reads them as absent with the switch ON.
+        let plain = items.iter().find(|item| item.id == "inv-2").unwrap();
+        assert_eq!(plain.case_colour, None);
+        assert_eq!(plain.kept_in, None);
+        assert!(plain.use_in_plans);
+        let mut older = serde_json::to_value(plain).unwrap();
+        let object = older.as_object_mut().unwrap();
+        object.remove("case_colour");
+        object.remove("kept_in");
+        object.remove("use_in_plans");
+        let old: InventoryItem = serde_json::from_value(older).unwrap();
+        assert_eq!(old.case_colour, None);
+        assert_eq!(old.kept_in, None);
+        assert!(old.use_in_plans);
+    }
+
     // #309's invariant, enforced where it cannot be bypassed (#320): the panel resolves a code to
     // ONE item and offers quantity + 1, which only means anything if a code names one cutter.
     #[tokio::test]
