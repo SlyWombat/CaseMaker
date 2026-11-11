@@ -1,6 +1,6 @@
 {
-  "_note": "Set B, VERSIONED WITH THE RULES (11 files: top p1..p8, bottom p1..p3). tableVersion 1195-1 — the bytes are IDENTICAL to 1114-1: the setup-boundary gate (a one-setup job no longer merges same-diameter siblings) restores the ⌀3.175 × 12 metal O-flute primary, the ⌀3.175 ball × 10 finish, the ⌀2 × 12 rest and the ⌀1.5 × 6 curved rough, and the freeing contour stays on the ⌀3.175 × 42 whose STATED 42 mm flute proves the 25.3 mm profile (#1195). The priced pick then lands on the same cutters the 2026-11-09 bench used, byte for byte. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1195-1",
+  "_note": "Set B, VERSIONED WITH THE RULES (11 files: top p1..p8, bottom p1..p3). tableVersion 1214-1 — the BOTTOM rows re-pin from 1195-1 with F words and the TIME line as the only differences: #1214 (exact edge contact) and #1214 ruling (b), the plunge rule, which now decides the feed word on the posted grid. Every coordinate word is identical (0 diffs over 342,880 lines; max |ΔZ| 0): Rough 1 plunge→feed (p1), Finish 116 plunge→feed (p2, TIME 3433→3431 s), Finish 115 plunge→feed (p3, TIME 5318→5317 s). The TOP rows are still 1195-1's bytes (not re-generated in that change). 1195-1's own note follows: the bytes were IDENTICAL to 1114-1 — the setup-boundary gate (a one-setup job no longer merges same-diameter siblings) restores the ⌀3.175 × 12 metal O-flute primary, the ⌀3.175 ball × 10 finish, the ⌀2 × 12 rest and the ⌀1.5 × 6 curved rough, and the freeing contour stays on the ⌀3.175 × 42 whose STATED 42 mm flute proves the 25.3 mm profile (#1195). The priced pick then lands on the same cutters the 2026-11-09 bench used, byte for byte. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1214-1",
   "rule": "(a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE (#1186 rule 1), ties to fewer bit changes then owned; (b) EVERY FLAT MAY PROPOSE AS A PRIMARY, shortlisted to the incumbent and the best own-row flat (#1192), and a cutter that can FREE the profile always joins when none shortlisted can (#1195); (c) THE FREEING CONTOUR IS A HARD CONSTRAINT (#1195, the analyst’s field): no chain is a candidate without a cutter whose STATED flute reaches the profile’s actual posted depth; the pick refuses only when nothing owned reaches or the operator pinned a cutter that does not, with a named sentence; (d) ONE CUTTER PER SHAPE AND DIAMETER, only on a job with a setup boundary (#1186 rule 6, gated by the setup count).",
   "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1195-freeing-reach @ 9338152b2 (1186-bench + the setup-boundary gate + #1195), k3, 2026-11-10; the CLI output is byte-identical to tableVersion 1114-1",
   "changedSince1129": [
@@ -122,19 +122,19 @@
         {
           "name": "m1trayB-bottom-p1.nc",
           "bytes": 100912,
-          "md5": "1b368039f8cc8087033b92e2a5a68f62",
+          "md5": "001e8d982c4aeec47131bff6e65211df",
           "note": "rough + pocket on the ⌀3.175 × 12 metal O-flute — the primary satisfies the shortest sufficient flute; 2 ops, 2 h 21 min"
         },
         {
           "name": "m1trayB-bottom-p2.nc",
-          "bytes": 1958074,
-          "md5": "5217422ee680f77f751e8a25278fa5a1",
+          "bytes": 1956914,
+          "md5": "80e050a8691c6b6f664423aa76a3bc2d",
           "note": "finish on the ⌀3.175 ball × 22 — the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 13 s"
         },
         {
           "name": "m1trayB-bottom-p3.nc",
-          "bytes": 3146573,
-          "md5": "e5f5bc692f9e47256235ac962394b59d",
+          "bytes": 3145433,
+          "md5": "9113726b8fe3dbcd11204d47373f5673",
           "note": "rest/pencil on the ⌀2 ball × 12 — the shortest sufficient rest ball; 1 h 26 min"
         }
       ]
@@ -203,6 +203,35 @@
       "new": "e5f5bc692f9e47256235ac962394b59d",
       "newBytes": 3146573,
       "why": "the rest returns to the ⌀2 × 12 ball (1 h 28 min) — the Ucheer ×15 the merge had forced is gone"
+    }
+  ],
+  "changedSince1214": [
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p1.nc",
+      "old": "1b368039f8cc8087033b92e2a5a68f62",
+      "oldBytes": 100912,
+      "new": "001e8d982c4aeec47131bff6e65211df",
+      "newBytes": 100912,
+      "why": "#1214 (exact edge contact) and #1214 ruling (b), the plunge rule: F words and TIME only, every coordinate identical"
+    },
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p2.nc",
+      "old": "5217422ee680f77f751e8a25278fa5a1",
+      "oldBytes": 1958074,
+      "new": "80e050a8691c6b6f664423aa76a3bc2d",
+      "newBytes": 1956914,
+      "why": "#1214 (exact edge contact) and #1214 ruling (b), the plunge rule: F words and TIME only, every coordinate identical"
+    },
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p3.nc",
+      "old": "e5f5bc692f9e47256235ac962394b59d",
+      "oldBytes": 3146573,
+      "new": "9113726b8fe3dbcd11204d47373f5673",
+      "newBytes": 3145433,
+      "why": "#1214 (exact edge contact) and #1214 ruling (b), the plunge rule: F words and TIME only, every coordinate identical"
     }
   ]
 }

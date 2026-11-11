@@ -263,8 +263,10 @@ function edgeReachInterval(x0: number, y0: number, x1: number, y1: number, cx: n
  * fixtures' own 0.001 mm Z tolerance, with both endpoints checked explicitly so a FLAT's own
  * linear `f` (no interior maximum to converge toward) lands exactly on one. `null` when the edge
  * never comes within reach at all.
+ *
+ * Exported for its unit test only.
  */
-function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x: number, y: number, profile: CutterProfile): number | null {
+export function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, x: number, y: number, profile: CutterProfile): number | null {
   const interval = edgeReachInterval(x0, y0, x1, y1, x, y, profile.radiusMm);
   if (interval === null) return null;
   const [lo, hi] = interval;
@@ -281,6 +283,46 @@ function edgeContactMax(x0: number, y0: number, z0: number, x1: number, y1: numb
   // them anyway (this file's own header). Skipping it removes ~170 f-evaluations per candidate on
   // every path a flat end mill walks — the skim, the 4a mask and every pocket.
   if (profile.kind === 'flat') return Math.max(f(lo), f(hi));
+  // planner v3 slice 1 — BALL AND CONE: `f` is concave on [lo, hi], so its maximum is at an end,
+  // at a point of zero slope, or at a kink of the cutter's shape. Those points are known exactly;
+  // evaluate `f` there and nowhere else. The bull nose (an arc with a flat) falls through to the
+  // search below.
+  const isBall = profile.kind === 'arc' && profile.flatRadiusMm === 0;
+  if (isBall || profile.kind === 'cone') {
+    const ex = x1 - x0;
+    const ey = y1 - y0;
+    const len2 = ex * ex + ey * ey; // > 0: edgeReachInterval returned null otherwise
+    const len = Math.sqrt(len2);
+    // s0: the parameter of the edge's point closest to the tool axis, seen from above.
+    const s0 = ((x - x0) * ex + (y - y0) * ey) / len2;
+    const nx = x0 + s0 * ex - x;
+    const ny = y0 + s0 * ey - y;
+    const d2 = nx * nx + ny * ny; // squared distance from the axis to the edge's line, seen from above
+    const slope = (z1 - z0) / len; // the edge's rise per mm of horizontal travel
+    // `t` is the signed horizontal distance along the edge from that closest point: s = s0 + t / len.
+    const tCandidates: number[] = [];
+    if (isBall) {
+      const r = profile.curveRadiusMm ?? 0;
+      const q2 = r * r - d2;
+      if (q2 > 0) tCandidates.push((slope * Math.sqrt(q2)) / Math.sqrt(1 + slope * slope));
+    } else {
+      const flat = profile.flatRadiusMm;
+      const k = slope * (profile.tanHalfAngle ?? 1);
+      if (d2 > 0 && Math.abs(k) < 1) tCandidates.push((k * Math.sqrt(d2)) / Math.sqrt(1 - k * k));
+      // The kinks: where the edge crosses the rim of the tip's flat, and the closest point itself.
+      tCandidates.push(0);
+      if (flat * flat > d2) {
+        const w = Math.sqrt(flat * flat - d2);
+        tCandidates.push(w, -w);
+      }
+    }
+    let best = Math.max(f(lo), f(hi));
+    for (const t of tCandidates) {
+      const s = s0 + t / len;
+      if (s > lo && s < hi) best = Math.max(best, f(s));
+    }
+    return best;
+  }
   const GOLDEN = (Math.sqrt(5) - 1) / 2;
   let a = lo;
   let b = hi;
