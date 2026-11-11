@@ -773,7 +773,8 @@ simulated; the candidate the measured pick fully planned is that plan, reused ra
 and the plan notes say how far the pick searched ("12 tied, 3 fully planned — the rest are ordered by
 the cheap estimate and scored coarse only"). The comparison with every bit the app knows is planned
 afterwards, on its own worker, so it is never queued ahead of the simulation or the sweep: the plan
-card reads "comparing the plans…" until the tradeoff — or "no material difference" — lands. On the
+card says it is comparing the owned plan with every bit the app knows, and that Cut can carry on,
+until the tradeoff — or "no material difference" — lands. On the
 tray the programs are ready in about 2.5–7 minutes. On the CLI and the house service the pick's
 capped finalists evaluate as one batch on worker threads; the page's own path is unchanged.
 
