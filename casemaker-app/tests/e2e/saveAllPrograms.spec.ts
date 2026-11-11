@@ -9,12 +9,12 @@
 // The zip's `.nc` files must be BYTE-IDENTICAL to set B — the CLI's own output for this job
 // (`fixtures/m1trayB/setB-md5.json`, the #1114 re-keyed table) — proving the app's Save, the CLI
 // and the release store name and write the same files. Every file is strict: the app and the CLI
-// order the owned set canonically, price every bit change from the program before it, and decide
-// a same-diameter tie by ONE rule (the gate → the shortest sufficient flute → the larger diameter
-// → the lower priced stage → the key), so the ⌀3.175 finish is the 22 mm ball and the primary is
-// the ⌀3.175 × 12 metal O-flute on both doors. Under that rule the job posts three programs, not
-// the old five: the curved rough shares the primary's program and the 0.9 flat's program is gone
-// with the outcome unchanged. The run sheet must name every program with its own Save button, and
+// order the owned set canonically, price every bit change from the program before it, and rank a
+// chain by the time it will really take (#1186 rule 1: each step at the row its cutter actually
+// runs, plus the priced changes), so the ⌀3.175 finish is the 22 mm ball and the primary is the
+// ⌀3.175 × 42 O-flute on both doors. Under that rule the job posts four programs: the pocket, the
+// curved rough on the ⌀3.0 corn, the ball finish and the ⌀2 rest. The run sheet must name every
+// program with its own Save button, and
 // the file bar must offer NO single-program Save for the run.
 //
 // WHY THE HOUSE IS A FIXTURE: no real house service runs in the e2e web build, and the tray's
@@ -200,14 +200,15 @@ test('#1093 — Save all writes every program of the run, byte-identical to set 
     await expect(page.getByTestId(`run-sheet-file-${i}`)).toContainText(`${JOB_NAME}-p${i}.nc`);
     await expect(page.getByTestId(`run-sheet-save-${i}`)).toBeVisible();
   }
-  // #1114 — EVERY SAME-DIAMETER PICK STATES ITS DECIDER (no more pending policy), and every bit
-  // change is priced from the program before it. The sheet's `sentence()` capitalises a note's
-  // first letter, so the row reads "Same diameter".
+  // #1186 — THE PLAN STATES ITS PRICED CURRENCY: every bit change is priced from the program
+  // before it, and the run's cycle sums the cutting and those changes. The #1114 same-diameter
+  // decider line rides a pick only when the pick faces such a tie; on this job the primary is
+  // settled by the priced total (the ⌀3.175 × 42 over the ×12), so the sheet states the cycle
+  // instead. The byte comparison below is the strict part; this asserts the sheet explains itself.
   const plan = page.locator('[data-section-id="plan"]');
-  await expect(plan).toContainText(/same diameter/i);
-  await expect(plan).toContainText(/shortest sufficient flute|reach-margin gate|larger diameter/i);
   await expect(plan).toContainText(/bit change/i);
   await expect(plan).toContainText(/priced/i);
+  await expect(plan).toContainText(/run.?.?s cycle is/i);
   // One row's own Save writes that program, and only that program (the run's last one).
   const last = SETB_BOTTOM.programs;
   const [one] = await Promise.all([
