@@ -146,7 +146,6 @@ export function engraveShopOpts(defaults: ShopDefaults | null): {
   };
   finish: { stockToLeaveMm: ReturnType<typeof readDefault> };
   drill: ReturnType<typeof drillSettings>;
-  surfaceGrid: { pitchMm: ReturnType<typeof readDefault> };
 } {
   return {
     lostDetailWarnRatio: readDefault(defaults, 'engrave.lostDetailWarnRatio').value,
@@ -165,6 +164,5 @@ export function engraveShopOpts(defaults: ShopDefaults | null): {
     },
     finish: { stockToLeaveMm: readDefault(defaults, 'finish.stockToLeaveMm') },
     drill: drillSettings(defaults),
-    surfaceGrid: { pitchMm: readDefault(defaults, 'sim.columnFlatPitchYMm') },
   };
 }

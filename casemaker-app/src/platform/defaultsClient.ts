@@ -368,6 +368,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // this is Case Maker's figure until a bench measurement replaces it; the Holding step asks the
   // grip and derives the stick-out as the rod's length less it.
   'rotary.gripMm': { label: 'grip in the rotary chuck (chosen, not measured)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 15 },
+  // ── #1164 — THE RELIEF PLANNING PITCH, mm: the map a rotary relief's drop-tip fields are planned
+  // on when the goal states no `surface.gridPitchMm`. CHOSEN, not measured: a coarser plan is the
+  // conservative direction (`poolRadialField`, rule 5) and the tip field's cost grows ~1/pitch².
+  // The shop's 0.1 mm simulation grid is a MEASUREMENT pitch, not a planning one — a giraffe-sized
+  // relief planned at 0.1 mm would need ~4e9 tip evaluations. Fallback = the value the Set B and
+  // giraffe acceptance jobs state, which measures 0.0056 mm of finish overcut.
+  'relief.planningPitchMm': { label: 'relief planning pitch (chosen)', unit: 'mm', rule: z.number().min(0.1).max(2), fallback: 1 },
   // ── #451 sim resolutions (end)
   // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
   'runSheet.blankToleranceMm': { label: 'blank-size tolerance the sheet prints (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
