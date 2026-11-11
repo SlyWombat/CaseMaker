@@ -17,9 +17,12 @@
 import { motionOrderGuard } from './motionOrder';
 import { routineIdentityOf, type MotionRoutineId, type NamedHeights, type RoutineIdentity } from './routineIdentity';
 import {
+  runCentreFind,
   runFlipRegistration,
   runMountTap,
   runRegistration,
+  type CentreFindOptions,
+  type CentreRunResult,
   type ExecDeps,
   type FlipRunResult,
   type MountTapResult,
@@ -206,6 +209,22 @@ export function recordingConsole(
 }
 
 /**
+ * The centre find's scripted machine (#827): the top touch is the FIRST `G38.3` Z probe and must
+ * trigger (it finds the surface); every later Z probe is a descent to the side touch's depth, which
+ * must MISS — a bore's centre is open air, a boss's start is beyond its wall. X/Y probes trigger.
+ */
+export function centreFindReply(): (line: string) => string {
+  let zProbes = 0;
+  return (line) => {
+    if (/^G38\.3\s+Z[-+]?[\d.]+/i.test(line.trim())) {
+      zProbes += 1;
+      if (zProbes > 1) return '[PRB:0,0,-80.000:0]\r\nok';
+    }
+    return dryReply(line);
+  };
+}
+
+/**
  * The scripted reply for one line. Shapes copied from the fake console (#816), which every probing
  * e2e runs against: a `?` is Idle, M119 is open, M491 is a touched reading, and a `G38.3` reports
  * the trigger at half its travel so the executor records a reading and carries on.
@@ -347,6 +366,24 @@ export async function dryMountTap(
     error = e instanceof Error ? e.message : String(e);
   }
   return finish(opts.routine, console_, opts.clearanceZ, heights, error);
+}
+
+/**
+ * The centre find's dry lines (#1202 field 5) — the bore/boss/round-part routine through the SAME
+ * executor the Find press runs. `seekFromMachineZ` is the machine's travel height; the press uses
+ * it as the session's live clearance, so the preview reviews against the same number.
+ */
+export async function dryCentreFind(opts: CentreFindOptions): Promise<DryRoutine> {
+  const console_ = recordingConsole(centreFindReply());
+  const clearanceZ = opts.seekFromMachineZ;
+  let error: string | null = null;
+  try {
+    const result: CentreRunResult = await runCentreFind(opts, depsFor(console_, clearanceZ));
+    if (!result.ok) error = result.reason;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  return finish('centre-find', console_, clearanceZ, { clearance: clearanceZ }, error);
 }
 
 /**

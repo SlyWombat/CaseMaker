@@ -13,12 +13,23 @@
  * feature's centre says where the ORIGIN is, not where the stock's edges are.
  */
 
-import { useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
 import { attachConsole } from '@/platform/machineConsole';
-import { applyCorrection, runCentreFind, type CentreRunResult } from '@/engine/cnc/registration/execute';
-import { planCentreFind, type CentreKind } from '@/engine/cnc/registration/centreFind';
+import {
+  applyCorrection,
+  runCentreFind,
+  type CentreFindOptions,
+  type CentreRunResult,
+} from '@/engine/cnc/registration/execute';
+import { planCentreFind, type CentreFindPlan, type CentreKind } from '@/engine/cnc/registration/centreFind';
 import { probeInstrumentOf, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
+// #1202 field 5 — the Find press's own dry line view, first-run mark and statement.
+import { dryCentreFind, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { RoutineDryPreview } from './RoutineDryPreview';
+import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
+import { firstRunAutomationRefusal } from '@/platform/automation';
+import { machineAt, saveMachineWithRetry, useLocationStore } from '@/store/locationStore';
 
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 const BOX: CSSProperties = { marginTop: 6, padding: 8, border: '1px solid #3a4552', borderRadius: 4, background: '#1b2027' };
@@ -71,6 +82,64 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
     return null;
   }, [estimate, stock, search, defaultSearch]);
 
+  // #1202 field 5 — THE FIND PRESS'S OWN ROUTINE, shown before it moves. The same plan the press
+  // runs goes through the dry executor (recording console, no socket); a shape this machine has
+  // never completed is marked, the operator's statement holds the press, and a run that finishes
+  // without a stop records the shape.
+  const machineRecord = useLocationStore((s) =>
+    target === null
+      ? null
+      : s.location?.machines.find((m) => m.address?.host === target.host && m.address.port === target.port) ?? null,
+  );
+  const made = useMemo((): { ok: true; plan: CentreFindPlan } | { ok: false; reason: string } | null => {
+    if (plan === null || probe?.tip == null || estimate === null) return null;
+    return planCentreFind({
+      kind,
+      at: estimate,
+      searchMm: Number(search.trim() === '' ? defaultSearch : search),
+      ballRadiusMm: probe.tip.rimOffsetMm,
+      ...(thickness === undefined ? {} : { stockThicknessMm: thickness }),
+      touchFeed: settings.touchFeed,
+    });
+  }, [kind, search, defaultSearch, plan, probe, estimate, thickness, settings.touchFeed]);
+  /** The executor's own options for this plan — the press and the preview must not differ. */
+  const centreOptions = useMemo((): CentreFindOptions | null => {
+    if (made === null || !made.ok || plan === null) return null;
+    return {
+      plan: made.plan,
+      seekFromMachineZ: plan.seek.fromMachineZ,
+      bandMm: plan.seek.band,
+      surfaceFeed: settings.surfaceSlowFeed,
+      parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
+      ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
+    };
+  }, [made, plan, settings.surfaceSlowFeed, settings.parkAboveSurfaceMm, kind, topTouchAt]);
+  const [preview, setPreview] = useState<DryRoutine | null>(null);
+  const [ticked, setTicked] = useState(false);
+  useEffect(() => {
+    if (centreOptions === null) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const dry = await dryCentreFind(centreOptions);
+        if (live) setPreview(dry);
+      } catch {
+        if (live) setPreview(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [centreOptions]);
+  // A fresh statement per routine shape: the tick that satisfied the last press is not this one.
+  useEffect(() => setTicked(false), [preview?.identity.shape]);
+  const firstRun = preview !== null && !routineCompleted(machineRecord, preview.identity);
+  const headless = firstRunAutomationRefusal({ firstRun });
+  const routineGate = (preview !== null && preview.refused) || (firstRun && !ticked);
+
   const operator = (step: { text: string }): Promise<boolean> =>
     new Promise<boolean>((resolve) => {
       if (!alive.current) {
@@ -87,20 +156,13 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
   }
 
   async function find(): Promise<void> {
-    if (target === null || plan === null || probe?.tip == null || estimate === null) return;
-    const made = planCentreFind({
-      kind,
-      at: estimate,
-      searchMm: Number(search.trim() === '' ? defaultSearch : search),
-      ballRadiusMm: probe.tip.rimOffsetMm,
-      ...(thickness === undefined ? {} : { stockThicknessMm: thickness }),
-      touchFeed: settings.touchFeed,
-    });
+    if (target === null || made === null) return;
     if (!made.ok) {
       setError(made.reason);
       setPhase('failed');
       return;
     }
+    if (centreOptions === null) return;
     setPhase('running');
     setError(null);
     setResult(null);
@@ -108,17 +170,11 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
     alive.current = true;
     const handle = attachConsole(target);
     try {
-      const r = await runCentreFind(
-        {
-          plan: made.plan,
-          seekFromMachineZ: plan.seek.fromMachineZ,
-          bandMm: plan.seek.band,
-          surfaceFeed: settings.surfaceSlowFeed,
-          parkAboveSurfaceMm: settings.parkAboveSurfaceMm,
-          ...(kind === 'bore' && topTouchAt !== null ? { topTouchAt } : {}),
-        },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: plan.seek.fromMachineZ },
-      );
+      const r = await runCentreFind(centreOptions, {
+        console: { send: (line, timing) => handle.send(line, timing) },
+        operator,
+        liveClearanceZ: centreOptions.seekFromMachineZ,
+      });
       if (!alive.current) return;
       if (!r.ok) {
         setError(r.reason);
@@ -127,6 +183,22 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
       }
       setResult(r);
       setPhase('measured');
+      // #1202 — THE ROUTINE COMPLETED (no stop): its identity is recorded on the machine, through
+      // the guarded PUT. A refused write only means the next press marks the routine again. The
+      // card's preview is the identity's source; a press taken before it resolved computes the
+      // same identity from the same plan (the dry console never touches the wire).
+      const recordMachine = machineAt(target);
+      if (recordMachine !== null) {
+        const identity = preview?.identity ?? (await dryCentreFind(centreOptions)).identity;
+        void saveMachineWithRetry(recordMachine, (current) =>
+          withRoutineCompletion(current, {
+            routine: 'centre-find',
+            shape: identity.shape,
+            at: new Date().toISOString(),
+            build: buildStamp(),
+          }),
+        );
+      }
     } catch (e) {
       if (alive.current) {
         setError(e instanceof Error ? e.message : String(e));
@@ -224,11 +296,22 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
               larger blank.
             </p>
           )}
+          {/* #1202 field 5 — the Find press's own routine: shown, marked on a first run, and held
+              by the operator's statement (or by a refused line / the headless refusal). */}
+          {preview !== null && (
+            <RoutineDryPreview
+              preview={preview}
+              firstRun={firstRun}
+              ticked={ticked}
+              onTick={setTicked}
+              headless={headless}
+            />
+          )}
           <div style={{ marginTop: 6 }}>
             <button
               type="button"
               data-testid="engrave-centre-find"
-              disabled={busy || (kind === 'bore' && topTouchAt === null)}
+              disabled={busy || (kind === 'bore' && topTouchAt === null) || routineGate || headless !== null}
               style={{ width: '100%', padding: 7 }}
               onClick={() => void find()}
             >
