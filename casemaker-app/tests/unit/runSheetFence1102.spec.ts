@@ -19,6 +19,28 @@ const stepsOf = (job: EngraveJob, options = {}): string =>
     .sections.flatMap((s) => s.steps.map((step) => step.text))
     .join('\n');
 
+describe('#1102 REGRESSION — a fence’s anchor is the anchor the sheet prints', () => {
+  const pinStep = (job: EngraveJob): string =>
+    stepsOf(job, { tapeStripCount: 5 })
+      .split('\n')
+      .filter((line) => /anchor/.test(line))
+      .join('\n');
+
+  it('an anchor-2 fence prints anchor 2 in every step that names an anchor, and never anchor 1', () => {
+    const text = pinStep(fenced(2));
+    expect(text).toContain('Pin the bracket to the bed at anchor 2');
+    expect(text).toContain("into the bracket's inside corner at anchor 2");
+    expect(text).not.toMatch(/anchor 1/);
+  });
+
+  it('an anchor-1 fence prints anchor 1 in every step that names an anchor, and never anchor 2', () => {
+    const text = pinStep(fenced(1));
+    expect(text).toContain('Pin the bracket to the bed at anchor 1');
+    expect(text).toContain("into the bracket's inside corner at anchor 1");
+    expect(text).not.toMatch(/anchor 2/);
+  });
+});
+
 describe('#1102 the run sheet of a taped blank located against the bracket', () => {
   it('says taped to the bed and pushed into the bracket corner at anchor 1, with the shop’s strip count', () => {
     expect(stepsOf(fenced(1), { tapeStripCount: 5 })).toContain(
