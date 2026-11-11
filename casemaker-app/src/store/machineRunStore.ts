@@ -46,7 +46,7 @@ import { newStockId, useStockStore } from './stockStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useHouseStore } from './houseStore';
 import { machineAt, useLocationStore } from './locationStore';
-import { writeLastMachineId } from '@/components/welcome/lastMachine';
+import { writeLastMachineId } from '@/platform/lastMachine';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
@@ -654,13 +654,13 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       return true;
     },
     start: (target, settings) => {
-      // #1106 item 5 — A RUN IS THE STRONGEST "last machine" there is: the record the program is
-      // going to is remembered, matched by the address the run is on.
-      const at = machineAt(target);
-      if (at !== null) writeLastMachineId(at.id);
       const machine = machineKey(target);
       const prepared = get().runs[machine];
       if (!prepared || prepared.running) return false;
+      // #1106 item 5 — a run that ACTUALLY STARTS is the strongest "last machine" there is; a
+      // refused start (nothing prepared, or one already running) writes nothing.
+      const at = machineAt(target);
+      if (at !== null) writeLastMachineId(at.id);
       const runId = prepared.runId;
       /**
        * #1153 — A WRITE FROM THIS RUN. Dropped the moment the entry belongs to another run (a retry

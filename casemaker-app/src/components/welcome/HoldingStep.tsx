@@ -2607,7 +2607,10 @@ export function HoldingStep({
               <MountRow
                 key={option.mount}
                 option={option}
-                checked={!option.disabled && current === option.mount}
+                // #1107 item 5 — the job's OWN answer stays selected even when this machine cannot
+                // honour it: a rod answer with the rotary off the pins shows the chuck row chosen,
+                // disabled, with its Change the machine… action (Next is blocked by mountBlocked).
+                checked={current === option.mount}
                 onChoose={() => choose(option.mount)}
                 onOpenManage={onOpenManage}
                 onBackToStock={onBackToStock}

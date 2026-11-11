@@ -58,7 +58,7 @@ import type { PendingStock, StartStockSeed } from './StartStockStep';
 import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
-import { readLastMachineId, writeLastMachineId } from './lastMachine';
+import { readLastMachineId, writeLastMachineId } from '@/platform/lastMachine';
 import type { MachineRecord } from '@/platform/locationClient';
 
 /**

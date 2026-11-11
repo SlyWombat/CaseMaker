@@ -313,15 +313,26 @@ export function OperationStep({
   const rotary = rotaryJob || frameRotary;
   /** #1107 — the rod intents: an entry to the rotary step from a job that is not one yet. */
   const startRotary = (pick: RotaryOperationId): void => {
-    // A flat pick that the rotary step does not know is dropped BY NAME, never silently.
+    // #1107 item 1 — a SIGN's own text and font travel onto the rod's engrave field: the card's
+    // answer is not dropped by the frame change.
+    if (preset === 'sign' && pick === 'engrave') {
+      setText(answers.text);
+      setFont(answers.font);
+    }
+    // A flat pick that the rotary step does not know is dropped BY NAME, never silently. A preset
+    // CARD is named by its own title ("Cut out a shape is a flat-stock operation — …").
     const ROTARY_COMPATIBLE: readonly OperationTypeId[] = ['engrave', 'surface', 'pocket', 'v-carve', 'flute'];
     const flatLabel = picked === null ? null : operationType(picked).label;
+    const cardTitle =
+      preset === 'cutout' || preset === 'pocket' ? (WIZARD_PRESETS.find((p) => p.id === preset)?.title ?? null) : null;
     setDroppedPick(
-      picked !== null && !ROTARY_COMPATIBLE.includes(picked) && flatLabel !== null
-        ? `${flatLabel} is a flat-stock operation — on a rod, choose again.`
-        : outline !== null
-          ? 'Your drawing is a flat-stock operation — on a rod, choose again.'
-          : null,
+      cardTitle !== null
+        ? `${cardTitle} is a flat-stock operation — on a rod, choose again.`
+        : picked !== null && !ROTARY_COMPATIBLE.includes(picked) && flatLabel !== null
+          ? `${flatLabel} is a flat-stock operation — on a rod, choose again.`
+          : outline !== null
+            ? 'Your drawing is a flat-stock operation — on a rod, choose again.'
+            : null,
     );
     setFrameRotary(true);
     setRotaryPicked(pick);
@@ -374,6 +385,11 @@ export function OperationStep({
       : {}),
   }));
   const choosePreset = (id: PresetId): void => {
+    // #1107 item 2 — a FLAT card is a way back to flat stock, and names the rod pick it drops.
+    // (The dowel card is the rotary door and Something else… is the fold, where the rotary chips
+    // live while a rod intent is in force; both keep the frame. part-3d/pcb go through pickFlat.)
+    const flatViaPicker = id === 'part-3d' || id === 'pcb';
+    if (!flatViaPicker && id !== 'dowel' && id !== 'something-else') nameDroppedRodPick();
     setPreset(id);
     setDropError(null);
     if (id === 'part-3d') pickFlat('surface');
@@ -400,25 +416,33 @@ export function OperationStep({
   const [outlineError, setOutlineError] = useState<string | null>(null);
   /** #1098 — the drop zone's one-sentence refusal for a file the app does not read. */
   const [dropError, setDropError] = useState<string | null>(null);
+  /**
+   * #1107 item 2 — RETURNING TO FLAT STOCK NAMES THE ROD PICK IT DROPS. Shared by a flat chip
+   * (pickFlat) and a flat CARD (choosePreset); a no-op when the step is not in a rod frame.
+   */
+  function nameDroppedRodPick(): void {
+    if (!frameRotary) return;
+    const ROD_LABEL: Partial<Record<RotaryOperationId, string>> = {
+      flat: 'The flat on a face',
+      'faces-all-round': 'Faces all round',
+      'cross-hole': 'The cross-hole',
+    };
+    const carried =
+      rotaryPicked === 'engrave' || rotaryPicked === 'v-carve' || rotaryPicked === 'pocket' || rotaryPicked === 'flute' || rotaryPicked === 'relief';
+    setDroppedPick(
+      !carried && rotaryPicked !== null
+        ? `${ROD_LABEL[rotaryPicked] ?? 'Your rod answer'} is a rod operation — on flat stock, choose again.`
+        : null,
+    );
+    setFrameRotary(false);
+  }
+
   const pickFlat = (id: OperationTypeId, keepFold = false): void => {
     // #1100 — a FILE (or a card) is an alternative to the fold; a chip clicked INSIDE the fold
     // keeps it open, so the picker does not disappear under the operator's next click.
     if (!keepFold) setPreset(null);
     // #1107 — a flat chip is the way back to flat stock; a rod pick it cannot carry is named.
-    if (frameRotary) {
-      const ROD_LABEL: Partial<Record<RotaryOperationId, string>> = {
-        flat: 'The flat on a face',
-        'faces-all-round': 'Faces all round',
-        'cross-hole': 'The cross-hole',
-      };
-      const carried = rotaryPicked === 'engrave' || rotaryPicked === 'v-carve' || rotaryPicked === 'pocket' || rotaryPicked === 'flute' || rotaryPicked === 'relief';
-      setDroppedPick(
-        !carried && rotaryPicked !== null
-          ? `${ROD_LABEL[rotaryPicked] ?? 'Your rod answer'} is a rod operation — on flat stock, choose again.`
-          : null,
-      );
-    }
-    setFrameRotary(false);
+    nameDroppedRodPick();
     // #1098 — the picker is the alternative to the file; clicking a chip clears the drawing.
     setOutline(null);
     setOutlineFileName(null);
@@ -772,7 +796,7 @@ export function OperationStep({
         if (files.length > 0) void acceptFiles(files);
       }}
     >
-      {!rotary && (
+      {!rotaryJob && (
         <WizardDropZone
           accept={WIZARD_FILE_ACCEPT}
           kinds={WIZARD_FILE_KINDS}
@@ -885,7 +909,11 @@ export function OperationStep({
           {droppedPick}
         </p>
       )}
-      {rotary ? (
+      {/* #1107 item 2 — a rod INTENT on a flat job keeps the flat cards and the zone visible (there
+          is always a way back); only a ROTARY JOB (the chuck's own frame) replaces the face of the
+          step. In the intent frame the rotary picker lives inside the Something else… fold, where
+          the panel's vocabulary belongs, in place of the flat chip list. */}
+      {rotaryJob ? (
         <RotaryOperationPicker
           selected={rotaryPicked}
           onPick={pickRotary}
@@ -923,13 +951,21 @@ export function OperationStep({
           </div>
           {rotaryFacts.owned && !rotaryFacts.onPins && rodCards}
           {preset === 'something-else' && (
-            <OperationPicker
-              mode="select"
-              testidFor={(id) => `engrave-setup-what-${id}`}
-              onPick={(id) => pickFlat(id, true)}
-              surfaceAllowed={fresh || !jobHasItems(job)}
-              selected={picked}
-            />
+            frameRotary ? (
+              <RotaryOperationPicker
+                selected={rotaryPicked}
+                onPick={pickRotary}
+                testidFor={(id) => `start-wizard-op-rotary-${id}`}
+              />
+            ) : (
+              <OperationPicker
+                mode="select"
+                testidFor={(id) => `engrave-setup-what-${id}`}
+                onPick={(id) => pickFlat(id, true)}
+                surfaceAllowed={fresh || !jobHasItems(job)}
+                selected={picked}
+              />
+            )
           )}
         </>
       )}
