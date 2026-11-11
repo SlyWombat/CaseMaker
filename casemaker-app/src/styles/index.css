@@ -3040,6 +3040,22 @@ button:disabled {
 .manage .tbl th.num {
   text-align: right;
 }
+/* #1172 item 2 — a sortable header is a button; it keeps the th's type and adds the mark. */
+.manage .tbl__sort {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+.manage .tbl__sort:hover {
+  color: var(--cm-color-primary);
+}
 .manage .tbl td.dim {
   color: var(--cm-color-on-surface-muted);
 }

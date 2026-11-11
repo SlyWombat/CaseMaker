@@ -255,15 +255,16 @@ describe('#311 — the tool list, grouped by tier', () => {
     render(<ManageMode />);
     const row = screen.getByTestId('manage-tools-row-user:1a2b3c4d5e');
     const cells = Array.from(row.querySelectorAll('td')).map((td) => td.textContent ?? '');
-    // cell 1 is the profile silhouette (#489); then tip ⌀ 2, shank 3.175, flute 12, shoulder
-    // unstated, stick-out unstated, qty not applicable.
+    // cell 1 is the profile silhouette (#489); then tip ⌀ 2, Cuts 12 (#1172 item 2), shank 3.175,
+    // flute 12, shoulder unstated, stick-out unstated, qty not applicable.
     expect(cells[1]).toContain('Side profile');
     expect(cells[3]).toBe('2.0');
-    expect(cells[4]).toBe('3.175');
-    expect(cells[5]).toBe('12.0');
-    expect(cells[6]).toBe('—');
+    expect(cells[4]).toBe('12.0');
+    expect(cells[5]).toBe('3.175');
+    expect(cells[6]).toBe('12.0');
     expect(cells[7]).toBe('—');
-    expect(cells[8]).toBe('·');
+    expect(cells[8]).toBe('—');
+    expect(cells[9]).toBe('·');
   });
 
   it('search narrows the list, and says so when nothing matches', () => {
@@ -403,7 +404,7 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     expect((screen.getByTestId('manage-def-tip') as HTMLInputElement).value).toBe('2');
     // A null is a blank box, never a 0.
     expect((screen.getByTestId('manage-def-shoulder') as HTMLInputElement).value).toBe('');
-    expect((screen.getByTestId('manage-def-save') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('manage-detail-save') as HTMLButtonElement).disabled).toBe(true);
     // What the form has no box for is still drawn, read-only, as the unknown it is.
     expect(screen.getByTestId('manage-detail').textContent).toContain('unset; the machine probes the tip');
   });
@@ -431,7 +432,7 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     // ...and the drawing reads the DRAFT, not the saved row: a typed tip changes DC.
     fireEvent.change(screen.getByTestId('manage-def-tip'), { target: { value: '3' } });
     expect(dimension('DC').textContent).toContain('3.0');
-    expect(screen.getByTestId('manage-def-save').hasAttribute('disabled')).toBe(false);
+    expect(screen.getByTestId('manage-detail-save').hasAttribute('disabled')).toBe(false);
   });
 
   it('Save PATCHes the key with the tool list’s validator and the edited fields, the rest untouched', async () => {
@@ -439,7 +440,7 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
     fireEvent.change(screen.getByTestId('manage-def-name'), { target: { value: '2 mm flat end — measured' } });
     fireEvent.change(screen.getByTestId('manage-def-shoulder'), { target: { value: '14' } });
-    const save = screen.getByTestId('manage-def-save') as HTMLButtonElement;
+    const save = screen.getByTestId('manage-detail-save') as HTMLButtonElement;
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
 
@@ -462,7 +463,7 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     render(<ManageMode />);
     fireEvent.click(screen.getByTestId(`manage-tools-row-${USER.key}`));
     fireEvent.change(screen.getByTestId('manage-def-tip'), { target: { value: '0' } });
-    const save = screen.getByTestId('manage-def-save') as HTMLButtonElement;
+    const save = screen.getByTestId('manage-detail-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     expect(save.title).toContain('tip ⌀');
     expect(save.title).toContain('above 0');
@@ -473,7 +474,9 @@ describe('#335 — a Yours row is the one that can be changed', () => {
     for (const key of [CAT.key, 'inv:9f8e7d6c5b', TOOL_LIBRARY[0]!.key]) {
       fireEvent.click(screen.getByTestId(`manage-tools-row-${key}`));
       expect(q('manage-definition-editor'), key).toBeNull();
-      expect(q('manage-def-save'), key).toBeNull();
+      // #1172 item 7 — the panel's ONE Save is drawn for every row and stays off until a draft
+      // changes; only the definition editor above is the tier's own.
+      expect((screen.getByTestId('manage-detail-save') as HTMLButtonElement).disabled, key).toBe(true);
     }
     // The read-only table is what a catalogue row gets, with the clone as its only write.
     fireEvent.click(screen.getByTestId(`manage-tools-row-${CAT.key}`));
@@ -520,7 +523,7 @@ describe('#331 — the inventory editor answers to the shared count rule', () =>
     const field = openEditor('');
     // Visible, not silent: the field says which count a blank will send.
     expect(field.placeholder).toBe('1');
-    fireEvent.click(screen.getByTestId('manage-item-save'));
+    fireEvent.click(screen.getByTestId('manage-detail-save'));
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.method).toBe('PATCH');
@@ -530,19 +533,43 @@ describe('#331 — the inventory editor answers to the shared count rule', () =>
 
   it('refuses zero and a fraction, in the one sentence', () => {
     openEditor('0');
-    const save = screen.getByTestId('manage-item-save') as HTMLButtonElement;
+    const save = screen.getByTestId('manage-detail-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     // The wording is `quantityProblem`'s, not a second copy of it: one string in the source, and the
     // issue's own grep for it (`grep -rn "whole number of cutters" src`) finds exactly one file.
     expect(save.title).toContain('a quantity is a whole number of cutters, one or more');
 
     fireEvent.change(screen.getByTestId('manage-item-quantity'), { target: { value: '1.5' } });
-    expect((screen.getByTestId('manage-item-save') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('manage-detail-save') as HTMLButtonElement).disabled).toBe(true);
     // And with a count the schema would accept, the tooltip stops being a complaint.
     fireEvent.change(screen.getByTestId('manage-item-quantity'), { target: { value: '3' } });
-    const ok = screen.getByTestId('manage-item-save') as HTMLButtonElement;
+    const ok = screen.getByTestId('manage-detail-save') as HTMLButtonElement;
     expect(ok.disabled).toBe(false);
-    expect(ok.title).toBe('Save the count and the notes');
+    expect(ok.title).toBe('Save these changes');
+  });
+
+  it('#1172 item 7 — one Save carries the count and the copies in ONE inventory PATCH', async () => {
+    render(<ManageMode />);
+    fireEvent.click(screen.getByTestId('manage-tools-row-inv:9f8e7d6c5b'));
+    // Two editors, each with its own draft: the count/notes block and the copies block.
+    fireEvent.change(screen.getByTestId('manage-item-quantity'), { target: { value: '3' } });
+    fireEvent.click(screen.getByTestId('manage-copy-add'));
+    fireEvent.change(screen.getByTestId('manage-copy-condition-0'), { target: { value: 'worn' } });
+    // There is exactly one Save in the panel; the per-block saves are gone.
+    expect(q('manage-item-save')).toBeNull();
+    expect(q('manage-copies-save')).toBeNull();
+    expect(screen.getAllByTestId('manage-detail-save')).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId('manage-detail-save'));
+    // ONE PATCH, because two would each replace the whole document and the second would undo the
+    // first. Both drafts are folded onto the record the panel was seeded from.
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.method).toBe('PATCH');
+    expect(calls[0]!.path).toBe('/inventory/9f8e7d6c5b');
+    const sent = calls[0]!.body as InventoryItem;
+    expect(sent.quantity).toBe(3);
+    expect(sent.copies).toHaveLength(1);
+    expect(sent.copies[0]!.condition).toBe('worn');
   });
 });
 

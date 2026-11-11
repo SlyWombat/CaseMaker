@@ -10,7 +10,7 @@
  * `toolCondition.runtimeWarning`.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CONDITIONS,
   MAX_WARN_MINUTES,
@@ -27,6 +27,7 @@ import { machineDisplayName, type MachineRecord } from '@/platform/locationClien
 import { useHouseStore } from '@/store/houseStore';
 import { useLocationStore } from '@/store/locationStore';
 import { useShopDefault } from '@/store/shopDefaultsStore';
+import { useDetailSave } from './detailSave';
 import { newId } from '@/utils/id';
 
 /** One stable empty list: a fresh `[]` from a selector re-renders without end. */
@@ -35,6 +36,7 @@ const NO_MACHINES: readonly MachineRecord[] = [];
 export function ToolCopies({ item }: { item: InventoryItem }) {
   const updateItem = useHouseStore((s) => s.updateItem);
   const busy = useHouseStore((s) => s.busy);
+  const detailSave = useDetailSave();
   const machines = useLocationStore((s) => s.location?.machines ?? NO_MACHINES);
   const threshold = useShopDefault('tools.runtimeWarnMinutes');
   // A draft, seeded from the record; the caller keys this component on the record's copies, so a
@@ -44,6 +46,24 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
 
   const problem = copiesProblem(item.quantity, copies, fits);
   const dirty = JSON.stringify(copies) !== JSON.stringify(item.copies) || JSON.stringify(fits) !== JSON.stringify(item.colletFits);
+
+  // #1172 item 7 — the panel's one Save. The refs carry the latest draft into the merge; the effect
+  // watches the serialized text because a fresh array identity would register on every render.
+  const copiesRef = useRef(copies);
+  copiesRef.current = copies;
+  const fitsRef = useRef(fits);
+  fitsRef.current = fits;
+  const copiesText = JSON.stringify(copies);
+  const fitsText = JSON.stringify(fits);
+  useEffect(() => {
+    if (detailSave === null) return;
+    detailSave('copies', {
+      dirty,
+      problem,
+      merge: (current) => ({ ...current, copies: copiesRef.current, colletFits: fitsRef.current }),
+    });
+    return () => detailSave('copies', null);
+  }, [detailSave, dirty, problem, copiesText, fitsText]);
   const undescribed = Math.max(0, item.quantity - copies.length);
   const summary = itemConditionSummary({ ...item, copies });
   const machineName = (id: string) => {
@@ -272,17 +292,21 @@ export function ToolCopies({ item }: { item: InventoryItem }) {
           {problem}
         </p>
       )}
-      <div className="btn-row">
-        <button
-          type="button"
-          className="btn btn--sm btn--primary"
-          data-testid="manage-copies-save"
-          disabled={!dirty || problem !== null || busy !== null}
-          onClick={() => void updateItem({ ...item, copies, colletFits: fits })}
-        >
-          Save copies
-        </button>
-      </div>
+      {/* #1172 item 7 — inside the detail panel the footer's one Save commits this draft; a
+          standalone editor (its own spec, another surface) keeps its own Save. */}
+      {detailSave === null && (
+        <div className="btn-row">
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            data-testid="manage-copies-save"
+            disabled={!dirty || problem !== null || busy !== null}
+            onClick={() => void updateItem({ ...item, copies, colletFits: fits })}
+          >
+            Save copies
+          </button>
+        </div>
+      )}
     </>
   );
 }
