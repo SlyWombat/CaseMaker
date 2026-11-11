@@ -99,7 +99,10 @@ async function capture(page: Page, name: string): Promise<void> {
       .map((el) => {
         const scope = scopeOf(el);
         const reason = [...scope.querySelectorAll<HTMLElement>('[data-testid]')]
-          .filter((n) => /-(blocked|unblock|why|reason|error)$/.test(n.dataset.testid ?? ''))
+          // #1109 items 2 and 8 — the one blocker shape's testids end in `-block`
+          // (`start-wizard-holding-block`), and a disabled option's reason became the VISIBLE line
+          // under its chip (`engrave-add-frame-help`); the older `-blocked`/`-unblock` remain.
+          .filter((n) => /-(block|blocked|unblock|why|reason|error|help)$/.test(n.dataset.testid ?? ''))
           .find((n) => (n.textContent ?? '').trim().length > 0);
         return {
           testid: el.dataset.testid ?? null,

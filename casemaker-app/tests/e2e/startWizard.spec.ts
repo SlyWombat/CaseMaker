@@ -136,10 +136,11 @@ test('step 2 refuses a new run with nothing picked, and a pick walks on (#1107 s
     'Step 2 of 4 · What are you cutting?',
   );
   // Nothing picked: the primary still reads Create the job, and it carries its reason.
+  // #1109 item 8 — the reason is a VISIBLE line now, not only the button's title.
   const next = page.getByTestId('start-wizard-operation-next');
   await expect(next).toHaveText('Create the job');
   await expect(next).toBeDisabled();
-  await expect(next).toHaveAttribute('title', 'Pick what to make first.');
+  await expect(page.getByTestId('start-wizard-operation-unblock')).toHaveText('Pick what to make first.');
 
   // A pick opens the door: the sign card, its text typed, then the SAME press walks on to Stock.
   await page.getByTestId('start-wizard-preset-sign').click();
@@ -182,9 +183,10 @@ test('#1183 — start with an empty job: the secondary lands on Stock, Back retu
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
 
   // The primary keeps #1107's refusal; the door is the secondary, at link weight.
+  // #1109 item 8 — the refusal's sentence is the step's visible line.
   const next = page.getByTestId('start-wizard-operation-next');
   await expect(next).toBeDisabled();
-  await expect(next).toHaveAttribute('title', 'Pick what to make first.');
+  await expect(page.getByTestId('start-wizard-operation-unblock')).toHaveText('Pick what to make first.');
   await expect(page.getByTestId('start-wizard-empty-job')).toHaveText('Start with an empty job');
 
   // A job with work is asked first — the same one box and sentence the stock step raises.
