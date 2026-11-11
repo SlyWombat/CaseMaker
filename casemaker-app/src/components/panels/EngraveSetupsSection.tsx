@@ -13,8 +13,6 @@
  */
 
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type JSX } from 'react';
-import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
-import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
@@ -42,7 +40,6 @@ import {
   bracketSeatDatumFor,
   bracketPlacementSeedFor,
 } from '@/engine/cnc/registration/mountContext';
-import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
 import {
   addSetupOffer,
   applySetupChange,
@@ -207,16 +204,8 @@ export function EngraveSetupsSection({
   const regSettings = useMemo(() => registrationSettings(defaults, probe).settings, [defaults, probe]);
   // #603 — the checked-out probe's name and the machine's display name, on the compact row.
   const probeName = useMemo(() => probeNameFor(machineRecord), [machineRecord]);
-  const tapBusy = useMountTapBusyFlag();
-  const mountTapApi = useMountTap({
-    clearanceZ: seekFromMachineZ,
-    target,
-    settings: regSettings,
-    floor: jobMachine(job, calibration).envelope.z.min,
-    probeId: probe?.id ?? null,
-    // #607 — the tap may be the bracket's or the rotary's now, so the note names neither.
-    successNote: 'the mount reference is recorded — plan the registration again',
-  });
+  // #1199 field 7 (e) — NO TAP FROM A JOB. The jaw datum is measured in the bed setup (Manage ›
+  // the machine); this surface only plans and shows, and its no-frame refusal links there.
   const rotaryEnvelope = useMemo(() => rotaryOf(jobMachine(job, calibration))?.envelope, [job, calibration]);
   const suggested = useMemo(() => suggestedPlan(job, settings, rotaryEnvelope), [job, settings, rotaryEnvelope]);
   const savedPlan = useMemo(() => (job.setups !== undefined ? planFromSetups(job, settings, rotaryEnvelope) : null), [job, settings, rotaryEnvelope]);
@@ -568,30 +557,6 @@ export function EngraveSetupsSection({
           {sectionNotice}
         </p>
       )}
-      {mountTapApi.note !== null && (
-        <p style={{ ...MUTED, color: '#e0c07a' }} data-testid="engrave-setups-tap-note">
-          {mountTapApi.note}
-        </p>
-      )}
-      {mountTapApi.prompt !== null && (
-        <div style={{ margin: '8px 0' }} data-testid="engrave-setups-tap-prompt">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12 }}>{mountTapApi.prompt.text}</span>
-            <button type="button" data-testid="engrave-mount-tap-continue" onClick={() => mountTapApi.resolve(true)}>
-              Continue
-            </button>
-            <button type="button" data-testid="engrave-mount-tap-cancel" onClick={() => mountTapApi.resolve(false)}>
-              Cancel
-            </button>
-          </div>
-          {/* #788 — this prompt is the executor asking for the probe to be fitted (the mount tap
-              runs it before the first touch): show which connector, for the probe this machine
-              has checked out; none checked out means no diagram. */}
-          {mountTapApi.prompt.kind === 'fit-probe' && (
-            <ProbeFitDiagram compact instrument={probe === null ? null : probeInstrumentOf(probe)} />
-          )}
-        </div>
-      )}
 
       {reading.source === 'empty' && draft === null ? (
         <p style={MUTED} data-testid="engrave-setups-empty">
@@ -674,8 +639,6 @@ export function EngraveSetupsSection({
                   setupIndex: index + 1,
                 });
               }}
-              onTapJaw={mountTapApi.tapJaw}
-              tapBusy={tapBusy}
             />
             {showSides && (() => {
               const goal = goalFor(setup, index);

@@ -2959,6 +2959,14 @@
                             "minimum": -9007199254740991,
                             "type": "integer"
                           },
+                          "mountTapFloorMm": {
+                            "description": "Bed-setup jaw tap: how far below the stored jaw top its search may go.",
+                            "type": "number"
+                          },
+                          "mountTapSlackMm": {
+                            "description": "Bed-setup jaw tap: how far a reading may sit from the stored jaw top before the run says so.",
+                            "type": "number"
+                          },
                           "parkAboveSurfaceMm": {
                             "description": "Parking height above the surface, in millimetres.",
                             "type": "number"
@@ -5033,6 +5041,14 @@
                         "maximum": 9007199254740991,
                         "minimum": -9007199254740991,
                         "type": "integer"
+                      },
+                      "mountTapFloorMm": {
+                        "description": "Bed-setup jaw tap: how far below the stored jaw top its search may go.",
+                        "type": "number"
+                      },
+                      "mountTapSlackMm": {
+                        "description": "Bed-setup jaw tap: how far a reading may sit from the stored jaw top before the run says so.",
+                        "type": "number"
                       },
                       "parkAboveSurfaceMm": {
                         "description": "Parking height above the surface, in millimetres.",

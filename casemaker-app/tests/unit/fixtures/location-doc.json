@@ -1892,6 +1892,18 @@
       "source": "seeded",
       "setAt": null,
       "unit": "deg"
+    },
+    "registration.mountTapFloorMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.mountTapSlackMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
     }
   },
   "accessories": [

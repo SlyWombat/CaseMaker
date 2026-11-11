@@ -74,6 +74,10 @@ describe('#430 the settings come from the shop defaults', () => {
   it('reads every registration.* key from the location; the rim offset is the MEASURED one', () => {
     expect(fallbacks).toEqual([]);
     expect(S.tipRadiusMm).toBe(0.7);
+    // #1199 field 7 (e) — the bed-setup jaw tap's two figures are shop keys (#1207), read from the
+    // location; the recommendation is the old job-tap constants' own 2 mm.
+    expect(S.mountTapFloorMm).toBe(2);
+    expect(S.mountTapSlackMm).toBe(2);
     const d = ShopDefaultsSchema.parse(DOC.defaults)['registration.tipRadiusMm']!;
     expect(d.source).toBe('measured');
     expect(d.note).toContain('39.5 mm wide');
@@ -904,121 +908,19 @@ describe('#599 the mount tap', () => {
     expect(summarizePlan(threeD.plan)).toContain('fit the 3D probe');
   });
 
-  it('the tap precedes the surface seek and its reading is on the result', async () => {
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
-    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
-    if (!r.ok) throw new Error(r.reason);
-
-    const tapIdx = z1.lines.indexOf('G53 G0 X-186.2 Y-180');
-    const surfaceIdx = z1.lines.findIndex((l) => /^G0 X/.test(l));
-    expect(tapIdx).toBeGreaterThan(-1);
-    expect(tapIdx).toBeLessThan(surfaceIdx);
-    expect(r.mountTap).toEqual({ z: -56.82, at: { x: TAP.x, y: TAP.y } });
-    // The post-tap probe must read open again before the surface seek.
-    expect(z1.lines.slice(tapIdx, surfaceIdx)).toContain('M119');
-  });
-
-  it('a tap miss stops with the mount named', async () => {
+  // #1199 field 7 (e) — A PRE-RULING PLAN IS REFUSED WITH NOTHING SENT. The job-time jaw tap was
+  // the 11-10 class: a descent 4.65 mm beside the blank. The Register card's plan-drift block
+  // offers the new plan (#1123 item 28); the executor must not run the old one.
+  it('a stored plan that carries a mountTap is refused, and no line was sent', async () => {
     const z1 = fakeZ1({ actual: SHIFTED });
     const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
     const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain('no jaw top');
-  });
-
-  // #642 — the #607 BRACKET tap had no executor spec: `bracketTap.spec.ts` pinned the plan-level
-  // shape and a PRE-#607 miss, but nothing ran `runRegistration` with `reference: 'bracket-seat'`.
-  // These pin the floor (expectZ − 2), the reading riding the result, and the bracket's own miss
-  // sentence. The bracket's origin here IS the G54, so the fake's work-frame geometry holds.
-  const BRACKET_TAP = {
-    x: -186.2,
-    y: -180,
-    fromMachineZ: -3,
-    label: 'the bracket’s front arm',
-    reference: 'bracket-seat' as const,
-    expectZ: -48.9,
-    datumOffsetMm: 8.5,
-  };
-  const bracketTapPlan = (): RegistrationPlan =>
-    plan('bracket', {
-      cutCentre: { x: 19.05, y: 38.1 },
-      expectedSurface: { machineZ: SURFACE, from: 'the seat + the stock’s thickness' },
-      bracketOrigin: { x: G54.x, y: G54.y, from: 'the anchor', offsetMeasured: true },
-      mountObstacles: [],
-      mountTap: BRACKET_TAP,
-    });
-
-  it('#642 runs a bracket-seat tap: the floor is expectZ − 2 and the reading is on the result', async () => {
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: BRACKET_TAP.x, y: BRACKET_TAP.y, z: BRACKET_TAP.expectZ } });
-    const p = bracketTapPlan();
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
-    if (!r.ok) throw new Error(r.reason);
-
-    expect(r.mountTap).toEqual({ z: BRACKET_TAP.expectZ, at: { x: BRACKET_TAP.x, y: BRACKET_TAP.y } });
-    // #615's two-stage descent, bounded by the BRACKET's own expected top: the fast seek runs from
-    // the travel height to the park above it (−3 → −45.9), then the touch feed covers the last
-    // park + 2 mm down to `expectZ − 2` (−45.9 → −50.9) — the same rule the vise's tap uses.
-    const searched = z1.lines.filter((l) => l.startsWith('G38.3 Z-')).slice(0, 2);
-    expect(searched).toEqual(['G38.3 Z-42.9 F300', 'G38.3 Z-5 F150']);
-  });
-
-  it('#642 a bracket-seat tap miss names the arm and the stored top', async () => {
-    // No `tap` in the fake: both stages find nothing, so the reading is a miss.
-    const z1 = fakeZ1({ actual: SHIFTED });
-    const r = await runRegistration(bracketTapPlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.reason).toContain('no touch at the bracket’s front arm (-186.2, -180) down to machine Z -50.9');
-    expect(r.reason).toContain('within 2 mm of the stored -48.9');
-    expect(r.reason).toContain('is the bracket where the machine record says?');
-  });
-
-  // #519 item 1 — `ExecDeps.onTouch` is fed each reading AS IT LANDS, in landing order, so the
-  // viewport's dots and the dock's table can fill during the run. The seq is the table's row number.
-  it('emits every reading as it lands — the tap, the surface, then each scan touch', async () => {
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
-    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const seen: LiveTouch[] = [];
-    const r = await runRegistration(p, { liveClearanceZ: -3,
-      console: z1.console,
-      operator: yes,
-      onTouch: (t) => seen.push(t),
-    });
-    if (!r.ok) throw new Error(r.reason);
-
-    expect(seen.length).toBeGreaterThan(2);
-    expect(seen[0]).toMatchObject({
-      seq: 1,
-      source: 'mount-tap',
-      label: TAP.label,
-      x: TAP.x,
-      y: TAP.y,
-      z: JAW.jawTopZ,
-      touched: true,
-      kind: null,
-    });
-    expect(seen[1]).toMatchObject({
-      seq: 2,
-      source: 'surface',
-      x: p.surfacePoint.x,
-      y: p.surfacePoint.y,
-      kind: null,
-    });
-    expect(seen.slice(2).every((t) => t.source === 'edge')).toBe(true);
-    // Numbering is the landing order, with no gaps and no repeats.
-    expect(seen.map((t) => t.seq)).toEqual(seen.map((_, i) => i + 1));
-  });
-
-  // #615 — with the jaw top known from the datum, the tap descends in two stages: a fast seek to
-  // 3 mm above the expected top, then the touch feed for the last 5 mm down to the jawTopZ − 2 floor.
-  it('a tap with an expected Z seeks fast, then touches at the touch feed', async () => {
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: TAP.x, y: TAP.y, z: JAW.jawTopZ } });
-    const p = plan('vise', { mountDatum: JAW, mountTap: TAP, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
-    if (!r.ok) throw new Error(r.reason);
-    const taps = z1.lines.filter((l) => l.startsWith('G38.3 Z-')).slice(0, 2);
-    expect(taps).toEqual(['G38.3 Z-50.82 F300', 'G38.3 Z-5 F150']);
+    expect(r.reason).toContain('carries a job-time jaw tap');
+    expect(r.reason).toContain('Nothing was sent');
+    expect(z1.lines).toEqual([]);
+    expect(r.transcript).toEqual([]);
   });
 });
 
@@ -1037,7 +939,7 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
     // Setups section resolves them (`registrationSettings(defaults, probe)`).
     const instrumentSettings = registrationSettings(null, PROBE_3D).settings;
     const r = planRegistration(
-      input('vise', { probe: PROBE_3D, mountDatum: JAW3, mountTap: TAP3, fixtureBelowSurfaceMm: undefined }),
+      input('vise', { probe: PROBE_3D, mountDatum: JAW3, fixtureBelowSurfaceMm: undefined }),
       instrumentSettings,
     );
     if (!r.ok) throw new Error(r.reason);
@@ -1180,18 +1082,13 @@ describe('#525 the 3D probe’s sideways scan, against the fake Z1', () => {
       expect(releaseAfter(lines, side!)).toBe(`G38.5 Y${travel < 0 ? 3 : -3} F100`);
     });
 
-    it('site 5 (the mount tap) releases before its G0 Z3, and site 4 (the fast seek) before its G0 Z1', async () => {
+    it('site 4 — the fast surface seek is released before its G0 Z1', async () => {
       const z1 = armed();
       const r = await runRegistration(sidePlan(), { liveClearanceZ: -3, console: z1.console, operator: yes });
       if (!r.ok) throw new Error(r.reason);
       const lines = z1.lines;
       const probes = z1.triggeredAt();
-      // The tap is the first reading of the run; its retract is the relative `G0 Z3`.
-      const tap = probes[0]!;
-      expect(lines[tap]!).toMatch(/^G38\.3 Z-/);
-      expect(lines[tap + 1]).toBe('G38.5 Z3 F100');
-      expect(lines[tap + 2]).toBe('G0 Z3');
-      // The fast surface touch is the one whose lift is the relative `G0 Z1`.
+      // #1199 field 7 (e) — a job has no mount tap now: the run's first readings are the seek's.
       const fastSeek = probes.find((at) => lines[at + 2] === 'G0 Z1');
       expect(fastSeek).toBeDefined();
       expect(lines[fastSeek! + 1]).toBe('G38.5 Z3 F100');
@@ -1616,6 +1513,22 @@ describe('#430 the executor, on a fake machine', () => {
     const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('found nothing down to machine Z');
+  });
+
+  // #1199 field 7 (e) — THE TOP TOUCH ANSWERS "is the vise where the record says". A stored jaw
+  // top wrong by more than the slack puts the stock's own top outside the band; the stop keeps its
+  // words and names the bed setup, where the jaw is re-measured (a job never taps it).
+  it('#1199 (e) — a top reading far off a trusted jaw datum stops, and the words name the bed setup', async () => {
+    const DATUM: MountDatum = { jawTopZ: SURFACE - 1.84, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    const p = plan('vise', { mountDatum: DATUM, stockThicknessMm: 3.81 });
+    const z1 = fakeZ1({ actual: SHIFTED, surface: SURFACE - 3 });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    // The 3 mm error is beyond the seek's travel, so the top touch MISSES; its words are the
+    // existing miss sentence plus the bed-setup sentence.
+    expect(r.reason).toContain('found nothing down to machine Z');
+    expect(r.reason).toContain('re-measure the jaw in Manage › the machine');
   });
 
   it('#518 a scan miss is a reading: no $X follows it; a stop after a TIMEOUT reads the State and sends G90 alone', async () => {
@@ -2359,24 +2272,17 @@ describe('#933 the run stops in seconds', () => {
       instrument: 'xyz',
       tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
     };
-    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
     const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
     const made = planRegistration(
-      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      input('vise', { probe: PROBE_3D, mountDatum: jaw, fixtureBelowSurfaceMs: undefined } as never),
       registrationSettings(null, PROBE_3D).settings,
     );
     if (!made.ok) throw new Error(made.reason);
-    const z1 = fakeZ1({
-      actual: SHIFTED,
-      tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ },
-      ballR: 1.5,
-      rim: 1.5,
-      stylusStaysDown: true,
-    });
-    // The press lands once the tap has TOUCHED (the fast seek misses and the slow seek hits on this
-    // fixture, so the second probe line is the touch): the very next line — the touch's release —
-    // is refused by the flag, and the stop path must send it.
-    const stopRequested = () => z1.lines.filter((l) => l.startsWith('G38.3')).length >= 2;
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+    // #1199 field 7 (e) — there is no job-time tap now, so the first probe line is the surface
+    // seek's fast touch. The press lands once it has TOUCHED: the very next line — the touch's
+    // release — is refused by the flag, and the stop path must send it.
+    const stopRequested = () => z1.lines.filter((l) => l.startsWith('G38.3')).length >= 1;
     const r = await runRegistration(made.plan, { liveClearanceZ: -3, console: z1.console, operator: yes, stopRequested });
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -2400,14 +2306,14 @@ describe('#933 the run stops in seconds', () => {
       instrument: 'xyz',
       tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
     };
-    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
-    const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    // #1199 field 7 (e) — a typed-seat vise plan: its surface seek is miss-aware, so a `:0`
+    // reading is a MISS (not a stop) and the operator's Stop follows it.
     const made = planRegistration(
-      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      input('vise', { probe: PROBE_3D }),
       registrationSettings(null, PROBE_3D).settings,
     );
     if (!made.ok) throw new Error(made.reason);
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     let probed = false;
     const wire: string[] = [];
     const console = {
@@ -2438,24 +2344,28 @@ describe('#933 the run stops in seconds', () => {
       instrument: 'xyz',
       tip: { diameterMm: 3, rimOffsetMm: 1.5, rimOffsetUncertaintyMm: 0.05 },
     };
-    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
-    const jaw: MountDatum = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
+    // #1199 field 7 (e) — a typed-seat plan's first probe line is miss-aware (as the tap's was),
+    // so the ALARM rides it as a READING and the probe-down booking survives to the stop path.
     const made = planRegistration(
-      input('vise', { probe: PROBE_3D, mountDatum: jaw, mountTap: tap, fixtureBelowSurfaceMs: undefined } as never),
+      input('vise', { probe: PROBE_3D }),
       registrationSettings(null, PROBE_3D).settings,
     );
     if (!made.ok) throw new Error(made.reason);
-    const z1 = fakeZ1({ actual: SHIFTED, tap: { x: tap.x, y: tap.y, z: jaw.jawTopZ }, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5, rim: 1.5, stylusStaysDown: true });
     let alarmed = false;
-    let probed = false;
+    let probes = 0;
     const wire: string[] = [];
     const console = {
       async send(line: string, timing?: Partial<ConsoleTiming>): Promise<ConsoleSendResult> {
         wire.push(line);
-        if (line.startsWith('G38.3') && !probed) {
-          probed = true;
-          alarmed = true;
-          return { kind: 'sent', line, text: '[PRB:-186.2,-180,-56.82:1]\nALARM: Probe fail', frames: 2, elapsedMs: 1 };
+        if (line.startsWith('G38.3')) {
+          probes += 1;
+          // #1199 field 7 (e) — the alarm rides a SCAN touch (the first miss-aware line; the tap
+          // that used to be first is gone). The surface seek's two touches precede it.
+          if (probes === 3 && !alarmed) {
+            alarmed = true;
+            return { kind: 'sent', line, text: '[PRB:19.050,38.100,-56.172:1]\nALARM: Probe fail', frames: 2, elapsedMs: 1 };
+          }
         }
         if (line === '?') {
           return alarmed
@@ -2469,7 +2379,7 @@ describe('#933 the run stops in seconds', () => {
         return z1.console.send(line, timing);
       },
     };
-    const r = await runRegistration(made.plan, { liveClearanceZ: -3, console, operator: yes, stopRequested: () => probed });
+    const r = await runRegistration(made.plan, { liveClearanceZ: -3, console, operator: yes, stopRequested: () => alarmed });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('may be in alarm');

@@ -2211,6 +2211,8 @@ const registrationSettingsSchema = z.object({
       tapePlacementMm: z.number().finite().optional().describe('Tape hold: placement uncertainty.'),
       tapePlacementRotationDeg: z.number().finite().optional().describe('Tape hold: by-eye rotation.'),
       bracketFitMm: z.number().finite().optional().describe('The bracket hold’s own fit (#1199 field 7).'),
+      mountTapFloorMm: z.number().finite().optional().describe('Bed-setup jaw tap: how far below the stored jaw top its search may go.'),
+      mountTapSlackMm: z.number().finite().optional().describe('Bed-setup jaw tap: how far a reading may sit from the stored jaw top before the run says so.'),
       cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.

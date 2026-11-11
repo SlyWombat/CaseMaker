@@ -877,7 +877,11 @@ function inBand(
   // #619 — a reading ABOVE the band is not a miss on the datum path: a normally mounted blank may
   // stand prouder than the ledge estimate, so the upper bound is widened; only the floor still stops.
   if (prb.z < band.min || prb.z > maxZ) {
-    throw new Stop(`the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${maxZ}`);
+    // #1199 field 7 (e) — the caller's sentence rides too: on the datum path it names the bed
+    // setup when the stored jaw top may be the thing that is wrong ("re-measure the jaw").
+    throw new Stop(
+      `the ${which} surface touch read machine Z ${prb.z}, outside the expected ${band.min} to ${maxZ} — ${band.expect}`,
+    );
   }
   return prb;
 }
@@ -1341,14 +1345,6 @@ async function seekDeeper(
 }
 
 /**
- * #599/#607 — how far below the stored reference a mount tap searches, and how far from it a real
- * reading may land. Two millimetres either way, the same window the vise's tap has had since #599;
- * named here because it is one rule for every mount, not a number typed twice.
- */
-const MOUNT_TAP_FLOOR_MM = 2;
-const MOUNT_TAP_SLACK_MM = 2;
-
-/**
  * #599 — one guarded mount tap at the machine XY `tap`, down to the machine floor `floorZ`. One line
  * per Idle, and the G38.3 is never queued behind the rapid (that queue gave PROBE_FAIL on
  * 2026-10-23). Returns the reading — a miss is a `touched:false` reading, null is no reading — and
@@ -1450,9 +1446,18 @@ export async function runMountTap(
    * Absent (a pre-#1070 caller): the work-envelope floor, exactly as before.
    */
   planTravelMm: number | null = null,
+  /**
+   * #1199 field 7 (e) — THE STORED JAW TOP this bed-setup tap is measuring against, machine Z, or
+   * null on a first measurement. With one, the search is floored `registration.mountTapFloorMm`
+   * below it (not at the work envelope), and a reading further than `registration.mountTapSlackMm`
+   * from it is SAID (the vise may have moved) while the new datum is still recorded — a setup tap
+   * must be able to refresh a moved jaw.
+   */
+  expectZ: number | null = null,
 ): Promise<MountTapResult> {
   const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe), undefined, probe?.touches !== 'z-only');
-  // The floor the tap may reach: the PLAN's bound when it states one, never the envelope's alone.
+  // The floor the tap may reach: the PLAN's bound when it states one, else the stored reference's
+  // own `mountTapFloorMm`, else the work envelope's floor as before.
   // #1199 — the bound is stated below the tap's own APPROACH (`tap.fromMachineZ`, the band start),
   // not below the clearance: the two heights were one parameter before, and splitting them must
   // not move the floor (which it did: a clearance-based floor stopped the seat seek 1.1 mm short).
@@ -1460,7 +1465,9 @@ export async function runMountTap(
   const tapFloorZ =
     planTravelMm !== null && Number.isFinite(planTravelMm) && planTravelMm > 0
       ? Math.max(workEnvelopeFloorZ, tapApproachZ - planTravelMm)
-      : workEnvelopeFloorZ;
+      : expectZ !== null && settings.mountTapFloorMm !== undefined
+        ? Math.max(workEnvelopeFloorZ, r3(expectZ - settings.mountTapFloorMm))
+        : workEnvelopeFloorZ;
   const bad = settingsProblem(settings);
   if (bad !== null) return { ok: false, reason: `nothing was sent: ${bad}`, transcript: [] };
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
@@ -1487,8 +1494,10 @@ export async function runMountTap(
     const ref = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (ref === null || !ref.touched) throw new Stop('M491 answered no tool-length reading');
     // #1199 — the descent starts at the tap's own planned approach (the seat's band), at the point;
-    // the travel to it is at the clearance.
-    const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, tap.fromMachineZ ?? seekFromMachineZ, seekFromMachineZ, settings, tapFloorZ, null, probe);
+    // the travel to it is at the clearance. #1199 field 7 (e) — with the stored jaw top in hand the
+    // touch is the SAME two-stage one the job tap ran (#615): a fast seek to the park above it,
+    // then the touch feed to the floor.
+    const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, tap.fromMachineZ ?? seekFromMachineZ, seekFromMachineZ, settings, tapFloorZ, expectZ, probe);
     if (prb === null || !prb.touched) {
       // The vise's sentence is the bench-tested one and stays byte for byte; the others name their
       // own reference the way the operator sees it.
@@ -1506,6 +1515,15 @@ export async function runMountTap(
     }
     // #519 item 1 — the standalone tap's reading, as it lands.
     io.saw({ source: 'mount-tap', label: null, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
+    // #1199 field 7 (e) — a reading further than the slack from the stored jaw top is SAID, not
+    // hidden and never a stop: this is the SETUP tap, and a moved vise must be able to refresh its
+    // datum. The job's own top touch is where a moved vise stops a run.
+    if (expectZ !== null && settings.mountTapSlackMm !== undefined && Math.abs(prb.z - expectZ) > settings.mountTapSlackMm) {
+      const off = r3(prb.z - expectZ);
+      io.at(
+        `the jaw reads machine Z ${f(prb.z)}, ${f(Math.abs(off))} mm ${off > 0 ? 'above' : 'below'} the stored jaw top ${f(expectZ)} — the datum is refreshed (the vise may have moved)`,
+      );
+    }
     await io.home();
     return { ok: true, z: prb.z, at: { x: tap.x, y: tap.y }, probe: { lengthZ: ref.z, rest }, transcript: io.transcript };
   } catch (e) {
@@ -2120,6 +2138,18 @@ export async function runRegistration(
   deps: ExecDeps,
   spreadPlan?: SurfaceSpreadPlan,
 ): Promise<RunResult> {
+  // #1199 field 7 (e) — A PRE-RULING PLAN THAT CARRIES A JOB-TIME JAW TAP IS REFUSED, NOTHING SENT.
+  // The jaw datum is a bed-setup measurement (Manage › the machine), and the tap's point is 4.65 mm
+  // beside the blank — the 11-10 class. The stored plan is stale; the Register card's plan-drift
+  // block offers the new proposal (#1123 item 28).
+  if (plan.mountTap !== null) {
+    return {
+      ok: false,
+      reason:
+        'this approved plan carries a job-time jaw tap, which the safe-Z rule no longer allows — a jaw datum is measured at bed setup (Manage › the machine), never during a job. Nothing was sent; use the new plan from the Register card and register again',
+      transcript: [],
+    };
+  }
   // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
   const cleared = liveClearanceFor(plan, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
@@ -2244,42 +2274,10 @@ export async function runRegistration(
       throw new Stop('stopped: the clamps were not confirmed where the plan puts them');
     }
 
-    // #599 — the mount tap: one guarded touch on the mount's reference (the fixed-jaw top) before the
-    // surface seek, at the machine XY the plan carries. One line per Idle, and the G38.3 is never
-    // queued behind the rapid — that exact queue gave PROBE_FAIL and MPos 0,0 on 2026-10-23.
-    let mountTap: { z: number; at: { x: number; y: number } } | null = null;
-    // #607 — the tap is the MOUNT's, not the vise's: which reference it touches is the plan's
-    // (`PlanMountTap.reference`), and the machine Z it expects is `expectZ` — the jaw top, or the
-    // bracket's top = seat + height. The fallback keeps a pre-#607 plan and the typed-seat path
-    // exactly as they were: with no expected reference there is nothing to tap.
-    const tapExpectZ = plan.mountTap === null ? null : (plan.mountTap.expectZ ?? plan.mountDatum?.jawTopZ ?? null);
-    // #1166 (c1) — no mount tap either when the top was chosen: the question's answers move nothing.
-    if (chosenTop === null && plan.mountTap !== null && tapExpectZ !== null) {
-      const tap = plan.mountTap;
-      const floorZ = tapExpectZ - MOUNT_TAP_FLOOR_MM;
-      const prb = await mountTapTouch(io, { x: tap.x, y: tap.y }, plan.seek.fromMachineZ, plan.seek.fromMachineZ, s, floorZ, tapExpectZ, plan.probe);
-      if (prb === null || !prb.touched || Math.abs(prb.z - tapExpectZ) > MOUNT_TAP_SLACK_MM) {
-        const vise = tap.reference === undefined || tap.reference === 'vise-jaw-top';
-        // #633 — a TOUCH outside the slack is not a miss. The fast stage meets the fixed jaw (or an
-        // obstruction) above the stored reference; reporting "no jaw top … down to machine Z" sends
-        // the operator looking for a surface the probe did find. Say where it touched, and how far
-        // from the stored reference that is.
-        if (prb !== null && prb.touched) {
-          const off = r3(prb.z - tapExpectZ);
-          throw new Stop(
-            `a touch at machine Z ${f(prb.z)} at (${tap.x}, ${tap.y}), ${f(Math.abs(off))} mm ${off > 0 ? 'above' : 'below'} the stored ${vise ? 'jaw top' : tap.label} ${f(tapExpectZ)} — is the ${plan.mount} where the machine record says?`,
-          );
-        }
-        throw new Stop(
-          vise
-            ? `no jaw top at (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} — is the vise where the machine record says?`
-            : `no touch at ${tap.label} (${tap.x}, ${tap.y}) down to machine Z ${f(floorZ)} within ${MOUNT_TAP_SLACK_MM} mm of the stored ${f(tapExpectZ)} — is the ${plan.mount} where the machine record says?`,
-        );
-      }
-      // #519 item 1 — the tap is a reading too: the viewport marks the fixed-jaw top.
-      io.saw({ source: 'mount-tap', label: tap.label, x: tap.x, y: tap.y, z: prb.z, touched: prb.touched, kind: null });
-      mountTap = { z: prb.z, at: { x: tap.x, y: tap.y } };
-    }
+    // #1199 field 7 (e) — A JOB NEVER TAPS THE JAW. The jaw/seat datum is a bed-setup measurement
+    // (the standalone mount tap in Manage › the machine); a pre-ruling plan that carries one is
+    // refused above, so this run has no mount-tap reading.
+    const mountTap: { z: number; at: { x: number; y: number } } | null = null;
 
     // #449 — the slow travel is the shop's `registration.surfaceSlowSeekMm` (1.2 to 2 mm, more than the
     // lift); a plan whose settings break that never got this far (`settingsProblem`).
@@ -2320,7 +2318,11 @@ export async function runRegistration(
         {
           ...plan.seek.band,
           at: `as low as machine Z ${plan.seek.band.min}, ${s.surfaceToleranceMm} mm below the expected surface (the surface seek)`,
-          expect: 'the stock is not where the job expects it',
+          // #1199 field 7 (e) — the top touch ANSWERS "is the vise where the record says" now; a
+          // trusted jaw datum that no longer fits the stock is said to be re-measured in setup.
+          expect:
+            'the stock is not where the job expects it' +
+            (plan.mountDatum !== null ? ' — and if the jaw datum itself is in doubt, re-measure the jaw in Manage › the machine' : ''),
         },
         // #633 — the datum path's OWN widening (#619): a blank mounted normally may stand prouder
         // than the ledge estimate, and this seek is the one that accepts it.

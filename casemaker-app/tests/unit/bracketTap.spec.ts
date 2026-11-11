@@ -30,7 +30,7 @@ import {
   defaultClampPlacements,
 } from '@/engine/cnc/mounts/bracket';
 import { bracketTapFor } from '@/engine/cnc/registration/mountContext';
-import { planRegistration, registrationSettings, runRegistration } from '@/engine/cnc/registration';
+import { planRegistration, registrationSettings, runMountTap } from '@/engine/cnc/registration';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -176,7 +176,7 @@ describe('#607 a plan carries whichever tap it was given', () => {
   });
 });
 
-describe('#599/#607 the vise tap runs the same code path it always did', () => {
+describe('#599/#607 the BED-SETUP jaw tap (a job never taps — #1199 field 7 (e))', () => {
   const JAW = { jawTopZ: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe' };
 
   /** Answers the questions before the tap and then MISSES it — no PRB line comes back. */
@@ -196,33 +196,28 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
     };
   }
 
-  it('a PRE-#607 plan (no reference, no expectZ) keeps the bench-tested sentence and the jawTopZ − 2 floor', async () => {
-    // The #599 fixture shape exactly: a datum and a tap point, and none of #607's fields.
-    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
-    const planned = planRegistration(
-      {
-        stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
-        mount: 'vise',
-        expectedSurface: { machineZ: -56.172, from: 'the jaw top and the blank’s proud height' },
-        seekFromMachineZ: -3,
-        mountDatum: JAW,
-        mountTap: tap,
-      },
-      S,
-    );
-    if (!planned.ok) throw new Error(planned.reason);
-
+  it('with the stored jaw top the search is floored 2 mm below it, and the miss sentence is the bench’s', async () => {
+    // #1199 field 7 (e) — the tap moved to bed setup; the floor and slack are the shop keys
+    // (`registration.mountTapFloorMm` / `mountTapSlackMm`, 2 mm each by recommendation).
     const console = tapMissConsole();
-    const r = await runRegistration(planned.plan, { liveClearanceZ: -3, console, operator: async () => true });
+    const r = await runMountTap(
+      { x: -186.2, y: -180 },
+      -3,
+      S,
+      { liveClearanceZ: -3, console, operator: async () => true },
+      -100,
+      'vise',
+      null,
+      null,
+      JAW.jawTopZ,
+    );
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      // The sentence the bench read on 2026-10-23, character for character.
       expect(r.reason).toContain('no jaw top at (-186.2, -180) down to machine Z -58.82');
       expect(r.reason).toContain('is the vise where the machine record says?');
     }
-    // #615 — the tap knows the jaw top from the datum, so it descends in two stages: a fast seek to
-    // 3 mm above the expected top (−3 → −53.82), then the touch feed for the last 5 mm down to the
-    // jawTopZ − 2 floor (−58.82).
+    // #615's two-stage descent, bounded by the stored top: fast to 3 mm above it, then the touch
+    // feed to the floor.
     const searched = console.lines.filter((l) => l.startsWith('G38.3 Z-'));
     expect(searched).toHaveLength(2);
     expect(searched[0]!.startsWith('G38.3 Z-50.82 F300')).toBe(true);
@@ -246,29 +241,24 @@ describe('#599/#607 the vise tap runs the same code path it always did', () => {
     };
   }
 
-  it('#633 a tap that TOUCHES above the stored jaw top says so, not "no jaw top"', async () => {
-    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
-    const planned = planRegistration(
-      {
-        stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
-        mount: 'vise',
-        expectedSurface: { machineZ: -56.172, from: 'the jaw top and the blank’s proud height' },
-        seekFromMachineZ: -3,
-        mountDatum: JAW,
-        mountTap: tap,
-      },
-      S,
-    );
-    if (!planned.ok) throw new Error(planned.reason);
-    // The fast stage meets something 5 mm ABOVE the stored jaw top (a chip, the wrong vise) — a touch
-    // outside the 2 mm slack, not a miss: "no jaw top … down to machine Z" would send the operator
-    // looking for a surface the probe did find.
+  it('a reading beyond the slack SAYS so and still records — a setup tap must refresh a moved jaw', async () => {
+    // The old job tap STOPPED here ("is the vise where the record says"). A setup measurement is
+    // where a moved vise is re-recorded, so the same distance is said, not refused.
+    const steps: string[] = [];
     const console = tapTouchConsole(JAW.jawTopZ + 5);
-    const r = await runRegistration(planned.plan, { liveClearanceZ: -3, console, operator: async () => true });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.reason).toContain('a touch at machine Z -51.82 at (-186.2, -180), 5 mm above the stored jaw top -56.82');
-    expect(r.reason).toContain('is the vise where the machine record says?');
-    expect(r.reason).not.toContain('no jaw top at');
+    const r = await runMountTap(
+      { x: -186.2, y: -180 },
+      -3,
+      S,
+      { liveClearanceZ: -3, console, operator: async () => true, onStep: (s) => steps.push(s) },
+      -100,
+      'vise',
+      null,
+      null,
+      JAW.jawTopZ,
+    );
+    expect(r.ok).toBe(true);
+    expect(steps.some((s) => s.includes('5 mm above the stored jaw top -56.82'))).toBe(true);
+    expect(steps.some((s) => s.includes('the datum is refreshed'))).toBe(true);
   });
 });

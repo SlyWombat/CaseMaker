@@ -327,16 +327,75 @@ describe('#1189 the Register card and a legacy datum', () => {
     expect(attempt.plan.surfaceChecks).toHaveLength(2);
   });
 
-  it('a jaw top measured before the probe was last fitted asks for the tap again', () => {
+  it('a jaw top measured before the probe was last fitted no longer asks — the top is measured on the blank', () => {
+    // #1199 field 7 (e) — no dead end: an untrusted (pre-refit) jaw datum falls into the guarded
+    // top-touch plan; nothing taps the jaw and nothing is asked.
     const attempt = planRegistrationAttempt({
       ...args(null),
       mount: { kind: 'vise' as const },
       mountDatum: { jawTopZ: TOP - 2, measuredAt: '2026-11-09T00:00:00.000Z', by: 'fx-probe-1' },
       mountTap: { x: -150, y: -160, fromMachineZ: -20, label: 'the vise fixed-jaw top' },
     });
+    expect(attempt.kind).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.guarded).toBeDefined();
+    expect(attempt.plan.mountTap).toBeNull();
+    expect(attempt.plan.surfaceChecks).toHaveLength(2);
+  });
+
+  it('a trusted-datum vise job plans with NO mountTap — the datum is used as it is', () => {
+    // #1199 field 7 (e) field 1: planners emit no job mountTap. The frame is present (the tap point
+    // is the frame's presence signal here); the plan itself must carry none.
+    const attempt = planRegistrationAttempt({
+      ...args(null),
+      mount: { kind: 'vise' as const },
+      mountDatum: { jawTopZ: -56.82, measuredAt: '2026-11-09T00:00:00.000Z', by: 'fx-probe-1', probeRefZ: -80 },
+      mountTap: { x: -150, y: -160, fromMachineZ: -20, label: 'the vise fixed-jaw top' },
+    });
+    expect(attempt.kind).toBe('plan');
+    if (attempt.kind !== 'plan') return;
+    expect(attempt.plan.mountTap).toBeNull();
+  });
+
+  // #1199 field 7 (e) — the guarded top touch's inset: the MAX of the job's edge margin and the
+  // shared probe/hold inset (a floor, not a sum), and the HOLD figure is the JOB'S OWN MOUNT's —
+  // the analyst's B ruling runs this path for vise jobs, so a hard-coded bracket fit is wrong.
+  const guardedVise = (over: { edgeMargin?: number; alongJawsMm?: number } = {}) => {
+    const attempt = planRegistrationAttempt({
+      ...args(null),
+      mount: { kind: 'vise' as const },
+      mountTap: { x: -150, y: -160, fromMachineZ: -20, label: 'the vise fixed-jaw top' },
+      job: { ...job, edgeMargin: over.edgeMargin ?? 0 } as never,
+      ...(over.alongJawsMm === undefined ? {} : { settings: { ...S, visePlacementAlongJawsMm: over.alongJawsMm } }),
+    });
+    expect(attempt.kind).toBe('plan');
+    return attempt.kind === 'plan' ? attempt.plan.surfaceChecks![0]! : { x: NaN, y: NaN, depthMm: 0 };
+  };
+
+  it('the guarded inset is the MAX of the job’s edge margin and the hold’s — never their sum', () => {
+    const tight = guardedVise({ edgeMargin: 0 });
+    const wide = guardedVise({ edgeMargin: 12 });
+    // The vise's across-jaws margin is 3 (the registry floor): the 12 mm margin replaces it.
+    expect(wide.x - tight.x).toBeCloseTo(9, 3);
+  });
+
+  it('the guarded inset uses the VISE’s placement keys, not the bracket’s fit', () => {
+    const a = guardedVise({ alongJawsMm: 0 });
+    const b = guardedVise({ alongJawsMm: 10 });
+    // margins.y = max(3, tip 0.7 + the unit's stated lateral uncertainty 0 + along): 3 at 0,
+    // 10.7 at 10.
+    expect(b.y - a.y).toBeCloseTo(7.7, 3);
+  });
+
+  it('a mounted vise whose hold figure is unstated REFUSES the guarded plan', () => {
+    const attempt = planRegistrationAttempt({
+      ...args(null),
+      mount: { kind: 'vise' as const },
+      mountTap: { x: -150, y: -160, fromMachineZ: -20, label: 'the vise fixed-jaw top' },
+      settings: { ...S, visePlacementAlongJawsMm: undefined },
+    });
     expect(attempt.kind).toBe('refused');
-    if (attempt.kind !== 'refused') return;
-    expect(attempt.reason).toContain('Tap the fixed jaw');
+    if (attempt.kind === 'refused') expect(attempt.reason).toContain('placement uncertainty is not stated');
   });
 });
 
