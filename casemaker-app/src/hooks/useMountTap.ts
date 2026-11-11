@@ -372,6 +372,12 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         axisY: req.nominal.axisY,
         nominalRadiusMm: req.nominal.radiusMm,
       };
+      // #1190 — THE AXIS DATUM'S OWN SEATING. The trial chord and the crown's band are placed from
+      // the stored axis Z (a raw M491-era reading), so the tap carries that datum's reference and
+      // the executor corrects the geometry once its own M491 is known.
+      const activeRecord = machineAt(inputs.target);
+      const activeProfile = activeRecord?.bedProfiles?.find((p) => p.id === activeRecord.activeBedProfileId);
+      const axisProbeRefZ = activeProfile?.datums.rotaryAxis?.probeRefZ ?? null;
       const r = await runRotaryTap(
         {
           at: rotaryTapPoint(record, req.atX),
@@ -384,6 +390,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           touchFeed: inputs.settings.touchFeed,
           surfaceFeed: inputs.settings.surfaceSlowFeed,
           parkAboveSurfaceMm: inputs.settings.parkAboveSurfaceMm,
+          probeRefZ: axisProbeRefZ,
         },
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
       );
