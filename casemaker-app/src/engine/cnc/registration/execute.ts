@@ -2415,8 +2415,17 @@ export async function runRegistration(
         : null;
 
     const parkZ = slow.z + s.parkAboveSurfaceMm;
-    await io.send(`G53 G0 Z${f(parkZ)}`);
-    io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
+    // #1199 field 7 — THE PARK DESCENT BELONGS TO THE SCANS. It puts the head at the scan park
+    // before the scan loop (each touch there lifts to the clearance and places its own point
+    // anyway). With a typed or derived top nothing touched the blank and no XY has moved off
+    // home: descending to that park is a depth beside the blank at the home corner, the class that
+    // bent the probe. With no scans to prepare for it is a needless descent at the last check
+    // point — and on a cut blank that point may be the last one read. Skip either way; the guard
+    // still refuses the move from any routine that sends it.
+    if (slow.touched && plan.scans.length > 0) {
+      await io.send(`G53 G0 Z${f(parkZ)}`);
+      io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
+    }
 
     const scans: ScanRecord[] = [];
     // #525/#1133 — a sideways touch wherever the mount leaves the edge free: the bracket and tape

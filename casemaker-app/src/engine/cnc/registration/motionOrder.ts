@@ -160,7 +160,32 @@ export function jobDescentRegion(
    * plan runs none, so its collar is empty), and never over a TOP CLAMP's box.
    */
   const inEdgeWindow = (x: number, y: number): boolean => {
-    if (plan.scans.length + extraScans.length === 0) return false;
+    const allScans = [...plan.scans, ...extraScans];
+    if (allScans.length === 0) return false;
+    // (1) THE PLAN'S OWN DECLARED WINDOW: each scan's start..limit, at its own line along the
+    // edge (either axis orientation), ± one band for the probe's rim.
+    for (const sc of allScans) {
+      // An X-axis edge varies in X: `at` is the coordinate along start..limit, `along` is fixed.
+      const xEdge = sc.edge === 'left' || sc.edge === 'right';
+      const at = xEdge ? x : y;
+      const along = xEdge ? y : x;
+      const lo = Math.min(sc.start, sc.limit);
+      const hi = Math.max(sc.start, sc.limit);
+      if (Math.abs(along - sc.along) <= band + eps && at >= lo - band - eps && at <= hi + band + eps) {
+        // A clamp's box is WORK XY. `at`/`along` are the scan's own axis pair, so put the point
+        // back in (x, y) before the box test — a right/left edge's `along` is Y, not X.
+        const px = xEdge ? at : along;
+        const py = xEdge ? along : at;
+        const clamped = plan.mountObstacles.some(
+          (o) =>
+            o.kind === 'clamp' &&
+            px >= o.min[0] - eps && px <= o.max[0] + eps &&
+            py >= o.min[1] - eps && py <= o.max[1] + eps,
+        );
+        if (!clamped) return true;
+      }
+    }
+    // (2) …and the COLLAR of one band around the blank's outline (the analyst's edge ± band).
     const inCollar =
       x >= stock.xMin - band - eps &&
       x <= stock.xMax + band + eps &&
@@ -178,13 +203,14 @@ export function jobDescentRegion(
   };
   const tap = plan.mountTap;
   return (machine, x, y) => {
+    // TODO(#1199 analyst): the VISE's jaw tap sits outside the blank by design — kept as a
+    // declared target until the analyst rules how a job-time jaw datum fits field 7. The tap's
+    // own coordinates are MACHINE XY (`PlanMountTap`), so they are compared in that frame.
+    if (tap !== null && machine && Math.abs(x - tap.x) <= 1e-3 && Math.abs(y - tap.y) <= 1e-3) return true;
     const p = toWork(machine, x, y);
     if (p === null) return false;
     if (inBlank(p.x, p.y)) return true;
-    if (inEdgeWindow(p.x, p.y)) return true;
-    // TODO(#1199 analyst): the VISE's jaw tap sits outside the blank by design — kept as a
-    // declared target until the analyst rules how a job-time jaw datum fits field 7.
-    return tap !== null && Math.abs(p.x - tap.x) <= 1e-3 && Math.abs(p.y - tap.y) <= 1e-3;
+    return inEdgeWindow(p.x, p.y);
   };
 }
 
