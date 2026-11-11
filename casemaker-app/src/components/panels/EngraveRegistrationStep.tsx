@@ -142,6 +142,7 @@ import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
 // #1202 + #1199 item 3 — the dry line view and the first-run mark.
 import { dryFlipRegistration, dryMountTap, dryRegistration, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
 import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
 import { firstRunAutomationRefusal } from '@/platform/automation';
 import { useMachineStore } from '@/store/machineStore';

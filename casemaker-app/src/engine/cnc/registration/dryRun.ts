@@ -105,7 +105,7 @@ export function registrationHeights(plan: RegistrationPlan, clearanceZ: number):
   return heights;
 }
 
-function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ?: number): ExecDeps {
+function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ: number): ExecDeps {
   return {
     console: { send: (line, timing) => console_.send(line, timing) },
     // The operator is not asked in a dry run: every prompt is answered as the press would with a
@@ -113,8 +113,10 @@ function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ?:
     operator: () => Promise.resolve(true),
     stopRequested: () => false,
     // #1199 item 2 / #1202 — the guard is built from the SAME live clearance the real run passes,
-    // so the shown verdicts and the wire's verdicts are one guard, not two readings.
-    ...(liveClearanceZ !== undefined && Number.isFinite(liveClearanceZ) ? { liveClearanceZ } : {}),
+    // so the shown verdicts and the wire's verdicts are one guard, not two readings. The field is
+    // REQUIRED (1e5ecb4aa): every caller here names the machine's clearance (the live reading when
+    // one was observed, the routine's own clearance otherwise).
+    liveClearanceZ,
   };
 }
 
