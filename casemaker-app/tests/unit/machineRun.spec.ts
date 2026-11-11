@@ -678,9 +678,12 @@ describe('#655 the firmware’s Tool state after T1 M6', () => {
           ask = 'continue-tool';
         }
         if (e.kind === 'tool-continued') events.push('continued');
+        // #1202 — the tool change is DONE once the controller leaves `Tool`; only OUR line makes
+        // that a completion this app records (`byApp`).
+        if (e.kind === 'tool-done') events.push(`done:${e.byApp}`);
       },
     });
-    expect(events).toEqual(['waiting:1', 'continued']);
+    expect(events).toEqual(['waiting:1', 'continued', 'done:true']);
     expect(f.lines()).toContain('M490.2');
     expect(o.kind).toBe('finished');
   });
@@ -695,16 +698,18 @@ describe('#655 the firmware’s Tool state after T1 M6', () => {
   });
 
   it('says so when the machine is carried on by hand', async () => {
-    const notes: string[] = [];
+    // #1202 — the run reports the tool change as done either way; `byApp: false` says a hand at
+    // the console carried it on, so this app must NOT record the completion as its own routine.
+    const done: boolean[] = [];
     const f = fake([TOOL, TOOL, '<Run|MPos:0,0,0|P:5,10,2>', '<Idle|P:5,100,9>']);
     const o = await runProgram('job.nc', {
       ...deps(f),
       onEvent: (e) => {
-        if (e.kind === 'note') notes.push(e.text);
+        if (e.kind === 'tool-done') done.push(e.byApp);
       },
     });
     expect(o.kind).toBe('finished');
-    expect(notes.some((n) => n.includes('The tool change is done'))).toBe(true);
+    expect(done).toEqual([false]);
     expect(f.lines()).not.toContain('M490.2');
   });
 });
