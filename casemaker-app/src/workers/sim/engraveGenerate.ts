@@ -379,13 +379,6 @@ export interface EngraveShopOpts {
    */
   finish?: { stockToLeaveMm: FinishStockToLeave } | null;
   /**
-   * #535 — the shop's `sim.columnFlatPitchYMm` (the FLAT heightfield pitch), resolved on the
-   * CALLER's side like `finish`: the goal operation samples its heightfield at this pitch when it
-   * states none of its own, and the source travels so the run sheet and the row can say where the
-   * number came from. Absent/null is no location: the CAM's labelled `DEFAULT_GRID_PITCH_MM`.
-   */
-  surfaceGrid?: { pitchMm: { value: number; source: 'seeded' | 'chosen' | 'measured' | 'fallback' } } | null;
-  /**
    * #434 — the drill-bit numbers (`drill.peckDiameters`, `drill.peckClearanceMm`,
    * `drill.pointAngleDeg`, `drill.plungeFeed`, `drill.spindleRpm`) with each one's source,
    * resolved on the CALLER's side by `drillSettings(shopDefaults)` exactly as `rest` is. The
@@ -4745,10 +4738,20 @@ export function generateRotaryGoalProgram(
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
-  const pitchMm = settings.gridPitchMm ?? shop.surfaceGrid?.pitchMm.value ?? null;
+  // #1164 — THE FINE FIELD, ONCE. The field is sampled at the JUDGED pitch (the check compares on
+  // the sampler's default, `DEFAULT_GRID_PITCH_MM`) and the planner reads its max-pooled form at
+  // the job's own planning pitch (`poolRadialField`, rule 5), so a coarse planning cell carries the
+  // highest radius over its footprint and the plan can only stand off. The same fine field is what
+  // the check is handed; the flat path does not go through here at all.
+  // #1164 a — THE PLANNING PITCH: the goal's own `surface.gridPitchMm` when it states one; else the
+  // shop's `relief.planningPitchMm`, a CAM planning pitch. The shop's 0.1 mm `sim.columnFlatPitchYMm`
+  // is a MEASUREMENT pitch, and a true-ray stencil at it costs ~4e9 evaluations for a medium
+  // relief — the tip drop would refuse the plan outright.
+  const planningPitchMm =
+    settings.gridPitchMm ?? readDefault(shop.defaults ?? null, 'relief.planningPitchMm').value;
   let field: ReturnType<typeof sampleGoalRadialField>;
   try {
-    field = sampleGoalRadialField(goal, rotary.radius, { pitchMm });
+    field = sampleGoalRadialField(goal, rotary.radius, {});
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e));
   }
@@ -4892,6 +4895,7 @@ export function generateRotaryGoalProgram(
   try {
     relief = generateRotaryReliefIR({
       field,
+      planningPitchMm,
       // #777 — a block in the chuck roughs from its own section, not the envelope.
       section: rotary.section,
       tool,

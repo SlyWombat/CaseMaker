@@ -1,0 +1,2929 @@
+{
+  "kind": "casemaker-location",
+  "schemaVersion": 1,
+  "id": "loc-18df72f2aaf89730",
+  "name": "My shop",
+  "createdAt": "2026-10-17T22:52:43.292Z",
+  "migratedFrom": null,
+  "machines": [
+    {
+      "id": "machine-lejqjgb73q",
+      "profileId": "Z1",
+      "name": "Makera_Z1_010290",
+      "nickname": "Zoomba",
+      "serial": null,
+      "firmware": null,
+      "address": {
+        "host": "192.168.10.43",
+        "port": 2222
+      },
+      "calibration": {
+        "frame": {
+          "anchor1": [
+            -190.89,
+            -193.83
+          ],
+          "anchor2Offset": [
+            88.5,
+            45
+          ],
+          "clearanceXY": [
+            -11.6,
+            -14.6
+          ],
+          "clearanceZ": -3,
+          "toolrackOffset": [
+            48.8,
+            181
+          ],
+          "toolrackZ": -108
+        },
+        "machineId": "Z1",
+        "measuredAt": "2026-11-07T20:34:33.417Z",
+        "softEndstop": {
+          "enabled": true,
+          "source": "config-get sd on 192.168.10.43",
+          "xMin": -207,
+          "yMin": -206,
+          "zMin": -102
+        },
+        "source": "config-get sd on 192.168.10.43"
+      },
+      "fixtures": {},
+      "bedProfiles": [
+        {
+          "id": "bp-first-2026-10-24",
+          "name": "bed 2026-10-24",
+          "createdAt": "2026-10-24T15:23:45.198Z",
+          "basedOn": null,
+          "surface": {
+            "kind": "wasteboard",
+            "material": null,
+            "length": null,
+            "width": null,
+            "thickness": 6.0,
+            "position": null,
+            "provenance": {
+              "thickness": "measured:2026-11-07T20:51:45.253334Z"
+            },
+            "scars": [],
+            "lastResurfacedAt": null
+          },
+          "datums": {
+            "surfaceTopZ": null,
+            "viseJawTopZ": {
+              "value": -56.853,
+              "measuredAt": "2026-10-25T16:55:32.828Z",
+              "by": "fx-probe-1",
+              "at": [
+                -184.975,
+                -152.85
+              ]
+            },
+            "bracketSeatZ": null,
+            "rotaryAxis": null,
+            "rotaryFaceAngle": null
+          },
+          "placements": [],
+          "preferredMounting": [],
+          "consumables": null,
+          "history": [
+            {
+              "at": "2026-10-24T15:23:45.198Z",
+              "what": "created at the first vise registration"
+            },
+            {
+              "at": "2026-10-24T15:23:45.198Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-24T15:28:08.677Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-24T15:42:30.949Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-24T16:50:13.297Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-24T16:50:13.491Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-24T22:14:36.610Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-24T22:14:36.610Z",
+              "what": "surface top measured"
+            },
+            {
+              "at": "2026-10-24T22:14:36.778Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-24T23:57:10.692Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-24T23:57:10.692Z",
+              "what": "surface top measured"
+            },
+            {
+              "at": "2026-10-24T23:57:10.865Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-25T02:11:07.916Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-25T02:17:08.930Z",
+              "what": "tapped"
+            },
+            {
+              "at": "2026-10-25T16:55:32.828Z",
+              "what": "the vise placement frame was written from a registration"
+            },
+            {
+              "at": "2026-10-25T16:55:32.828Z",
+              "what": "surface top measured"
+            },
+            {
+              "at": "2026-10-25T16:55:32.828Z",
+              "what": "tapped"
+            }
+          ]
+        }
+      ],
+      "activeBedProfileId": "bp-first-2026-10-24",
+      "margins": null,
+      "power": null,
+      "wasteboard": {
+        "thickness": 6.0,
+        "thicknessSource": "measured",
+        "measuredAt": "2026-11-07T20:51:45.253334Z",
+        "lastResurfacedAt": null,
+        "scars": []
+      },
+      "finishedPrograms": [
+        "5343dd8c"
+      ],
+      "updatedAt": "2026-11-07T20:35:06.406Z"
+    }
+  ],
+  "accessories": [
+    {
+      "id": "fx-probe-1",
+      "kind": "probe",
+      "product": "Makera Wired Probe V2",
+      "variant": "wired-touch",
+      "constants": {},
+      "unit": {
+        "lastM119Rest": "0",
+        "lastM491": {
+          "at": "2026-10-25T16:55:33.029Z",
+          "z": -75.954
+        },
+        "rimOffsetMm": 0.7,
+        "rimOffsetUncertaintyMm": 0.25,
+        "tipDiameterMm": 2
+      },
+      "provenance": {
+        "rimOffsetMm": "measured:2026-10-15T19:03:20.874Z",
+        "rimOffsetUncertaintyMm": "measured:2026-10-15T19:03:20.874Z",
+        "tipDiameterMm": "measured:2026-10-15T19:03:20.874Z"
+      },
+      "whereabouts": {
+        "kind": "machine",
+        "machineId": "machine-lejqjgb73q",
+        "since": "2026-10-15T19:03:20.874Z"
+      },
+      "history": [
+        {
+          "at": "2026-10-15T19:03:20.874Z",
+          "what": "tip 2.0 mm / rim offset 0.70 +/- 0.25 measured on the 2026-10-15 bench scan; in the Z1 since at least then"
+        },
+        {
+          "at": "2026-10-23T22:30:00.000Z",
+          "what": "registered from the accessory card (Wired Probe V2); every 2026-10-22/23 registration run used it"
+        },
+        {
+          "at": "2026-10-24T16:50:13.671Z",
+          "what": "probe length -75.918 mm, rest 0"
+        },
+        {
+          "at": "2026-10-24T22:14:36.952Z",
+          "what": "probe length -75.869 mm, rest 0"
+        },
+        {
+          "at": "2026-10-24T23:57:11.062Z",
+          "what": "probe length -75.862 mm, rest 0"
+        },
+        {
+          "at": "2026-10-25T02:11:08.106Z",
+          "what": "probe length -75.959 mm, rest 0"
+        },
+        {
+          "at": "2026-10-25T02:17:09.103Z",
+          "what": "probe length -75.955 mm, rest 0"
+        },
+        {
+          "at": "2026-10-25T16:55:33.029Z",
+          "what": "probe length -75.954 mm, rest 0"
+        }
+      ]
+    },
+    {
+      "id": "fx-probe-3d",
+      "kind": "probe",
+      "product": "Makera 3D Wired Probe",
+      "variant": "3d",
+      "constants": {},
+      "unit": {
+        "lastM119Rest": null,
+        "lastM491": null,
+        "rimOffsetMm": null,
+        "rimOffsetUncertaintyMm": null,
+        "tipDiameterMm": null
+      },
+      "provenance": {},
+      "whereabouts": {
+        "kind": "box"
+      },
+      "history": [
+        {
+          "at": "2026-10-23T22:30:00.000Z",
+          "what": "owned; not yet tested — registered from the accessory card (3D Wired Probe)"
+        }
+      ]
+    },
+    {
+      "id": "fx-vise-1",
+      "kind": "vise",
+      "product": "makera-z1-low-profile-vise",
+      "variant": null,
+      "constants": {
+        "jawBarWidth": 10,
+        "jawLength": 100,
+        "ledgeStep": 3.1,
+        "ledgeWidth": 1.9
+      },
+      "unit": {
+        "bodyHeight": null,
+        "fixedJawThickness": null,
+        "jawBarHeight": null,
+        "jawLength": null,
+        "jawStartY": null,
+        "maxOpening": null,
+        "movingJawThickness": null,
+        "stockProud": null,
+        "uncertainty": null
+      },
+      "provenance": {
+        "bodyHeight": "unmeasured",
+        "fixedJawThickness": "unmeasured",
+        "jawBarHeight": "unmeasured",
+        "jawBarWidth": "measured",
+        "jawLength": "measured",
+        "jawStartY": "unmeasured",
+        "ledgeStep": "measured",
+        "ledgeWidth": "measured",
+        "maxOpening": "unmeasured",
+        "movingJawThickness": "unmeasured",
+        "stockProud": "unmeasured",
+        "uncertainty": "unmeasured"
+      },
+      "whereabouts": {
+        "kind": "box"
+      },
+      "history": [
+        {
+          "at": "2026-10-24T15:23:45.198Z",
+          "what": "created at the first vise registration"
+        }
+      ]
+    },
+    {
+      "id": "fx-rotary-1",
+      "kind": "rotary-module",
+      "product": "makera-z1-4th-axis-module",
+      "variant": null,
+      "constants": {
+        "aHomeOffsetNote": "A home (0) has an unknown offset to the jaws and stock faces; the stock face angle must be measured per mounting",
+        "axisYPresetMm": -124.83,
+        "jawFaceRawPrbXMm": -159.76,
+        "jawFaceXMmEffective": -159.91,
+        "jawFaceXMmOuter": -160.81,
+        "jawsOutsideClosedMm": 50.9,
+        "jawsOutsideOpenMm": 84.0,
+        "m491SetterTriggerZMm": -48.5378,
+        "m491Tl0Mm": -4.966,
+        "presetDeltaYMm": -0.2265,
+        "probeBallDiameterMm": 2.1,
+        "probeBodyDiameterMm": 17.1,
+        "probeEffectiveRadiusMm": 0.15,
+        "probePreTravelFlagMm": 1.18,
+        "rodDiameterMm": 10.0,
+        "rodEccentricityMm": 0.49,
+        "squareFits": true,
+        "squareSpanMm": 150.0,
+        "stylusMm": 13.3
+      },
+      "unit": {
+        "axisYMm": -125.0565,
+        "axisZMm": -37.7083,
+        "chuckDiameterMm": 52.0,
+        "chuckFaceXMm": null,
+        "envelopeDiameterMm": 80,
+        "envelopeLengthMm": 150,
+        "jawCount": 4,
+        "runoutMm": null
+      },
+      "provenance": {
+        "aHomeOffsetNote": "observed 2026-11-07 (photo 12)",
+        "axisYMm": "measured:2026-11-07T17:50:56Z",
+        "axisYPresetMm": "firmware anchor1_y + rotation_offset_y",
+        "axisZMm": "measured:2026-11-07T17:50:23Z",
+        "chuckDiameterMm": "measured:2026-11-07 (calipers, maintainer)",
+        "chuckFaceXMm": "unmeasured (keep-out; jaw face measured separately)",
+        "envelopeDiameterMm": "vendor:t_MachineType",
+        "envelopeLengthMm": "vendor:t_MachineType",
+        "jawCount": "stated:maintainer:2026-11-07",
+        "jawFaceRawPrbXMm": "measured:2026-11-07T18:05:33Z",
+        "jawFaceXMmEffective": "measured:2026-11-07T18:05:33Z (probe, upper corner edge, +/-0.5)",
+        "jawFaceXMmOuter": "candidate bound (no pre-travel)",
+        "jawsOutsideClosedMm": "measured (calipers, maintainer 2026-11-07)",
+        "jawsOutsideOpenMm": "measured (calipers, maintainer 2026-11-07)",
+        "m491SetterTriggerZMm": "measured:2026-11-07T17:47:40Z (poll granularity)",
+        "m491Tl0Mm": "measured:2026-11-07T17:47:40Z",
+        "probeBallDiameterMm": "measured (calipers, maintainer 2026-11-07)",
+        "probeBodyDiameterMm": "measured (calipers, maintainer 2026-11-07)",
+        "probeEffectiveRadiusMm": "survey 2026-10-30",
+        "probePreTravelFlagMm": "derived from the 2026-11-07 Y span (flag)",
+        "rodDiameterMm": "measured (calipers, maintainer 2026-11-07)",
+        "rodEccentricityMm": "measured:2026-11-07T17:50:23Z (crown spread, probe)",
+        "runoutMm": "unmeasured (TIR not measured; rod eccentricity 0.49 in constants)",
+        "squareFits": "measured (44.5 mm square, maintainer 2026-11-07)",
+        "stylusMm": "measured (calipers, maintainer 2026-11-07)"
+      },
+      "whereabouts": {
+        "kind": "box"
+      },
+      "history": [
+        {
+          "at": "2026-11-07T16:00:09.858770Z",
+          "what": "recorded as owned (maintainer 2026-11-07 via the Manager, #1059); never fitted; #238 R-1 measures it 2026-11-08"
+        },
+        {
+          "at": "2026-11-07T18:20:00Z",
+          "what": "R-1 bench 2026-11-07: axis Y/Z and jaw-face X probed (deflection proof passed twice), chuck dia 52 and jaws calipered, M491 TL0 -4.966; TIR/backlash and tailstock reach not measured (#238 comment 6711320948)"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "inventory": [
+    {
+      "id": "kz-corn-2-0-10-5",
+      "tool": {
+        "number": null,
+        "id": "111218203811",
+        "name": "TiN Coating Corn Bit - 1/8\" Shank 2mm * 10.5mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 2.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 10.5,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 3,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CORN-2.0-10.5"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-CORN-2.0-10.5-10PCS. Label CN: 玉米刀. Makera catalogue id 111218203811 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-drill-1-10",
+      "tool": {
+        "number": null,
+        "id": "142212103810",
+        "name": "TiN Coating Drill Bit - 1/8\" Shank 1mm * 10mm",
+        "typeText": "Drill",
+        "shape": "drill",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.0,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 10.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-DRILL-1-10"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-DRILL-1-10-10PCS. Label CN: 钻头. Makera catalogue id 142212103810 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-drill-2-12",
+      "tool": {
+        "number": null,
+        "id": "142212203812",
+        "name": "TiN Coating Drill Bit - 1/8\" Shank 2mm * 12mm",
+        "typeText": "Drill",
+        "shape": "drill",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 3,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-DRILL-2-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-DRILL-2-12-10PCS. Label CN: 钻头. Makera catalogue id 142212203812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-engrave-30-0-3",
+      "tool": {
+        "number": null,
+        "id": "121011033830",
+        "name": "Single Flute Engraving Bit - 1/8\" Shank 30° * 0.3mm",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.3,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 30.0,
+        "halfAngle": 15.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-ENGRAVE-30-0.3"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-ENGRAVE-30-0.3-10PCS. Label CN: 平底尖刀. Makera catalogue id 121011033830 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-corn-3-0-12",
+      "tool": {
+        "number": null,
+        "id": "111218303812",
+        "name": "TiN Coating Corn Bit - 1/8\" Shank 3.0mm * 12mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.0,
+        "diameter": 3.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CORN-3.0-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-CORN-3.0-12-10PCS. Label CN: 玉米刀. Makera catalogue id 111218303812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-drill-2-5-12",
+      "tool": {
+        "number": null,
+        "id": "142212253812",
+        "name": "TiN Coating Drill Bit - 1/8\" Shank 2.5mm * 12mm",
+        "typeText": "Drill",
+        "shape": "drill",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.5,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-DRILL-2.5-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-DRILL-2.5-12-10PCS. Label CN: 钻头. Makera catalogue id 142212253812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-m-2-8",
+      "tool": {
+        "number": null,
+        "id": "112111203808",
+        "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 2mm * 8mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 2.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 8.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 3,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-M-2-8"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-M-2-8. Label CN: 金属单刃螺旋铣刀. Metal line (-M-). Makera catalogue id 112111203808 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-3-175-22",
+      "tool": {
+        "number": null,
+        "id": "131012313822",
+        "name": "Two Flute Ball Nose Bit - 1/8\" Shank 3.175mm * 22mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 1.5875,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 22.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-3.175-22"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-3.175-22. Label CN: 球头刀. Makera catalogue id 131012313822 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-2-12",
+      "tool": {
+        "number": null,
+        "id": "111011203812",
+        "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 2mm * 12mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 2.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-2-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-2-12. Label CN: 单刃螺旋铣刀. In service: in the Z1 spindle since 2026-10-12 (bench cutter, replacing the 1x4 ball nose). Makera catalogue id 111011203812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-3-175-25",
+      "tool": {
+        "number": null,
+        "id": "111011313825",
+        "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 25mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 25.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-3.175-25"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-3.175-25. Label CN: 单刃螺旋铣刀. Makera catalogue id 111011313825 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-m-3-175-12",
+      "tool": {
+        "number": null,
+        "id": "112111313812",
+        "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 3.175mm * 12mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 6,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-M-3.175-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-M-3.175-12. Label CN: 金属单刃螺旋铣刀. Metal line (-M-). Makera catalogue id 112111313812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-2-12",
+      "tool": {
+        "number": null,
+        "id": "131012203812",
+        "name": "Two Flute Ball Nose Bit - 1/8\" Shank 2mm * 12mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 3.175,
+        "cornerRadius": 1.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-2-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-2-12. Label CN: 球头刀. Makera catalogue id 131012203812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-engrave-30-0-5",
+      "tool": {
+        "number": null,
+        "id": "121011053830",
+        "name": "Single Flute Engraving Bit - 1/8\" Shank 30° * 0.5mm",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.5,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 30.0,
+        "halfAngle": 15.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-ENGRAVE-30-0.5"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-ENGRAVE-30-0.5-10PCS. Label CN: 平底尖刀. Makera catalogue id 121011053830 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-corn-0-6-3",
+      "tool": {
+        "number": null,
+        "id": "111218063803",
+        "name": "TiN Coating Corn Bit - 1/8\" Shank 0.6mm * 3mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.6,
+        "diameter": 0.6,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 3.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CORN-0.6-3"
+        },
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CORN-0.6-3-10PCS"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-CORN-0.6-3-10PCS. Label CN: 玉米刀. Makera catalogue id 111218063803 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-corn-1-7",
+      "tool": {
+        "number": null,
+        "id": "111218103807",
+        "name": "TiN Coating Corn Bit - 1/8\" Shank 1mm * 7mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.0,
+        "diameter": 1.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 7.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CORN-1-7"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-CORN-1-7-10PCS. Label CN: 玉米刀. Makera catalogue id 111218103807 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-drill-3-12",
+      "tool": {
+        "number": null,
+        "id": "142212303812",
+        "name": "TiN Coating Drill Bit - 1/8\" Shank 3mm * 12mm",
+        "typeText": "Drill",
+        "shape": "drill",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.0,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 12.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-DRILL-3-12"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-DRILL-3-12-10PCS. Label CN: 钻头. Makera catalogue id 142212303812 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-chamfer-90",
+      "tool": {
+        "number": null,
+        "id": "122111013890",
+        "name": "Chamfering Bit - 1/8\" Shank 90°",
+        "typeText": "Chamfer",
+        "shape": "chamfer",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.1,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 90.0,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 6,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-CHAMFER-90"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow + orange + blue. Makera C1-BIT-CHAMFER-90. Label CN: 倒角刀. Two physical variants under one code (#381): 2× yellow with collar, ≈40 mm overall, tip→collar ≈17.5 mm; 2× orange, ≈51 mm overall (ruler photo, ±2 mm). Makera catalogue id 122111013890 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-engrave-m-30-0-2",
+      "tool": {
+        "number": null,
+        "id": "122111023830",
+        "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30° * 0.2mm",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.2,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 30.0,
+        "halfAngle": 15.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-ENGRAVE-M-30-0.2"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: orange + yellow. Makera C1-BIT-ENGRAVE-M-30-0.2. Label CN: 金属平底尖刀. Metal line (-M-). Makera catalogue id 122111023830 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-engrave-m-30-0-3",
+      "tool": {
+        "number": null,
+        "id": "122111033830",
+        "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 30° * 0.3mm",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.3,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 30.0,
+        "halfAngle": 15.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 4,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-ENGRAVE-M-30-0.3"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: orange. Makera C1-BIT-ENGRAVE-M-30-0.3. Label CN: 金属平底尖刀. Metal line (-M-). Makera catalogue id 122111033830 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-m-1-3",
+      "tool": {
+        "number": null,
+        "id": "112111103803",
+        "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1mm * 3mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.0,
+        "diameter": 1.0,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 3.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-M-1-3"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: green + yellow. Makera C1-BIT-O-FLUTE-M-1-3. Label CN: 金属单刃螺旋铣刀. Metal line (-M-). Makera catalogue id 112111103803 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-m-1-5-6",
+      "tool": {
+        "number": null,
+        "id": "112111153806",
+        "name": "Spiral 'O' Single Flute Bit for Metal - 1/8\" Shank 1.5mm * 6mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.5,
+        "diameter": 1.5,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 6.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-M-1.5-6"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: green. Makera C1-BIT-O-FLUTE-M-1.5-6. Label CN: 金属单刃螺旋铣刀. Metal line (-M-). Makera catalogue id 112111153806 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-engrave-m-60-0-1",
+      "tool": {
+        "number": null,
+        "id": "122111013860",
+        "name": "Single Flute Engraving Bit for Metal - 1/8\" Shank 60° * 0.1mm",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.1,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": 60.0,
+        "halfAngle": 30.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-ENGRAVE-M-60-0.1"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: orange + yellow. Makera C1-BIT-ENGRAVE-M-60-0.1. Label CN: 金属平底尖刀. Metal line (-M-). Makera catalogue id 122111013860 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-thread-m5-15",
+      "tool": {
+        "number": null,
+        "id": "152111403815",
+        "name": "Thread Milling Bit - 1/8\" Shank M5(d4) * 15mm",
+        "typeText": "Thread",
+        "shape": "thread",
+        "handleDiameter": 3.175,
+        "tipDiameter": 4.0,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 15.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-THREAD-M5-15"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: blue + red. Makera C1-BIT-THREAD-M5-15. Label CN: 螺纹铣刀 (thread milling cutter). Thread M5; cutter ⌀ from the label (d4), not the code. Makera catalogue id 152111403815 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-m-2-6",
+      "tool": {
+        "number": null,
+        "id": "132112203806",
+        "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 2mm * 6mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 3.175,
+        "cornerRadius": 1.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 6.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-M-2-6"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-2-6. Label CN: 金属球头刀 (metal ball-nose cutter). Metal line (-M-). Makera catalogue id 132112203806 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-m-1-3",
+      "tool": {
+        "number": null,
+        "id": "132112103803",
+        "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 1mm * 3mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.0,
+        "diameter": 3.175,
+        "cornerRadius": 0.5,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 3.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-M-1-3"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-1-3. Label CN: 金属球头刀 (metal ball-nose cutter). Metal line (-M-). Makera catalogue id 132112103803 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-thread-m3-9",
+      "tool": {
+        "number": null,
+        "id": "152111243809",
+        "name": "Thread Milling Bit - 1/8\" Shank M3(d2.4mm) * 9mm",
+        "typeText": "Thread",
+        "shape": "thread",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.4,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 9.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-THREAD-M3-9"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: blue + red. Makera C1-BIT-THREAD-M3-9. Label CN: 螺纹铣刀 (thread milling cutter). Thread M3; cutter ⌀ from the label (d2.4), not the code. Makera catalogue id 152111243809 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-o-flute-3-175-42",
+      "tool": {
+        "number": null,
+        "id": "111011313842",
+        "name": "Spiral 'O' Single Flute Bit - 1/8\" Shank 3.175mm * 42mm",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 42.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-O-FLUTE-3.175-42"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-O-FLUTE-3.175-42. Label CN: 单刃螺旋铣刀 (single-flute spiral milling cutter). Makera catalogue id 111011313842 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-m-3-175-10",
+      "tool": {
+        "number": null,
+        "id": "132112313810",
+        "name": "Two Flute Ball Nose Bit for Metal - 1/8\" Shank 3.175mm * 10mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 3.175,
+        "diameter": 3.175,
+        "cornerRadius": 1.5875,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 10.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-M-3.175-10"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: blue. Makera C1-BIT-BALL-NOSE-M-3.175-10. Label CN: 金属球头刀 (metal ball-nose cutter). Metal line (-M-). Makera catalogue id 132112313810 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "kz-ball-nose-1-4",
+      "tool": {
+        "number": null,
+        "id": "131012103804",
+        "name": "Two Flute Ball Nose Bit - 1/8\" Shank 1mm * 4mm",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.0,
+        "diameter": 3.175,
+        "cornerRadius": 0.5,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 4.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 2,
+      "codes": [
+        {
+          "symbology": "qr",
+          "value": "C1-BIT-BALL-NOSE-1-4"
+        }
+      ],
+      "addedAt": "2026-10-12T00:00:00.000Z",
+      "notes": "Case: yellow. Makera C1-BIT-BALL-NOSE-1-4. Label CN: 球头刀 (ball-nose cutter). Back in its box (swapped out of the spindle 2026-10-12). Makera catalogue id 131012103804 (matched 2026-11-07 by kind/⌀/flute to the k3 catalogue row)."
+    },
+    {
+      "id": "ucheer-ball-r1-15-38-2f",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "Ucheer ball nose R1.0 × 15 × Ø3.175 × 38 × 2F",
+        "typeText": "Ball Nose",
+        "shape": "ball",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.0,
+        "diameter": 3.175,
+        "cornerRadius": 1.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 15.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [
+        {
+          "symbology": "code128",
+          "value": "1028317510"
+        }
+      ],
+      "addedAt": "2026-11-03T00:00:00.000Z",
+      "notes": "Ucheer (non-Makera). Label: R1.0*15*Ø3.175*38*2B. Ball ⌀2 (R1.0), cutting length 15, shank 3.175, overall 38, 2 flutes — all from the label, not measured. Barcode Code128 1028317510. Case: blue."
+    },
+    {
+      "id": "xcan-flat-1.5-8-2f",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "XCAN 2-flute spiral flat end mill 1.5 × 8, 3.175 shank",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": 3.175,
+        "tipDiameter": 1.5,
+        "diameter": 1.5,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": 8.0,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 20,
+      "codes": [
+        {
+          "symbology": "code128",
+          "value": "ZDSCYS3005"
+        },
+        {
+          "symbology": "code128",
+          "value": "LXD0PD15B08M"
+        }
+      ],
+      "addedAt": "2026-11-03T00:00:00.000Z",
+      "notes": "XCAN (AliExpress). 20 × flat 2-flute spiral end mill, ⌀1.5 × 8 mm flute, 3.175 shank, in two cases of 10 — from the case labels (not calipered). One case came in a bag labelled 30° × 0.5 V-bit (ZDSCYS3005); the other in the correct flat-end-mill bag (LXD0PD15B08M)."
+    },
+    {
+      "id": "xcan-vbit-20-0.1",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "XCAN carbide straight V-bit 20° × 0.1 mm tip, 3.175 shank",
+        "typeText": "Engraving",
+        "shape": "engraving",
+        "handleDiameter": 3.175,
+        "tipDiameter": 0.1,
+        "diameter": 3.175,
+        "cornerRadius": null,
+        "angle": null,
+        "halfAngle": 10.0,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 10,
+      "codes": [
+        {
+          "symbology": "code128",
+          "value": "ZDSCYS2001"
+        }
+      ],
+      "addedAt": "2026-11-03T00:00:00.000Z",
+      "notes": "XCAN (AliExpress). 10 × straight V-bit, 20° included, 0.1 mm tip, 3.175 shank — bag and case labels agree; tips capped, not inspected. Code ZDSCYS2001."
+    },
+    {
+      "id": "haocher-corn-0.9",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "Haocher corn (PCB router) bit ⌀0.9",
+        "typeText": "Flat End",
+        "shape": "flat",
+        "handleDiameter": null,
+        "tipDiameter": 0.9,
+        "diameter": 0.9,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 9,
+      "codes": [
+        {
+          "symbology": "code39",
+          "value": "-1473019"
+        }
+      ],
+      "addedAt": "2026-11-03T00:00:00.000Z",
+      "notes": "Haocher Tool corn (PCB router) bit, ⌀0.9 (handwritten on the label). 9 of 10 left — one broken in testing. Shank and flute length not on the label. Code39 -1473019; label 0D 101-4B21."
+    },
+    {
+      "id": "makera-wired-probe-v2",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "Makera wired touch probe V2 (Z1, tool 9999)",
+        "typeText": "Probe",
+        "shape": "unknown",
+        "handleDiameter": 3.175,
+        "tipDiameter": null,
+        "diameter": 3.175,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [],
+      "addedAt": "2026-11-07T00:00:00.000Z",
+      "notes": "Wired probe V2 that ships with the Z1; the firmware's T9999 (M6T9999 = 'change tool to probe'). Mechanical touch tip. Bench 2026-10-30 (docs/bench/2026-10-30-3d-probe-survey.md): tool-setter reading −75.92, fixed-jaw top −56.82 machine Z. Tip ball diameter NOT yet calipered — record it when measured. Shape 'unknown' because the tool schema has no probe shape yet."
+    },
+    {
+      "id": "makera-3d-probe",
+      "tool": {
+        "number": null,
+        "id": null,
+        "name": "Makera 3D Probe (Z1, tool 8888)",
+        "typeText": "Probe",
+        "shape": "unknown",
+        "handleDiameter": 3.175,
+        "tipDiameter": 2.1,
+        "diameter": 3.175,
+        "cornerRadius": 0.0,
+        "angle": null,
+        "halfAngle": null,
+        "fluteLength": null,
+        "shoulderLength": null,
+        "stickout": null,
+        "centreCutting": null
+      },
+      "origin": null,
+      "quantity": 1,
+      "codes": [],
+      "addedAt": "2026-11-07T00:00:00.000Z",
+      "notes": "OUT OF SERVICE 2026-11-07 (maintainer): broken at ~20:06Z on a sideways `G91 G38.3 X25` sent by the Manager session's hand-driven routine after a soft-endstop alarm (`$X`) had dropped the toolsensor supply (an unpowered probe never triggers — the 10-30 survey's rule: re-send M831 after any alarm); console log docs/bench/traces/2026-11-07-console.log ~20:00–20:06Z. Not usable until inspected/replaced. Makera 3D touch probe; Studio's M6T8888. Plugs into the wired-probe connector (the wired probe is unplugged, body left docked). Bench 2026-10-30 survey: 8.95 mm longer than the wired probe at the setter and the jaw top; effective stylus radius ≈ 0.15 mm (moving-jaw band 10.30 mm between ball centres vs 10.0 calipered — large pre-travel); ball Ø 2.1 mm (ruby), calipered by the maintainer 2026-11-07; body Ø 17.1 mm calipered the same day. Retract after a sideways contact with G38.5 before any G0 (else 'unexpected probe trigger'). Shape 'unknown': no probe shape in the schema yet."
+    }
+  ],
+  "stock": [
+    {
+      "id": "stock-27tpsvq3oo",
+      "material": "plastic",
+      "form": "sheet",
+      "size": {
+        "length": 25.35,
+        "width": 76.0,
+        "thickness": 1.5,
+        "diameter": null,
+        "wall": null
+      },
+      "layers": [],
+      "capMm": null,
+      "capSource": null,
+      "finish": "finished",
+      "flatness": "unknown",
+      "domeHeight": null,
+      "conductive": false,
+      "quantity": 1,
+      "reservations": [],
+      "consumed": [],
+      "source": "purchased",
+      "notes": null,
+      "addedAt": "2026-10-18T18:34:58.641Z"
+    },
+    {
+      "id": "stock-h5hgw2j0sc",
+      "material": "softwood",
+      "form": "block",
+      "size": {
+        "length": 100.0,
+        "width": 100.0,
+        "thickness": 100.0,
+        "diameter": null,
+        "wall": null
+      },
+      "layers": [],
+      "capMm": null,
+      "capSource": null,
+      "finish": "rough",
+      "flatness": "unknown",
+      "domeHeight": null,
+      "conductive": false,
+      "quantity": 1,
+      "reservations": [],
+      "consumed": [],
+      "source": "purchased",
+      "notes": null,
+      "addedAt": "2026-10-27T21:50:16.110Z"
+    },
+    {
+      "id": "stock-vmqkagg6w9",
+      "material": "hardwood",
+      "form": "plate",
+      "size": {
+        "length": 120.0,
+        "width": 75.0,
+        "thickness": 50.0,
+        "diameter": null,
+        "wall": null
+      },
+      "layers": [],
+      "capMm": null,
+      "capSource": null,
+      "finish": "rough",
+      "flatness": "unknown",
+      "domeHeight": null,
+      "conductive": false,
+      "quantity": 1,
+      "reservations": [],
+      "consumed": [],
+      "source": "purchased",
+      "notes": null,
+      "addedAt": "2026-11-01T20:05:36.992Z"
+    },
+    {
+      "id": "stock-m1-hardwood-stick",
+      "material": "hardwood",
+      "form": "block",
+      "size": {
+        "length": 36.0,
+        "width": 100.0,
+        "thickness": 36.0,
+        "diameter": null,
+        "wall": null
+      },
+      "layers": [],
+      "capMm": null,
+      "capSource": null,
+      "finish": "finished",
+      "flatness": "unknown",
+      "domeHeight": null,
+      "conductive": false,
+      "quantity": 1,
+      "reservations": [],
+      "consumed": [],
+      "source": "purchased",
+      "notes": "Milestone 1 hardwood sticks: 36 x 36 x 100 mm, planed (taken as a finished face; the sample jobs carry no facing pass).",
+      "addedAt": "2026-11-03T18:29:10Z"
+    }
+  ],
+  "feeds": [
+    {
+      "id": "feed-softwood-flat-0.8-1.6",
+      "material": "softwood",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-softwood-flat-1.6-3.2",
+      "material": "softwood",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-hardwood-flat-0.8-1.6",
+      "material": "hardwood",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 400.0,
+        "plungeFeed": 150.0,
+        "stepDown": 0.3,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-hardwood-flat-1.6-3.2",
+      "material": "hardwood",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 400.0,
+        "plungeFeed": 150.0,
+        "stepDown": 0.6,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-mdf-flat-0.8-1.6",
+      "material": "mdf",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-mdf-flat-1.6-3.2",
+      "material": "mdf",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-0.8-1.6",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 0.8,
+      "maxDiameter": 1.6,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 0.3,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-1.6-3.2",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 1.6,
+      "maxDiameter": 3.2,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 0.5,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "Starting value. rpm/feed/plunge are what Makera Studio emits for the Z1 (TopClamp.nc: S12000, F500, F200); step-down is a conservative guess for a 150 W spindle. Replace from #209."
+    },
+    {
+      "id": "feed-pla-flat-0.5-0.8",
+      "material": "pla",
+      "edge": null,
+      "minDiameter": 0.5,
+      "maxDiameter": 0.8,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 0.2,
+        "stepOverFraction": 0.4,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": "The FINEST flat row (#410), for the 0.6 mm corn cutter; appended so a 0.8 mm cutter still takes the 0.8-1.6 mm row.",
+      "provenance": "PLACEHOLDER, nothing measured: the 0.8-1.6 mm row's own starting values (S12000, F500, F200 — the Z1's emitted defaults) with the step-down and step-over cut back for a 0.6 mm cutter, which is the least stiff bit the bench owns. No vendor row for this diameter. #284 measures it."
+    },
+    {
+      "id": "feed-pla-v-0.3-0.5",
+      "material": "pla",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.6,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "From the 2026-10-15 bench cut (#185, `docs/bench/185-v-groove.nc`): the hand file's own numbers — S12000, F500 along, F200 plunge, one pass to depth — cut a clean V groove in PLA (0.836 mm opening at 1.0 mm deep, the 30° × 0.3 mm bit). Starting values, not a coupon measurement: #284 is what measures this row."
+    },
+    {
+      "id": "feed-petg-v-0.3-0.5",
+      "material": "petg",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 500.0,
+        "plungeFeed": 200.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.6,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": null,
+      "provenance": "OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, F200 plunge for 856 s without melting. The numbers are the PLA V row's own starting values; no coupon measured PETG, and this row is a chosen placeholder for the two-colour blank. #284 is what settles it."
+    },
+    {
+      "id": "feed-1nahr2h5ul",
+      "material": "plastic",
+      "edge": "v",
+      "minDiameter": 0.3,
+      "maxDiameter": 0.5,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 1000.0,
+        "plungeFeed": 200.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.6,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "measured",
+      "setAt": "2026-10-18T20:03:37.788Z",
+      "note": "Laminate V row (#450): the 0.3-0.5 mm band; only the feed was swept, rpm/plunge/step-down are the PLA V row carried over.",
+      "provenance": "Measured 2026-10-18 by the maintainer (Dave) on the purchased two-colour laminate 76 x 25.35 x 1.5 with the yellow Single Flute Engraving Bit 30 deg x 0.3 mm: four cells F400/F600/F800/F1000 at S12000, F200 plunge, 0.1 mm deep, all clean by eye (no melt, no strings); chose 1000. Record docs/bench/450-laminate-v-feed-coupon-record.json, photo docs/bench/img/2026-10-18-laminate-V-feed-coupon.jpg."
+    },
+    {
+      "id": "feed-m1-hardwood-v-0.1",
+      "material": "hardwood",
+      "edge": "v",
+      "minDiameter": 0.1,
+      "maxDiameter": 0.1,
+      "params": {
+        "rpm": 12000.0,
+        "feed": 1000.0,
+        "plungeFeed": 500.0,
+        "stepDown": 1.0,
+        "stepOverFraction": 0.45,
+        "peckFraction": 1.0,
+        "air": true
+      },
+      "source": "seeded",
+      "setAt": null,
+      "note": "Library-sourced STARTING row: rpm, feed, plunge and step-down come from Makera Studio’s own Hardwood rows; step-over (0.45) and peck (1.0) are SEEDED — the vendor states neither. Not a measurement: the bench’s V-carve coupon is what makes it measured.",
+      "provenance": "Makera library starting values: Hardwood rows for cutter 122111013860 (3.175*0.1mm*60º Engraving(Metal)) and cutter 122111013890 (3.175mm*90º Chamfer) — S12000 / F1000 / F500 / 1.0 mm step-down. Step-over and peck are the seeded hardwood values. Unmeasured."
+    }
+  ],
+  "defaults": {
+    "adaptive.cutFeed": {
+      "value": 600.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the adaptive clearing feed until a measured row replaces it"
+    },
+    "adaptive.engagementFraction": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the most new material a clearing move may take per mm of travel, as a fraction of the cutter diameter"
+    },
+    "adaptive.entryClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"
+    },
+    "adaptive.entryFeed": {
+      "value": 200.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the helix and ramp entry feed until a measured row replaces it"
+    },
+    "adaptive.helixDiameterFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the helix entry's diameter as a fraction of the cutter diameter; the helix is refused where its bore does not fit"
+    },
+    "adaptive.maxCells": {
+      "value": 12000000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cells",
+      "note": "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"
+    },
+    "adaptive.neckAreaMm2": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm²",
+      "note": "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"
+    },
+    "adaptive.rampAngleDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: the descent angle of the helix and ramp entries"
+    },
+    "adaptive.residualShare": {
+      "value": 0.005,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"
+    },
+    "adaptive.spindleRpm": {
+      "value": 12000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the adaptive spindle speed until a measured row replaces it"
+    },
+    "adaptive.stepDownMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the deepest level adaptive clearing cuts at once"
+    },
+    "bore.rampAngleDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: how steeply a bore's helix descends, its lead per revolution"
+    },
+    "bracket.armLengthXMm": {
+      "value": 85,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, inside corner to the end of the scale arm (both arms 85)"
+    },
+    "bracket.armLengthYMm": {
+      "value": 85,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, inside corner to the end of the other arm (both arms 85)"
+    },
+    "bracket.armWidthMm": {
+      "value": 15,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket arm, stock face to outside face"
+    },
+    "bracket.fitMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how closely a corner pushed into the bracket repeats (the design's +/-0.1)"
+    },
+    "bracket.heightMm": {
+      "value": 15.05,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera L Bracket, underside to top; the M5 heads sit in counterbores"
+    },
+    "bracket.originOffsetXMm": {
+      "value": 0.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the stock's corner in the bracket from anchor 1 along X. 0 is Makera's own (Z1 QuickStart: work origin relative to Anchor 1, X offset 0); caliper the bracket's inside face to the anchor"
+    },
+    "bracket.originOffsetYMm": {
+      "value": 0.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: the stock's corner in the bracket from anchor 1 along Y. 0 is Makera's own (Z1 QuickStart: Y offset 0); caliper the bracket's inside face to the anchor"
+    },
+    "bracket.repeatMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: how closely a bracket seated on the anchor pins repeats; #208 B1 owes the pin-to-face measurement"
+    },
+    "clamp.refuseFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
+    },
+    "clamps.sideDepthMm": {
+      "value": 12.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how far a side clamp's body stands out from the blank's edge — the Side Clamp Set has never been calipered"
+    },
+    "clamps.sideWidthMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: a side clamp's width, along the edge it holds — the Side Clamp Set has never been calipered"
+    },
+    "clamps.topHeightMm": {
+      "value": 10.05,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp 5.05 thick + a standard M5 cap-screw head 5.0; the nose steps down to 3.6 and 1.05 (docs/bench/img/2026-10-18-top-clamp-stepped-nose.jpg)"
+    },
+    "clamps.topInFromCornerMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen placement, not a measurement: a clamp's side this far in from the corner of the edge it holds"
+    },
+    "clamps.topLengthMm": {
+      "value": 65,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp Set, end to end along the slot"
+    },
+    "clamps.topReachMm": {
+      "value": 8.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "default, not measured: how far a top clamp's nose reaches in over the stock from its edge"
+    },
+    "clamps.topWidthMm": {
+      "value": 20,
+      "source": "measured",
+      "setAt": "2026-10-18T21:04:37Z",
+      "unit": "mm",
+      "note": "measured 2026-10-18 by the maintainer (calipers, DAVE-1 bench): Makera Top Clamp Set, across the slot"
+    },
+    "console.firstReplyMs": {
+      "value": 60000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a typed console line waits for its first reply. Above the slowest lines timed on the bench (M491 about 32 s, $H about 31 s, 2026-10-15)"
+    },
+    "console.maxMs": {
+      "value": 120000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the longest a console reply may run; never shorter than the first-reply wait"
+    },
+    "console.quietMs": {
+      "value": 800.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the quiet gap that ends a console reply"
+    },
+    "drill.peckClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"
+    },
+    "drill.peckDiameters": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"
+    },
+    "drill.plungeFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the drilling feed until a measured row replaces it"
+    },
+    "drill.pointAngleDeg": {
+      "value": 118.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: a twist drill's included point angle, used only when the drill's own record states none"
+    },
+    "drill.spindleRpm": {
+      "value": 10000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the drilling spindle speed until a measured row replaces it"
+    },
+    "efficiency.maxAirFraction": {
+      "value": 0.35,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of a program's cycle that may be spent in rapid (air) moves before the run sheet warns, naming the airiest operation. 0.35 sits above the corpus's worst good program (26.3 %); the first corpus run that shows a good program near it moves it (#926)"
+    },
+    "engrave.blankBandFill": {
+      "value": 0.7,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
+    },
+    "engrave.lostDetailWarnRatio": {
+      "value": 0.9,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of an item's area a cutter must reach before the item is called detail-lost"
+    },
+    "engrave.newDrillDepthMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth a new hole starts at — deeper than an item's own starting depth because a hole that shallow shows nothing on the preview"
+    },
+    "engrave.newItemDepthMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth a new label, shape, combined shape, traced line or imported outline starts at, in the panel where the person then sets the depth that matters"
+    },
+    "engrave.newThreadDepthMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the threaded length a new thread item starts at"
+    },
+    "facing.marginMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: added to a probed top's high-to-low spread to fill in the facing depth, so the skim clears the highest point of the face"
+    },
+    "facing.retouchToleranceMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the +/- band around the top a facing skim was posted to leave; the post-facing re-touch accepts a measurement inside it, because a skim never removes exactly its nominal depth"
+    },
+    "facing.roughMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the facing depth filled in for rough stock — the heavy end of the 0.2 to 0.5 mm skim general practice uses; the person is asked and can change it"
+    },
+    "facing.unknownMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the facing depth filled in when the stock's finish is unknown — the light end of the same 0.2 to 0.5 mm skim"
+    },
+    "finish.stockToLeaveMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how much stock the roughing pass leaves on the walls and the floor for the finishing pass. 0.2 mm is about one printed layer at the common layer height. The first bench cut that inspects a finished floor replaces this"
+    },
+    "goal.passCoverage": {
+      "value": 0.95,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of a goal's top surface that must stand within 0.1 mm of it for the run to pass — the demo page's coverage rule (#948); a corpus run that shows a good goal job near it moves it"
+    },
+    "house.requestTimeoutMs": {
+      "value": 2000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a house service request gets before it is called dead; a service on this machine or LAN answers in single-digit milliseconds, and the client compiled 2 s"
+    },
+    "import.dxfChordToleranceMm": {
+      "value": 0.02,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most a flattened DXF arc may stray from the true arc; smaller is more points"
+    },
+    "import.traceDespecklePx": {
+      "value": 8.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "px",
+      "note": "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"
+    },
+    "import.traceSimplifyPx": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "px",
+      "note": "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"
+    },
+    "import.traceThreshold": {
+      "value": 128.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "level",
+      "note": "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"
+    },
+    "laser.originUncertaintyMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far the laser dot's origin may be from the stock's corner (the dot's size, and its offset from the spindle axis, are not measured); point-to-origin is refused for a job whose edge margin is tighter"
+    },
+    "machine.connectTimeoutMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a TCP connect to the machine's command port may take before it is called unreachable; the bridge compiled 3 s"
+    },
+    "machine.discoveryWindowMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long the app listens for the machine's UDP broadcast before deciding it is not announcing itself; the protocol compiled 3 s"
+    },
+    "machine.identifyWindowMs": {
+      "value": 1500.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long each reply to the identify asks (M482.5, then M482.4) is waited for; the protocol compiled 1.5 s"
+    },
+    "machine.uploadInactivityMs": {
+      "value": 9000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long an upload waits for the machine's next frame before it cancels the transfer; the protocol compiled 9 s"
+    },
+    "margins.boundaryMarginMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"
+    },
+    "margins.breakthroughMm": {
+      "value": 0.3,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"
+    },
+    "margins.edgeMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how close an item may come to a stock edge; seeds each new job"
+    },
+    "margins.jawClearanceMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"
+    },
+    "margins.measuredThicknessToleranceMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"
+    },
+    "margins.minFloorMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"
+    },
+    "margins.zToleranceMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"
+    },
+    "offcut.minSideMm": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: an offcut is offered back to the shelf only when both its sides are at least this (Q3: only leftover stock that has some size to it)"
+    },
+    "offcut.offer": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: offer an offcut back to the shelf at the end of a run that split the stock (false: never ask)"
+    },
+    "plan.autoLevelPointSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: one auto-level point; an estimate until #176 runs a grid here"
+    },
+    "plan.autoLevelPoints": {
+      "value": 9.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "points",
+      "note": "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"
+    },
+    "plan.autoLevelShallowMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: on stock not known flat, a cut shallower than this wants an auto-level grid (Makera Studio's own rule)"
+    },
+    "plan.clearanceSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the vacuum off and the clearance move after a cut (observed, not timed)"
+    },
+    "plan.finishSeconds": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the end of a job, M332, spindle off, G28 (observed, not timed)"
+    },
+    "plan.fitCutterSeconds": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: fitting a cutter by hand at a bit change, from the plan of section 5.8; the first timed run replaces it"
+    },
+    "plan.fitProbeSeconds": {
+      "value": 45.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: fitting the wired probe by hand, from the plan of section 5.8; the first timed run replaces it"
+    },
+    "plan.homeSeconds": {
+      "value": 27.5,
+      "source": "measured",
+      "setAt": "2026-10-15T23:37:01.349Z",
+      "unit": "s",
+      "note": "the mean of the five $H homes in the 2026-10-15 console trace: 27.0, 27.7, 29.4, 22.3 and 31.2 s (send to reply, 16:55, 17:14, 17:25, 19:14, 23:37)"
+    },
+    "plan.toolLengthSeconds": {
+      "value": 31.4,
+      "source": "measured",
+      "setAt": "2026-10-15T18:53:49.247Z",
+      "unit": "s",
+      "note": "the four complete M491 tool-length touches on the wired probe in the 2026-10-15 console trace, sent to Done ATC: 31.36, 31.25, 32.18 and 31.35 s (16:34, 16:55, 17:15, 18:53); a fifth at 18:58 ended early and is not counted"
+    },
+    "plan.touchSeconds": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured as the app's runner would take it: 15 s a touch, from the 2026-10-15 console trace's edge scans, driven by a console script, not the app runner. 32 touch-to-touch intervals under 20 s (G38.2 Z-5, 16:35:59 to 16:50:34): median 13.3 s, mean 14.0 s, range 10.4 to 19.7 s; the round trips between touches are included"
+    },
+    "power.cyclePauseSeconds": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: how long a plug cycle leaves the machine off before switching it on again (power.sh on --cycle)"
+    },
+    "power.onWaitSeconds": {
+      "value": 180.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s"
+    },
+    "power.pollSeconds": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the wait between checks while switching on waits for the controller to answer"
+    },
+    "power.probeGapSeconds": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured: the wait between those probes"
+    },
+    "power.probeTries": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "tries",
+      "note": "chosen, not measured: how many machine probes, all silent, before a powered machine counts as not answering (#416 review: one silent probe is a Wi-Fi blip as often as a dead controller)"
+    },
+    "registration.capBelowSurfaceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.chuckAxisResidualMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the chuck's runout where it locates the axis; #208 owes the bench measurement"
+    },
+    "registration.coarseStepMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.cornerClearanceMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.edgeMarginMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.faceAngleMaxDeg": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "°"
+    },
+    "registration.fineStepMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.idlePollLimit": {
+      "value": 30.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls",
+      "note": "chosen, not measured: how many status polls the registration waits for Idle before a touch, about a second each, before it stops"
+    },
+    "registration.parkAboveSurfaceMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.probeResidualMm": {
+      "value": 0.02,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "assumed, not measured: the 3D probe's ball-contact scatter in X, Y and Z, and what is left after a touch. The wired probe measured 0.001 mm in Z (registration.wiredProbeZResidualMm); this stays the conservative figure until the 3D probe is measured the same way (2026-10-08, /Z1-Firmware-Dialect.md §11.7)"
+    },
+    "registration.readingResolutionMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the depth two touch readings are told apart by (the machine's dial, not the probe's spec)"
+    },
+    "registration.scanInsideMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.scanMissMarginMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far past the jaw tops a run-sheet scan touch may travel before it is called nothing; the cap that keeps a touch with nothing under it off the bed"
+    },
+    "registration.scanReachMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceBandMm": {
+      "value": 0.25,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceFastFeed": {
+      "value": 300.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
+    "registration.surfaceSeekMm": {
+      "value": 60.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.surfaceSlowFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
+    "registration.surfaceSlowSeekMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far the slow surface touch may travel. It starts 1 mm above the fast touch's hit, so it must travel more than that, and at most 2 mm (never more than 1 mm past the hit), so it stays a capped touch"
+    },
+    "registration.surfaceToleranceMm": {
+      "value": 0.7,
+      "source": "chosen",
+      "setAt": "2026-10-23",
+      "unit": "mm",
+      "note": "bench 2026-10-23: a printed PLA badge read 0.4-0.5 mm lower at its moving-jaw end than at its centre (run 2); the 0.4 seed stopped a normally mounted blank"
+    },
+    "registration.surfaceTouchCount": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "touches"
+    },
+    "registration.tipDiameterMm": {
+      "value": 2.0,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "the wired probe tip's outside diameter, as recorded with the 2026-10-15 bench scan: an opening must be wider than this to be entered at all"
+    },
+    "registration.tipRadiusMm": {
+      "value": 0.7,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "effective rim offset of the wired probe, from the 2026-10-15 bench scan (trace 18:59-19:03): the 38.1 mm blank read 39.5 mm wide, (39.5 - 38.1) / 2 = 0.70 mm, +/- 0.25 at a 0.5 mm step; the tip's outside diameter is 2.0 mm"
+    },
+    "registration.tipRadiusUncertaintyMm": {
+      "value": 0.25,
+      "source": "measured",
+      "setAt": "2026-10-15T19:03:20.874Z",
+      "unit": "mm",
+      "note": "the rim offset's own spread from the same 2026-10-15 bench scan: +/- 0.25 mm at a 0.5 mm step. It cancels in a centre between two walls, and doubles in a width between them"
+    },
+    "registration.touchFeed": {
+      "value": 150.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min"
+    },
+    "registration.viseJawResidualMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "provisional, not measured: the vise jaws' squareness across the jaws; #208 owes the bench measurement"
+    },
+    "registration.wiredProbeZResidualMm": {
+      "value": 0.001,
+      "source": "measured",
+      "setAt": "2026-10-08T00:00:00.000Z",
+      "unit": "mm",
+      "note": "the wired probe's repeatability in Z: five slow (F100) touches on the printed blank in the vise triggered within 0.001 mm of each other, fast (F300) within 0.004 mm and 2-6 um deep (/Z1-Firmware-Dialect.md §11.7, runbook C4, 2026-10-08)"
+    },
+    "rest.overlapMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the LEAST the band both programs cut at the seam may be. The band itself is worked out per job from that job's own two cutters, and this is the floor under it — a 2 mm cutter at a 0.9 mm step-over leaves slivers 0.107 mm wide and a 0.6 mm rest cutter closes anything narrower, so the badge's pair needs about 0.493 mm. The first two-tool cut replaces this"
+    },
+    "rest.thirdToolPct": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "%",
+      "note": "chosen, not measured: the share of a job's own removal area that may still be standing after both programs have run before a third cutter is suggested"
+    },
+    "rest.visibleDepthMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how deep a 3D finish's leftover may stand above the goal before the run calls it visible. A ridge shallower than 0.1 mm reads as a witness mark, one past it as a step. The first inspected rest-pass surface replaces this"
+    },
+    "rotary.gripMm": {
+      "value": 15.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how much of the rod sits inside the rotary chuck's jaws; Makera publishes no jaw depth"
+    },
+    "rough3d.adaptiveDepthRatio": {
+      "value": 1.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how deep a goal must cut, as a multiple of the cutter's diameter, before the adaptive rough is preferred to the raster by rule"
+    },
+    "rough3d.compareCellBudget": {
+      "value": 1000000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cells",
+      "note": "chosen, not measured: above this many covered cells the two roughs are not both planned; the depth rule chooses and the run sheet says the comparison was skipped"
+    },
+    "rough3d.planBudgetCellLevels": {
+      "value": 500000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cell-levels",
+      "note": "chosen, not measured: above this much planning work (covered cells x roughing layers) the goal keeps the raster, because the adaptive rough is planned one level at a time and costs about 100 us per cell-level — 13.8 minutes on a 2.4M cell-level goal, measured 2026-11-01"
+    },
+    "run.blowWithVacuum": {
+      "value": true,
+      "source": "seeded",
+      "setAt": null,
+      "unit": null,
+      "note": "chosen, not measured: the spindle blower (Makera's Auto Blow, M331.1/M332.1) follows the vacuum on every run (false: the vacuum switches alone)"
+    },
+    "run.missLimit": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls"
+    },
+    "run.noProgressMs": {
+      "value": 30000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms"
+    },
+    "run.pollMs": {
+      "value": 2000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms"
+    },
+    "run.statusReplyMs": {
+      "value": 3000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a status poll waits for its reply; the controller answers in 0.6 to 0.7 s (#386)"
+    },
+    "runSheet.blankToleranceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"
+    },
+    "setups.minGripMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "setups.remountMinutes": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
+    },
+    "setups.reregisterMinutes": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
+    },
+    "sim.budgetMs": {
+      "value": 600000,
+      "source": "chosen",
+      "setAt": "2026-11-01",
+      "unit": "ms",
+      "note": "raised to the 10 min maximum at the maintainer's request until #895 replaces the wall-clock limit with a progress watchdog"
+    },
+    "sim.columnFlatPitchYMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the flat simulation grid's Y pitch; the oracle's band grows with the cell and the sim's memory and time with 1/pitch"
+    },
+    "sim.columnPitchXMm": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the simulation grid's X pitch; the sim's memory and time grow with 1/pitch"
+    },
+    "sim.defaultStockLengthMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along X; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.defaultStockThicknessMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, in Z; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.defaultStockWidthMm": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the blank a simulation starts with when the file states no stock, along Y; 100 x 100 x 10 is the documented default (/Simulation.md §6)"
+    },
+    "sim.loadStallMs": {
+      "value": 30000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long a simulation may run without completing a progress checkpoint before it is called stalled. A healthy sweep resets the window at every checkpoint and runs as long as it takes"
+    },
+    "sim.playbackSpeed": {
+      "value": 20.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the playback multiplier a fresh simulation session starts at, as a multiple of wall-clock time; one of 1, 5, 20 or 100"
+    },
+    "sim.rotaryPitchDeg": {
+      "value": 0.25,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg",
+      "note": "chosen, not measured: the rotary simulation grid's theta pitch; the sim's memory and time grow with 1/pitch"
+    },
+    "sim.spindleOffProximityMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: how close a feed move with the spindle off may come to material still present at that point, or to the bed, before it is a fault"
+    },
+    "sim.stallMs": {
+      "value": 180000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: how long Generate may be silent before the app presumes the worker stopped and Reports it; three minutes, because one stage of a large job can be a long CAM pass"
+    },
+    "stop.abortReplyMs": {
+      "value": 60000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured as a bound: how long abort is given to answer (about 18 s observed on 2026-10-12, #303). The app's Stop and the bench harness's run share this one number (maintainer, 2026-10-16)"
+    },
+    "stop.idlePollMs": {
+      "value": 5000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "ms",
+      "note": "chosen, not measured: the wait between those polls; never under the 2 s status floor (#386)"
+    },
+    "stop.idlePolls": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "polls",
+      "note": "chosen, not measured: after abort, how many status polls look for Idle before M332; none reading Idle leaves the vacuum on and says so"
+    },
+    "tabs.count": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "tabs",
+      "note": "chosen, not measured: holding tabs per cut-out. Four is provisional — the first part cut with tabs replaces it"
+    },
+    "tabs.heightMm": {
+      "value": 2,
+      "source": "chosen",
+      "setAt": "2026-11-08T17:29:02Z",
+      "unit": "mm",
+      "note": "chosen, not measured: 2 mm for the hardwood flip tray's release tabs (Analyst ruling, #1073); was the 1 mm seed for thin plastic cut-outs"
+    },
+    "tabs.widthMm": {
+      "value": 8,
+      "source": "chosen",
+      "setAt": "2026-11-08T17:29:02Z",
+      "unit": "mm",
+      "note": "chosen, not measured: 8 mm for the hardwood flip tray's release tabs (Analyst ruling, #1073); was the 4 mm seed for thin plastic cut-outs"
+    },
+    "tape.holdRatio": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: taped area must be this many times the cutter's bite (diameter × step-down) — the tape coupon at the bench sets it"
+    },
+    "tape.insetMm": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the tape strips stop this far in from every edge of the stock"
+    },
+    "thread.bottomClearancePitches": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: how many pitches the tool tip runs below the last full thread"
+    },
+    "thread.chordToleranceMm": {
+      "value": 0.01,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most a G1 chord may stray from the true helix; it sets the move count and the file size"
+    },
+    "thread.entryRampMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the axial drop over which the entry ramp reaches the pass radius; 0 is a flat radial entry"
+    },
+    "thread.feed": {
+      "value": 300.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the helical cutting feed until a measured row replaces it"
+    },
+    "thread.pilotTipClearanceMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the pilot floor must sit this far below the tool tip so the tip does not bottom"
+    },
+    "thread.plungeFeed": {
+      "value": 100.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm/min",
+      "note": "placeholder, not measured; not a vendor number: the feed down the open pilot and the entry ramp until a measured row replaces it"
+    },
+    "thread.radialStepoverMm": {
+      "value": 0.2,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the most radial depth one thread pass takes; the last pass always lands on the major radius"
+    },
+    "thread.spindleRpm": {
+      "value": 10000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "rpm",
+      "note": "placeholder, not measured; not a vendor number: the thread-milling spindle speed until a measured row replaces it"
+    },
+    "toolChange.seconds": {
+      "value": 91.4,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "s",
+      "note": "chosen, not measured as one number: what the measured cutter search charges a plan for each tool change. It is the run plan's own bit change: fitting the cutter by hand (plan.fitCutterSeconds, 60 s, chosen) plus the M491 tool-length touch (plan.toolLengthSeconds, 31.4 s, measured on 2026-10-15). The first timed bit change replaces it"
+    },
+    "tools.runtimeWarnMinutes": {
+      "value": 600.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "min"
+    },
+    "tools.wearWeight.abrasive": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting PA-CF or PA-GF. Fibre-filled nylon is abrasive; five times plastic's wear is this app's choice (the maintainer asked for a heavier class in #456), not a bench measurement"
+    },
+    "tools.wearWeight.aluminium": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting 6061, 7075: three times the wear of plastic"
+    },
+    "tools.wearWeight.brass": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting brass: free-cutting, twice plastic"
+    },
+    "tools.wearWeight.copper": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting copper: gummy, as hard on a cutter as aluminium"
+    },
+    "tools.wearWeight.plastic": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting PLA, ABS, acrylic: the baseline"
+    },
+    "tools.wearWeight.wood": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: a minute cutting softwood, hardwood, MDF: about as hard on a cutter as plastic"
+    },
+    "vise.defaultStockProudMm": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the cap on the stock-derived proud height; #508 derives the real proud from the seat, so this is the no-stock placeholder and the pre-#508 lower bound"
+    },
+    "vise.minCoverageFraction": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"
+    },
+    "vise.uncertaintyMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the band every vise collision box is grown by before a check; covers clamping repeatability, the blank's dome and a hand-set origin's error (#391 review)"
+    },
+    "wasteboard.depthLimitMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    }
+  }
+}

@@ -73,7 +73,9 @@ function target(maxLobe: number, coarse: boolean): EngraveTargetObject {
             stockToLeaveMm: 0.3,
           },
         }
-      : {}),
+      : // #1164 a — the CUT-RESOLUTION case asks for the judged 0.1 mm plan explicitly; unstated,
+        // the shop's relief-planning key would plan it at 1 mm and the swept count would collapse.
+        { surface: { gridPitchMm: 0.1 } }),
   };
 }
 

@@ -48,7 +48,6 @@ import { cuttingDiameter } from '@/engine/cnc/tool';
 import { ballScallopCusp, ballScallopStepOver } from '../ballScallop';
 import {
   DEFAULT_STOCK_TO_LEAVE_MM,
-  finishTipField,
   finishingMoves,
   maxTipOpsFor,
   type SurfaceFeeds,
@@ -64,6 +63,10 @@ import {
   type ToolpathIR,
 } from './ir';
 import { sectionRadiusAt, throughCentreSentence, toRotaryIR, type RotarySection } from '@/engine/cnc/rotary/wrap';
+import { poolRadialField } from '@/engine/cnc/rotary/poolRadialField';
+import { finishTipField } from './dropTip';
+import { rotaryFinishTipField } from '@/engine/cnc/rotary/tipDrop';
+import { columnCutterFor } from '@/workers/geometry/columnEngine';
 
 /**
  * The radial field as the flat goal pipeline's heightfield: same grid, same sentinel (0 = the
@@ -125,6 +128,11 @@ function clipFieldX(field: GoalRadialField, keepOutX: number): { field: GoalRadi
 
 export interface RotaryReliefArgs {
   field: GoalRadialField;
+  /**
+   * #1164 — THE PLANNING PITCH, mm: the field is the FINE (judged) one and the planner reads its
+   * max-pooled form at this pitch (rule 5). Absent keeps the field as given (older callers).
+   */
+  planningPitchMm?: number;
   /**
    * #777 — the stock's section, when it is a block. The field's heights are relative to the
    * turned ENVELOPE; the stock's own surface at a row's angle is `sectionRadiusAt − envelope
@@ -240,7 +248,22 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   // #1061 — the field is CLIPPED to the chuck/jaws keep-out before any move is planned: nothing
   // in the program may reach into the band, at any Z.
   const { field: cutField, clippedFromX } = clipFieldX(field, reliefKeepOutX(tool));
-  const hf = radialFieldAsHeightfield(cutField);
+  // #1164 — THE PLANNER'S FIELD: the caller's (fine) field pooled to the planning pitch, so a
+  // coarse cell carries the highest radius over its footprint and a coarse plan can only stand
+  // off (#1155). Absent a pitch, the field stands as given.
+  const planningField =
+    args.planningPitchMm === undefined ? cutField : poolRadialField(cutField, args.planningPitchMm);
+  const hf = radialFieldAsHeightfield(planningField);
+  // #1164 — THE TIP DROP ON THE TRUE RAY GEOMETRY: the shared #763 cutter profile, not the flat
+  // map metric. The rotary engine's own predicate has already refused the shapes it cannot sweep.
+  const cutter = columnCutterFor(tool, null, { rotary: true });
+  if (!cutter.ok) throw new Error(cutter.reason);
+  const tipTool = { cutter: cutter.cutter, ball: tool.shape === 'ball', radius: toolRadius };
+  // A FLAT's geometry IS the map disc: its cutting plane is horizontal, so the arc-vs-lateral
+  // distinction cannot move it, and the exact flat dilation stays (it is also byte-identical for
+  // every flat job). The true ray drop is for the shapes whose flank lives below the tip: a ball
+  // (its closed form) and a V (bisection).
+  const flatCutter = tool.shape === 'flat';
 
   // #1094 — THE ROUGH'S DROP-CUTTER TIP FIELD, COMPUTED ONCE. The A-sweep's per-cell clamp sees
   // only the cell's own angle, so the ball's flank cuts the wall beside a near-axis cell (a
@@ -248,17 +271,22 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
   // and the ball's flank removes the body. The finish's own tip field is the gouge-safe rule — the
   // tip lifted to clear every cell of the ball's disc — so the rough uses the same stencil on the
   // goal-plus-allowance surface: `z' = min(0, z + allowance)`. One pass, shared by every layer.
-  const roughHf: GoalHeightfield = {
-    ...hf,
-    z: Float32Array.from(hf.z, (v) => Math.min(0, v + allowance)),
-  };
-  const roughTip = finishTipField(roughHf, surfaceTool, args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool), {
-    wrapRows: true,
+  const roughHf = (): GoalRadialField => ({
+    ...planningField,
+    z: Float32Array.from(planningField.z, (v) => Math.min(0, v + allowance)),
   });
+  const roughTip = flatCutter
+    ? finishTipField(
+        { ...radialFieldAsHeightfield(roughHf()) } as GoalHeightfield,
+        surfaceTool,
+        args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool),
+        { wrapRows: true },
+      )
+    : rotaryFinishTipField(roughHf(), tipTool, { maxOps: args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool) });
 
   // Roughing: the A sweeps at stepped radii, from the stock's own section surface. Each layer's
   // floor stays; the tip never goes below the drop-cutter field's own value.
-  const rough = aSweepRoughing(cutField, feeds, allowance, args.section, roughTip);
+  const rough = aSweepRoughing(planningField, feeds, allowance, args.section, roughTip);
   const roughing: CamOperation = {
     number: 1,
     name: `[T${args.toolNumber}] rotary 3D rough — ${allowance} mm to leave`,
@@ -281,9 +309,9 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     args.finishScallopMm === undefined || tool.shape !== 'ball'
       ? null
       : reliefFinishStepOver(toolRadius, args.finishScallopMm, hf.pitch);
-  const tip = finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool), {
-    wrapRows: true,
-  });
+  const tip = flatCutter
+    ? finishTipField(hf, surfaceTool, args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool), { wrapRows: true })
+    : rotaryFinishTipField(planningField, tipTool, { maxOps: args.maxFinishTipOps ?? maxTipOpsFor(surfaceTool) });
   const finish = finishingMoves(
     hf,
     tip,
@@ -291,6 +319,10 @@ export function generateRotaryReliefIR(args: RotaryReliefArgs): RotaryReliefResu
     hf.pitch,
     SAFE_Z,
     HOP_Z,
+    undefined,
+    undefined,
+    undefined,
+    true, // #1164 — hold the higher clamp across each finish segment (rotary only)
   );
   const finishing: CamOperation = {
     number: 2,
@@ -378,6 +410,7 @@ function aSweepRoughing(
       const x = x0 + i * pitch;
       let open = false;
       let prevY = 0;
+      let lastTip = 0;
       for (let j = 0; j <= ny; j++) {
         // One full turn: after ny cells the seam cell closes the loop.
         const jj = j % ny;
@@ -396,9 +429,23 @@ function aSweepRoughing(
             moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
             open = true;
           } else {
-            moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+            // #1164 — THE SEGMENT HOLDS THE HIGHER OF ITS TWO ROWS' CLAMPS. The tip field
+            // evaluated the ROW centres; a single feed from one row's tip to the next ran the ball
+            // between them at an interpolated radius, which could sit below the clamp the material
+            // between the rows needs (the giraffe's 0.512 mm at one repeated pose). Lift to the
+            // higher clamp first, TRAVERSE at it, then settle onto the row's own tip — the segment
+            // can then never cut below either endpoint's clamp.
+            const hold = Math.max(tip, lastTip);
+            if (hold > lastTip + 1e-9) moves.push({ kind: 'feed', x, y: prevY, z: hold, f: feeds.feed });
+            if (hold > tip + 1e-9) {
+              moves.push({ kind: 'feed', x, y, z: hold, f: feeds.feed });
+              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.plungeFeed });
+            } else {
+              moves.push({ kind: 'feed', x, y, z: tip, f: feeds.feed });
+            }
           }
           prevY = y;
+          lastTip = tip;
         } else if (open) {
           retract(x, prevY);
           open = false;

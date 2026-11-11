@@ -381,6 +381,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // this is Case Maker's figure until a bench measurement replaces it; the Holding step asks the
     // grip and derives the stick-out as the rod's length less it.
     ("rotary.gripMm", 15.0, "mm", "chosen, not measured: how much of the rod sits inside the rotary chuck's jaws; Makera publishes no jaw depth"),
+    // #1164 — the relief planning pitch: chosen, not measured. The map a rotary relief's drop-tip
+    // fields are planned on when the goal states no surface grid; a coarser plan is the conservative
+    // direction and the tip field's cost grows ~1/pitch².
+    ("relief.planningPitchMm", 1.0, "mm", "chosen, not measured: the map a rotary relief's drop-tip fields are planned on when the goal states no surface grid; coarser is conservative and the cost grows with 1/pitch²"),
     // ── #451 runSheet (begin) — the blank-size tolerance the sheet prints in its first instruction.
     ("runSheet.blankToleranceMm", 0.5, "mm", "chosen, not measured: how far a measured blank may differ from the job's stated size before the sheet tells the operator to change the job and regenerate"),
     // ── #451 runSheet (end)
@@ -1225,6 +1229,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         // ── #451 sim resolutions (end)
         "rotary.gripMm" => Some(need(n.is_some_and(|v| (0.0..=100.0).contains(&v)), "0 to 100 mm")),
+        "relief.planningPitchMm" => Some(need(
+            n.is_some_and(|v| (0.1..=2.0).contains(&v)),
+            "0.1 to 2 mm",
+        )),
         // ── #451 sim starting values (begin) — `defaultsClient.ts` states the same bounds. The
         // playback speed is one of the transport's multipliers, not any number in a range.
         "sim.playbackSpeed" => Some(need(

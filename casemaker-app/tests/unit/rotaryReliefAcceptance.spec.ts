@@ -78,6 +78,10 @@ function goal(tris: Tri[], length: number, maxRadius: number): EngraveTargetObje
     rotation: 0,
     enabled: true,
     role: 'goal',
+    // The acceptance asks for the JUDGED-pitch plan (0.1 mm) explicitly: it judges the finish
+    // against the cut-resolution surface, and #1164 a's planning-pitch key would otherwise plan
+    // this bare-shop fixture at its 1 mm recommendation and leave more standing than the bars.
+    surface: { gridPitchMm: 0.1 },
   };
 }
 
