@@ -338,11 +338,12 @@ describe('#1201 a bracket hold with no trusted seat measures the top on the blan
       expect(c.y).toBeGreaterThan(0);
       expect(c.y).toBeLessThan(job.stock.width);
     }
-    // The first is the machining area's path origin, inset by the edge margin + the tip; the
-    // second is the area's centre. The area is the tray shape's rectangle: x 40..140, y 18..108.
-    const inset = Math.max(1, SETTINGS.tipRadiusMm + job.edgeMargin);
-    expect(checks[0]!.x).toBeCloseTo(40 + inset, 3);
-    expect(checks[0]!.y).toBeCloseTo(18 + inset, 3);
+    // The first is the machining area's path origin, inset by the SHARED top-touch margin (#1199
+    // field 7: the registry floor, the tip and the hold's fit), not the old `max(1, tip + edge
+    // margin)`. Movement on this fixture: x/y 41.7 → 43.0 (the 3 mm registry floor now applies).
+    // The second is the area's centre. The area is the tray shape's rectangle: x 40..140, y 18..108.
+    expect(checks[0]!.x).toBeCloseTo(43, 3);
+    expect(checks[0]!.y).toBeCloseTo(21, 3);
     expect(checks[1]!.x).toBeCloseTo(90, 3);
     expect(checks[1]!.y).toBeCloseTo(63, 3);
     // The guarded band: contact is accepted above the bed's known floor + margin, up to the

@@ -500,6 +500,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("margins.zToleranceMm", 0.05, "mm", "chosen, not measured: how far this machine is expected to put the blank and the registration out in Z; a job's recommendation adds the blank's own dome to it"),
     ("margins.minFloorMm", 1.0, "mm", "chosen, not measured: material that must remain under the deepest cut; seeds each new job, which then owns its own value"),
     ("margins.edgeMarginMm", 1.0, "mm", "chosen, not measured: how close an item may come to a stock edge; seeds each new job"),
+    ("registration.probeFootprintShrinkMm", 3.0, "mm", "chosen, not measured: the least a probe top touch footprint is shrunk below the blank outline; tip radius plus placement uncertainty may exceed it"),
+    ("registration.cutterFootprintGrowMm", 1.0, "mm", "chosen, not measured: how far a cutter region grows beyond the blank outline, on top of its radius"),
+    ("registration.vise.placementAcrossJawsMm", 0.5, "mm", "chosen, not measured: the fixed jaw is a measured datum; allowance for a chip or a blank not fully seated"),
+    ("registration.vise.placementAlongJawsMm", 5.0, "mm", "chosen, not measured: the blank is set by eye against the jaw end or a mark"),
+    ("registration.tape.placementMm", 10.0, "mm", "chosen, not measured: laid by eye, middle of the bed, square to the front edge"),
+    ("registration.tape.placementRotationDeg", 2.0, "deg", "chosen, not measured: by-eye squareness; its corner shift is added to the inset"),
     ("margins.jawClearanceMm", 1.0, "mm", "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"),
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
@@ -801,6 +807,22 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.01..=20.0).contains(&v)),
             "0.01 to 20 mm",
         )),
+        "registration.probeFootprintShrinkMm" | "registration.cutterFootprintGrowMm" => Some(need(
+            n.is_some_and(|v| (0.0..=20.0).contains(&v)),
+            "0 to 20 mm",
+        )),
+        "registration.vise.placementAcrossJawsMm" => {
+            Some(need(n.is_some_and(|v| (0.01..=5.0).contains(&v)), "0.01 to 5 mm"))
+        }
+        "registration.vise.placementAlongJawsMm" => {
+            Some(need(n.is_some_and(|v| (0.01..=20.0).contains(&v)), "0.01 to 20 mm"))
+        }
+        "registration.tape.placementMm" => {
+            Some(need(n.is_some_and(|v| (0.1..=30.0).contains(&v)), "0.1 to 30 mm"))
+        }
+        "registration.tape.placementRotationDeg" => {
+            Some(need(n.is_some_and(|v| (0.0..=10.0).contains(&v)), "0 to 10 degrees"))
+        }
         "registration.surfaceSeekMm" => Some(need(
             n.is_some_and(|v| (1.0..=100.0).contains(&v)),
             "1 to 100 mm",

@@ -136,6 +136,8 @@ export function registrationFor(
      * edges through the centre-lines instead of the rectangle's one-sided edges.
      */
     disc?: { diameterMm: number };
+    /** #1199 field 7 — the hold's own placement uncertainty, resolved by the caller. */
+    holdUncertainty?: import('../registration/plan').HoldPlacementUncertainty;
   },
   settings: RegistrationSettings,
 ): { plan: PlanResult; references: ReferenceFeature[] } {
@@ -164,6 +166,7 @@ export function registrationFor(
       probeRefLabel: expected.probeRefLabel,
       floorProbeRefZ: expected.floorProbeRefZ,
       seekFromMachineZ: input.seekFromMachineZ,
+      ...(input.holdUncertainty === undefined ? {} : { holdUncertainty: input.holdUncertainty }),
       mountDatum: datum,
       probe: input.probe ?? null,
       mountTap: input.mountTap ?? null,

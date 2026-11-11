@@ -57,6 +57,9 @@ function input(mount: 'vise' | 'tape' | 'bracket' = 'vise', over: Partial<PlanIn
     fixtureBelowSurfaceMm: mount === 'vise' ? 0.72 : undefined,
     bracketOrigin: mount === 'bracket' ? { x: G54.x, y: G54.y, from: 'anchor1 + (0, 0)', offsetMeasured: true } : undefined,
     mountObstacles: mount === 'bracket' ? [] : undefined,
+    // #1199 field 7 — the hold's placement figures the planner now requires; the badge blank's
+    // historical 3 mm floor came from the registry, and the hold sat where the plan says.
+    holdUncertainty: { xMm: 0, yMm: 0 },
     ...over,
   };
 }
@@ -1959,7 +1962,11 @@ describe('#427 the bracket: XY from the datum, an optional confirming touch', ()
   };
   const confirm = (over: Partial<PlanInput> = {}): RegistrationPlan => ({
     ...plan('bracket', { mountObstacles: [CLAMP, ARM], ...over }),
-    scans: [legacyScan('right', 38.1), legacyScan('back', 19.05)],
+    // The pre-#1133 planner's `clearLine` kept each confirming line clear of every clamp: this
+    // CLAMP covers x 12..27 on the back edge (± the 2.7 mm rim + corner clearance), and the old
+    // candidate set over the scan span 5..33.1 first found 8.5125 clear. A line at the mid (with
+    // the clamp on it) is not a plan that planner could have saved — the guard refuses it.
+    scans: [legacyScan('right', 38.1), legacyScan('back', 8.5125)],
   });
   const asked: string[] = [];
   const operator = async (step: { kind: string; text: string }) => (asked.push(`${step.kind}: ${step.text}`), true);

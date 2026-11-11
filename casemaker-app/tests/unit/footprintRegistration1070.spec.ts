@@ -139,6 +139,8 @@ describe('#1070 the planner routes an anchored bed-held job to the footprint', (
     mountObstacles: [],
     region: { min: [22, 10], max: [158, 116], marginMm: 1 },
     softLimits: { xMin: -207, yMin: -206, zMin: -102 },
+    // #1199 field 7 — the bracket's own fit, the planner's hold figure.
+    holdUncertainty: { xMm: 0.1, yMm: 0.1 },
   };
   const settings = registrationSettings(null).settings;
 

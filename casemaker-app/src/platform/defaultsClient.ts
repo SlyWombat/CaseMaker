@@ -153,6 +153,18 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // extents on each axis); the seed is the issue's own 5. The labelled fallback IS the seed.
   'registration.surfaceTouchCount': { label: 'surface touches across the cut', unit: 'touches', rule: z.number().int().min(5).max(9), fallback: 5 },
   'registration.edgeMarginMm': { label: 'registration margin', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 0.5 },
+  // #1199 field 7 — a probe's top touch keeps to the blank's footprint shrunk by at least this;
+  // the rule is max(this, tip radius + placement uncertainty). CHOSEN, not measured.
+  'registration.probeFootprintShrinkMm': { label: 'probe top-touch footprint shrink', unit: 'mm', rule: z.number().min(0).max(20), fallback: 3 },
+  // #1199 field 7 — a cutter's region grows beyond the blank's outline by its radius plus this.
+  'registration.cutterFootprintGrowMm': { label: 'cutter footprint growth', unit: 'mm', rule: z.number().min(0).max(20), fallback: 1 },
+  // #1199 field 7 (analyst 2026-11-11) — HOW SURELY EACH HOLD PLACES THE BLANK, per axis, chosen
+  // not measured. A top touch keeps the relevant axis term clear of that edge; the tape's rotation
+  // adds half-diagonal × sin(angle) to both axes. The bench will replace them with measured spreads.
+  'registration.vise.placementAcrossJawsMm': { label: 'vise: how squarely the blank seats against the fixed jaw (chosen)', unit: 'mm', rule: z.number().min(0.01).max(5), fallback: 0.5 },
+  'registration.vise.placementAlongJawsMm': { label: 'vise: where the blank sits along the jaws (chosen)', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 5 },
+  'registration.tape.placementMm': { label: 'tape, no fence: how squarely the blank is laid (chosen)', unit: 'mm', rule: z.number().min(0.1).max(30), fallback: 10 },
+  'registration.tape.placementRotationDeg': { label: 'tape, no fence: by-eye squareness (chosen)', unit: '°', rule: z.number().min(0).max(10), fallback: 2 },
   'registration.surfaceSeekMm': { label: 'surface seek travel, at most', unit: 'mm', rule: z.number().min(1).max(100), fallback: 60.0 },
   'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },
   'registration.surfaceFastFeed': { label: 'surface touch, fast', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 300.0 },

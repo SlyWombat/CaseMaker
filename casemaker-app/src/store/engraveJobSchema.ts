@@ -2180,7 +2180,15 @@ const registrationSettingsSchema = z.object({
   // answers then. Two touches on a blank that has been cut must agree to this, mm.
   cutBlankAgreeMm: z.number().finite().optional().describe('How close two touches on a cut blank must agree, in millimetres.'),
   // #1179 amendment — how far above the band a cut-blank check may read and still be a reading.
-  cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
+      // #1199 field 7 — absent on older plans; the executor refuses a plan without them.
+      probeFootprintShrinkMm: z.number().finite().optional().describe('The least a probe top touch’s footprint is shrunk.'),
+      cutterFootprintGrowMm: z.number().finite().optional().describe('How far a cutter’s region grows beyond the blank outline.'),
+      visePlacementAcrossJawsMm: z.number().finite().optional().describe('Vise hold: placement uncertainty across the jaws.'),
+      visePlacementAlongJawsMm: z.number().finite().optional().describe('Vise hold: placement uncertainty along the jaws.'),
+      tapePlacementMm: z.number().finite().optional().describe('Tape hold: placement uncertainty.'),
+      tapePlacementRotationDeg: z.number().finite().optional().describe('Tape hold: by-eye rotation.'),
+      bracketFitMm: z.number().finite().optional().describe('The bracket hold’s own fit (#1199 field 7).'),
+      cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.
   surfaceTouchCount: z
@@ -2244,6 +2252,17 @@ const registrationPlanSchema = z.object({
   seatRemeasure: z.enum(['probe-refit']).optional().describe('A seat-seek plan run because the stored seat predates the probe’s last fitting.'),
   probeRefLabel: z.string().nullable().optional().describe('The datum’s words in the seating-correction sentence.'),
   floorProbeRefZ: z.number().finite().nullable().optional().describe('The probe reference of the seek floor’s own datum, when it differs.'),
+  // #1199 field 7 — the hold's placement uncertainty this plan was built with, per plan axis.
+  // #1199 field 7 — a small taped blank: the first touch is the centre only and the run asks.
+  jogConfirm: z.literal(true).optional().describe('The hold’s uncertainty swallows the blank: the first touch is at the centre and the operator must jog and confirm.'),
+  holdUncertainty: z
+    .object({
+      xMm: z.number().finite().describe('How far the blank may sit from the plan in X, mm.'),
+      yMm: z.number().finite().describe('How far the blank may sit from the plan in Y, mm.'),
+      rotationDeg: z.number().finite().optional().describe('Tape without a fence: the by-eye rotation, whose corner shift is already added to X and Y.'),
+    })
+    .optional()
+    .describe('The hold’s placement uncertainty, per plan axis. Absent on older plans and on any hold with no stated figure — a consumer that needs it refuses.'),
   machineClearanceZ: z
     .number()
     .finite()

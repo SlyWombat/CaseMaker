@@ -321,6 +321,18 @@ describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
     return r.plan;
   };
 
+  it('#1200 — a z-only corner plan takes the Z-only path: no sideways line goes out', async () => {
+    // probe3d.ts's own #1200 guard is the primary (it refuses the sideways seek); this pins the
+    // executor end-to-end with the session's lateral flag false, and the guard's own red test
+    // (motionOrder1199) covers a lateral line reaching `check()` by any other route.
+    const p = cornerPlan(3);
+    p.probe = { ...(p.probe as ProbeSpec), touches: 'z-only' };
+    const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5 });
+    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    if (!r.ok) throw new Error(r.reason);
+    expect(z1.lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(0);
+  });
+
   it('a stock proud enough: the corner’s X lines seek the stock’s own face sideways, banded', async () => {
     // Proud 3 mm: the ball's 1.5 + 1 mm margin + 0.3 depth pass above the jaw — the planner leaves
     // `cornerXFrom` unset, which is its statement that the stock's own X face can be touched.

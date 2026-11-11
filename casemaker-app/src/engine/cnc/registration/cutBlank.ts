@@ -28,7 +28,6 @@ import type { FinishedCutMap } from '@/platform/locationClient';
 /** The candidate raster's pitch, mm. */
 export const CUT_BLANK_PITCH_MM = 1;
 /** The margin kept clear of the stock's edges, mm (#1179 B1). */
-export const CUT_BLANK_EDGE_MARGIN_MM = 3;
 /** A floor is flat when every nearby cutting move is at its depth ± this, mm (the analyst's 0.02). */
 export const CUT_BLANK_FLAT_MM = 0.02;
 /** The most spread candidates the choice offers (the executor touches three, five without a pair). */
@@ -288,12 +287,25 @@ export interface ProbeBody {
 }
 
 /**
- * #1200 — the closest a top touch may sit to an edge: the operator's stated lateral uncertainty
- * plus the tip radius, never below the historical 3 mm margin. The 10 mm PREFERENCE is unchanged
- * (it chooses among acceptable points); this is the floor.
+ * #1199 field 7 — the closest a top touch may sit to an edge, PER AXIS: the tip's radius plus the
+ * unit's stated lateral uncertainty, plus the HOLD's placement uncertainty on that axis, never
+ * below the registry floor (`registration.probeFootprintShrinkMm`). `hold` is null when the plan
+ * states none — the caller refuses rather than assuming 0. This one function is used by the
+ * planner's touch-point choice, the cut-blank candidate choice, the guarded-touch inset and the
+ * safe-Z guard's footprint, so no two insets can drift.
  */
-export function topTouchEdgeMarginMm(probe: ProbeBody): number {
-  return Math.max(CUT_BLANK_EDGE_MARGIN_MM, probe.tipRadiusMm + (probe.tipLateralUncertaintyMm ?? 0));
+export function topTouchEdgeMarginsMm(
+  probe: ProbeBody,
+  opts: { floorMm: number; hold: { xMm: number; yMm: number } | null },
+): { xMm: number; yMm: number } {
+  if (opts.hold === null) {
+    throw new Error('the hold’s placement uncertainty is not stated for this plan — a top touch cannot be placed');
+  }
+  const base = probe.tipRadiusMm + (probe.tipLateralUncertaintyMm ?? 0);
+  return {
+    xMm: Math.max(opts.floorMm, base + opts.hold.xMm),
+    yMm: Math.max(opts.floorMm, base + opts.hold.yMm),
+  };
 }
 
 /**
@@ -345,6 +357,9 @@ export function cutBlankCandidatesFromMap(input: {
   probe: ProbeBody;
   obstacles: readonly CutBlankObstacle[];
   edgeMarginMm?: number;
+  /** #1199 — the registry floor and the hold's per-axis placement uncertainty (see the plan). */
+  shrinkMm: number;
+  holdUncertainty: { xMm: number; yMm: number };
 }): { points: SurfacePointCandidate[]; floorsRestricted: string | null } | null {
   const { map } = input;
   const count = map.cols * map.rows;
@@ -353,7 +368,10 @@ export function cutBlankCandidatesFromMap(input: {
   if (levels === null || flatBits === null) return null;
   // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
   // radius); an explicitly passed margin still wins.
-  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
+  // #1199 — one inset per axis: the planner and the guard both use it; an explicit margin wins.
+  const margins = topTouchEdgeMarginsMm(input.probe, { floorMm: input.shrinkMm, hold: input.holdUncertainty });
+  const marginX = Math.max(input.edgeMarginMm ?? 0, margins.xMm);
+  const marginY = Math.max(input.edgeMarginMm ?? 0, margins.yMm);
   const tipLengthKnown = input.probe.tipLengthMm !== null && input.probe.tipLengthMm !== undefined;
   const bodyKnown =
     input.probe.bodyDiameterMm !== null && input.probe.bodyDiameterMm !== undefined && input.probe.bodyDiameterMm > 0;
@@ -363,10 +381,10 @@ export function cutBlankCandidatesFromMap(input: {
   const floor: Cell[] = [];
   for (let j = 0; j < map.rows; j++) {
     const y = map.y0Mm + (j + 0.5) * map.cellMm;
-    if (y < map.y0Mm + margin || y > yEnd - margin) continue;
+    if (y < map.y0Mm + marginY || y > yEnd - marginY) continue;
     for (let i = 0; i < map.cols; i++) {
       const x = map.x0Mm + (i + 0.5) * map.cellMm;
-      if (x < map.x0Mm + margin || x > xEnd - margin) continue;
+      if (x < map.x0Mm + marginX || x > xEnd - marginX) continue;
       if (input.obstacles.some((o) => x >= o.min[0] && x <= o.max[0] && y >= o.min[1] && y <= o.max[1])) continue;
       const at = j * map.cols + i;
       // A cell that is not flat (a ramp's exit, a scallop the map could not vouch for) is never a
@@ -486,11 +504,17 @@ export function cutBlankCandidates(input: {
   earlierCutsUnknown?: boolean;
   obstacles: readonly CutBlankObstacle[];
   edgeMarginMm?: number;
+  /** #1199 — the registry floor and the hold's per-axis placement uncertainty (see the plan). */
+  shrinkMm: number;
+  holdUncertainty: { xMm: number; yMm: number };
 }): { points: SurfacePointCandidate[]; earlierCutsKnown: boolean; floorsRestricted: string | null } {
   const { raster, programs, obstacles } = input;
   // #1200 — the margin is at least the probe's own top-touch floor (lateral uncertainty + tip
   // radius); an explicitly passed margin still wins.
-  const margin = input.edgeMarginMm ?? topTouchEdgeMarginMm(input.probe);
+  // #1199 — one inset per axis: the planner and the guard both use it; an explicit margin wins.
+  const margins = topTouchEdgeMarginsMm(input.probe, { floorMm: input.shrinkMm, hold: input.holdUncertainty });
+  const marginX = Math.max(input.edgeMarginMm ?? 0, margins.xMm);
+  const marginY = Math.max(input.edgeMarginMm ?? 0, margins.yMm);
   const earlierCutsKnown = input.earlierCutsUnknown !== true && programs.some((program) => program.finished);
   const depth = earlierCutsKnown ? depthRaster(raster, programs, input.fallbackRadiusMm) : null;
   // #1179 B (analyst) — a floor deeper than the tip's length is entered by the probe's BODY: it is
@@ -521,10 +545,10 @@ export function cutBlankCandidates(input: {
   const floor: Cell[] = [];
   for (let j = 0; j < raster.ny; j++) {
     const y = cellY(raster, j);
-    if (y < raster.yMin + margin || y > raster.yMax - margin) continue;
+    if (y < raster.yMin + marginY || y > raster.yMax - marginY) continue;
     for (let i = 0; i < raster.nx; i++) {
       const x = cellX(raster, i);
-      if (x < raster.xMin + margin || x > raster.xMax - margin) continue;
+      if (x < raster.xMin + marginX || x > raster.xMax - marginX) continue;
       const at = j * raster.nx + i;
       if (obstacles.some((o) => x >= o.min[0] && x <= o.max[0] && y >= o.min[1] && y <= o.max[1])) continue;
       const cell = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, depthMm: 0 };

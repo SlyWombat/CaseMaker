@@ -5,7 +5,8 @@
 // fx-probe-1's shaft) is `G53 G0 Z-81.25` AT HOME then `G53 G0 X-175 Y-35` — a 177 mm traverse
 // 7 mm above the board. The guard must refuse its second line; the corrected order must pass.
 import { describe, expect, it } from 'vitest';
-import { motionOrderGuard, planTravelProblem } from '@/engine/cnc/registration/motionOrder';
+import { jobDescentRegion, motionOrderGuard, planTravelProblem } from '@/engine/cnc/registration/motionOrder';
+import type { EdgeScan, RegistrationPlan } from '@/engine/cnc/registration/plan';
 
 const CLEARANCE = -3;
 const SEAT_FROM = -81.25; // band.max (−84.25) + parkAboveSurfaceMm (3)
@@ -168,5 +169,84 @@ describe('#1199 — the shared motion-order guard', () => {
     guard.observe('$H');
     guard.observe('G53 G0 Z0');
     expect(guard.observe('G53 G0 X10 Y10')).toBeNull();
+  });
+});
+
+describe('#1199 field 7 — the plan’s descent region', () => {
+  /** The badge blank, the four registry figures the region reads, and nothing else. */
+  const planAt = (over: Record<string, unknown> = {}): RegistrationPlan =>
+    ({
+      mount: 'vise',
+      bracketOrigin: null,
+      holdUncertainty: { xMm: 0, yMm: 0 },
+      settings: { probeFootprintShrinkMm: 3, tipRadiusMm: 0.7, edgeBandMm: 4 },
+      probe: null,
+      stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+      scans: [],
+      mountObstacles: [],
+      mountTap: null,
+      ...over,
+    }) as unknown as RegistrationPlan;
+  const scan = (edge: 'right' | 'back', along: number, start: number, limit: number): EdgeScan => ({
+    edge,
+    along,
+    expectedAt: edge === 'right' ? 38.1 : 76.2,
+    outward: 1,
+    start,
+    limit,
+    coarseStep: 1,
+    fineStep: 0.1,
+  });
+
+  it('allows the blank inside its top-touch margins, and refuses a point beside it', () => {
+    const region = jobDescentRegion(planAt());
+    expect(region(false, 19.05, 38.1)).toBe(true);
+    // The 3 mm shrink: the outline's own 3 mm band is not a descent region.
+    expect(region(false, 36, 38.1)).toBe(false);
+    expect(region(false, 40, 38.1)).toBe(false);
+  });
+
+  it('allows a declared edge-find window beyond the collar, and refuses a point off its line', () => {
+    // The right scan's limit is 5 mm past the edge; the collar alone would stop at edge + 4.
+    const region = jobDescentRegion(planAt({ scans: [scan('right', 38.1, 35.1, 43.1)] }));
+    expect(region(false, 43.1, 38.1)).toBe(true);
+    expect(region(false, 43.1, 50)).toBe(false);
+  });
+
+  it('never allows a CLAMPED stretch of a declared window (the analyst’s rule)', () => {
+    const clamp = { kind: 'clamp', label: 'a clamp', min: [40, 30], max: [46, 46], topZ: 12 };
+    const region = jobDescentRegion(
+      planAt({ scans: [scan('right', 38.1, 35.1, 43.1)], mountObstacles: [clamp] }),
+    );
+    expect(region(false, 43.1, 38.1)).toBe(false);
+    expect(region(false, 39, 38.1)).toBe(true);
+  });
+
+  it('converts a bracket plan’s machine lines through its origin', () => {
+    const region = jobDescentRegion(
+      planAt({ mount: 'bracket', bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor 1', offsetMeasured: true } }),
+    );
+    expect(region(true, -181.55 + 19.05, -184.8 + 38.1)).toBe(true);
+    expect(region(true, -181.55 + 40, -184.8 + 38.1)).toBe(false);
+  });
+
+  it('a bracket plan (the tray) carries no mount tap, so its region has no tap clause', () => {
+    // #1133/#1199 (analyst field 7 (e)) — a bracket plan has no mountTap, so the shipped tap
+    // clause cannot fire on it: the morning tray build is unaffected by removing it.
+    const region = jobDescentRegion(
+      planAt({
+        mount: 'bracket',
+        bracketOrigin: { x: -181.55, y: -184.8, from: 'anchor 1', offsetMeasured: true },
+        mountTap: null,
+      }),
+    );
+    expect(region(true, -186.2, -180)).toBe(false);
+  });
+
+  it('allows the plan’s own mount tap where it stands, in MACHINE XY (a vise jaw is outside the blank)', () => {
+    const tap = { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' };
+    const region = jobDescentRegion(planAt({ mountTap: tap }));
+    expect(region(true, -186.2, -180)).toBe(true);
+    expect(region(true, -186.2, -170)).toBe(false);
   });
 });

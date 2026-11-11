@@ -31,6 +31,8 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { holdUncertaintyFor } from '@/engine/cnc/registration/plan';
+import { topTouchEdgeMarginsMm } from '@/engine/cnc/registration/cutBlank';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationAttempt } from './EngraveSetupRow';
 
@@ -101,20 +103,25 @@ function cutBlankCheckPoints(
     tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? null,
   };
   const obstacles = plan.mountObstacles.map((o) => ({ min: o.min, max: o.max }));
+  // #1199 field 7 — the shared inset's two inputs, from the plan; absent is refused by the caller.
+  const shrinkMm = plan.settings.probeFootprintShrinkMm ?? Number.NaN;
+  const holdUncertainty = plan.holdUncertainty as { xMm: number; yMm: number };
   if (blankMap !== null) {
-    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles });
+    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles, shrinkMm, holdUncertainty });
     if (fromMap !== null) {
       return { points: fromMap.points, earlierCutsKnown: true, floorsRestricted: fromMap.floorsRestricted };
     }
     // A map that does not decode is not trusted: the unknown-cuts path, never a half-read map.
     return {
-      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true }),
+      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true, shrinkMm, holdUncertainty }),
       earlierCutsKnown: false,
     };
   }
   return cutBlankCandidates({
     raster,
     programs,
+    shrinkMm,
+    holdUncertainty,
     probe: {
       tipRadiusMm: plan.settings.tipRadiusMm,
       tipLengthMm: plan.probe?.tipLengthMm ?? null,
@@ -304,11 +311,33 @@ export function planRegistrationAttempt(args: {
       // area's centre. The area is the cut region when the job states one, else the blank.
       const region = cutRegionOf(job);
       const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
-      // #1207 — the 1 mm floor here is D's shared `topTouchEdgeMarginMm` (the footprint slice); it
-      // is not a second local default.
-      const inset = Math.max(1, args.settings.tipRadiusMm + job.edgeMargin);
-      const ix = Math.min(inset, Math.max(0.001, (area.maxX - area.minX) / 2));
-      const iy = Math.min(inset, Math.max(0.001, (area.maxY - area.minY) / 2));
+      // #1199 field 7 — THIS GUARDED TOUCH'S INSET IS THE SHARED ONE, per axis: the tip radius, the
+      // unit's lateral uncertainty and the HOLD's placement uncertainty, floored by the registry
+      // shrink; the job's edge margin is an extra term. The old `max(1, tip + edgeMargin)` let a
+      // touch sit closer to an edge than the guard would allow (#1207's 1 mm floor was the
+      // footprint slice's stand-in, now replaced by the slice itself).
+      const guardedHold = holdUncertaintyFor({
+        mount: 'bracket',
+        settings: args.settings,
+        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+      });
+      const guardedFloor = args.settings.probeFootprintShrinkMm;
+      if (guardedHold === null || guardedFloor === undefined) {
+        return {
+          kind: 'refused',
+          reason:
+            'the hold’s placement uncertainty is not stated for this machine, so a guarded top touch cannot be placed — ' +
+            'state the bracket fit (and the placement keys) and plan again',
+        };
+      }
+      const guardedMargins = topTouchEdgeMarginsMm(
+        { tipRadiusMm: args.settings.tipRadiusMm, tipLateralUncertaintyMm: args.probe?.tipLateralUncertaintyMm ?? 0 },
+        { floorMm: guardedFloor, hold: guardedHold },
+      );
+      const insetX = Math.max(job.edgeMargin, guardedMargins.xMm);
+      const insetY = Math.max(job.edgeMargin, guardedMargins.yMm);
+      const ix = Math.min(insetX, Math.max(0.001, (area.maxX - area.minX) / 2));
+      const iy = Math.min(insetY, Math.max(0.001, (area.maxY - area.minY) / 2));
       const clampToStock = (x: number, y: number): { x: number; y: number } => ({
         x: r3(Math.min(Math.max(x, 0.001), dims0.x - 0.001)),
         y: r3(Math.min(Math.max(y, 0.001), dims0.y - 0.001)),
@@ -320,10 +349,13 @@ export function planRegistrationAttempt(args: {
       }
       // The plan's frame comes from the ordinary builder with the floor as a NOMINAL seat (its
       // expected surface is discarded below); the guarded band and the checks are this branch's.
+      const bracketHold = guardedHold ?? undefined;
       const built = registrationFor(
         setup,
         mount,
         {
+          // #1199 field 7 — the hold's own placement uncertainty.
+          holdUncertainty: bracketHold,
           // #1201 — THE GUARDED CONTRACT: no expected surface, a floor and a margin.
           guarded: { floorMachineZ: r3(floorDatum), marginMm, seatIgnored: args.bracketSeat !== null ? 'legacy' : 'absent' },
           seekFromMachineZ: clearance,
@@ -370,6 +402,12 @@ export function planRegistrationAttempt(args: {
     // #1133 review — the ONE touch is at the CUT AREA'S centre, not the blank's (the bench job's
     // is (77.34, 63)): the region's own centre, when the job states a region.
     const region = cutRegionOf(job);
+    // #1199 field 7 — this branch shares the bracket's hold figure.
+    const bracketHold2 = holdUncertaintyFor({
+      mount: 'bracket',
+      settings: args.settings,
+      stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
+    }) ?? undefined;
     const result = registrationFor(
       setup,
       mount,
@@ -382,6 +420,7 @@ export function planRegistrationAttempt(args: {
         // M491 is known (the bench's refit shift).
         seatProbeRefZ: expected0.expectedSurface.probeRefZ,
         seatProbeRefLabel: 'the seat',
+        holdUncertainty: bracketHold2,
         seekFromMachineZ: clearanceZOf(jobMachine(job, calibration)) ?? 0,
         cornerRadius: 0,
         bracketOrigin: datum,
@@ -396,6 +435,14 @@ export function planRegistrationAttempt(args: {
     // from the package's own cutting footprint (a flat floor's depth is known and the executor
     // compares implied tops); no point at all keeps today's single touch, whose miss then offers
     // the bracket's own top — the derived path, the last resort.
+    if (args.cutBlank === true && result.plan.holdUncertainty === undefined) {
+      return {
+        kind: 'refused',
+        reason:
+          'the hold’s placement uncertainty is not recorded for this plan, so a top touch cannot be placed on the blank — ' +
+          'set the hold’s figure (its placement keys) and plan again',
+      };
+    }
     const checks =
       args.cutBlank === true
         ? cutBlankCheckPoints(job, result.plan, args.largestOwnedDiameterMm ?? 0, args.finishedHashes ?? [], args.setupIndex ?? 1, args.cutBlankMap ?? null)
@@ -451,7 +498,22 @@ export function planRegistrationAttempt(args: {
           'tap the fixed jaw again with the probe as it sits (Manage › the machine › Tap the fixed jaw), then register again',
       };
     }
-    input = { seekFromMachineZ, cornerRadius: STOCK_CORNER_RADIUS_MM, mountDatum: args.mountDatum, surfaceTopZ: args.surfaceTopZ, probe: args.probe, mountTap: args.mountTap };
+    input = {
+      seekFromMachineZ,
+      cornerRadius: STOCK_CORNER_RADIUS_MM,
+      mountDatum: args.mountDatum,
+      surfaceTopZ: args.surfaceTopZ,
+      probe: args.probe,
+      mountTap: args.mountTap,
+      // #1199 field 7 — the vise's own placement uncertainty, across and along the jaws.
+      holdUncertainty:
+        holdUncertaintyFor({
+          mount: 'vise',
+          settings: args.settings,
+          // A vise's figure is its across/along terms; the stock box is not consulted.
+          stock: { xMin: 0, yMin: 0, xMax: 0, yMax: 0, cornerRadius: 0 },
+        }) ?? undefined,
+    };
   } else {
     // The vise with no measured jaw-top datum: THE TAP IS THE PROCEDURE (#934 hides the typed-seat
     // override, so there is no other path to a seat here).

@@ -49,8 +49,10 @@ function ctx(): RegistrationPlan {
     mount: 'vise',
     stock: { xMin: 0, yMin: 0, xMax: 44.5, yMax: 60, cornerRadius: 0 },
     surfacePoint: { x: 22, y: 30 },
-    // #1199 — the frame states the MACHINE's clearance beside its seek start.
+    // #1199 — the frame states the MACHINE's clearance beside its seek start, and the hold's
+    // placement figures the footprint rule needs.
     machineClearanceZ: -3,
+    holdUncertainty: { xMm: 0.1, yMm: 0.1 },
     seek: { fromMachineZ: -3, travelMm: 60, band: { min: -60, max: -4 } },
     mountDatum: null,
     probe: null,

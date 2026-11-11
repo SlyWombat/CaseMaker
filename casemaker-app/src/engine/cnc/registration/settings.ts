@@ -33,6 +33,17 @@ export interface RegistrationSettings {
    * touch, and never walks inward over the stock where bores, pockets and clamps are.
    */
   edgeBandMm: number;
+  /** #1199 field 7 — the least a probe top touch's footprint is shrunk below the blank outline. */
+  probeFootprintShrinkMm?: number;
+  /** #1199 field 7 — a cutter's region grows beyond the blank's outline by its radius plus this. */
+  cutterFootprintGrowMm?: number;
+  /** #1199 field 7 — each hold's own placement uncertainty, in mm (analyst 2026-11-11). */
+  visePlacementAcrossJawsMm?: number;
+  visePlacementAlongJawsMm?: number;
+  tapePlacementMm?: number;
+  tapePlacementRotationDeg?: number;
+  /** #1199 field 7 — the bracket's own fit (its placement uncertainty), from `bracket.fitMm`. */
+  bracketFitMm?: number;
   /** A scan point stays this far beyond a rounded corner's radius from the corner. */
   cornerClearanceMm: number;
   /** A hit within this of the surface reads as "on the stock"; lower is off it (a jaw, the roll-off). */
@@ -116,6 +127,13 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   scanInsideMm: 'registration.scanInsideMm',
   scanReachMm: 'registration.scanReachMm',
   edgeBandMm: 'registration.edgeBandMm',
+  probeFootprintShrinkMm: 'registration.probeFootprintShrinkMm',
+  cutterFootprintGrowMm: 'registration.cutterFootprintGrowMm',
+  visePlacementAcrossJawsMm: 'registration.vise.placementAcrossJawsMm',
+  visePlacementAlongJawsMm: 'registration.vise.placementAlongJawsMm',
+  tapePlacementMm: 'registration.tape.placementMm',
+  tapePlacementRotationDeg: 'registration.tape.placementRotationDeg',
+  bracketFitMm: 'bracket.fitMm',
   cornerClearanceMm: 'registration.cornerClearanceMm',
   surfaceBandMm: 'registration.surfaceBandMm',
   tipRadiusMm: 'registration.tipRadiusMm',
@@ -169,6 +187,19 @@ export function settingsProblem(s: RegistrationSettings): string | null {
   if (s.fineStepMm > s.coarseStepMm) return 'the fine step is coarser than the coarse step';
   // #1133 — a scan with no band would start exactly on the expected edge: no span to seek in.
   if (!(s.edgeBandMm > 0)) return 'the edge-find band must be above 0 mm';
+  // #1199 field 7 — a plan (or a caller) without the hold's figures cannot be run or planned: the
+  // executors and planner refuse rather than assume a value.
+  for (const [key, v] of [
+    ['registration.probeFootprintShrinkMm', s.probeFootprintShrinkMm],
+    ['registration.cutterFootprintGrowMm', s.cutterFootprintGrowMm],
+    ['registration.vise.placementAcrossJawsMm', s.visePlacementAcrossJawsMm],
+    ['registration.vise.placementAlongJawsMm', s.visePlacementAlongJawsMm],
+    ['registration.tape.placementMm', s.tapePlacementMm],
+    ['registration.tape.placementRotationDeg', s.tapePlacementRotationDeg],
+    ['bracket.fitMm', s.bracketFitMm],
+  ] as const) {
+    if (v === undefined || !(v >= 0)) return `${key} is not stated (or is below 0) — the hold’s figures are required`;
+  }
   if (s.parkAboveSurfaceMm < 2) return 'the park height must be at least 2 mm above the surface';
   // #1059 — a zero limit would refuse every face-angle turn; the bound is `defaults.rs`'s.
   if (!(s.faceAngleMaxDeg > 0)) return 'the face-angle limit must be above 0°';

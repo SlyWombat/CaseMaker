@@ -296,11 +296,19 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     );
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.reason).toContain('2.5 mm');
+      // #1199 field 7 — the inset is now the SHARED per-axis margin (tip + the unit's lateral
+      // uncertainty + the hold's placement, floored by the registry shrink); the sentence states
+      // those terms rather than the unit's 2.5 mm alone.
+      expect(r.reason).toContain('not well inside');
       expect(r.reason).toContain('lateral uncertainty');
     }
     // The stock's own centre is clear of the floor, so the ordinary plan still succeeds.
     const centred = planRegistration({ ...input('tape'), stock, probe: RESTRICTED }, settingsFor(RESTRICTED));
     expect(centred.ok).toBe(true);
+    if (centred.ok) {
+      // #1199 field 7 — the tape hold's uncertainty swallows this small blank: the point is the
+      // CENTRE only, and the plan carries the jog-and-confirm flag rather than an autonomous touch.
+      expect(centred.plan.jogConfirm).toBe(true);
+    }
   });
 });

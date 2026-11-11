@@ -2332,6 +2332,33 @@
                         ],
                         "description": "The probe reference of the seek floor’s own datum, when it differs."
                       },
+                      "holdUncertainty": {
+                        "description": "The hold’s placement uncertainty, per plan axis. Absent on older plans and on any hold with no stated figure — a consumer that needs it refuses.",
+                        "properties": {
+                          "rotationDeg": {
+                            "description": "Tape without a fence: the by-eye rotation, whose corner shift is already added to X and Y.",
+                            "type": "number"
+                          },
+                          "xMm": {
+                            "description": "How far the blank may sit from the plan in X, mm.",
+                            "type": "number"
+                          },
+                          "yMm": {
+                            "description": "How far the blank may sit from the plan in Y, mm.",
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "xMm",
+                          "yMm"
+                        ],
+                        "type": "object"
+                      },
+                      "jogConfirm": {
+                        "const": true,
+                        "description": "The hold’s uncertainty swallows the blank: the first touch is at the centre and the operator must jog and confirm.",
+                        "type": "boolean"
+                      },
                       "machineClearanceZ": {
                         "description": "The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.",
                         "type": "number"
@@ -2877,6 +2904,10 @@
                       "settings": {
                         "description": "The registration tunables the plan was computed with.",
                         "properties": {
+                          "bracketFitMm": {
+                            "description": "The bracket hold’s own fit (#1199 field 7).",
+                            "type": "number"
+                          },
                           "capBelowSurfaceMm": {
                             "description": "Probe cap height below the nominal surface, in millimetres.",
                             "type": "number"
@@ -2895,6 +2926,10 @@
                           },
                           "cutBlankAgreeMm": {
                             "description": "How close two touches on a cut blank must agree, in millimetres.",
+                            "type": "number"
+                          },
+                          "cutterFootprintGrowMm": {
+                            "description": "How far a cutter’s region grows beyond the blank outline.",
                             "type": "number"
                           },
                           "edgeBandMm": {
@@ -2926,6 +2961,10 @@
                           },
                           "parkAboveSurfaceMm": {
                             "description": "Parking height above the surface, in millimetres.",
+                            "type": "number"
+                          },
+                          "probeFootprintShrinkMm": {
+                            "description": "The least a probe top touch’s footprint is shrunk.",
                             "type": "number"
                           },
                           "readingResolutionMm": {
@@ -2975,6 +3014,14 @@
                             "minimum": 5,
                             "type": "integer"
                           },
+                          "tapePlacementMm": {
+                            "description": "Tape hold: placement uncertainty.",
+                            "type": "number"
+                          },
+                          "tapePlacementRotationDeg": {
+                            "description": "Tape hold: by-eye rotation.",
+                            "type": "number"
+                          },
                           "tipDiameterMm": {
                             "description": "Probe tip diameter, in millimetres.",
                             "type": "number"
@@ -2989,6 +3036,14 @@
                           },
                           "touchFeed": {
                             "description": "Probe feed while touching, mm/min.",
+                            "type": "number"
+                          },
+                          "visePlacementAcrossJawsMm": {
+                            "description": "Vise hold: placement uncertainty across the jaws.",
+                            "type": "number"
+                          },
+                          "visePlacementAlongJawsMm": {
+                            "description": "Vise hold: placement uncertainty along the jaws.",
                             "type": "number"
                           }
                         },
@@ -4352,6 +4407,33 @@
                     ],
                     "description": "The probe reference of the seek floor’s own datum, when it differs."
                   },
+                  "holdUncertainty": {
+                    "description": "The hold’s placement uncertainty, per plan axis. Absent on older plans and on any hold with no stated figure — a consumer that needs it refuses.",
+                    "properties": {
+                      "rotationDeg": {
+                        "description": "Tape without a fence: the by-eye rotation, whose corner shift is already added to X and Y.",
+                        "type": "number"
+                      },
+                      "xMm": {
+                        "description": "How far the blank may sit from the plan in X, mm.",
+                        "type": "number"
+                      },
+                      "yMm": {
+                        "description": "How far the blank may sit from the plan in Y, mm.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "xMm",
+                      "yMm"
+                    ],
+                    "type": "object"
+                  },
+                  "jogConfirm": {
+                    "const": true,
+                    "description": "The hold’s uncertainty swallows the blank: the first touch is at the centre and the operator must jog and confirm.",
+                    "type": "boolean"
+                  },
                   "machineClearanceZ": {
                     "description": "The machine’s own travel height (toolChange.clearanceZ) this plan was built against — the executor’s safe-Z floor, independent of the seek’s start. Absent on older plans, which refuse to run.",
                     "type": "number"
@@ -4897,6 +4979,10 @@
                   "settings": {
                     "description": "The registration tunables the plan was computed with.",
                     "properties": {
+                      "bracketFitMm": {
+                        "description": "The bracket hold’s own fit (#1199 field 7).",
+                        "type": "number"
+                      },
                       "capBelowSurfaceMm": {
                         "description": "Probe cap height below the nominal surface, in millimetres.",
                         "type": "number"
@@ -4915,6 +5001,10 @@
                       },
                       "cutBlankAgreeMm": {
                         "description": "How close two touches on a cut blank must agree, in millimetres.",
+                        "type": "number"
+                      },
+                      "cutterFootprintGrowMm": {
+                        "description": "How far a cutter’s region grows beyond the blank outline.",
                         "type": "number"
                       },
                       "edgeBandMm": {
@@ -4946,6 +5036,10 @@
                       },
                       "parkAboveSurfaceMm": {
                         "description": "Parking height above the surface, in millimetres.",
+                        "type": "number"
+                      },
+                      "probeFootprintShrinkMm": {
+                        "description": "The least a probe top touch’s footprint is shrunk.",
                         "type": "number"
                       },
                       "readingResolutionMm": {
@@ -4995,6 +5089,14 @@
                         "minimum": 5,
                         "type": "integer"
                       },
+                      "tapePlacementMm": {
+                        "description": "Tape hold: placement uncertainty.",
+                        "type": "number"
+                      },
+                      "tapePlacementRotationDeg": {
+                        "description": "Tape hold: by-eye rotation.",
+                        "type": "number"
+                      },
                       "tipDiameterMm": {
                         "description": "Probe tip diameter, in millimetres.",
                         "type": "number"
@@ -5009,6 +5111,14 @@
                       },
                       "touchFeed": {
                         "description": "Probe feed while touching, mm/min.",
+                        "type": "number"
+                      },
+                      "visePlacementAcrossJawsMm": {
+                        "description": "Vise hold: placement uncertainty across the jaws.",
+                        "type": "number"
+                      },
+                      "visePlacementAlongJawsMm": {
+                        "description": "Vise hold: placement uncertainty along the jaws.",
                         "type": "number"
                       }
                     },

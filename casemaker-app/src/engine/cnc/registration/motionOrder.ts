@@ -31,6 +31,8 @@
 // height would otherwise hand the guard a floor of −81.25 and wave the accident through.
 
 import { lastPrb } from './readings';
+import { topTouchEdgeMarginsMm } from './cutBlank';
+import type { EdgeScan, RegistrationPlan } from './plan';
 
 export interface MotionOrderGuardOptions {
   /**
@@ -108,6 +110,108 @@ function isTraverse(w: Words): boolean {
 /** A Z probe's trigger Z (`[PRB:x,y,z:1]`), or null when the reply carries none. */
 function triggerZOf(reply: string | undefined): number | null {
   return reply ? (lastPrb(reply)?.z ?? null) : null;
+}
+
+/**
+ * #1199 field 7 (analyst 2026-11-11) — WHERE A JOB-TIME DESCENT MAY HAPPEN, per plan:
+ *  - the BLANK's outline as the hold places it, SHRUNK by the probe's top-touch margins
+ *    (`topTouchEdgeMarginsMm`: tip + unit lateral uncertainty + hold placement, registry floor);
+ *  - each declared edge-find window (a scan's start..limit along its edge, ± `edgeBandMm`), minus
+ *    any stretch a top clamp's box covers — never on a clamped stretch;
+ *  - the plan's own mount-tap target (a datum measurement the planner places and checks).
+ * Machine-frame lines are converted with the bracket origin; a machine line on a plan with no
+ * origin is refused. A plan with no hold figure or floor shrinks to NOTHING: every descent is
+ * refused rather than guessed.
+ */
+export function jobDescentRegion(
+  plan: RegistrationPlan,
+  extraScans: readonly EdgeScan[] = [],
+): (machine: boolean, x: number, y: number) => boolean {
+  const eps = 1e-6;
+  const origin = plan.mount === 'bracket' ? plan.bracketOrigin : null;
+  const toWork = (machine: boolean, x: number, y: number): { x: number; y: number } | null => {
+    if (!machine) return { x, y };
+    if (plan.mount !== 'bracket') return null;
+    return origin === null ? null : { x: x - origin.x, y: y - origin.y };
+  };
+  const hold = plan.holdUncertainty;
+  const floor = plan.settings.probeFootprintShrinkMm;
+  const margins =
+    hold === undefined || floor === undefined
+      ? null
+      : topTouchEdgeMarginsMm(
+          { tipRadiusMm: plan.settings.tipRadiusMm, tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? 0 },
+          { floorMm: floor, hold },
+        );
+  const stock = plan.stock;
+  const inBlank = (x: number, y: number): boolean => {
+    if (margins === null) return false;
+    return (
+      x >= stock.xMin + margins.xMm - eps &&
+      x <= stock.xMax - margins.xMm + eps &&
+      y >= stock.yMin + margins.yMm - eps &&
+      y <= stock.yMax - margins.yMm + eps
+    );
+  };
+  const band = plan.settings.edgeBandMm;
+  /**
+   * The #1133 declared edge-find window: a COLLAR of `edgeBandMm` around the blank's outline —
+   * "edge ± band" (analyst 2026-11-11). Only where the plan actually runs edge finds (a bracket
+   * plan runs none, so its collar is empty), and never over a TOP CLAMP's box.
+   */
+  const inEdgeWindow = (x: number, y: number): boolean => {
+    const allScans = [...plan.scans, ...extraScans];
+    if (allScans.length === 0) return false;
+    // (1) THE PLAN'S OWN DECLARED WINDOW: each scan's start..limit, at its own line along the
+    // edge (either axis orientation), ± one band for the probe's rim.
+    for (const sc of allScans) {
+      // An X-axis edge varies in X: `at` is the coordinate along start..limit, `along` is fixed.
+      const xEdge = sc.edge === 'left' || sc.edge === 'right';
+      const at = xEdge ? x : y;
+      const along = xEdge ? y : x;
+      const lo = Math.min(sc.start, sc.limit);
+      const hi = Math.max(sc.start, sc.limit);
+      if (Math.abs(along - sc.along) <= band + eps && at >= lo - band - eps && at <= hi + band + eps) {
+        // A clamp's box is WORK XY. `at`/`along` are the scan's own axis pair, so put the point
+        // back in (x, y) before the box test — a right/left edge's `along` is Y, not X.
+        const px = xEdge ? at : along;
+        const py = xEdge ? along : at;
+        const clamped = plan.mountObstacles.some(
+          (o) =>
+            o.kind === 'clamp' &&
+            px >= o.min[0] - eps && px <= o.max[0] + eps &&
+            py >= o.min[1] - eps && py <= o.max[1] + eps,
+        );
+        if (!clamped) return true;
+      }
+    }
+    // (2) …and the COLLAR of one band around the blank's outline (the analyst's edge ± band).
+    const inCollar =
+      x >= stock.xMin - band - eps &&
+      x <= stock.xMax + band + eps &&
+      y >= stock.yMin - band - eps &&
+      y <= stock.yMax + band + eps;
+    if (!inCollar) return false;
+    return !plan.mountObstacles.some(
+      (o) =>
+        o.kind === 'clamp' &&
+        x >= o.min[0] - eps &&
+        x <= o.max[0] + eps &&
+        y >= o.min[1] - eps &&
+        y <= o.max[1] + eps,
+    );
+  };
+  const tap = plan.mountTap;
+  return (machine, x, y) => {
+    // TODO(#1199 analyst): the VISE's jaw tap sits outside the blank by design — kept as a
+    // declared target until the analyst rules how a job-time jaw datum fits field 7. The tap's
+    // own coordinates are MACHINE XY (`PlanMountTap`), so they are compared in that frame.
+    if (tap !== null && machine && Math.abs(x - tap.x) <= 1e-3 && Math.abs(y - tap.y) <= 1e-3) return true;
+    const p = toWork(machine, x, y);
+    if (p === null) return false;
+    if (inBlank(p.x, p.y)) return true;
+    return inEdgeWindow(p.x, p.y);
+  };
 }
 
 /** The refusal for a plan whose travel height sits below the machine's clearance. */

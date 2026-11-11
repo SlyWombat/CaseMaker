@@ -1807,6 +1807,42 @@
       "setAt": null,
       "unit": "mm",
       "note": "chosen, not measured: how far above the bed\u2019s known floor a guarded top seek may accept contact; it only stops a seek over a missing blank"
+    },
+    "registration.probeFootprintShrinkMm": {
+      "value": 3.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.cutterFootprintGrowMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.vise.placementAcrossJawsMm": {
+      "value": 0.5,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.vise.placementAlongJawsMm": {
+      "value": 5.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.tape.placementMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm"
+    },
+    "registration.tape.placementRotationDeg": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "deg"
     }
   },
   "accessories": [

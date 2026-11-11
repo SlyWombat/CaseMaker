@@ -106,7 +106,7 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
-import { motionOrderGuard, planTravelProblem } from './motionOrder';
+import { jobDescentRegion, motionOrderGuard, planTravelProblem } from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -332,6 +332,12 @@ function session(
    * without a footprint check.
    */
   descentAllowed?: (machine: boolean, x: number, y: number) => boolean,
+  /**
+   * #1200 — whether this session's probe may touch SIDEWAYS (`probe.touches !== 'z-only'`). The
+   * planner is expected never to emit one for a z-only unit; the guard refuses it at the wire if
+   * one ever gets through.
+   */
+  lateralProbes = true,
 ) {
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
@@ -354,7 +360,10 @@ function session(
    * line sent from below it — so a routine that lifts to a band height and traverses is stopped
    * before the line reaches the wire, and a descent is only ever taken at the point to be probed.
    */
-  const motion = motionOrderGuard(seekFromMachineZ, descentAllowed === undefined ? {} : { descentAllowed });
+  const motion = motionOrderGuard(seekFromMachineZ, {
+    ...(descentAllowed === undefined ? {} : { descentAllowed }),
+    ...(lateralProbes ? {} : { lateralProbes: false }),
+  });
 
   /** The operator's Stop, checked before every line the run sends (#933, `machineRun.ts`'s shape). */
   function stoppedByOperator(): boolean {
@@ -1442,7 +1451,7 @@ export async function runMountTap(
    */
   planTravelMm: number | null = null,
 ): Promise<MountTapResult> {
-  const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe));
+  const io = session(deps, seekFromMachineZ, settings.idlePollLimit, probeNeedsRelease(probe), undefined, probe?.touches !== 'z-only');
   // The floor the tap may reach: the PLAN's bound when it states one, never the envelope's alone.
   // #1199 — the bound is stated below the tap's own APPROACH (`tap.fromMachineZ`, the band start),
   // not below the clearance: the two heights were one parameter before, and splitting them must
@@ -2114,7 +2123,15 @@ export async function runRegistration(
   // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
   const cleared = liveClearanceFor(plan, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    plan.settings.idlePollLimit,
+    probeNeedsRelease(plan.probe),
+    // #1199 field 7 — a descent below the clearance only over the blank's outline.
+    jobDescentRegion(plan),
+    plan.probe?.touches !== 'z-only',
+  );
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -2398,8 +2415,17 @@ export async function runRegistration(
         : null;
 
     const parkZ = slow.z + s.parkAboveSurfaceMm;
-    await io.send(`G53 G0 Z${f(parkZ)}`);
-    io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
+    // #1199 field 7 — THE PARK DESCENT BELONGS TO THE SCANS. It puts the head at the scan park
+    // before the scan loop (each touch there lifts to the clearance and places its own point
+    // anyway). With a typed or derived top nothing touched the blank and no XY has moved off
+    // home: descending to that park is a depth beside the blank at the home corner, the class that
+    // bent the probe. With no scans to prepare for it is a needless descent at the last check
+    // point — and on a cut blank that point may be the last one read. Skip either way; the guard
+    // still refuses the move from any routine that sends it.
+    if (slow.touched && plan.scans.length > 0) {
+      await io.send(`G53 G0 Z${f(parkZ)}`);
+      io.at(`at the park height, ${s.parkAboveSurfaceMm} mm above the surface`);
+    }
 
     const scans: ScanRecord[] = [];
     // #525/#1133 — a sideways touch wherever the mount leaves the edge free: the bracket and tape
@@ -2639,7 +2665,15 @@ export async function retouchSurface(
   // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
   const cleared = liveClearanceFor(plan, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe));
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    plan.settings.idlePollLimit,
+    probeNeedsRelease(plan.probe),
+    // #1199 field 7 — a descent below the clearance only over the blank's outline.
+    jobDescentRegion(plan),
+    plan.probe?.touches !== 'z-only',
+  );
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
@@ -2938,7 +2972,15 @@ export async function runFlipRegistration(
   // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
   const cleared = liveClearanceFor(ctx, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, s.idlePollLimit, true);
+  const flipScans = flip.steps.flatMap((st) => (st.kind === 'edge-pair' ? st.scans : st.kind === 'seed' ? [st.scan] : []));
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    s.idlePollLimit,
+    true,
+    jobDescentRegion(ctx, flipScans),
+    ctx.probe?.touches !== 'z-only',
+  );
   let powered = false;
   try {
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
