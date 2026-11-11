@@ -208,7 +208,9 @@ test('#1093 — Save all writes every program of the run, byte-identical to set 
   const plan = page.locator('[data-section-id="plan"]');
   await expect(plan).toContainText(/bit change/i);
   await expect(plan).toContainText(/priced/i);
-  await expect(plan).toContainText(/run.?.?s cycle is/i);
+  // #1193's wording, carried by land18 after #1186's branch: the sheet line is the PLAN's cycle
+  // (a flip job states one per setup), not "the run's".
+  await expect(plan).toContainText(/plan.?.?s cycle is/i);
   // One row's own Save writes that program, and only that program (the run's last one).
   const last = SETB_BOTTOM.programs;
   const [one] = await Promise.all([
