@@ -303,6 +303,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         2.0,
         "mm",
         "chosen, not measured: the tape strips stop this far in from every edge of the stock",
+    ),
+    // #1098 — the plate a drawing is worked on when the shelf holds none that fits.
+    (
+        "stock.defaultPlateThicknessMm",
+        12.0,
+        "mm",
+        "chosen, not measured: the house's common plate — the thickness a drawing's blank starts at when no shelf plate holds it",
     ),    // #434 — peck drilling with drill bits: the pecks chosen, the feeds placeholders. None measured.
     ("drill.peckDiameters", 1.0, "x", "chosen, not measured: each peck goes this many drill diameters deep before the drill retracts to clear chips"),
     ("drill.peckClearanceMm", 0.5, "mm", "chosen, not measured: after a peck the drill rapids back down to this far above the floor it just cut"),
@@ -1068,6 +1075,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         )),
         "tape.holdRatio" => Some(need(n.is_some_and(|v| (1.0..=1000.0).contains(&v)), "1 to 1000 x")),
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
+        "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "tools.wearWeight.plastic"
         | "tools.wearWeight.wood"
         | "tools.wearWeight.aluminium"
