@@ -9,7 +9,7 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
-  await page.screenshot({ path: 'test-results/1109-step1-machine.png' });
+  await expect(page).toHaveScreenshot('1109-step1-machine.png');
 
   await page.getByTestId('start-wizard-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you cutting?');
@@ -17,13 +17,13 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
   // behind Something else…, which is where the walk's pick lives now.
   await page.getByTestId('start-wizard-preset-something-else').click();
   await page.getByTestId('engrave-setup-what-pocket').click();
-  await page.screenshot({ path: 'test-results/1109-step2-operation.png' });
+  await expect(page).toHaveScreenshot('1109-step2-operation.png');
 
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
-  await page.screenshot({ path: 'test-results/1109-step3-stock.png' });
+  await expect(page).toHaveScreenshot('1109-step3-stock.png');
 
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
-  await page.screenshot({ path: 'test-results/1109-step4-holding.png' });
+  await expect(page).toHaveScreenshot('1109-step4-holding.png');
 });
