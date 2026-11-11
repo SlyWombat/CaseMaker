@@ -137,8 +137,7 @@ import { useMachineStopReportStore } from '@/store/machineStopReportStore';
 import { StopReportAction } from '@/components/panels/StopReportAction';
 import { stopIsReportable } from '@/platform/machineStopReport';
 // #1202 + #1199 item 3 — the dry line view and the first-run mark.
-import { dryFlipRegistration, dryMountTap, dryRegistration, previewHolds, type DryRoutine } from '@/engine/cnc/registration/dryRun';
-import { seatTapArgs } from '@/engine/cnc/registration/seatPress';
+import { dryFlipRegistration, dryRegistration, previewHolds, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import { RoutineDryPreview } from './RoutineDryPreview';
 import { buildStamp, routineCompleted, withRoutineCompletion } from '@/platform/routineRecord';
 import { firstRunAutomationRefusal } from '@/platform/automation';
@@ -629,7 +628,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const [preview, setPreview] = useState<DryRoutine | null>(null);
   const [routineTicked, setRoutineTicked] = useState(false);
   const previewPlan: RegistrationPlan | null = plan ?? (proposal?.kind === 'plan' ? proposal.plan : null);
-  const previewFloor = jobMachine(job, calibration).envelope.z.min;
   useEffect(() => {
     if (previewPlan === null || target === null) {
       setPreview(null);
@@ -637,21 +635,17 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     }
     let live = true;
     const clearanceZ = previewPlan.machineClearanceZ ?? seekFromMachineZ;
-    const seat = seatTapArgs(previewPlan);
     void (async () => {
       try {
-        const dry =
-          seat !== null
-            ? await dryMountTap(seat, {
-                clearanceZ,
-                settings: regSettings,
-                workEnvelopeFloorZ: previewFloor,
-                mount: 'bracket',
-                planTravelMm: seat.planTravelMm,
-                routine: 'seat-press',
-                liveClearanceZ: seekFromMachineZ,
-              })
-            : await dryRegistration(previewPlan, { clearanceZ, settings: regSettings, liveClearanceZ: seekFromMachineZ });
+        // #1202 — THE PREVIEW IS ALWAYS THE REGISTRATION'S. The old seat-press branch (a scanless
+        // bracket-seat plan through `dryMountTap`) has been dead since #1201: the planner never
+        // plans that shape, and the seat is a bed-setup datum now. Keeping the branch let a
+        // hypothetical plan shape reach a preview of a routine the press does not run.
+        const dry = await dryRegistration(previewPlan, {
+          clearanceZ,
+          settings: regSettings,
+          liveClearanceZ: seekFromMachineZ,
+        });
         if (live) setPreview(dry);
       } catch {
         if (live) setPreview(null);
@@ -660,7 +654,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     return () => {
       live = false;
     };
-  }, [previewPlan, target, seekFromMachineZ, regSettings, previewFloor]);
+  }, [previewPlan, target, seekFromMachineZ, regSettings]);
   // A fresh statement per routine shape: the tick that satisfied the last press is not this one.
   const previewShape = preview?.identity.shape ?? null;
   useEffect(() => setRoutineTicked(false), [previewShape]);

@@ -63,6 +63,26 @@ vi.mock('@/platform/capabilities', async (importOriginal) => {
   };
 });
 
+/**
+ * #1202 — THE PREVIEW'S SEAT BRANCH IS DEAD (dead since #1201: the planner no longer plans a
+ * scanless bracket-seat plan). This mock lets one test present a seat-SHAPED tap and pin that the
+ * preview still runs the registration executor; every other test sees null (the real behaviour).
+ */
+const seatPreviewMock = vi.hoisted(() => ({
+  value: null as null | {
+    x: number;
+    y: number;
+    fromMachineZ: number;
+    reference: 'bracket-seat';
+    datumOffsetMm: number;
+    planTravelMm: number;
+  },
+}));
+vi.mock('@/engine/cnc/registration/seatPress', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/engine/cnc/registration/seatPress')>();
+  return { ...actual, seatTapArgs: () => seatPreviewMock.value };
+});
+
 const TARGET = { host: '192.0.2.10', port: 2222 };
 const STOCK = { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 };
 
@@ -318,6 +338,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   setMachineConsoleLoader(null);
+  seatPreviewMock.value = null;
   useEngraveJobStore.setState({ job: savedJob });
 });
 
@@ -1335,6 +1356,29 @@ describe('#797 follow-up — the Register card proposes the plan it runs', () =>
     expect(approved!.method).toBe('vise');
     expect(approved!.plan.scans.length).toBeGreaterThan(0);
     expect(approved!.expected.length).toBeGreaterThan(0);
+  });
+
+  it('#1202 — the preview runs the registration executor for a seat-shaped plan too (the seat branch is dead)', async () => {
+    const base = defaultEngraveJob();
+    const setup0 = jobSetups(base)[0]!;
+    const job: EngraveJob = { ...base, setups: [{ ...setup0, mount: { kind: 'vise' } }] };
+    proposalLocation();
+    useEngraveJobStore.setState({ job });
+    useEngraveRunStore.setState({ acknowledged: false, acknowledgedFor: null });
+    // A tap that WOULD have routed the old seat branch to dryMountTap (`routine: 'seat-press'`).
+    seatPreviewMock.value = {
+      x: -175,
+      y: -35,
+      fromMachineZ: -50,
+      reference: 'bracket-seat',
+      datumOffsetMm: 0,
+      planTravelMm: 10,
+    };
+
+    render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    const routine = await screen.findByTestId('engrave-registration-routine', undefined, { timeout: 5000 });
+    // Dead since #1201: the preview is the registration's, never the retired seat press's.
+    expect(routine.getAttribute('data-routine')).toBe('registration');
   });
 });
 
