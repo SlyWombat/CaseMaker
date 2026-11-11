@@ -53,17 +53,128 @@ export interface DryRoutine {
   error: string | null;
 }
 
-/** The recording console: it answers like a well-behaved machine and never opens a socket. */
-export function recordingConsole(): {
+/**
+ * #1202 — WHETHER THE CARD'S ROUTINE PRESS IS HELD BY ITS PREVIEW. A preview that could not finish
+ * (a dry error) shows LESS than the app would send — the analyst saw 23 lines of 36 — so it holds
+ * the press on a proved routine as firmly as on a first run; a refused line holds too, and a first
+ * run needs its own tick.
+ */
+export function previewHolds(preview: DryRoutine | null, firstRun: boolean, ticked: boolean): boolean {
+  return (preview !== null && (preview.refused || preview.error !== null)) || (firstRun && !ticked);
+}
+
+/**
+ * THE SCRIPTED MACHINE'S OWN STATE — the head's Z and G90/G91. A `G38.3` answers from where the
+ * head actually is: the fast top touch contacts at the level the plan expects (the middle of its
+ * band), and the slow touch that follows starts just above it and triggers at that same level.
+ * Answering half a relative travel as an ABSOLUTE machine Z (what `dryReply` did) put the reading
+ * above the machine's clearance; the scripted executor then stopped partway and the card showed a
+ * truncated sequence — 23 lines of 36 (#1202 analyst defect, 2026-11-11).
+ */
+export function scriptedReply(opts: { band?: { min: number; max: number } } = {}): (line: string) => string {
+  // The machine's Z and the mode. A relative `G38.3 Z-…` answers from where the head IS; the fast
+  // top touch contacts at the level the plan expects (the middle of its band) and the slow touch
+  // answers at that same level. X/Y probes keep the shape the scans were shaped on (`half the
+  // travel` on the probed axis) — only Z needed the machine's own position.
+  let z = 0;
+  let absolute = true;
+  const expected = opts.band === undefined ? null : (opts.band.min + opts.band.max) / 2;
+  /** The level the fast touch found; the slow touch starts just above it and triggers there. */
+  let found: number | null = null;
+  const applyZ = (value: number): void => {
+    z = absolute ? value : z + value;
+  };
+  return (line: string): string => {
+    const text = line.trim();
+    const upper = text.toUpperCase();
+    if (text === '?') return DRY_STATUS;
+    if (text === 'M119') return 'X_max:0 Y_max:0 Z_max:0 Probe: 0';
+    if (text === 'M491') return DRY_M491;
+    // Homing parks at the top of travel; the Z1 reports -1,-1,-1 (#1202).
+    if (upper === '$H') {
+      z = -1;
+      return 'ok';
+    }
+    if (upper === 'G90') {
+      absolute = true;
+      return 'ok';
+    }
+    if (upper === 'G91') {
+      absolute = false;
+      return 'ok';
+    }
+    // G53 is machine-coordinate and absolute whatever the mode.
+    let m = /^G53\s+G0\s+Z([-+]?[\d.]+)/.exec(upper);
+    if (m !== null) {
+      z = Number(m[1]);
+      return 'ok';
+    }
+    // A probe.
+    m = /^G38\.3\s+([XYZ])([-+]?[\d.]+)(?:\s|$)/.exec(upper);
+    if (m !== null) {
+      const axis = m[1]!.toLowerCase() as 'x' | 'y' | 'z';
+      const amount = Number(m[2]);
+      if (axis !== 'z') {
+        // The scans' own scripted reading, unchanged from the long-green dry run.
+        const at = (amount / 2).toFixed(3);
+        const x = axis === 'x' ? at : '0.000';
+        const y = axis === 'y' ? at : '0.000';
+        return `[PRB:${x},${y},-80.000:1]\r\nok`;
+      }
+      const from = z;
+      const target = absolute ? amount : z + amount;
+      const lo = Math.min(from, target);
+      const hi = Math.max(from, target);
+      let hit: number;
+      if (found !== null && found >= lo && found <= hi) {
+        // The slow touch (and any re-seek): the surface is where the fast touch found it.
+        hit = found;
+      } else if (target < from && expected !== null && expected >= lo && expected <= hi) {
+        // The fast touch: place the contact at the level the plan expects, inside its band.
+        hit = expected;
+        found = expected;
+      } else {
+        hit = (from + target) / 2;
+      }
+      z = hit;
+      return `[PRB:0.000,0.000,${hit.toFixed(3)}:1]\r\nok`;
+    }
+    // Probe-away (G38.5): a move that must NOT trigger; a Z one moves the head back up.
+    m = /^G38\.5\s+([XYZ])([-+]?[\d.]+)(?:\s|$)/.exec(upper);
+    if (m !== null) {
+      if (m[1]!.toUpperCase() === 'Z') applyZ(Number(m[2]));
+      return 'ok';
+    }
+    // Any other move with a Z word: apply it so the next probe answers from the right place.
+    // G10/G92 write offsets and move nothing.
+    m = /^G([0-9]+)\s+(.+)$/.exec(upper);
+    const words = m !== null && m[1] !== '10' && m[1] !== '92' ? m[2]! : upper;
+    const zw = /(?:^|\s)Z([-+]?[\d.]+)(?:\s|$)/.exec(words);
+    if (zw !== null) applyZ(Number(zw[1]));
+    return 'ok';
+  };
+}
+
+/** The recording console: it answers like a well-behaved machine and never opens a socket. The
+ * reply function is stateful by default (`scriptedReply`); each answer is recorded beside its line
+ * so the guard reviews the SAME conversation the executor heard. */
+export function recordingConsole(
+  reply: (line: string) => string = scriptedReply(),
+): {
   send: (line: string, timing?: Partial<unknown>) => Promise<ConsoleSendResult>;
   lines: string[];
+  replies: string[];
 } {
   const lines: string[] = [];
+  const replies: string[] = [];
   return {
     lines,
+    replies,
     async send(line: string): Promise<ConsoleSendResult> {
       lines.push(line);
-      return { kind: 'sent', line, text: dryReply(line), frames: 1, elapsedMs: 0 };
+      const text = reply(line);
+      replies.push(text);
+      return { kind: 'sent', line, text, frames: 1, elapsedMs: 0 };
     },
   };
 }
@@ -96,6 +207,17 @@ export function reviewLines(lines: readonly string[], clearanceZ: number): DryLi
   return lines.map((line) => ({ line, refused: guard.observe(line, dryReply(line)) }));
 }
 
+/**
+ * The same review over the console's OWN recorded answers. The guard reads a probe's trigger Z out
+ * of the reply (`motionOrder.commit`), so re-deriving the reply from the line alone would feed it a
+ * different conversation than the executor heard — the stateful machine's answers must be the ones
+ * reviewed.
+ */
+export function reviewSequence(entries: readonly { line: string; reply: string }[], clearanceZ: number): DryLine[] {
+  const guard = motionOrderGuard(clearanceZ);
+  return entries.map((e) => ({ line: e.line, refused: guard.observe(e.line, e.reply) }));
+}
+
 /** The heights a registration plan names, for the identity: machine Z (or the seek travel). */
 export function registrationHeights(plan: RegistrationPlan, clearanceZ: number): NamedHeights {
   const heights: Record<string, number> = { clearance: clearanceZ };
@@ -121,7 +243,10 @@ function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ: 
 }
 
 function finish(routine: MotionRoutineId, console_: ReturnType<typeof recordingConsole>, clearanceZ: number, heights: NamedHeights, error: string | null): DryRoutine {
-  const reviewed = reviewLines(console_.lines, clearanceZ);
+  const reviewed = reviewSequence(
+    console_.lines.map((line, i) => ({ line, reply: console_.replies[i] ?? dryReply(line) })),
+    clearanceZ,
+  );
   return {
     lines: reviewed,
     identity: routineIdentityOf(routine, console_.lines, heights),
@@ -135,7 +260,9 @@ export async function dryRegistration(
   plan: RegistrationPlan,
   opts: { clearanceZ: number; settings: RegistrationSettings; liveClearanceZ?: number },
 ): Promise<DryRoutine> {
-  const console_ = recordingConsole();
+  // The scripted machine is seeded with the plan's OWN band: the fast touch contacts where the
+  // plan expects the top, and the slow touch answers at that level (#1202 analyst defect).
+  const console_ = recordingConsole(scriptedReply({ band: plan.seek.band }));
   const heights = registrationHeights(plan, opts.clearanceZ);
   let error: string | null = null;
   try {
@@ -197,7 +324,7 @@ export async function dryFlipRegistration(
   attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
   opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
 ): Promise<DryRoutine> {
-  const console_ = recordingConsole();
+  const console_ = recordingConsole(scriptedReply({ band: attempt.ctx.seek.band }));
   const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
   let error: string | null = null;
   try {
