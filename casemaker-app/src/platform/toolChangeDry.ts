@@ -12,7 +12,7 @@
  * (`M493.2 T<n>` at the sensor, the return) is the controller's, and the card's note says so.
  */
 import { pauseResumeCommands } from '@/platform/machinePause';
-import { reviewLines, type DryRoutine } from '@/engine/cnc/registration/dryRun';
+import { CLEARANCE_UNKNOWN, reviewLines, type DryRoutine } from '@/engine/cnc/registration/dryRun';
 import { routineIdentityOf, type RoutineIdentity } from '@/engine/cnc/registration/routineIdentity';
 
 /** The console lines the app sends when the operator presses Continue at the firmware's `Tool` stop. */
@@ -26,7 +26,7 @@ export function toolChangeIdentity(): RoutineIdentity {
 }
 
 /** What the card says when the machine's clearance has not been read: no verdict is possible. */
-export const TOOL_CHANGE_NO_CLEARANCE = 'clearance unknown — the line can’t be reviewed';
+export const TOOL_CHANGE_NO_CLEARANCE = CLEARANCE_UNKNOWN;
 
 /**
  * The dry view the bit-change card shows before the press: the exact lines, in send order, each

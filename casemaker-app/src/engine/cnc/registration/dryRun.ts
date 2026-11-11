@@ -67,6 +67,13 @@ export function previewHolds(preview: DryRoutine | null, firstRun: boolean, tick
 }
 
 /**
+ * #1202 — WHAT A PREVIEW SAYS WHEN THE MACHINE'S CLEARANCE IS UNKNOWN. D's #1199 makes the live
+ * clearance REQUIRED: a routine cannot be reviewed against a height nobody read, so the preview
+ * refuses instead of inventing one (the tool change and the flip registration share the sentence).
+ */
+export const CLEARANCE_UNKNOWN = 'clearance unknown — the line can’t be reviewed';
+
+/**
  * THE SCRIPTED MACHINE'S OWN STATE — the head's Z and G90/G91. A `G38.3` answers from where the
  * head actually is: the fast top touch contacts at the level the plan expects (the middle of its
  * band), and the slow touch that follows starts just above it and triggers at that same level.
@@ -395,12 +402,22 @@ export async function dryFlipRegistration(
   attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
   opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
 ): Promise<DryRoutine> {
-  // No tapZ here: the flip run never taps the mount (`runFlipRegistration` reads the ctx for
-  // its stock, settings and probe only), so seeding it would misplace its first Z probe.
+  const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? null;
+  // #1202 — UNKNOWN MEANS REFUSED, never reviewed against an invented 0 (the tool-change rule):
+  // the card shows the sentence and `previewHolds` keeps the press held.
+  if (clearanceZ === null || !Number.isFinite(clearanceZ)) {
+    return {
+      lines: [],
+      identity: routineIdentityOf('flip-registration', [], {}),
+      refused: true,
+      error: CLEARANCE_UNKNOWN,
+    };
+  }
+  // No tapZ here: the flip run never taps the mount (`runFlipRegistration` reads the ctx for its
+  // stock, settings and probe only), so seeding it would misplace its first Z probe.
   const console_ = recordingConsole(
     scriptedReply({ band: attempt.ctx.seek.band, m491Z: attempt.ctx.probeRefZ ?? null }),
   );
-  const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
   let error: string | null = null;
   try {
     const result: FlipRunResult = await runFlipRegistration(
