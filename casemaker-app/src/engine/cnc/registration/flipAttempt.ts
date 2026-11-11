@@ -19,6 +19,7 @@ import { flipReflection } from '@/engine/cnc/setups/flip';
 import { flipHoldCheck } from '@/engine/cnc/engrave/goalFlipSetups';
 import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { holdUncertaintyFor } from './plan';
 
 export interface FlipAttempt {
   /** The index of the FLIPPED setup in `job.setups`. */
@@ -149,10 +150,18 @@ export function planFlipAttempt(job: EngraveJob, input: FlipAttemptInput): FlipA
   const point = corners.find((c) => pins.every((p) => Math.hypot(c.x - p.x, c.y - p.y) > clearance)) ?? { x: length / 2, y: width / 2 };
   const top = input.z0.topMachineZ;
   const band = input.z0.checkBand ?? { minMm: top - 0.5, maxMm: top + 0.5 };
+  // #1199 field 7 — the hold's own placement uncertainty, from the same sources as side 1.
+  const mountKind = setup.mount?.kind === 'bracket' ? 'bracket' : setup.mount?.kind === 'tape' ? 'tape' : 'vise';
+  const holdUncertainty = holdUncertaintyFor({
+    mount: mountKind,
+    settings: input.settings as never,
+    stock: { xMin: 0, yMin: 0, xMax: length, yMax: width, cornerRadius: 0 },
+  }) ?? undefined;
   const ctx = {
-    mount: setup.mount?.kind === 'bracket' ? 'bracket' : setup.mount?.kind === 'tape' ? 'tape' : 'vise',
+    mount: mountKind,
     stock: { xMin: 0, yMin: 0, xMax: length, yMax: width, cornerRadius: 0 },
     surfacePoint: point,
+    holdUncertainty,
     // #1199 — the machine's clearance, carried separately from the seek start so the executor's
     // guard is built from the machine and not from this frame's band.
     machineClearanceZ: input.seekFromMachineZ,

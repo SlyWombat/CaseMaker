@@ -317,7 +317,6 @@ export function planRegistrationAttempt(args: {
         mount: 'bracket',
         settings: args.settings,
         stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-        bracketFitMm: sizes.settings.fitMm,
       });
       const guardedFloor = args.settings.probeFootprintShrinkMm;
       if (guardedHold === null || guardedFloor === undefined) {
@@ -405,7 +404,6 @@ export function planRegistrationAttempt(args: {
       mount: 'bracket',
       settings: args.settings,
       stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-      bracketFitMm: bracketSettings(defaults).settings.fitMm,
     }) ?? undefined;
     const result = registrationFor(
       setup,

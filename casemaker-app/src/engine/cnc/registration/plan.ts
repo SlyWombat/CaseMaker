@@ -400,14 +400,19 @@ export interface HoldPlacementUncertainty {
  */
 export function holdUncertaintyFor(input: {
   mount: Mount;
-  settings: Pick<RegistrationSettings, 'visePlacementAcrossJawsMm' | 'visePlacementAlongJawsMm' | 'tapePlacementMm' | 'tapePlacementRotationDeg'>;
+  /**
+   * The RESOLVED shop defaults (via `registrationSettings`): every hold kind's figure comes from
+   * here, its recommendation applied as the fallback, so a caller never has to pass one.
+   */
+  settings: Pick<
+    RegistrationSettings,
+    'visePlacementAcrossJawsMm' | 'visePlacementAlongJawsMm' | 'tapePlacementMm' | 'tapePlacementRotationDeg' | 'bracketFitMm'
+  >;
   stock: ExpectedStock;
-  /** The bracket's own fit, from `bracketSettings(...)`; required for a bracket plan. */
-  bracketFitMm?: number | null;
 }): HoldPlacementUncertainty | null {
   if (input.mount === 'bracket') {
-    const fit = input.bracketFitMm;
-    return fit === undefined || fit === null || !Number.isFinite(fit) ? null : { xMm: fit, yMm: fit };
+    const fit = input.settings.bracketFitMm;
+    return fit === undefined || !Number.isFinite(fit) ? null : { xMm: fit, yMm: fit };
   }
   if (input.mount === 'vise') {
     const across = input.settings.visePlacementAcrossJawsMm;
@@ -483,6 +488,12 @@ export interface RegistrationPlan {
    * that needs it refuses rather than assuming 0.
    */
   holdUncertainty?: HoldPlacementUncertainty;
+  /**
+   * #1199 field 7 (analyst 2026-11-11) — THE SMALL TAPED BLANK: the hold's uncertainty swallows
+   * the blank, so no point satisfies the inset. The first touch is at the expected CENTRE only,
+   * and registration must ASK the operator to jog over the blank and confirm before it moves.
+   */
+  jogConfirm?: true;
   /**
    * #1199 — THE MACHINE'S OWN TRAVEL HEIGHT this plan was built against (`toolChange.clearanceZ`),
    * carried SEPARATELY from {@link RegistrationPlan.seek}: the executor's guard is built from THIS,
@@ -677,7 +688,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   // edge, floored by the registry shrink; the corner radius is an extra term. A plan with no hold
   // figure cannot place a touch and refuses (above).
   const lateralSigma = probe?.tipLateralUncertaintyMm ?? 0;
-  const hold = input.holdUncertainty;
+  const hold = input.holdUncertainty ?? holdUncertaintyFor({ mount, settings: s, stock });
   const floorMm = s.probeFootprintShrinkMm;
   if (hold === undefined || floorMm === undefined) {
     return { ok: false, reason: 'the hold’s placement uncertainty is not stated, so the top touch’s distance from the edge cannot be proven — state the hold’s placement figures' };
@@ -688,12 +699,19 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   );
   const insetX = Math.max(stock.cornerRadius, margins.xMm);
   const insetY = Math.max(stock.cornerRadius, margins.yMm);
-  if (
+  const outsideInset =
     surfacePoint.x < stock.xMin + insetX ||
     surfacePoint.x > stock.xMax - insetX ||
     surfacePoint.y < stock.yMin + insetY ||
-    surfacePoint.y > stock.yMax - insetY
-  ) {
+    surfacePoint.y > stock.yMax - insetY;
+  // #1199 field 7 — a small taped blank: when even the stock's CENTRE cannot satisfy the inset,
+  // the first touch is the centre only and the run ASKS for a jog-and-confirm; it is never refused
+  // here, and it is never started without the operator's answer.
+  const atCentre =
+    Math.abs(surfacePoint.x - (stock.xMin + stock.xMax) / 2) <= 1e-6 &&
+    Math.abs(surfacePoint.y - (stock.yMin + stock.yMax) / 2) <= 1e-6;
+  const jogConfirm = outsideInset && atCentre && mount === 'tape';
+  if (outsideInset && !jogConfirm) {
     return {
       ok: false,
       reason:
@@ -751,7 +769,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
         mount,
         stock,
         stockThicknessMm: input.stockThicknessMm,
-        ...(input.holdUncertainty === undefined ? {} : { holdUncertainty: input.holdUncertainty }),
+        ...(hold === null ? {} : { holdUncertainty: hold }),
+      ...(jogConfirm ? { jogConfirm: true as const } : {}),
         ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
         ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
         ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),
@@ -1011,7 +1030,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       // #525 — present only on a corner plan, so every other plan's record is unchanged.
       ...(corner !== undefined ? { corner: { id: corner, ...cornerEdges(corner) } } : {}),
       stockThicknessMm: input.stockThicknessMm,
-      ...(input.holdUncertainty === undefined ? {} : { holdUncertainty: input.holdUncertainty }),
+      ...(jogConfirm ? { jogConfirm: true as const } : {}),
+      ...(hold === null ? {} : { holdUncertainty: hold }),
       ...(input.probeRefZ == null ? {} : { probeRefZ: input.probeRefZ }),
       ...(input.probeRefLabel == null ? {} : { probeRefLabel: input.probeRefLabel }),
       ...(floorProbeRefZ == null ? {} : { floorProbeRefZ }),

@@ -2186,7 +2186,9 @@ const registrationSettingsSchema = z.object({
       visePlacementAcrossJawsMm: z.number().finite().optional().describe('Vise hold: placement uncertainty across the jaws.'),
       visePlacementAlongJawsMm: z.number().finite().optional().describe('Vise hold: placement uncertainty along the jaws.'),
       tapePlacementMm: z.number().finite().optional().describe('Tape hold: placement uncertainty.'),
-      tapePlacementRotationDeg: z.number().finite().optional().describe('Tape hold: by-eye rotation.'),  cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
+      tapePlacementRotationDeg: z.number().finite().optional().describe('Tape hold: by-eye rotation.'),
+      bracketFitMm: z.number().finite().optional().describe('The bracket hold’s own fit (#1199 field 7).'),
+      cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.
   surfaceTouchCount: z
@@ -2251,6 +2253,8 @@ const registrationPlanSchema = z.object({
   probeRefLabel: z.string().nullable().optional().describe('The datum’s words in the seating-correction sentence.'),
   floorProbeRefZ: z.number().finite().nullable().optional().describe('The probe reference of the seek floor’s own datum, when it differs.'),
   // #1199 field 7 — the hold's placement uncertainty this plan was built with, per plan axis.
+  // #1199 field 7 — a small taped blank: the first touch is the centre only and the run asks.
+  jogConfirm: z.literal(true).optional().describe('The hold’s uncertainty swallows the blank: the first touch is at the centre and the operator must jog and confirm.'),
   holdUncertainty: z
     .object({
       xMm: z.number().finite().describe('How far the blank may sit from the plan in X, mm.'),

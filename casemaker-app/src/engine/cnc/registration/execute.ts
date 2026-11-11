@@ -106,7 +106,7 @@ import {
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
 import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
-import { motionOrderGuard, planTravelProblem } from './motionOrder';
+import { jobDescentRegion, motionOrderGuard, planTravelProblem } from './motionOrder';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -2123,7 +2123,15 @@ export async function runRegistration(
   // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
   const cleared = liveClearanceFor(plan, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe), undefined, plan.probe?.touches !== 'z-only');
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    plan.settings.idlePollLimit,
+    probeNeedsRelease(plan.probe),
+    // #1199 field 7 — a descent below the clearance only over the blank's outline.
+    jobDescentRegion(plan),
+    plan.probe?.touches !== 'z-only',
+  );
   const s = plan.settings;
   // #449 — the settings are the location's; a set that cannot make a capped touch sends nothing at all.
   const bad = settingsProblem(s);
@@ -2648,7 +2656,15 @@ export async function retouchSurface(
   // #1199 — the clearances are proven against the LIVE machine's, never taken from the plan alone.
   const cleared = liveClearanceFor(plan, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, plan.settings.idlePollLimit, probeNeedsRelease(plan.probe), undefined, plan.probe?.touches !== 'z-only');
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    plan.settings.idlePollLimit,
+    probeNeedsRelease(plan.probe),
+    // #1199 field 7 — a descent below the clearance only over the blank's outline.
+    jobDescentRegion(plan),
+    plan.probe?.touches !== 'z-only',
+  );
   /** #789 — whether the probe's supply was (or may have been) switched on, for the closing M832. */
   let powered = false;
   try {
@@ -2947,7 +2963,15 @@ export async function runFlipRegistration(
   // G38.5 move that is safe on a mechanical probe too, so this run never gates it on the instrument.
   const cleared = liveClearanceFor(ctx, deps);
   if (cleared.problem !== null) return { ok: false, reason: `nothing was sent: ${cleared.problem}`, transcript: [] };
-  const io = session(deps, cleared.clearanceZ, s.idlePollLimit, true, undefined, ctx.probe?.touches !== 'z-only');
+  const flipScans = flip.steps.flatMap((st) => (st.kind === 'edge-pair' ? st.scans : st.kind === 'seed' ? [st.scan] : []));
+  const io = session(
+    deps,
+    cleared.clearanceZ,
+    s.idlePollLimit,
+    true,
+    jobDescentRegion(ctx, flipScans),
+    ctx.probe?.touches !== 'z-only',
+  );
   let powered = false;
   try {
     const status = await io.send('?', { timing: STATUS_POLL_TIMING });
