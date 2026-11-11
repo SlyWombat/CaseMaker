@@ -25,7 +25,16 @@ export interface PlanCounts {
   stamps: { computed: number; cached: number; failed: number };
   sweeps: number;
   goalFields: number;
-  shadow: { choices: number; agree: number; candidates: number; errors: number; fieldMs: number; estimateMs: number };
+  shadow: {
+    choices: number;
+    agree: number;
+    candidates: number;
+    errors: number;
+    fieldMs: number;
+    estimateMs: number;
+    /** #1231 — per shortlist size k (as a string, ascending): how many measurements, how many held the real pick. */
+    shortlist: Record<string, { choices: number; held: number }>;
+  };
   /** Largest `rss` seen, bytes; 0 when no row has one. */
   peakRssBytes: number;
   /** last row's t minus first row's t; 0 for fewer than two rows. */
@@ -59,6 +68,7 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
   let sweeps = 0;
   let goalFields = 0;
   let shadowChoices = 0;
+  const shortlistCounts = new Map<number, { choices: number; held: number }>();
   let shadowAgree = 0;
   let shadowCandidates = 0;
   let shadowErrors = 0;
@@ -151,6 +161,16 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
       case 'shadow:error':
         shadowErrors += 1;
         break;
+      case 'shadow:shortlist': {
+        // #1231 — per size: how many measurement rows, how many held the real pick.
+        if (typeof row.k === 'number') {
+          const entry = shortlistCounts.get(row.k) ?? { choices: 0, held: 0 };
+          entry.choices += 1;
+          if (row.holdsRealPick === 1) entry.held += 1;
+          shortlistCounts.set(row.k, entry);
+        }
+        break;
+      }
       default:
         // Any other stage is ignored.
         break;
@@ -185,6 +205,7 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
       errors: shadowErrors,
       fieldMs: shadowFieldMs,
       estimateMs: shadowEstimateMs,
+      shortlist: Object.fromEntries([...shortlistCounts.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => [String(k), v])),
     },
     peakRssBytes,
     wallMs: rows.length < 2 ? 0 : Math.round(rows[rows.length - 1]!.t - rows[0]!.t),
