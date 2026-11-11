@@ -17,12 +17,15 @@
 import { motionOrderGuard } from './motionOrder';
 import { routineIdentityOf, type MotionRoutineId, type NamedHeights, type RoutineIdentity } from './routineIdentity';
 import {
+  runFlipRegistration,
   runMountTap,
   runRegistration,
   type ExecDeps,
+  type FlipRunResult,
   type MountTapResult,
   type RunResult,
 } from './execute';
+import type { FlipRegistrationPlan } from './plan';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
 import type { RegistrationPlan } from './plan';
 import type { RegistrationSettings } from './settings';
@@ -181,4 +184,29 @@ export async function dryMountTap(
     error = e instanceof Error ? e.message : String(e);
   }
   return finish(opts.routine, console_, opts.clearanceZ, heights, error);
+}
+
+/**
+ * The flip registration's dry lines — side 2's frame plan (the front pair, the seed, each bore's
+ * four touches) through the SAME executor the press runs. `attempt` is the card's own FlipAttempt:
+ * the plan, its context and the carried Z0.
+ */
+export async function dryFlipRegistration(
+  attempt: { plan: FlipRegistrationPlan; ctx: RegistrationPlan; z0: unknown },
+  opts: { clearanceZ?: number; liveClearanceZ?: number } = {},
+): Promise<DryRoutine> {
+  const console_ = recordingConsole();
+  const clearanceZ = opts.liveClearanceZ ?? opts.clearanceZ ?? attempt.ctx.machineClearanceZ ?? 0;
+  let error: string | null = null;
+  try {
+    const result: FlipRunResult = await runFlipRegistration(
+      attempt.plan,
+      { ctx: attempt.ctx, z0: attempt.z0 as never },
+      depsFor(console_, clearanceZ),
+    );
+    if (!result.ok) error = result.reason;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+  }
+  return finish('flip-registration', console_, clearanceZ, { clearance: clearanceZ }, error);
 }
