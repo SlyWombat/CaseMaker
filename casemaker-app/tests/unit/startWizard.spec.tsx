@@ -605,7 +605,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(job.labels[0]!.text).toBe('No bit yet');
   });
 
-  it('the stock step arrives with the sign’s plate, and says where it came from', () => {
+  it('the stock step arrives with the house’s stock, and says where it came from', () => {
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
@@ -617,15 +617,14 @@ describe('#681 — the wizard with nothing to lean on', () => {
     // The button that leaves the stock step says what it leads to.
     // #1105 — the press CREATES the job, and now says so.
     expect(next.textContent).toBe('Next: holding — starts the job');
-    // #1100 item 3 — a SIGN sizes its own plate: the line at its card size plus the sign margin
-    // on every side (the shop's `stock.signMarginMm`, 10). 'A block' at medium (35 mm) measures
-    // 163.04 × 35.4 mm, so the plate is 183.04 × 55.4 × 1.5.
-    const provenance = screen.getByTestId('engrave-setup-stock-provenance').textContent ?? '';
-    expect(provenance).toContain('Sized from the text:');
-    expect(provenance).toContain('plus 10 mm each side.');
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('183');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('55.4');
-    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('1.5');
+    // #930 — the shop's 36 × 36 × 100 mm hardwood stick, and the sentence says so.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
+      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
+    );
+    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     // #1109 — the sentence survives typing: a slip must not lose where the numbers came from.
     typePiece();
@@ -643,15 +642,13 @@ describe('#681 — the wizard with nothing to lean on', () => {
     render(<WizardHost />);
     skipToStockStep();
 
-    const length = screen.getByTestId('start-wizard-make-length') as HTMLInputElement;
-    // The seed is the sign's plate length; a typo that lands back on it is not a change.
-    const seed = length.value;
-    fireEvent.change(length, { target: { value: seed.slice(0, -1) } });
-    fireEvent.change(length, { target: { value: seed } });
+    const length = screen.getByTestId('start-wizard-make-length');
+    fireEvent.change(length, { target: { value: '3' } });
+    fireEvent.change(length, { target: { value: '36' } });
     fireEvent.blur(length);
     expect(screen.getByTestId('engrave-setup-stock-provenance')).toBeTruthy();
 
-    fireEvent.change(length, { target: { value: String(Number(seed) + 4) } });
+    fireEvent.change(length, { target: { value: '40' } });
     fireEvent.blur(length);
     expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
   });

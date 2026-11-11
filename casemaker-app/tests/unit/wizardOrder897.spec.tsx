@@ -165,7 +165,7 @@ endsolid tet
 `;
 
 describe('#897 — the question comes first, and it sizes the blank', () => {
-  it('a line of text proposes the sign’s plate, and the sentence says so', async () => {
+  it('a line of text proposes the house’s stock, and the sentence says so', async () => {
     openWizard();
     toQuestion();
     // #1100 — a text job comes from the sign card now.
@@ -174,16 +174,17 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect(progress()).toContain('Stock');
-    // #1100 item 3 — THE SIGN SIZES ITS OWN PLATE: 'Hello' at the card's medium letter (35 mm)
-    // measures 105.95 × 35.4 mm, so the plate is 126 × 55.4 × 1.5 (10 mm each side, 1 mm skin).
-    const provenance = screen.getByTestId('engrave-setup-stock-provenance').textContent ?? '';
-    expect(provenance).toContain('Sized from the text:');
-    expect(provenance).toContain('plus 10 mm each side.');
+    // #930 — THE HOUSE'S STOCK, not a plate sized from the line: the shop cuts 36 × 36 × 100 mm
+    // hardwood sticks, and a first job keeps every default.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
+      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
+    );
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
-    expect(screen.getByTestId('start-wizard-form-plate').getAttribute('aria-pressed')).toBe('true');
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('126');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('55.4');
-    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('1.5');
+    expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
+    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
 
     await leaveStock();
     // The hold follows from the blank the work asked for, and the last step creates the line.
@@ -197,9 +198,9 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     // #1100 — the sign card states no depth: the line takes the job's own stock-aware default.
     expect(job.labels[0]).toMatchObject({ text: 'Hello' });
     expect(job.stock.material).toBe('hardwood');
-    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([126, 55.4, 1.5]);
-    // (#1100 item 3 — the plate's finish, and with it the facing pass, is the stock step's own
-    // answer; `startWizardStock.spec.tsx` pins it per material. This test is the blank's size.)
+    expect([job.stock.length, job.stock.width, job.stock.thickness]).toEqual([36, 100, 36]);
+    // …and a finished face is cut as it is: the first-job path does not face.
+    expect(job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
   it('a job that states its own material keeps it, and the blank is still the house’s stock', () => {
@@ -215,7 +216,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     // The proposal sizes the blank; it does not overrule the piece the job has named.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
     // …and because the step's answer still MATCHES the proposal, the sentence it came from stays.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('Sized from the text');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {

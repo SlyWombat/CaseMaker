@@ -27,6 +27,11 @@ test('#1100 — the preset cards, and a sign asks for its text', async ({ cm, pa
   // A sign's questions are in place, and Create waits for the text.
   await page.getByTestId('start-wizard-preset-sign').click();
   await page.getByTestId('start-wizard-preset-text').fill('Hello');
+  // #1100 item 3, ruling b — the size starts UNCHOSEN: the house stick stands until one is picked.
+  await expect(page.getByTestId('start-wizard-preset-letter-small')).not.toBeChecked();
+  await expect(page.getByTestId('start-wizard-preset-letter-medium')).not.toBeChecked();
+  await expect(page.getByTestId('start-wizard-preset-letter-large')).not.toBeChecked();
+  await page.getByTestId('start-wizard-preset-letter-medium').click();
   await expect(page.getByTestId('start-wizard-preset-letter-medium')).toBeChecked();
 
   // Cut out a shape carries its own size numbers.

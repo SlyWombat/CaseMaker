@@ -1900,10 +1900,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         (placeholder !== null
           ? { ...placeholder, text, font: opts.font, depth: opts.depth }
           : { ...newLabel(job, opts.depth), text, font: opts.font });
-      // #1100 item 3a — a card that STATES its letter size (the sign) lays the line at that cap
-      // height; the seed above fits the band, and the position is the ink's centre, so the size
-      // changes around it. No other caller states one.
-      const label = opts.sizeMm === undefined ? fitted : { ...fitted, size: opts.sizeMm };
+      // #1100 item 3a — a card that STATES its letter size (the sign, with a size chosen) lays the
+      // line at that cap height; the seed above fits the band, and the position is the ink's
+      // centre, so the size changes around it. #1100 ruling b / merge defect: a blank the operator
+      // then makes SMALLER than the card's plate cannot hold the stated size — the fitted size is
+      // the ceiling, so the line shrinks to fit instead of overrunning the blank (and the fixed
+      // jaw's keep-out). No other caller states a size.
+      const label = opts.sizeMm === undefined ? fitted : { ...fitted, size: Math.min(opts.sizeMm, fitted.size) };
       // The wizard's former `addLabel` + `updateLabel` pair stamped the text and its layout as the
       // person's; this write keeps that (the operator typed the text and pressed Create), and the
       // placeholder stamp is gone because the line is no longer a placeholder.

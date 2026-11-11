@@ -61,7 +61,11 @@ export type LetterSizeId = (typeof LETTER_SIZES)[number]['id'];
 export interface PresetAnswers {
   /** The sign's (or dowel's) text. */
   text: string;
-  letterSize: LetterSizeId;
+  /**
+   * #1100 item 3 (ruling b) — UNCHOSEN by default: the line is then fitted to the house's stick
+   * (#930's rule). Only CHOOSING a size asks for the plate sized from the line.
+   */
+  letterSize: LetterSizeId | null;
   font: TextFont;
   /** The dowel's reading (#752). */
   reads: 'along' | 'around';
@@ -79,7 +83,7 @@ export interface PresetAnswers {
 export function defaultPresetAnswers(): PresetAnswers {
   return {
     text: '',
-    letterSize: 'medium',
+    letterSize: null,
     font: DEFAULT_FONT_ID,
     reads: 'along',
     shape: 'rect',
@@ -98,7 +102,9 @@ export function letterSizeMm(id: LetterSizeId): number {
  * #1100 item 2 — the size id a stored line's cap height came from, for a Back: the exact match
  * when the number is one of the card's, else the card's default (the line was not the card's own).
  */
-export function letterSizeIdFor(mm: number | undefined): LetterSizeId {
+export function letterSizeIdFor(mm: number | undefined): LetterSizeId | null {
+  // Ruling b — no stored size (an unchosen card, or any other text route) stays unchosen.
+  if (mm === undefined) return null;
   return LETTER_SIZES.find((s) => s.mm === mm)?.id ?? 'medium';
 }
 
@@ -111,7 +117,14 @@ export function presetChoice(id: PresetId, answers: PresetAnswers): OperationCho
     case 'sign':
       // The empty text still yields the engrave choice, so the step's own gate can say "Type the
       // text to engrave." rather than the footer silently offering an empty job.
-      return { type: 'engrave', text: answers.text, depth: 0.5, font: answers.font, sizeMm: letterSizeMm(answers.letterSize) };
+      // Ruling b — no size chosen is #930's default: the house's stick, the letters fitted to it.
+      return {
+        type: 'engrave',
+        text: answers.text,
+        depth: 0.5,
+        font: answers.font,
+        ...(answers.letterSize === null ? {} : { sizeMm: letterSizeMm(answers.letterSize) }),
+      };
     case 'cutout':
       return {
         type: 'cutout',
@@ -138,12 +151,15 @@ export function presetWorkShape(id: PresetId, answers: PresetAnswers): WorkShape
   switch (id) {
     case 'sign': {
       if (answers.text.trim() === '') return null;
-      const size = letterSizeMm(answers.letterSize);
+      // Ruling b — the size is optional; without one the work shape does NOT size the blank
+      // (the house stick stands, #930), so only a chosen size carries the sign marker.
+      const sized = answers.letterSize !== null;
+      const size = answers.letterSize === null ? 10 : letterSizeMm(answers.letterSize);
       // The line's extent is measured per character conservatively: the real measure runs where a
       // face is loaded (the wizard's `workShapeFor` owns that). A card's own estimate keeps the
       // blank this preset promises, not a different one.
       const length = Math.max(1, answers.text.length * size * 0.62);
-      return { kind: 'text', size: { length, width: size }, depth: 0.5, sign: true };
+      return { kind: 'text', size: { length, width: size }, depth: 0.5, ...(sized ? { sign: true } : {}) };
     }
     case 'cutout':
       return {

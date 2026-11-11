@@ -12,6 +12,10 @@ import { operationCreateBlocked } from '@/components/welcome/operationCreate';
 import { WIZARD_PRESETS, defaultPresetAnswers, presetChoice, presetWorkShape } from '@/components/welcome/presets';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { proposeStock } from '@/engine/cnc/stockProposal';
+import { proposedStockFor } from '@/components/welcome/workShape';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import { inkBoxOf } from '@/engine/cnc/engrave/inkBox';
+import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
 import { wizardStep } from '@/components/welcome/wizardSteps';
 
 afterEach(cleanup);
@@ -19,27 +23,69 @@ afterEach(cleanup);
 const answers = defaultPresetAnswers();
 
 describe('#1100 — the preset answers', () => {
-  it('a sign with text is a makeable engrave, and its proposed plate leaves the sign margin each side', () => {
+  // #1100 item 3, ruling b — THE DEFAULT SIGN IS #930's: no size chosen, so the line is fitted
+  // to the house's stick and nothing is sized from the text.
+  it('an unchosen letter size proposes the house stick, not a plate', () => {
     const a = { ...answers, text: 'Hello' };
+    expect(a.letterSize).toBeNull();
     const choice = presetChoice('sign', a)!;
-    expect(operationCreateBlocked(choice)).toBeNull();
+    expect(choice.type).toBe('engrave');
+    if (choice.type === 'engrave') expect(choice.sizeMm).toBeUndefined();
     const shape = presetWorkShape('sign', a)!;
-    // #1100 item 3 — the sign margin is the shop's (`stock.signMarginMm`, 10 each side).
-    const blank = proposeStock(shape, { signMarginMm: 10 })!;
-    if (shape.kind !== 'text') throw new Error('expected text work');
-    expect(shape.sign).toBe(true);
-    expect(blank.length - shape.size.length).toBeCloseTo(20, 5);
-    expect(blank.width - shape.size.width).toBeCloseTo(20, 5);
-    expect(blank.form).toBe('plate');
+    expect(shape.kind).toBe('text');
+    if (shape.kind === 'text') expect(shape.sign).toBeUndefined();
+    // The wizard's own opening rule keeps the house stick for a text line (#930).
+    expect(proposedStockFor(shape, defaultEngraveJob(), proposeStock(shape))).toMatchObject({
+      form: 'block',
+      length: 36,
+      width: 100,
+    });
   });
 
-  it('Large makes 60 mm letters and a plate that holds them', () => {
+  it('choosing Large makes 60 mm letters and a plate that holds them', () => {
     const a = { ...answers, text: 'Hello', letterSize: 'large' as const };
+    const choice = presetChoice('sign', a)!;
+    if (choice.type === 'engrave') expect(choice.sizeMm).toBe(60);
     const shape = presetWorkShape('sign', a)!;
     if (shape.kind !== 'text') throw new Error('expected text work');
     expect(shape.size.width).toBe(60);
+    expect(shape.sign).toBe(true);
+    // The sign margin is the shop's (`stock.signMarginMm`, 10 each side).
     const blank = proposeStock(shape, { signMarginMm: 10 })!;
     expect(blank.width).toBeCloseTo(80, 5);
+    expect(blank.width - shape.size.width).toBeCloseTo(20, 5);
+    expect(proposedStockFor(shape, defaultEngraveJob(), blank)).toEqual(blank);
+  });
+
+  // #1100 item 3 — THE RE-SEAT ON A BLANK CHANGE (the merge defect): a chosen size is the
+  // TARGET, and the fitted size on the operator's actual blank is its ceiling, so a smaller typed
+  // stock shrinks the line to fit instead of overrunning the blank (and the fixed jaw's keep-out).
+  describe('the line is re-seated on the blank the operator makes', () => {
+    const seed = (stock: Partial<ReturnType<typeof defaultEngraveJob>['stock']>): void => {
+      const job = defaultEngraveJob();
+      job.stock = { ...job.stock, ...stock };
+      useEngraveJobStore.setState({ job });
+    };
+
+    it('a chosen 35 mm line shrinks to fit a 76.2 × 38.1 typed stock', () => {
+      seed({ length: 76.2, width: 38.1, thickness: 3.81 });
+      useEngraveJobStore.getState().addEngraveText('Zoomba', { depth: 0.5, font: DEFAULT_FONT_ID, sizeMm: 35 });
+      const label = useEngraveJobStore.getState().job.labels[0]!;
+      expect(label.size).toBeLessThan(35);
+      const box = inkBoxOf(label.text, label.font, label.weight, label.size, labelGlyphMeasure([]));
+      const margin = useEngraveJobStore.getState().job.edgeMargin;
+      expect(box.width).toBeLessThanOrEqual(76.2 - 2 * margin + 0.01);
+      expect(box.height).toBeLessThanOrEqual(38.1 - 2 * margin + 0.01);
+    });
+
+    it('a chosen size is never exceeded on any blank', () => {
+      // jsdom has no loaded faces, so the fitted size here comes from the estimate and is
+      // smaller than a browser's; the plateau (a chosen size standing on the sign's own plate) is
+      // proven by the signLarge receipt in presetJobs.spec.tsx's engine run.
+      seed({ length: 126, width: 55.4, thickness: 1.5 });
+      useEngraveJobStore.getState().addEngraveText('Hello', { depth: 0.5, font: DEFAULT_FONT_ID, sizeMm: 35 });
+      expect(useEngraveJobStore.getState().job.labels[0]!.size).toBeLessThanOrEqual(35);
+    });
   });
 
   it('an empty sign is not makeable: the gate asks for the text', () => {

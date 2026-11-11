@@ -256,10 +256,11 @@ describe('the material-first start (#418)', () => {
     await screen.findByTestId('engrave-setup-step-holding');
     const job = useEngraveJobStore.getState().job;
     expect(job.stock).toMatchObject({ length: 80, width: 50, thickness: 6 });
-    // #1100 item 3 — the question's text is the SIGN card, whose plate is proposed from the line:
-    // the opening form is a plate and the proposal's finish is rough. Typing over the numbers
-    // keeps the form the operator was shown.
-    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'plate', finish: 'rough' });
+    // The opening finish is the proposal's — the house's stick is planed stock (#934) — so a made
+    // piece is finished unless the operator says otherwise.
+    // #930 — the step opens on the house's BLOCK (the 36 × 36 × 100 stick); typing over its
+    // numbers keeps the form the operator was shown.
+    expect(job.stockEntry).toMatchObject({ kind: 'made', shelfId: null, form: 'block', finish: 'finished' });
     // Non-square on purpose: an X/Y swap would show here. Length (X) is the blank's width, width (Y)
     // its height — `blankStockFor`'s mapping, read back the other way.
     expect(useProjectStore.getState().project.case.blank).toMatchObject({ width: 80, height: 50, thickness: 6 });
@@ -635,10 +636,8 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
     expect(await loadMesh(material)).toBe('printed');
   });
 
-  // #1100 item 3 — the opening finish is the proposal's; the sign's plate proposes rough (the
-  // house stick's finished default was the old text path's).
-  it.each(NOT_PRINTED)('%s: the finish is the step’s opening one (the proposal’s rough)', async (material) => {
-    expect(await loadMesh(material)).toBe('rough');
+  it.each(NOT_PRINTED)('%s: the finish is the step’s opening one (planed stock)', async (material) => {
+    expect(await loadMesh(material)).toBe('finished');
   });
 });
 

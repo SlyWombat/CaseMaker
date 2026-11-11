@@ -603,7 +603,15 @@ export function OperationStep({
                     : null
     : preset === 'sign'
       ? // #1100 — the sign's depth is the job's stock-aware default, as every engrave entry's is.
-        { type: 'engrave', text: answers.text, depth: newItemDepthFor(job), font: answers.font, sizeMm: letterSizeMm(answers.letterSize) }
+        {
+          type: 'engrave',
+          text: answers.text,
+          depth: newItemDepthFor(job),
+          font: answers.font,
+          // Ruling b — no size chosen is #930's fitted line (the house stick); a chosen size
+          // carries the plate-sized sign flow.
+          ...(answers.letterSize === null ? {} : { sizeMm: letterSizeMm(answers.letterSize) }),
+        }
       : preset === 'cutout' || preset === 'pocket'
       ? presetChoice(preset, answers)
       : design !== null
