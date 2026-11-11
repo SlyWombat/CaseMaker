@@ -10,6 +10,7 @@
  * Nothing calls this yet. No registry value: the stepping is an argument.
  */
 import type { FieldGrid } from './boundedField';
+import type { CamMove } from '../ir';
 
 export type Vec3 = readonly [number, number, number];
 /** Three rows. Pose coordinates = rotation · part coordinates. */
@@ -40,15 +41,35 @@ export interface PoseCut {
   floor: Float64Array;
 }
 
-/** The blank, a box in part coordinates. */
+/** A rod: material only within `radiusMm` of the line along x at (axisY, axisZ). */
+export interface RodShape {
+  axisY: number;
+  axisZ: number;
+  radiusMm: number;
+}
+
+/** The blank, a box in part coordinates — or a rod inside that box. */
 export interface Blank {
   min: Vec3;
   max: Vec3;
+  /** #1229 — a rod blank: material only within its radius of the axis line. Absent: the box. */
+  rod?: RodShape;
+}
+
+/** What turning has removed: at each cell along the rod, the radius it has been cut down to. +Infinity where it has not been turned. Cell i is at x0 + i * dx. */
+export interface TurnedCut {
+  axisY: number;
+  axisZ: number;
+  x0: number;
+  dx: number;
+  radius: Float64Array;
 }
 
 export interface Stock {
   blank: Blank;
   cuts: readonly PoseCut[];
+  /** #1229 — the rod's turned record, when a turning pass has cut it. Absent: no turning. */
+  turned?: TurnedCut;
 }
 
 const EPS = 1e-9;
@@ -59,6 +80,19 @@ export function isMaterial(stock: Stock, p: Vec3): boolean {
   for (let k = 0; k < 3; k++) {
     if (p[k]! < stock.blank.min[k]! - EPS) return false;
     if (p[k]! > stock.blank.max[k]! + EPS) return false;
+  }
+  // 1b. Inside the rod, when the blank is one.
+  const rod = stock.blank.rod;
+  if (rod !== undefined) {
+    if (Math.hypot(p[1] - rod.axisY, p[2] - rod.axisZ) > rod.radiusMm + EPS) return false;
+  }
+  // 1c. Not turned away. A position along the rod outside the turned span says nothing.
+  const turned = stock.turned;
+  if (turned !== undefined) {
+    const i = Math.round((p[0] - turned.x0) / turned.dx);
+    if (i >= 0 && i < turned.radius.length) {
+      if (Math.hypot(p[1] - turned.axisY, p[2] - turned.axisZ) > turned.radius[i]! + EPS) return false;
+    }
   }
   // 2. At or below every pose's map that covers the point. A cell outside a pose's grid says
   // nothing about the point; only a covered cell above the map removes material.
@@ -107,4 +141,21 @@ export function startSurface(stock: Stock, rotation: Mat3, grid: FieldGrid, step
     }
   }
   return out;
+}
+
+/**
+ * Lower `turned.radius` by what these turning moves cut. Each FEED move's end point is a tool tip at
+ * radius `z` and position `x`; the cutter reaches `cutterRadiusMm` along the rod either side. Rapids
+ * are ignored. Only end points are counted, so the record never claims more removed than was.
+ */
+export function recordTurning(turned: TurnedCut, moves: readonly CamMove[], cutterRadiusMm: number): void {
+  for (const m of moves) {
+    if (m.kind !== 'feed') continue;
+    for (let i = 0; i < turned.radius.length; i++) {
+      const xc = turned.x0 + i * turned.dx;
+      if (Math.abs(xc - m.x) <= cutterRadiusMm + turned.dx / 2 + 1e-9 && m.z < turned.radius[i]!) {
+        turned.radius[i] = m.z;
+      }
+    }
+  }
 }
