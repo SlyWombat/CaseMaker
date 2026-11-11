@@ -608,6 +608,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // so a shop feed would be a number nothing reads (the manager's ruling, 2026-11-10).
   'clean.clearanceMm': { label: 'cleaning pass clearance above the highest fixture', unit: 'mm', rule: z.number().min(0.5).max(50), fallback: 5 },
   'clean.rowSpacingMm': { label: 'cleaning pass row pitch', unit: 'mm', rule: z.number().min(2).max(50), fallback: 12 },
+  // #1207 / #1203 — how close a probe unit's recorded shank must be to a post's nominal diameter
+  // (1/8" = 6.35 mm, 6 mm) for the fit-probe prompts to name that post's collet. A chosen
+  // tolerance, not a measured one: the bench's posts are nominal, and a slightly worn shank is
+  // still that collet.
+  'probe.colletMatchMm': { label: 'collet match tolerance for a probe’s recorded shank', unit: 'mm', rule: z.number().min(0.001).max(0.5), fallback: 0.05 },
 };
 
 /**

@@ -1731,6 +1731,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the cleaning raster's row pitch over the stock footprint; the 2026-11-09 bench ran 10 rows over a 160 x 126 blank"
     },
+    "probe.colletMatchMm": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a probe unit's recorded shank within this of a post's nominal diameter (1/8\" = 6.35 mm, 6 mm) is that post's collet, and the fit-probe prompts name it; the bench's posts are nominal"
+    },
     "reach.marginMm": {
       "value": 1.0,
       "source": "seeded",

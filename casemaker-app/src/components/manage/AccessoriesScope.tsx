@@ -25,7 +25,7 @@
 import { useState } from 'react';
 import type { FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
-import { probeColletWords } from '@/engine/cnc/probeFitWords';
+import { probeColletWords, shankIsPost } from '@/engine/cnc/probeFitWords';
 import { accessoryNameFor, mountUnitReading, MOUNT_TAP_UNIT_KEY, MOUNT_TAP_WORD } from '@/engine/cnc/registration/mountContext';
 import { RotaryAxisTap } from './RotaryAxisTap';
 import { newId } from '@/utils/id';
@@ -596,9 +596,10 @@ function postsFor(item: FixtureRecord): ProbePost[] {
     if (posts.length > 0) return posts;
   }
   const shank = typeof item.unit.shankMm === 'number' && Number.isFinite(item.unit.shankMm) ? item.unit.shankMm : null;
+  // #1207 — the match tolerance is the shop's (`probe.colletMatchMm`), read by `shankIsPost`.
   return [
-    { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: shank !== null && Math.abs(shank - 6.35) <= 0.05 ? 'fitted' : 'spare' },
-    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: shank !== null && Math.abs(shank - 6) <= 0.05 ? 'fitted' : 'spare' },
+    { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: shankIsPost(shank, 6.35) ? 'fitted' : 'spare' },
+    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: shankIsPost(shank, 6) ? 'fitted' : 'spare' },
   ];
 }
 
