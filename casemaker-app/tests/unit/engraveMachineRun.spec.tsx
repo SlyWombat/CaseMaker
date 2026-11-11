@@ -435,6 +435,10 @@ describe('#655 the tool-change stop', () => {
     // Nothing to suspend while it waits: Pause is not offered, Stop still is.
     expect(screen.queryByTestId('engrave-run-pause')).toBeNull();
     expect(screen.getByTestId('engrave-run-stop')).toBeTruthy();
+    // #1202 — the tool change is a motion routine: an unrecorded shape is marked and the operator's
+    // own statement holds the Continue (this window has no machine record: it has never run here).
+    expect(screen.getByTestId('engrave-registration-first-run')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('engrave-registration-first-run-tick'));
 
     fireEvent.click(screen.getByTestId('engrave-run-tool-continue'));
     await advanceUntil(() => expect(sent).toContain('M490.2'), { timeoutMs: 8000 });
