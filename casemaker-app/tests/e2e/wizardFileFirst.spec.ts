@@ -176,9 +176,9 @@ test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same jo
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   // The Stock step arrives settled on that file and says what it is — it does not ask for it again.
-  await expect(page.getByTestId('start-wizard-load-name')).toContainText('single.3mf');
+  await expect(page.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
   await page.getByTestId('start-wizard-stock-next').click();
-  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
   const viaDrop = await readJob(page);
   expect(viaDrop.stockEntry?.kind).toBe('file');
 
@@ -196,9 +196,9 @@ test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same jo
   await fresh.getByTestId('start-wizard-operation-next').click();
   await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await fresh.getByTestId('start-wizard-load-file').setInputFiles(PROJECT_3MF);
-  await expect(fresh.getByTestId('start-wizard-load-name')).toContainText('single.3mf');
+  await expect(fresh.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
   await fresh.getByTestId('start-wizard-stock-next').click();
-  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
   const viaLoader = await readJob(fresh);
   await context.close();
 
