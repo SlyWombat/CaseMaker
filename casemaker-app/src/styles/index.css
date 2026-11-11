@@ -2689,6 +2689,11 @@ button:disabled {
   --m-control-text: #e6e8eb;
   --m-card-bg: #161a20;
   --m-hairline: #20262e;
+  /* #1172A/#500 — the tools list's numeric columns are fixed and tight so the whole table fits the
+     884 px card at 1500×850 with the detail panel open (it was 35 px over at the table default's
+     8 px sides). 4 px each side takes the table from 919 px to 863. A static fit, not a
+     breakpoint: no collapse rule is introduced. */
+  --m-num-col-pad: 4px;
 
   /* The mode replaces all three columns of `.app-main` (rail / canvas / context
      rail), so it spans the grid rather than landing in the 320px first column. */
@@ -3098,6 +3103,15 @@ button:disabled {
 }
 .manage .tbl th.num {
   text-align: right;
+}
+/* #1172A/#500 — THE TOOLS LIST FITS ITS CARD. The numeric columns are fixed-width and tighter than
+   the table's default (8 px sides), so the twelve columns come to 863 px inside the 884 px card at
+   1500×850 with the detail panel open — no horizontal scroll, and the From badge is not clipped.
+   Scoped to the tools list; the accessories table and the detail panel keep the default padding. */
+.manage .tbl--tools th.num,
+.manage .tbl--tools td.num {
+  padding-left: var(--m-num-col-pad);
+  padding-right: var(--m-num-col-pad);
 }
 /* #1172 item 2 — a sortable header is a button; it keeps the th's type and adds the mark. */
 .manage .tbl__sort {

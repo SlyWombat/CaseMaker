@@ -567,7 +567,7 @@ export function ToolsScope() {
         </div>
 
         <div className="mscroll">
-          <table className="tbl" data-testid="manage-tools-table">
+          <table className="tbl tbl--tools" data-testid="manage-tools-table">
             <thead>
               <tr>
                 <th style={{ width: '34%' }}>Name</th>
