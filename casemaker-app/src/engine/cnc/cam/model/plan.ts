@@ -51,6 +51,7 @@ import { traceShadowSelection } from '../fields/shadowSelector';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
+import { overrunFootprint, sidesReached, type StockSide } from './ops/edgeOverrun';
 import { assertOwnPocketMetadata, PlanMetadataInconsistentError } from './planMeta';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits , type ClGridEntry } from './clsurface';
@@ -205,6 +206,13 @@ export interface OpOutcome {
    * above the stock bottom is a wall, not a through cut, and grants no breakthrough.
    */
   throughKerf?: { path: Polygons; spans: ProfileSpan[][]; toolRadius: number; tabHeight: number };
+  /**
+   * #1234 — THE FINISHING EDGE OVERRUN, stated the way `throughKerf` is: the stock sides this op's
+   * finishing footprint was grown past (by `amountMm`, the cutter's radius). `#1235`'s verifier
+   * window reads it; the plan states it so nothing has to re-infer which sides a finish may leave.
+   * Absent on every op that took no overrun.
+   */
+  edgeOverrun?: { sides: StockSide[]; amountMm: number };
 }
 
 export type RegionKind = 'pocket' | 'island-top' | 'curved' | 'contour' | 'rim';
@@ -355,6 +363,13 @@ export interface ModelPlanInput {
    * are (the #949 class).
    */
   fixture: { mount: Mount; envelope: FixtureEnvelope | null };
+  /**
+   * #1234 — WHICH STOCK SIDES A FINISH MAY OVERRUN FROM, as data: the plan never sees the mount
+   * (`RegionRef.obstacles` is not wired), so the job layer that holds the obstacle boxes answers
+   * here. A side is open only when nothing solid stands in the band its radius would leave through.
+   * ABSENT → every side is closed and every plan is byte-identical to the pre-#1234 behaviour.
+   */
+  stockEdgeOpen?: (side: StockSide, lowestTipZ: number, radiusMm: number) => boolean;
   cutters: CutterCandidates;
   tolerances: ModelTolerances;
   edgeBreak: EdgeBreakSpec;
@@ -1627,6 +1642,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const stageMemo = createStageMemo();
     const curvedOptionsFor = (b: Tool | undefined, paramsFor: (tool: Tool) => CutParams): PlanCurvedOptions => ({
       offset,
+      // #1234 — the finishing edge overrun's inputs: the job layer's fixture answer, the setup's
+      // own stock box, and the real boolean the grown footprint is built with.
+      ...(input.stockEdgeOpen === undefined ? {} : { stockEdgeOpen: input.stockEdgeOpen }),
+      stockMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width },
+      boolean,
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
       // #1214's ruling (b) — the plan's printed precision rides every stage's feed decisions.
@@ -4770,6 +4790,15 @@ export interface PlanCurvedOptions {
   /** The mesh the tree's regions index into (`ModelPlanInput.geometry`). */
   geometry: FeatureSource;
   /**
+   * #1234 — THE STOCK, for the finishing edge overrun: `sidesReached` measures the region's own
+   * boundary against these two numbers. Absent (with `stockEdgeOpen` absent) → no overrun anywhere.
+   */
+  stockMm?: { length: number; width: number };
+  /** #1234 — the job layer's own answer, carried through from `ModelPlanInput.stockEdgeOpen`. */
+  stockEdgeOpen?: (side: StockSide, lowestTipZ: number, radiusMm: number) => boolean;
+  /** #1234 — the real Clipper2 boolean the overrun's union/subtract needs (the pocket op's contract). */
+  boolean?: { union: BooleanFn; subtract: BooleanFn };
+  /**
    * #1214's ruling (b) — the post's printed axis precision (decimal places): the grid the feed
    * words are decided on. Absent → the Z1's (this planner posts through `postZ1`).
    */
@@ -5167,6 +5196,45 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const roughRef = roughRegion === base
       ? ref
       : regionRefOf(region.id, 'curved', roughRegion.footprint, base.zTop, base.zBottom);
+    // #1234 — THE FINISHING EDGE OVERRUN (planner v3 A7, stage 2). A ball touches a downhill
+    // surface on its downhill side: where a finishing region's own boundary lies on the stock's
+    // edge and the job layer's fixture answer opens that side, the finishing footprint grows by
+    // the cutter's radius, so the ball's centre can reach the design at the edge. Scoped to the
+    // finish and the ball rest; the rough, the pockets, the pencil and the contour keep the
+    // footprint they had, so no other program can move. Absent options → every side is closed.
+    const signedArea = (polys: Polygons): number => {
+      let total = 0;
+      for (const ring of polys) {
+        let a = 0;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j]![0] * ring[i]![1] - ring[i]![0] * ring[j]![1];
+        total += a / 2;
+      }
+      return Math.abs(total);
+    };
+    const overrunFor = (footprint: Polygons, radiusMm: number): { footprint: Polygons; sides: StockSide[] } => {
+      if (opts.stockEdgeOpen === undefined || opts.stockMm === undefined || opts.boolean === undefined || !(radiusMm > 0)) {
+        return { footprint, sides: [] };
+      }
+      const sides = sidesReached(footprint, opts.stockMm, GOAL_FIT_TOLERANCE_MM).filter((side) =>
+        opts.stockEdgeOpen!(side, base.zBottom, radiusMm),
+      );
+      if (sides.length === 0) return { footprint, sides: [] };
+      return { footprint: overrunFootprint(footprint, opts.stockMm, radiusMm, sides, opts.offset, opts.boolean), sides };
+    };
+    const grownRegionOf = (
+      source: RemainderRegion,
+      overrun: { footprint: Polygons; sides: StockSide[] },
+    ): RemainderRegion =>
+      overrun.sides.length === 0 ? source : { ...source, footprint: overrun.footprint, area: signedArea(overrun.footprint) };
+    const withOverrun = (outcome: OpOutcome, overrun: { sides: StockSide[] }, amountMm: number): OpOutcome =>
+      overrun.sides.length === 0 ? outcome : { ...outcome, edgeOverrun: { sides: overrun.sides, amountMm } };
+    const finishOverrun = ball === undefined
+      ? { footprint: roughRegion.footprint, sides: [] as StockSide[] }
+      : overrunFor(roughRegion.footprint, finishRadius0);
+    const finishRegion = grownRegionOf(roughRegion, finishOverrun);
+    const finishRef = finishRegion === roughRegion
+      ? roughRef
+      : regionRefOf(region.id, 'curved', finishRegion.footprint, base.zTop, base.zBottom);
     // #1054 — THE MEMO'S KEYS: one per stage, over everything that decides the op — its own
     // cutter, this region (grown by the FINISH cutter's radius on an outer surface, so the finish
     // cutter is in every key), and the scalar options the stage is called with. The closures
@@ -5617,6 +5685,23 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       }
       return clBallCache;
     };
+    // #1234 — THE FINISH'S OWN CL, GATED ON THE OVERRUN FOOTPRINT. Inside the footprint the two
+    // queries in `clsurface.ts` are the same value; only the gate differs, so a grown gate makes
+    // `dropCutter` answer past the edge with exactly the height the unclipped mesh query gives
+    // (stage 1 measured it: at one radius out the ball's surface meets the design at the edge).
+    // With no open side this IS `clBall()` — the same object, so the bytes cannot move.
+    let clFinishCache: ReturnType<typeof clSurface> | undefined;
+    const clFinish = (): ReturnType<typeof clSurface> => {
+      if (finishRegion === roughRegion) return clBall();
+      if (clFinishCache === undefined) {
+        memTrace('cl:build', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish-overrun' });
+        const clStarted = performance.now();
+        clFinishCache = floorSurface(clSurface(opts.geometry, finishRegion, finishCutter, cuts.stepOver, opts.minSampleSpacingMm ?? null));
+        memTrace('cl:built', { cutter: cutterKeyOf(finishCutter), region: roughRegion.id, what: 'finish-overrun', ms: Math.round(performance.now() - clStarted) });
+        noteGrid(finishCutter, clFinishCache);
+      }
+      return clFinishCache;
+    };
     // #960 — FLAT OR BALL BY THE REGION'S OWN SLOPE, with the threshold stated on the plan; the
     // constant is a parameter (shared with C's #959 skin pass) while the picture decides 1.9° vs 7.1°.
     // #982 — with no ball the slope limit is lifted: the flat raster covers the WHOLE remainder.
@@ -5664,6 +5749,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       feeds: feedsOf(paramsFor(finishCutter)),
       safeZ: opts.safeZMm,
       hopZ: opts.hopZMm,
+      // #1234 — the overrun is part of the op's identity: a memo hit must not hand back a finish
+      // planned with a different set of open sides.
+      edge: finishOverrun.sides.length === 0 ? '-' : finishOverrun.sides.join('+'),
       toolNumber: opts.toolNumberFor(finishCutter),
       rpm: paramsFor(finishCutter).rpm,
       air: opts.air,
@@ -5680,9 +5768,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       memTrace('curved:stage', { stage: 'finish', cutter: cutterKeyOf(finishCutter), region: roughRegion.id });
       const out = finish({
         cutter: finishCutter,
-        region: roughRegion,
-        regionRef: roughRef,
-        clSurface: clBall(),
+        region: finishRegion,
+        regionRef: finishRef,
+        clSurface: clFinish(),
         kind: finishKind,
         mesh: opts.geometry.triangles,
         scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -5707,21 +5795,23 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         rapid: opts.rapid,
       });
       // The CL grid the surface recorded rides the entry: a hit does not rebuild the CL.
-      memoStore(finishKey, out, {
-        ...(clBallCache === undefined
+      const usedCl = finishRegion === roughRegion ? clBallCache : clFinishCache;
+      const stated = withOverrun(out, finishOverrun, finishRadius0);
+      memoStore(finishKey, stated, {
+        ...(usedCl === undefined
           ? {}
           : {
               grid: {
                 cutterKey: cutterKeyOf(finishCutter),
-                toleranceMm: clBallCache.toleranceMm,
-                minSpacingMm: clBallCache.minSpacingMm,
-                maxSpacingMm: clBallCache.maxSpacingMm,
-                minSpacingSource: clBallCache.minSpacingSource,
-                minSpacingFromStepOverMm: clBallCache.minSpacingFromStepOverMm,
+                toleranceMm: usedCl.toleranceMm,
+                minSpacingMm: usedCl.minSpacingMm,
+                maxSpacingMm: usedCl.maxSpacingMm,
+                minSpacingSource: usedCl.minSpacingSource,
+                minSpacingFromStepOverMm: usedCl.minSpacingFromStepOverMm,
               },
             }),
       });
-      finishOutcome = out;
+      finishOutcome = stated;
     } catch (err) {
       // #1052 — the move cap is a CANDIDATE decision, not a stage failure: it leaves the rank
       // with its own sentence (below), never the unplanned list.
@@ -5758,6 +5848,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     if (opts.restBall !== undefined) {
       const restBallTool = opts.restBall;
       const ballMaskRadiusMm = (cuttingDiameter(restBallTool) ?? 0) / 2;
+      // #1234 — the ball rest overruns with ITS OWN radius; the finish's open sides and the rest's
+      // can differ (a fixture box or a region boundary reaches one edge and not the other).
+      const restOverrun = overrunFor(roughRegion.footprint, ballMaskRadiusMm);
+      const restRegion = grownRegionOf(roughRegion, restOverrun);
+      const restRef = restRegion === roughRegion
+        ? roughRef
+        : regionRefOf(region.id, 'curved', restRegion.footprint, base.zTop, base.zBottom);
       const restRing: [number, number][] = [];
       for (let d = 0; d < 8; d++) {
         const a = (d * Math.PI) / 4;
@@ -5782,6 +5879,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         feeds: feedsOf(paramsFor(restBallTool)),
         safeZ: opts.safeZMm,
         hopZ: opts.hopZMm,
+        // #1234 — the rest's own overrun is part of its identity (see the finish key's `edge`).
+        edge: restOverrun.sides.length === 0 ? '-' : restOverrun.sides.join('+'),
         toolNumber: opts.toolNumberFor(restBallTool),
         rpm: paramsFor(restBallTool).rpm,
         air: opts.air,
@@ -5795,11 +5894,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       } else {
         memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
         attempt('rest', restBallTool, ref, () => {
+          // The crease pass reads `restBallCl` (the mask's own CL, unchanged by #1234); the rest's
+          // OWN surface is the grown gate when a side opened, and the same object otherwise.
+          restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver, opts.minSampleSpacingMm ?? null);
+          const restCl = restRegion === roughRegion
+            ? restBallCl
+            : clSurface(opts.geometry, restRegion, restBallTool, cuts.stepOver, opts.minSampleSpacingMm ?? null);
           const out = finish({
             cutter: restBallTool,
-            region: roughRegion,
-            regionRef: roughRef,
-            clSurface: (restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver, opts.minSampleSpacingMm ?? null)),
+            region: restRegion,
+            regionRef: restRef,
+            clSurface: restCl,
             kind: finishKind,
             mesh: opts.geometry.triangles,
             scallopMm: opts.finishScallopMm ?? DEFAULT_FINISH_SCALLOP_MM,
@@ -5816,8 +5921,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             air: opts.air,
             rapid: opts.rapid,
           });
-          memoStore(restBallKey, out, { cl: restBallCl });
-          return out;
+          memoStore(restBallKey, withOverrun(out, restOverrun, ballMaskRadiusMm), { cl: restBallCl });
+          return withOverrun(out, restOverrun, ballMaskRadiusMm);
         });
       }
     }
