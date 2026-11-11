@@ -19,7 +19,8 @@ import { vCone } from '@/engine/cnc/vProfile';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { expandEngraveRow } from '@/store/engraveRowStore';
-import type { PlanMountTap, RegistrationPlan } from '@/engine/cnc/registration/plan';
+import { useManageModeStore } from '@/store/manageModeStore';
+import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { FACES, type Face, type Mount, type MountSpec, type Setup, machineSize, setupPinReference } from '@/engine/cnc/setups';
 import type { SetupAuthoringFinding, SetupItemsReading } from '@/engine/cnc/setups';
 import type { JobSetup, StockCorner, ViseParams } from '@/types/engraveJob';
@@ -42,9 +43,9 @@ const WARN_COLOR = '#e0c07a';
 /** What pressing "Plan registration" answered — an engine plan, a refusal, or a missing input. */
 export type RegistrationAttempt =
   | { kind: 'need-seat'; message: string }
-  // #607 — the tap carries which mount reference it is, so the button names the right one.
-  | { kind: 'need-datum'; message: string; mountTap: PlanMountTap | null }
-  | { kind: 'refused'; reason: string }
+  // #1199 field 7 (e) — `manageLink` marks the no-frame refusal: the row offers a LINK into bed
+  // setup (a navigation), never a control that moves the machine from the job.
+  | { kind: 'refused'; reason: string; manageLink?: boolean }
   | { kind: 'plan'; method: Mount; plan: RegistrationPlan; summary: string; expected: string };
 
 export interface EngraveSetupRowProps {
@@ -83,10 +84,6 @@ export interface EngraveSetupRowProps {
   onReplace: (next: JobSetup) => void;
   onPreviewRemount: () => void;
   planRegistration: () => RegistrationAttempt;
-  /** #599 — run the standalone mount tap (no datum yet) and write the reading. */
-  onTapJaw: (tap: { x: number; y: number; fromMachineZ: number }) => void;
-  /** #637 — a tap is running somewhere in this window: the button is disabled, not orphaned. */
-  tapBusy: boolean;
   /** #603 — the checked-out probe's name, or null when none is checked out. */
   probeName?: string | null;
   /** #603 — the machine's display name, or null when there is no location record. */
@@ -139,6 +136,8 @@ function itemChip(
 export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
   const { index, setup, derived, reading, editable, findings } = props;
   const n = index + 1;
+  // #1199 field 7 (e) — the no-frame refusal's link into the bed setup (navigation only).
+  const openManage = useManageModeStore((s) => s.openManage);
   // #723 P2-2 — a flip's stated pins, in this setup's mounted XY (the derived setup carries the
   // rotation and the stock's frame, so the size is the mounted one).
   const mountedSize =
@@ -390,9 +389,9 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
 
               {editable && (
                 <>
-                  {/* #934 — THE TYPED SEAT IS HIDDEN. The datum path (tap the fixed jaw) is the
-                      one registration procedure on this machine; the seat field and its override
-                      return behind their own bench issue. */}
+                  {/* #934 — THE TYPED SEAT IS HIDDEN, and #1199 field 7 (e) — a JOB never taps
+                      the jaw: the plan measures the top on the blank (guarded or from the stored
+                      datum), and the jaw datum itself is measured in the bed setup. */}
                   <button type="button" data-testid={`engrave-setup-plan-reg-${n}`} onClick={planNow}>
                     {setup.registration === undefined ? 'Plan registration' : 'Plan registration again'}
                   </button>
@@ -404,24 +403,21 @@ export function EngraveSetupRow(props: EngraveSetupRowProps): JSX.Element {
                   {attempt.message}
                 </p>
               )}
-              {attempt?.kind === 'need-datum' && (
-                <div data-testid={`engrave-setup-reg-need-datum-${n}`}>
-                  <p style={{ ...MUTED, color: WARN_COLOR, margin: '4px 0' }}>{attempt.message}</p>
-                  {attempt.mountTap !== null && (
-                    <button type="button" data-testid={`engrave-setup-tap-jaw-${n}`} disabled={props.tapBusy} onClick={() => props.onTapJaw(attempt.mountTap!)}>
-                      {/* #607 — the tap is the mount's, so the button says which reference it touches.
-                          #640 — the bracket-seat branch is UNREACHABLE today: `bracketTapFor` is null
-                          until the seat is measured, and no bracket plan offers a need-datum tap. The
-                          branch stays, and so does this note: it costs nothing and marks the door. */}
-                      {attempt.mountTap.reference === 'bracket-seat' ? 'Tap the bracket’s front arm' : 'Tap the fixed jaw'}
+              {attempt?.kind === 'refused' && (
+                <div data-testid={`engrave-setup-reg-refusal-${n}`}>
+                  <p style={{ ...MUTED, color: ERROR_COLOR }}>{attempt.reason}</p>
+                  {attempt.manageLink === true && (
+                    // #1199 field 7 (e) — a LINK into the bed setup, never a control that moves the
+                    // machine from a job: the jaw datum is measured there (the standalone tap).
+                    <button
+                      type="button"
+                      data-testid={`engrave-setup-bed-setup-${n}`}
+                      onClick={() => openManage('machines')}
+                    >
+                      Set up the vise in Manage
                     </button>
                   )}
                 </div>
-              )}
-              {attempt?.kind === 'refused' && (
-                <p style={{ ...MUTED, color: ERROR_COLOR }} data-testid={`engrave-setup-reg-refusal-${n}`}>
-                  {attempt.reason}
-                </p>
               )}
               {attempt?.kind === 'plan' && (
                 <div data-testid={`engrave-setup-reg-preview-${n}`}>

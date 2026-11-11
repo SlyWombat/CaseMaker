@@ -229,6 +229,17 @@ export function planRegistrationAttempt(args: {
   // tape registration is hidden (refused by name); a BRACKET job registers on its cut region's
   // footprint (#1070 — the maintainer's rule: find the edges of where it will cut, not the blank's).
   const mountKind: MountSpec['kind'] = mount.kind;
+  /**
+   * #1199 field 7 (e) — THE GUARDED TOP TOUCH'S HOLD FIGURE, BY THE JOB'S OWN MOUNT: a vise uses
+   * its across/along jaws keys (or refuses when unstated). Never a mount type hard-coded here: the
+   * analyst's B ruling runs this path for vise jobs too.
+   */
+  const guardedHoldFor = (kind: MountSpec['kind'], dims: { x: number; y: number }) =>
+    holdUncertaintyFor({
+      mount: kind,
+      settings: args.settings,
+      stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: 0 },
+    });
   if (mountKind !== 'vise') {
     if (mountKind === 'tape') {
       return { kind: 'refused', reason: 'registration on tape has not been run on this machine yet — hold the blank in the vise' };
@@ -319,14 +330,10 @@ export function planRegistrationAttempt(args: {
       const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
       // #1199 field 7 — THIS GUARDED TOUCH'S INSET IS THE SHARED ONE, per axis: the tip radius, the
       // unit's lateral uncertainty and the HOLD's placement uncertainty, floored by the registry
-      // shrink; the job's edge margin is an extra term. The old `max(1, tip + edgeMargin)` let a
-      // touch sit closer to an edge than the guard would allow (#1207's 1 mm floor was the
-      // footprint slice's stand-in, now replaced by the slice itself).
-      const guardedHold = holdUncertaintyFor({
-        mount: 'bracket',
-        settings: args.settings,
-        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-      });
+      // shrink. The job's edge margin is a FLOOR over that inset (`max`, not a sum): the touch must
+      // keep clear of both constraints, and neither is an allowance the other may spend. The old
+      // `max(1, tip + edgeMargin)` let a touch sit closer to an edge than the guard would allow.
+      const guardedHold = guardedHoldFor('bracket', dims0);
       const guardedFloor = args.settings.probeFootprintShrinkMm;
       if (guardedHold === null || guardedFloor === undefined) {
         return {
@@ -473,71 +480,149 @@ export function planRegistrationAttempt(args: {
   // #845 — a stated machine has no clearance to seek from; the preview it places a tap with is
   // only run where a connected Makera machine exists, and the 0 is never used to place a touch.
   const seekFromMachineZ = clearanceZOf(jobMachine(job, calibration)) ?? 0;
-  let input: Parameters<typeof registrationFor>[2];
+  let input!: Parameters<typeof registrationFor>[2];
 
   // #1133 — the old #607 bracket branch that stood here (its front-arm tap and edge scans) was
   // unreachable: every bracket mount returns from the branch above. It is gone with the edge finds
   // it carried; `bracketRegistration1133.spec.ts` pins that a bracket plan has no scans.
-  if (mount.kind === 'vise' && args.mountDatum !== null) {
-    // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's proud
-    // height (`registrationFor` works it out), and the probe is carried for the record. #1199
-    // (analyst ruling B) — the plan carries NO mount tap: a jaw datum is a SETUP measurement, and a
-    // job never descends beside the blank. The measured datum is used as it is.
-    // #1189 — a datum measured before the probe was last fitted cannot anchor the band. The
-    // surface top is the expected top when present; the jaw top is the seek's floor and ceiling
-    // datum, so BOTH have to carry a reference. Ask for the one-touch re-measure and stop.
-    if (args.surfaceTopZ !== null && args.surfaceTopZ.probeRefZ == null) {
+  if (mount.kind === 'vise') {
+    // #1199 field 7 (e) — NO FRAME, NO PLAN. Without the vise's place in machine XY there is no
+    // stock footprint for the guard, so nothing may descend. The words name the bed setup, and the
+    // Setups row's link opens it; no control moves the machine from a job.
+    if (args.mountTap === null) {
       return {
         kind: 'refused',
+        manageLink: true,
         reason:
-          'the surface top on file was measured before the probe was last fitted, so it cannot anchor a surface band now — ' +
-          'measure it again with the probe as it sits (Manage › the machine › Run a surface registration), then register again',
+          'the vise’s place in machine XY is not on file, so there is no stock footprint to descend into — ' +
+          'set the vise up in Manage › the machine (its placement and jaw top), then register again',
       };
     }
-    if (args.mountDatum.probeRefZ == null) {
+    // #1199 (B) — A TRUSTED JAW DATUM IS THE BAND's ANCHOR; an absent or pre-refit datum does not
+    // refuse the job (#1201 field 3, the analyst's no-dead-end): the top is measured on the blank.
+    const trustedSurfaceTop = args.surfaceTopZ === null || args.surfaceTopZ.probeRefZ != null;
+    const trustedDatum = args.mountDatum !== null && args.mountDatum.probeRefZ != null;
+    if (trustedDatum && trustedSurfaceTop) {
+      // #598 — the datum path: no seat input; the surface is the measured jaw top + the stock's
+      // proud height (`registrationFor` works it out), and the probe is carried for the record.
+      // #1199 (analyst ruling B) — the plan carries NO mount tap: a jaw datum is a SETUP
+      // measurement, and a job never descends beside the blank. The datum is used as it is.
+      input = {
+        seekFromMachineZ,
+        cornerRadius: STOCK_CORNER_RADIUS_MM,
+        mountDatum: args.mountDatum,
+        surfaceTopZ: args.surfaceTopZ,
+        probe: args.probe,
+        // #1199 (B) — NO job-time jaw tap: the measured datum above is the plan's reference.
+        mountTap: null,
+        // #1199 field 7 — the vise's own placement uncertainty, across and along the jaws.
+        holdUncertainty:
+          holdUncertaintyFor({
+            mount: 'vise',
+            settings: args.settings,
+            // A vise's figure is its across/along terms; the stock box is not consulted.
+            stock: { xMin: 0, yMin: 0, xMax: 0, yMax: 0, cornerRadius: 0 },
+          }) ?? undefined,
+      };
+    } else {
+      // #1199 field 7 (e) — THE GUARDED TOP TOUCHES. A framed vise with no trusted jaw datum (absent,
+      // or measured before the probe's last fitting — #1189) does not ask and does not tap: the top
+      // is measured on the blank at two points that must agree (#1201 field 3), inside the shrunk
+      // footprint. Makera would cut it; a dead end is not an option.
+      const floorDatum =
+        args.mountDatum !== null
+          ? args.mountDatum.jawTopZ
+          : args.surfaceTopZ !== null
+            ? args.surfaceTopZ.value
+            : jobMachine(job, calibration).envelope.z.min;
+      const marginMm = 1;
+      const clearance = clearanceZOf(jobMachine(job, calibration)) ?? 0;
+      const floorMin = r3(floorDatum + marginMm);
+      const ceiling = r3(clearance - args.settings.parkAboveSurfaceMm);
+      if (!Number.isFinite(clearance) || !(floorMin < ceiling)) {
+        return {
+          kind: 'refused',
+          reason: 'the machine’s clearance does not bound a top seek above the bed — check the machine frame, then register again',
+        };
+      }
+      const dims = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
+      const region = cutRegionOf(job);
+      const area = region ?? { minX: 0, minY: 0, maxX: dims.x, maxY: dims.y };
+      // #1199 field 7 — the SHARED inset, per axis: tip radius + the unit's lateral uncertainty +
+      // the hold's placement uncertainty (the VISE's keys here), floored by the registry shrink.
+      // The job's edge margin is a FLOOR over that inset (`max`, not a sum).
+      const viseHold = guardedHoldFor('vise', dims);
+      const guardedFloor = args.settings.probeFootprintShrinkMm;
+      if (viseHold === null || guardedFloor === undefined) {
+        return {
+          kind: 'refused',
+          reason:
+            'the hold’s placement uncertainty is not stated for this machine, so a guarded top touch cannot be placed — ' +
+            'state the vise’s placement keys and plan again',
+        };
+      }
+      const margins = topTouchEdgeMarginsMm(
+        { tipRadiusMm: args.settings.tipRadiusMm, tipLateralUncertaintyMm: args.probe?.tipLateralUncertaintyMm ?? 0 },
+        { floorMm: guardedFloor, hold: viseHold },
+      );
+      const insetX = Math.max(job.edgeMargin, margins.xMm);
+      const insetY = Math.max(job.edgeMargin, margins.yMm);
+      const ix = Math.min(insetX, Math.max(0.001, (area.maxX - area.minX) / 2));
+      const iy = Math.min(insetY, Math.max(0.001, (area.maxY - area.minY) / 2));
+      const clampToStock = (x: number, y: number): { x: number; y: number } => ({
+        x: r3(Math.min(Math.max(x, 0.001), dims.x - 0.001)),
+        y: r3(Math.min(Math.max(y, 0.001), dims.y - 0.001)),
+      });
+      const originPoint = clampToStock(area.minX + ix, area.minY + iy);
+      let centrePoint = clampToStock((area.minX + area.maxX) / 2, (area.minY + area.maxY) / 2);
+      if (Math.abs(centrePoint.x - originPoint.x) < 1 && Math.abs(centrePoint.y - originPoint.y) < 1) {
+        centrePoint = clampToStock(originPoint.x + Math.min(1, (dims.x - originPoint.x) / 2), originPoint.y);
+      }
+      // The plan's frame comes from the ordinary builder with the floor as a NOMINAL seat (its
+      // expected surface is discarded); the guarded band and the two checks are this branch's.
+      const built = registrationFor(
+        setup,
+        mount,
+        {
+          holdUncertainty: viseHold,
+          // #1201 — THE GUARDED CONTRACT: no expected surface, a floor and a margin.
+          guarded: { floorMachineZ: r3(floorDatum), marginMm, seatIgnored: args.mountDatum !== null ? 'legacy' : 'absent' },
+          seekFromMachineZ: clearance,
+          cornerRadius: STOCK_CORNER_RADIUS_MM,
+          // #1199 (B) — no datum, no tap: the guarded seek does not read either.
+          mountDatum: null,
+          mountTap: null,
+          probe: args.probe,
+          cutCentre: { x: centrePoint.x, y: centrePoint.y },
+        },
+        args.settings,
+      ).plan;
+      if (!built.ok) return { kind: 'refused', reason: built.reason };
+      const seatWord =
+        args.mountDatum !== null
+          ? 'the jaw top on file was measured before the probe’s last fitting and is not used'
+          : 'the bed states no jaw top';
+      const plan: RegistrationPlan = {
+        ...built.plan,
+        surfacePoint: originPoint,
+        surfaceChecks: [
+          { x: originPoint.x, y: originPoint.y, depthMm: 0 },
+          { x: centrePoint.x, y: centrePoint.y, depthMm: 0 },
+        ],
+        mountTap: null,
+        notes: [
+          ...built.plan.notes,
+          `${seatWord}; the top is measured on the blank at two points, and the bed’s floor at machine Z ${r3(floorDatum)} bounds the seek`,
+        ],
+      };
       return {
-        kind: 'refused',
-        reason:
-          'the jaw top on file was measured before the probe was last fitted, so it cannot bound the surface seek now — ' +
-          'tap the fixed jaw again with the probe as it sits (Manage › the machine › Tap the fixed jaw), then register again',
+        kind: 'plan',
+        method: 'vise',
+        plan,
+        summary: summarizePlan(plan),
+        expected: 'the top on the blank, from two touches that must agree',
       };
     }
-    input = {
-      seekFromMachineZ,
-      cornerRadius: STOCK_CORNER_RADIUS_MM,
-      mountDatum: args.mountDatum,
-      surfaceTopZ: args.surfaceTopZ,
-      probe: args.probe,
-      // #1199 (B) — NO job-time jaw tap: the measured datum above is the plan's reference.
-      mountTap: null,
-      // #1199 field 7 — the vise's own placement uncertainty, across and along the jaws.
-      holdUncertainty:
-        holdUncertaintyFor({
-          mount: 'vise',
-          settings: args.settings,
-          // A vise's figure is its across/along terms; the stock box is not consulted.
-          stock: { xMin: 0, yMin: 0, xMax: 0, yMax: 0, cornerRadius: 0 },
-        }) ?? undefined,
-    };
-  } else {
-    // The vise with no measured jaw-top datum: THE TAP IS THE PROCEDURE (#934 hides the typed-seat
-    // override, so there is no other path to a seat here). #1199 (B) — the tap is a SETUP action
-    // (the standalone mount tap behind this button), never the registration's first touch.
-    // #611 — a datum tapped by a probe other than the one now checked out names which probe tapped
-    // it and offers the tap with the current probe; an absent datum keeps the plain ask.
-    if (args.mountDatumMismatch !== null) {
-      const current = args.probeName !== null ? `the ${args.probeName} now checked out` : 'the probe now checked out';
-      return {
-        kind: 'need-datum',
-        message: `the jaw top was tapped by ${args.mountDatumMismatchName}, not ${current} — tap the fixed jaw with the current probe first`,
-        mountTap: args.mountTap,
-      };
-    }
-    return {
-      kind: 'need-datum',
-      message: 'tap the fixed jaw first (Manage › the machine › Tap the fixed jaw) — a job never taps beside the blank, so the jaw datum is a setup measurement',
-      mountTap: args.mountTap,
-    };
   }
 
   // #743 D-2 — the disc wiring stays in the planner; #934 refuses a disc at the top of this

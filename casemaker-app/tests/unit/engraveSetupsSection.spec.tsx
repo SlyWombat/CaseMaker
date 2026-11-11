@@ -111,6 +111,22 @@ const DATUM_LOCATION = {
   ],
 } as unknown as LocationView;
 
+/** The same bed with its jaw-top datum cleared — a vise FRAME, no datum (#1199 field 7 (e)). */
+const NO_DATUM_LOCATION = {
+  ...DATUM_LOCATION,
+  machines: [
+    {
+      ...DATUM_LOCATION.machines[0]!,
+      bedProfiles: [
+        {
+          ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
+          datums: { ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums, viseJawTopZ: null },
+        },
+      ],
+    },
+  ],
+} as unknown as LocationView;
+
 function savedJob(): EngraveJob {
   const job = defaultEngraveJob();
   job.setups = jobSetups(job).map((s) => ({
@@ -363,7 +379,9 @@ describe('#471 a saved list that no longer matches the document', () => {
 describe('#471 registration — planned only after approval, refused with the engine’s reason', () => {
   // #934 — THE TYPED SEAT IS HIDDEN. There is no override and no seat field; a vise with no
   // measured jaw-top datum asks for the tap, which is a SETUP measurement (#1199 ruling B).
-  it('offers neither the typed-seat override nor the seat field, and asks for the jaw tap', () => {
+  it('offers neither the typed-seat override nor the seat field; with no frame it refuses and LINKS to bed setup', () => {
+    // #1199 field 7 (e) — no job-surface tap control exists. With no machine record there is no
+    // frame, so the refusal names Manage and offers a LINK (navigation), nothing that moves.
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
@@ -373,29 +391,36 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.getByTestId('engrave-setup-reg-unplanned-1')).toBeTruthy();
 
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain(
-      'tap the fixed jaw first (Manage › the machine › Tap the fixed jaw)',
-    );
+    const refusal = screen.getByTestId('engrave-setup-reg-refusal-1');
+    expect(refusal.textContent).toContain('set the vise up in Manage › the machine');
+    expect(screen.getByTestId('engrave-setup-bed-setup-1')).toBeTruthy();
+    expect(screen.queryByTestId('engrave-setup-tap-jaw-1')).toBeNull();
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  it('asks to tap the fixed jaw instead of inventing a datum (a custom, non-Z1 vise)', () => {
+  it('refuses with no frame instead of inventing a datum (a custom, non-Z1 vise)', () => {
     const job = savedJob();
     jobVise(job).source = 'saved';
     act(() => useEngraveJobStore.setState({ job }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1').textContent).toContain('tap the fixed jaw first (Manage › the machine › Tap the fixed jaw)');
+    expect(screen.getByTestId('engrave-setup-reg-refusal-1').textContent).toContain('set the vise up in Manage › the machine');
+    expect(screen.queryByTestId('engrave-setup-tap-jaw-1')).toBeNull();
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  it('#614 a shipped-vise job with no datum plans to need-datum, not a seeded seat', () => {
+  it('#614 a shipped-vise job with no datum does NOT seed a seat — with a frame it plans the guarded top touches', () => {
+    // A machine record with a vise frame but no jaw datum: no ask, no tap; the top is measured.
+    useMachineStore.setState({ machine: OBS });
+    useLocationStore.setState({ location: NO_DATUM_LOCATION });
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1')).toBeTruthy();
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('two touches that must agree');
+    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-tap-jaw-1')).toBeNull();
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
@@ -415,7 +440,7 @@ describe('#471 registration — planned only after approval, refused with the en
     expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
   });
 
-  it('#611 a jaw-top datum tapped by a different probe reads as absent and names that probe', () => {
+  it('#611 a jaw-top datum tapped by a different probe is not trusted — the job measures the top, no ask', () => {
     useMachineStore.setState({ machine: OBS });
     useLocationStore.setState({
       location: {
@@ -446,69 +471,31 @@ describe('#471 registration — planned only after approval, refused with the en
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
 
-    const row = screen.getByTestId('engrave-setup-reg-need-datum-1');
-    expect(row.textContent).toContain('Makera Wired Probe V1');
-    expect(row.textContent).not.toContain('fx-probe-old');
-    expect(row.textContent).toContain('tap the fixed jaw with the current probe first');
-    // The tap is offered with the current probe, and nothing is written until the person acts.
-    expect(screen.getByTestId('engrave-setup-tap-jaw-1')).toBeTruthy();
+    // #1199 field 7 (e) — no dead end: the pre-refit datum is not trusted, so the top is measured
+    // on the blank; no question, no jaw touch, no name to chase.
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('two touches that must agree');
+    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-tap-jaw-1')).toBeNull();
     expect(useEngraveJobStore.getState().job.setups![0]!.registration).toBeUndefined();
   });
 
-  // #637 — the tap's prompt carries testids, the button is disabled while the tap runs, and
-  // Continue completes it through the shared hook.
-  it('#637 the mount tap prompts with testids, disables while busy, and completes on Continue', async () => {
+  // #1199 field 7 (e) — NEITHER THE SETUPS ROW NOR THIS SECTION HAS A CONTROL THAT SENDS A JAW
+  // TOUCH. The datum is measured in Manage › the machine (the standalone tap); the job surface
+  // only plans, and its no-frame/untapped state links there.
+  it('#637 the job surface has no tap control, no tap prompt and no tap note', () => {
     useMachineStore.setState({ machine: OBS });
-    useLocationStore.setState({
-      location: {
-        ...DATUM_LOCATION,
-        accessories: (DATUM_LOCATION.accessories ?? []).map((a) =>
-          a.kind === 'probe' ? { ...a, constants: {}, provenance: {}, history: [] } : a,
-        ),
-        machines: [
-          {
-            ...DATUM_LOCATION.machines[0]!,
-            bedProfiles: [
-              {
-                ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!,
-                datums: {
-                  ...DATUM_LOCATION.machines[0]!.bedProfiles![0]!.datums,
-                  viseJawTopZ: { value: -56.82, measuredAt: '2026-10-23T00:00:00.000Z', by: 'wired-probe', at: null , probeRefZ: -80 },
-                },
-                history: [],
-              },
-            ],
-          },
-        ],
-      },
-    });
-    // The write-back is not this spec's subject: the save answers ok so the note is the success one.
-    useLocationStore.setState({ saveMachine: async () => 'ok' });
+    useLocationStore.setState({ location: DATUM_LOCATION });
     act(() => useEngraveJobStore.setState({ job: savedJob() }));
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
 
-    const tapButton = screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement;
-    fireEvent.click(tapButton);
-    // The runner is at the operator prompt: Continue is there, by testid, and the row's button is
-    // disabled while the tap runs (a second press would orphan the console handle).
-    // #1181 — the runner is async; the default 1 s find could expire under the loaded run while
-    // the prompt was still on its way. 15 s is a clock deadline, not the subject.
-    await screen.findByTestId('engrave-mount-tap-continue', {}, { timeout: 15_000 });
-    expect(screen.getByTestId('engrave-mount-tap-cancel')).toBeTruthy();
-    expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(true);
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
-    });
-    // #1181 — same: the tap's completion and note land asynchronously; the 1 s default was seen
-    // to expire under load before the note rendered. 15 s only trips if the note never lands.
-    await waitFor(() => expect(screen.getByTestId('engrave-setups-tap-note').textContent).toContain('recorded'), {
-      timeout: 15_000,
-    });
-    expect((screen.getByTestId('engrave-setup-tap-jaw-1') as HTMLButtonElement).disabled).toBe(false);
-    expect(operatorPrompts.length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('engrave-setup-tap-jaw-1')).toBeNull();
+    expect(screen.queryByTestId('engrave-mount-tap-continue')).toBeNull();
+    expect(screen.queryByTestId('engrave-setups-tap-prompt')).toBeNull();
+    expect(screen.queryByTestId('engrave-setups-tap-note')).toBeNull();
+    // It plans from the trusted datum instead (the legitimate path).
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
   });
 
   it('#611 with no probe accessory checked out the datum stands — there is nothing to compare against', () => {
@@ -557,13 +544,16 @@ describe('#471 registration — planned only after approval, refused with the en
     render(<EngraveSetupsSection />);
     fireEvent.click(screen.getByTestId('engrave-setup-expand-1'));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.getByTestId('engrave-setup-reg-need-datum-1')).toBeTruthy();
+    // #1199 field 7 (e) — no datum, a frame: the guarded top touches, no ask.
+    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('two touches that must agree');
 
-    // The card's tap writes the datum into the location; the section re-reads it and takes the datum path.
+    // The Manage tap writes the datum into the location; the section re-reads it and takes the
+    // datum path (the trusted band from the stored jaw top).
     act(() => useLocationStore.setState({ location: DATUM_LOCATION }));
     fireEvent.click(screen.getByTestId('engrave-setup-plan-reg-1'));
-    expect(screen.queryByTestId('engrave-setup-reg-need-datum-1')).toBeNull();
-    expect(screen.getByTestId('engrave-setup-reg-summary-1').textContent).toContain('Home, fit the wired probe');
+    const summary = screen.getByTestId('engrave-setup-reg-summary-1').textContent ?? '';
+    expect(summary).toContain('touch the surface at the cut area');
+    expect(summary).not.toContain('two touches that must agree');
   });
 
   // #1123 item 37 — the machine's nickname is not a per-setup fact: it repeated on every row as

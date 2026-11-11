@@ -111,7 +111,6 @@ import {
   mountTapFor,
   probeFor,
   probeNameFor,
-  recordMountReading,
   recordProbeReading,
   surfaceTopDatumFor,
 } from '@/engine/cnc/registration/mountContext';
@@ -128,12 +127,9 @@ import type { RegistrationAttempt } from './EngraveSetupRow';
 import {
   viseFrameFromRegistration,
   withBracketPlacementSeed,
-  withBracketSeatDatum,
   withSurfaceTopDatum,
-  withViseJawTopDatum,
   withVisePlacementFrame,
 } from '@/platform/bedProfiles';
-import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { gridSeeds } from '@/engine/cnc/registration/placing';
 import { useMachineTranscriptStore } from '@/store/machineTranscriptStore';
 import { useMachineStopReportStore } from '@/store/machineStopReportStore';
@@ -1296,7 +1292,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       const writeNotes: string[] = [];
       try {
         const machine = machineAt(target);
-        if (machine !== null && (r.outcome.usable || r.mountTap !== null)) {
+        if (machine !== null && r.outcome.usable) {
           const now = new Date().toISOString();
           // #638 — a measurement outside the margin writes NO frame and NO surface top: the blank
           // is to be re-seated, and `mountTapFor` prefers this frame for every later tap point, so
@@ -1313,12 +1309,6 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           // window's change with this run's pre-read copy.
           const bed = await createFirstBed(machine, frameRegistration, now);
           const probeId = effectivePlan.probe?.id ?? null;
-          const reference = effectivePlan.mountTap?.reference ?? 'vise-jaw-top';
-          const mountTap = r.mountTap;
-          // #607 — the reading is the bracket's TOP; the datum is the SEAT it stands on, one bracket
-          // height below (`bracketSeatFromTap`), using the arm's measured top.
-          const bracketSeat =
-            mountTap !== null && reference === 'bracket-seat' ? bracketSeatFromTap(mountTap.z, effectivePlan.mountTap?.datumOffsetMm ?? 0) : null;
           const update: MachineUpdate = (current) => {
             let rec = bed(current);
             if (frameRegistration !== null) {
@@ -1328,18 +1318,15 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
               // #1189 — with the seating it was read in, so a later refit is corrected.
               rec = withSurfaceTopDatum(rec, { z: r.data.surface.z, at: effectivePlan.surfacePoint }, probeId, now, r.data.probeRefZ);
             }
-            if (mountTap !== null) {
-              rec =
-                bracketSeat !== null
-                  ? withBracketSeatDatum(rec, { z: bracketSeat, at: mountTap.at }, probeId, now, r.data.probeRefZ)
-                  : withViseJawTopDatum(rec, mountTap, probeId, now, r.data.probeRefZ);
-            }
+            // #1199 field 7 (e) — NO JOB-TIME JAW DATUM IS WRITTEN. The jaw top is a bed-setup
+            // measurement (Manage › the machine); a job refreshes the FRAME and the surface top,
+            // never the datum the tap used to re-measure.
             return rec;
           };
-          // #653 — NOTHING TO WRITE, NO WRITE. An out-of-margin vise run with no mount tap builds
-          // nothing (no frame, no top, no datum, no bed — every step of the update above answers the
-          // SAME record when it changes nothing), and a PUT of it could earn a 412 that this code
-          // would report as "the record was not saved" for a run that had nothing to record.
+          // #653 — NOTHING TO WRITE, NO WRITE. An out-of-margin vise run builds nothing (no frame,
+          // no top; #1199 field 7 (e) — a job writes no mount datum either), and a PUT of it could
+          // earn a 412 that this code would report as "the record was not saved" for a run that had
+          // nothing to record.
           const outcome = update(machine) === machine ? ('ok' as const) : await saveMachineWithRetry(machine, update);
           if (outcome !== 'ok') {
             // Never "recorded" without 'ok': the measurement stands on screen, the datum does not.
@@ -1350,36 +1337,12 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
             // #638 — the frame is on the house record only when the save that carried it landed;
             // otherwise the acceptance write tries again from the held result.
             if (frameRegistration !== null) frameSavedRef.current = true;
-            if (bracketSeat !== null) {
-              // The shop default the compiler reads moves with the seat the run just measured.
-              const saved = await useShopDefaultsStore.getState().set('bracket.seatMachineZ', {
-                value: bracketSeat,
-                source: 'measured',
-                setAt: now,
-                unit: 'mm',
-                note: 'tapped on the bracket’s top face',
-              });
-              if (!saved) {
-                writeNotes.push(
-                  `the bracket seat was tapped, but the shop default was not saved: ${useShopDefaultsStore.getState().reason ?? 'the write was refused'}`,
-                );
-              }
-            }
           }
         }
         // #601 — the probe's last M491 length and M119 rest ride on the checked-out probe accessory.
         await recordProbeReading(machineAt(target), r.probe);
-        // #595 — a mount tap's reading rides on the mount checked out to the machine as well: the
-        // vise's jaw top or the bracket's arm top, in the unit's own record (the one `mountDatumFor`
-        // prefers). The bed datum above is the machine's copy of the same reading.
-        if (r.mountTap !== null) {
-          await recordMountReading(
-            machineAt(target),
-            effectivePlan.mountTap?.reference === 'bracket-seat' ? 'bracket' : 'vise',
-            r.mountTap,
-            effectivePlan.probe?.id ?? null,
-          );
-        }
+        // #1199 field 7 (e) — a job writes no mount reading: the jaw/seat datum is measured in the
+        // bed setup (the standalone tap), never by a job's registration.
       } catch (e) {
         writeNotes.push(
           `the measurement was taken, but the record was not saved: ${e instanceof Error ? e.message : String(e)}. Run the registration again to write it.`,

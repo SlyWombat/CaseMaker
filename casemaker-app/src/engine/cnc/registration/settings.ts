@@ -44,6 +44,18 @@ export interface RegistrationSettings {
   tapePlacementRotationDeg?: number;
   /** #1199 field 7 — the bracket's own fit (its placement uncertainty), from `bracket.fitMm`. */
   bracketFitMm?: number;
+  /**
+   * #1199 field 7 (e) — THE BED-SETUP JAW TAP (the only place a jaw is touched now): how far below
+   * the stored jaw top its search may go, mm. Touched by the move to setup mode, so a shop key
+   * (#1207), not a constant. OPTIONAL on a plan stored before the key existed; the bed-setup tap
+   * reads it from fresh settings, and a job never uses it.
+   */
+  mountTapFloorMm?: number;
+  /**
+   * #1199 field 7 (e) — how far from the stored jaw top a bed-setup reading may land before the run
+   * SAYS it moved (the datum is still refreshed; the words this far apart are worth reading).
+   */
+  mountTapSlackMm?: number;
   /** A scan point stays this far beyond a rounded corner's radius from the corner. */
   cornerClearanceMm: number;
   /** A hit within this of the surface reads as "on the stock"; lower is off it (a jaw, the roll-off). */
@@ -134,6 +146,8 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   tapePlacementMm: 'registration.tape.placementMm',
   tapePlacementRotationDeg: 'registration.tape.placementRotationDeg',
   bracketFitMm: 'bracket.fitMm',
+  mountTapFloorMm: 'registration.mountTapFloorMm',
+  mountTapSlackMm: 'registration.mountTapSlackMm',
   cornerClearanceMm: 'registration.cornerClearanceMm',
   surfaceBandMm: 'registration.surfaceBandMm',
   tipRadiusMm: 'registration.tipRadiusMm',
@@ -200,6 +214,10 @@ export function settingsProblem(s: RegistrationSettings): string | null {
   ] as const) {
     if (v === undefined || !(v >= 0)) return `${key} is not stated (or is below 0) — the hold’s figures are required`;
   }
+  // #1199 field 7 (e) — the bed-setup jaw tap's own two figures (#1207 keys). Optional so a plan
+  // stored before them still loads; when stated they must be usable.
+  if (s.mountTapFloorMm !== undefined && !(s.mountTapFloorMm > 0)) return 'the jaw tap’s search floor must be above 0 mm';
+  if (s.mountTapSlackMm !== undefined && !(s.mountTapSlackMm >= 0)) return 'the jaw tap’s slack must be 0 mm or more';
   if (s.parkAboveSurfaceMm < 2) return 'the park height must be at least 2 mm above the surface';
   // #1059 — a zero limit would refuse every face-angle turn; the bound is `defaults.rs`'s.
   if (!(s.faceAngleMaxDeg > 0)) return 'the face-angle limit must be above 0°';

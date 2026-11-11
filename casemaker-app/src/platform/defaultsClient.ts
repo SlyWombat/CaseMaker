@@ -165,6 +165,11 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.vise.placementAlongJawsMm': { label: 'vise: where the blank sits along the jaws (chosen)', unit: 'mm', rule: z.number().min(0.01).max(20), fallback: 5 },
   'registration.tape.placementMm': { label: 'tape, no fence: how squarely the blank is laid (chosen)', unit: 'mm', rule: z.number().min(0.1).max(30), fallback: 10 },
   'registration.tape.placementRotationDeg': { label: 'tape, no fence: by-eye squareness (chosen)', unit: '°', rule: z.number().min(0).max(10), fallback: 2 },
+  // #1199 field 7 (e) — THE BED-SETUP JAW TAP, the only place a jaw is touched now (a job never
+  // descends beside the blank). Both CHOSEN, not measured; the recommendation is the old job-tap
+  // constants' own value (2 mm each).
+  'registration.mountTapFloorMm': { label: 'jaw tap: how far below the stored jaw top it searches (chosen)', unit: 'mm', rule: z.number().min(0.1).max(10), fallback: 2 },
+  'registration.mountTapSlackMm': { label: 'jaw tap: how far a reading may sit from the stored jaw top before the run says so (chosen)', unit: 'mm', rule: z.number().min(0).max(10), fallback: 2 },
   'registration.surfaceSeekMm': { label: 'surface seek travel, at most', unit: 'mm', rule: z.number().min(1).max(100), fallback: 60.0 },
   'registration.touchFeed': { label: 'scan touch feed', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 150.0 },
   'registration.surfaceFastFeed': { label: 'surface touch, fast', unit: 'mm/min', rule: z.number().min(10).max(1000), fallback: 300.0 },

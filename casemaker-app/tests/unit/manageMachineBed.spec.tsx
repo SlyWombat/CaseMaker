@@ -160,6 +160,8 @@ describe('#637 the Bed card drives the shared mount tap', () => {
     useLocationStore.setState({ saveMachine: async () => 'ok' });
     render(<MachineBed machine={m} />);
 
+    // #1199 field 7 (e) — the bed-setup tap SHOWS its point (the only place a jaw is touched now).
+    expect(screen.getByTestId('manage-bed-tap-point').textContent).toContain('at machine X');
     const tapButton = screen.getByTestId('manage-bed-tap-jaw-button') as HTMLButtonElement;
     fireEvent.click(tapButton);
     await screen.findByTestId('engrave-mount-tap-continue');

@@ -21,7 +21,7 @@ import { createFirstBed, machineAt, saveMachineWithRetry, useLocationStore, type
 import { withBracketSeatDatum, withRotaryAxisDatum, withRotaryFaceAngleDatum, withViseJawTopDatum } from '@/platform/bedProfiles';
 import { bracketSeatFromTap } from '@/engine/cnc/mounts/bracket';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
-import { recordMountReading, recordProbeReading } from '@/engine/cnc/registration/mountContext';
+import { recordMountReading, recordProbeReading, mountDatumFor } from '@/engine/cnc/registration/mountContext';
 import { SEAT_DERIVED } from '@/engine/cnc/registration/footprintJob';
 // #1202 — a completed tap records its routine identity on the machine, so a later press can say
 // whether this exact motion has run here before.
@@ -250,6 +250,13 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     const handle = attachConsole(inputs.target);
     handleRef.current = handle;
     try {
+      // #1199 field 7 (e) — THE BED-SETUP JAW TAP measures against the stored jaw top when one
+      // exists: its search floor is `registration.mountTapFloorMm` below it, and a reading further
+      // than `registration.mountTapSlackMm` from it is said while the datum is still refreshed.
+      const storedJawTopZ =
+        tap.reference === undefined || tap.reference === 'vise-jaw-top'
+          ? (mountDatumFor(machineAt(inputs.target))?.jawTopZ ?? null)
+          : null;
       const r = await runMountTap(
         // #1199 — the tap's own approach rides with the point; the session's height is the
         // machine's clearance, so the XY move to the seat is taken there and the descent at it.
@@ -265,6 +272,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         // reach, not at the machine's work-envelope floor.
         null,
         tap.planTravelMm ?? null,
+        storedJawTopZ,
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (r.ok) {

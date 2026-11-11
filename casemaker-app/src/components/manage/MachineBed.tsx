@@ -157,6 +157,12 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
       >
         Tap the fixed jaw
       </button>
+      {/* #1199 field 7 (e) — THE BED-SETUP TAP SHOWS ITS POINT. This is the only place a jaw is
+          touched now; the probe travels there at the clearance and descends only at the point. */}
+      <span className="hint" data-testid="manage-bed-tap-point">
+        {' '}
+        at machine X {mountTap.x}, Y {mountTap.y}
+      </span>
       {api.note !== null && (
         <span className="hint" data-testid="manage-bed-tap-note">
           {' '}

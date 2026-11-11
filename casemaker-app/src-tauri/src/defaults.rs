@@ -526,6 +526,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("registration.vise.placementAlongJawsMm", 5.0, "mm", "chosen, not measured: the blank is set by eye against the jaw end or a mark"),
     ("registration.tape.placementMm", 10.0, "mm", "chosen, not measured: laid by eye, middle of the bed, square to the front edge"),
     ("registration.tape.placementRotationDeg", 2.0, "deg", "chosen, not measured: by-eye squareness; its corner shift is added to the inset"),
+    ("registration.mountTapFloorMm", 2.0, "mm", "chosen, not measured: the bed-setup jaw tap searches this far below the stored jaw top before stopping"),
+    ("registration.mountTapSlackMm", 2.0, "mm", "chosen, not measured: a bed-setup jaw reading this far from the stored top is worth saying so; the datum is still refreshed"),
     ("margins.jawClearanceMm", 1.0, "mm", "chosen, not measured: how far a cut's floor must stay above the vise jaws' tops; seeds each new job"),
     ("margins.breakthroughMm", 0.3, "mm", "chosen, not measured: how far a through-cut may pass below the part's underside; seeds each new job"),
     ("margins.measuredThicknessToleranceMm", 0.05, "mm", "not measured: the +/- a caliper-measured stock thickness adds to a job's Z budget; provisional until the bench measures it (#208)"),
@@ -850,6 +852,12 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         }
         "registration.tape.placementRotationDeg" => {
             Some(need(n.is_some_and(|v| (0.0..=10.0).contains(&v)), "0 to 10 degrees"))
+        }
+        "registration.mountTapFloorMm" => {
+            Some(need(n.is_some_and(|v| (0.1..=10.0).contains(&v)), "0.1 to 10 mm"))
+        }
+        "registration.mountTapSlackMm" => {
+            Some(need(n.is_some_and(|v| (0.0..=10.0).contains(&v)), "0 to 10 mm"))
         }
         "registration.surfaceSeekMm" => Some(need(
             n.is_some_and(|v| (1.0..=100.0).contains(&v)),

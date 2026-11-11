@@ -112,3 +112,22 @@ test('Setups: implicit draft, stale list, disabled Add, and the remount refusal'
   await expect(page.getByTestId('engrave-remount-page')).toBeHidden();
   await expect(page.getByTestId('engrave-setup-remount-approved-2')).toBeVisible();
 });
+
+
+// #1199 field 7 (e) — A JOB SURFACE NEVER SENDS A JAW TOUCH. The jaw datum is measured in
+// Manage › the machine (the standalone tap); the Setups row offers a LINK there when the vise has
+// no frame, and there is no control that moves the machine from the job.
+test('Setups: no jaw-touch control — the no-frame state links to Manage instead', async ({ cm, page }) => {
+  await cm.ready();
+  await openEngravePanel(page);
+  // The row's Plan press needs a saved setup (the implicit draft must be adopted first).
+  await page.getByTestId('engrave-setups-use-plan').click();
+  await page.getByTestId('engrave-setup-expand-1').click();
+  await page.getByTestId('engrave-setup-plan-reg-1').click();
+
+  await expect(page.getByTestId('engrave-setup-tap-jaw-1')).toHaveCount(0);
+  await expect(page.getByTestId('engrave-mount-tap-continue')).toHaveCount(0);
+  // A fresh server has no vise frame: the refusal names Manage and offers a navigation LINK.
+  await expect(page.getByTestId('engrave-setup-reg-refusal-1')).toContainText('Manage');
+  await expect(page.getByTestId('engrave-setup-bed-setup-1')).toBeVisible();
+});

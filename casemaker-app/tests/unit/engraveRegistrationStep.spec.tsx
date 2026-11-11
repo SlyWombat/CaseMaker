@@ -1963,8 +1963,13 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
         bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
       },
     };
-    // The plan approved on the older planner (a footprint-shaped plan for this job).
-    const oldPlan = makePlan(-56.8);
+    // The plan approved on the older planner (a footprint-shaped plan for this job), and #1199
+    // field 7 (e): a PRE-RULING plan carrying a job-time jaw tap — the drift block must offer the
+    // new (tap-free) proposal, and Use the new plan must write it.
+    const oldPlan = {
+      ...makePlan(-56.8),
+      mountTap: { x: -186.2, y: -180, fromMachineZ: -3, label: 'the vise fixed-jaw top' },
+    };
     const approved: EngraveJob = {
       ...job,
       setups: [
@@ -2035,6 +2040,8 @@ describe('#1123-28 — the Register card never silently runs a stored plan the p
     // The stored approval is replaced in place — never silently left as the old plan.
     const written = useEngraveJobStore.getState().job.setups![0]!.registration!.plan;
     expect(canonicalJson(written)).not.toBe(canonicalJson(oldPlan));
+    // #1199 field 7 (e) — the new plan carries no job-time jaw tap.
+    expect(written.mountTap).toBeNull();
 
     // With the new plan approved, the card no longer reports a difference.
     cleanup();
