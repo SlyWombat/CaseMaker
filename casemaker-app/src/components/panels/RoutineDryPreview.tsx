@@ -80,7 +80,7 @@ export function RoutineDryPreview({
       )}
       {preview.error !== null && (
         <p style={{ ...MUTED, color: BAD, margin: '4px 0' }} data-testid="engrave-registration-dry-error">
-          {preview.error}
+          The preview could not finish — {preview.error}
         </p>
       )}
       {preview.refused && (
