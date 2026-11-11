@@ -1899,6 +1899,9 @@ export function EngraveCutSurface({
             finishedHashes={finishedHashes}
             target={target}
             programs={releaseSources}
+            // #1145 × #1123 item 42 — the run's own total over every program (#1193): while a
+            // multi-program job runs, the card's time-left line states the WHOLE RUN's remaining.
+            runTotalSeconds={cutCycle}
             // #819 — once THIS job's run has ended, the card draws no Start; the bit-change card
             // (programs left) or the end card (job over) owns the next press.
             noStart={runEnded}

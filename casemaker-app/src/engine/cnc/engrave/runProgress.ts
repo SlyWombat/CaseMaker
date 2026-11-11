@@ -68,6 +68,41 @@ export function remainingSeconds(percent: number | null, elapsedS: number | null
   return Math.round((elapsedS * (100 - percent)) / percent);
 }
 
+/**
+ * #1145 — x #1123 item 42 — THE WHOLE RUN'S TIME LEFT, from the run's own total and our clock.
+ *
+ * A multi-program job is one press and one wait: the operator standing at the machine needs "how
+ * long until the job is done", not only how long the program in hand has left. The run's total
+ * (#1193 — the seam's figure over EVERY posted program) is the basis; what has already run is the
+ * finished programs' own times (measured where the plan has them, the estimate otherwise) plus
+ * OUR clock for the program playing. `P:`'s third field is not involved, as everywhere in #1145.
+ *
+ * When the result states no total (or a finished program has neither a measured nor an estimated
+ * time), the honest fallback is the sum over what is left: our clock's remaining for the program in
+ * hand plus every program not yet started. Null when even that cannot be stated.
+ */
+export function runRemainingSeconds(input: {
+  /** The run's total over EVERY program (#1193), seconds; null when the result states none. */
+  runTotalS: number | null;
+  /** The finished programs' seconds — measured where known, estimated otherwise; null if any states neither. */
+  doneS: number | null;
+  /** OUR clock for the program playing, seconds; null before the first `P:` reading. */
+  elapsedS: number | null;
+  /** The program playing's own remaining (our clock × the percent still to run), seconds. */
+  programLeftS: number | null;
+  /** Every program not yet started, its estimate summed; null when one has no estimate. */
+  queuedS: number | null;
+}): number | null {
+  const { runTotalS, doneS, elapsedS, programLeftS, queuedS } = input;
+  if (runTotalS !== null && doneS !== null && elapsedS !== null) {
+    const minus = runTotalS - doneS - elapsedS;
+    // A total the run has already passed is spent, not a negative time: fall through to the sum.
+    if (minus > 0) return Math.round(minus);
+  }
+  if (programLeftS === null || queuedS === null) return null;
+  return Math.round(programLeftS + queuedS);
+}
+
 /** One sentence for the program that is playing — the controller's percent, our clock. */
 export function runningProgramWords(input: {
   /** The 1-based cut order of the program the machine plays. */

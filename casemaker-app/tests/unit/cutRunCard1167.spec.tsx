@@ -114,19 +114,19 @@ function seedReady(): void {
   useEngraveReleaseStore.setState({ records: { [KEY]: releaseRecord('ready', null, 1) } } as never);
 }
 
-function seedRunning(): void {
-  useEngraveReleaseStore.setState({ records: { [KEY]: releaseRecord('running', 2, null) } } as never);
+function seedRunning(firstProgressAt: number | null = null, percent = 20, active = 2): void {
+  useEngraveReleaseStore.setState({ records: { [KEY]: releaseRecord('running', active, null) } } as never);
   useMachineRunStore.setState({
     runs: {
       [KEY]: {
         running: true,
         runId: 1,
-        filename: 'p2.nc',
-        programHash: 'h2',
+        filename: `p${active}.nc`,
+        programHash: `h${active}`,
         paused: false,
         stopAsked: false,
-        progress: { state: 'Run', line: 5, percent: 20, elapsedS: null },
-        firstProgressAt: null,
+        progress: { state: 'Run', line: 5, percent, elapsedS: null },
+        firstProgressAt,
         pausedMs: 0,
         lines: [],
         outcome: null,
@@ -279,6 +279,77 @@ describe('#1167 the Cut card lists the whole job', () => {
     expect(screen.queryByTestId('engrave-cut-card-start')).toBeNull();
     expect((screen.getByTestId('engrave-cut-card-pause') as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByTestId('engrave-cut-card-stop') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // #1145 × #1123 item 42 — A MULTI-PROGRAM JOB'S LINE STATES THE WHOLE RUN. The operator waits
+  // for the job, not the program in hand: the basis is the run's own total (#1193) less what has
+  // run (the finished program's measured time + OUR clock). Without the total, it is our clock's
+  // remaining plus the programs not started — and the words still say it is the job's.
+  it('RUNNING: the time-left line is the WHOLE RUN’s, and says so', () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    seedRunning(Date.now() - 120_000, 20);
+    render(
+      <CutRunCard
+        job={job}
+        pkg={pkg}
+        plan={planOf(20)}
+        finishedHashes={['h1']}
+        target={{ host: '192.0.2.10', port: 2222 }}
+        programs={[]}
+        runTotalSeconds={1200}
+      />,
+    );
+    const row = screen.getByTestId('engrave-cut-card-running').textContent ?? '';
+    expect(row).toContain('left in the job');
+    expect(row).not.toContain('left in this program');
+  });
+
+  it('RUNNING: with no stated total, the line is our clock plus the programs not started, still the job’s', () => {
+    const job = trayJob();
+    const pkg = packageOf(job, 20);
+    seedRunning(Date.now() - 120_000, 20);
+    render(
+      <CutRunCard job={job} pkg={pkg} plan={planOf(20)} finishedHashes={['h1']} target={{ host: '192.0.2.10', port: 2222 }} programs={[]} />,
+    );
+    const row = screen.getByTestId('engrave-cut-card-running').textContent ?? '';
+    expect(row).toContain('left in the job');
+  });
+
+  it('RUNNING: a one-program job states the program’s time, with no basis word', () => {
+    const job = defaultEngraveJob();
+    job.toolKey = 'flat-1.0';
+    const [a] = job.labels.map((l) => l.id);
+    job.setups = [setup('s1', [a!], ['flat-1.0'])];
+    const pkg = packageOf(job, 1);
+    useEngraveReleaseStore.setState({
+      records: { [KEY]: { ...releaseRecord('running', 1, null), files: releaseRecord('running', 1, null).files.slice(0, 1) } },
+    } as never);
+    useMachineRunStore.setState({
+      runs: {
+        [KEY]: {
+          running: true,
+          runId: 1,
+          filename: 'p1.nc',
+          programHash: 'h1',
+          paused: false,
+          stopAsked: false,
+          progress: { state: 'Run', line: 5, percent: 20, elapsedS: null },
+          firstProgressAt: Date.now() - 120_000,
+          pausedMs: 0,
+          lines: [],
+          outcome: null,
+          context: null,
+          end: null,
+          pendingStock: null,
+        } as never,
+      },
+    });
+    render(<CutRunCard job={job} pkg={pkg} plan={planOf(1)} finishedHashes={[]} target={{ host: '192.0.2.10', port: 2222 }} programs={[]} />);
+    const row = screen.getByTestId('engrave-cut-card-running').textContent ?? '';
+    expect(row).toContain('left');
+    expect(row).not.toContain('in the job');
+    expect(row).not.toContain('in this program');
   });
 
   it('while the machine is WAITING the recovery card owns Continue/Stop: the run card offers neither', () => {
