@@ -125,11 +125,17 @@ describe('#1046 the plan states its own wall time (dump only)', () => {
     // same way the original was: this exact case run with the plan/pipeline sources checked out at
     // the branch's base, now main 0022a093b (the old #1046-base hash d9aa7461 predates main's
     // #1129/#1151 landings, which moved the plate's own NC). Flag off == main, byte for byte.
+    //
+    // RE-MEASURED for #1214 ruling (b), the plunge rule (posted-Z): the feed word is now decided on
+    // the rounded posted Z, and this plate has 3 moves whose raw descent posts no Z change, so they
+    // went plunge → feed. The NC was diffed line for line against the base's (sha 25ba7602 the
+    // pin before this change): 1,020 lines both, 0 coordinate differences, max |ΔZ| 0,
+    // 3 plunge→feed and 0 feed→plunge, TIME unchanged (64 s). F words only, as the ruling promises.
     const target = goalTarget();
     const job = goalJob(target);
     const out = await generateGoalProgram(job, target, BALL6, null, { shop: { tools: [], feeds: SHOP_FEEDS } });
     expect(out.ok, out.errors.map((e) => e.message).join('; ')).toBe(true);
     expect(out.nc).not.toBeNull();
-    expect(createHash('sha256').update(out.nc!, 'utf8').digest('hex')).toBe('25ba7602f1cac4a05094f88b6ea938122deaa1db1bf83d1e43d2953684c2a00f');
+    expect(createHash('sha256').update(out.nc!, 'utf8').digest('hex')).toBe('d9aa746147f445bd0d60ab87c7c392ac163fef44146364115665111604bda6e9');
   }, 300_000);
 });
