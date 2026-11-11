@@ -1237,7 +1237,7 @@ export function StartWizard(): JSX.Element {
             </h2>
             <button
               type="button"
-              className="sw-close"
+              className="sw-btn sw-close"
               aria-label="Close"
               title="Close"
               data-testid="start-wizard-close"
@@ -1273,6 +1273,7 @@ export function StartWizard(): JSX.Element {
               </p>
               <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                 <button
+                className="sw-btn"
                   type="button"
                   data-testid="start-wizard-replace-yes"
                   onClick={() => {
@@ -1283,7 +1284,8 @@ export function StartWizard(): JSX.Element {
                 >
                   Replace it
                 </button>
-                <button type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
+                <button
+                className="sw-btn" type="button" data-testid="start-wizard-replace-no" onClick={() => setConfirmReplace(null)}>
                   Keep it
                 </button>
               </div>

@@ -812,6 +812,7 @@ export function OperationStep({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 4 }}>
         {ROD_INTENTS.map((intent) => (
           <button
+                className="sw-btn"
             key={intent.id}
             type="button"
             data-testid={`start-wizard-rotary-intent-${intent.id}`}
@@ -948,6 +949,7 @@ export function OperationStep({
               const goal = goalForSide(setup.id);
               return (
                 <button
+                className="sw-btn"
                   key={setup.id}
                   type="button"
                   role="radio"
@@ -994,6 +996,7 @@ export function OperationStep({
           >
             {WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true).map((p) => (
               <button
+                className="sw-btn"
                 key={p.id}
                 type="button"
                 data-testid={`start-wizard-preset-${p.id}`}
@@ -1539,6 +1542,7 @@ export function OperationStep({
               <span style={MUTED} data-testid="start-wizard-op-pcb-holding-notice">
                 {pcbHoldingFix}{' '}
                 <button
+                className="sw-btn"
                   type="button"
                   data-testid="start-wizard-op-pcb-use-holding"
                   onClick={() => {
@@ -1558,6 +1562,7 @@ export function OperationStep({
                 {pcbAlignment.message}{' '}
                 {pcbAlignment.holes.length > 0 && (
                   <button
+                className="sw-btn"
                     type="button"
                     data-testid="start-wizard-op-pcb-add-alignment"
                     onClick={() => {
@@ -1576,6 +1581,7 @@ export function OperationStep({
               <span style={MUTED} data-testid="start-wizard-op-pcb-stock-notice">
                 {pcbStockFix}{' '}
                 <button
+                className="sw-btn"
                   type="button"
                   data-testid="start-wizard-op-pcb-use-stock"
                   onClick={() => {
@@ -1597,7 +1603,8 @@ export function OperationStep({
           re-entry's Done already finishes an existing job. */}
       {fresh && !rotary && onStartEmptyJob !== undefined && (
         <p style={{ margin: '12px 0 2px' }} data-testid="start-wizard-empty-job-row">
-          <button type="button" data-testid="start-wizard-empty-job" onClick={onStartEmptyJob} style={LINK}>
+          <button
+                className="sw-btn" type="button" data-testid="start-wizard-empty-job" onClick={onStartEmptyJob} style={LINK}>
             Start with an empty job
           </button>
         </p>

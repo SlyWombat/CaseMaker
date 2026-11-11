@@ -210,7 +210,7 @@ export function SourcesPanel() {
             </span>
             <span className="wb-source__actions">
               <button
-                className="wb-btn wb-btn--ghost"
+                className="sw-btn wb-btn wb-btn--ghost"
                 onClick={() => void onCheck(s)}
                 disabled={checkingId === s.id}
                 title="Compare the cached boards against the index upstream"
@@ -219,7 +219,7 @@ export function SourcesPanel() {
                 {checkingId === s.id ? '…' : 'Check'}
               </button>
               <button
-                className="wb-btn wb-btn--ghost"
+                className="sw-btn wb-btn wb-btn--ghost"
                 onClick={() => {
                   clearCheck(s.id);
                   void refreshRemoteSource(s.id);
@@ -230,7 +230,7 @@ export function SourcesPanel() {
                 {refreshing.includes(s.id) ? '…' : '↻ Refresh'}
               </button>
               <button
-                className="wb-btn wb-btn--ghost wb-btn--danger"
+                className="sw-btn wb-btn wb-btn--ghost wb-btn--danger"
                 onClick={() => removeRemoteSource(s.id)}
                 title="Remove this source and its cached boards"
               >
@@ -247,7 +247,7 @@ export function SourcesPanel() {
             <strong>Case Maker Community</strong> — the official community board index
           </span>
           <button
-            className="wb-btn"
+            className="sw-btn wb-btn"
             disabled={busy}
             data-testid="welcome-source-add-community"
             onClick={async () => {
@@ -276,7 +276,7 @@ export function SourcesPanel() {
           aria-label="Online board source URL"
         />
         <button
-          className="wb-btn"
+          className="sw-btn wb-btn"
           onClick={() => void onAdd()}
           disabled={busy || !url.trim()}
           data-testid="welcome-source-add"

@@ -124,7 +124,8 @@ function fmtMm(v: number): string {
 }
 
 /**
- * #1123 item 1 — THE WHOLE TILE IS THE CONTROL. The card itself is the button (a `<button>` may not
+ * #1123 item 1 — THE WHOLE TILE IS THE CONTROL. The card itself is the button (a `<button
+                className="sw-btn">` may not
  * wrap the heading and the paragraph it must contain), and the primary action stays inside it as a
  * span, visually the same label. Pointer or Enter/Space, the same action fires.
  */
@@ -187,7 +188,7 @@ function TemplateCard({
   return (
     <li>
       <button
-        className="wb-card wb-card--tpl"
+        className="sw-btn wb-card wb-card--tpl"
         onClick={() => onApply(t.id)}
         data-testid={`welcome-template-${t.id}`}
         aria-label={`Load ${t.name} template`}
@@ -470,7 +471,7 @@ export function WelcomeOverlay() {
             </div>
             <button
               type="button"
-              className="wb-btn wb-btn--primary wb-continue__action"
+              className="sw-btn wb-btn wb-btn--primary wb-continue__action"
               data-testid="welcome-continue-open"
               onClick={() => useProjectStore.getState().resume()}
               title="Back to the workspace, exactly as you left it — nothing was discarded"
@@ -493,7 +494,7 @@ export function WelcomeOverlay() {
           </div>
           <div className="wb-hero__actions">
             <button
-              className={`wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
+              className={`sw-btn wb-btn wb-btn--ghost ${sourcesOpen ? 'wb-btn--toggled' : ''}`}
               onClick={() => setSourcesOpen((v) => !v)}
               data-testid="welcome-sources-toggle"
               aria-expanded={sourcesOpen}
@@ -506,7 +507,7 @@ export function WelcomeOverlay() {
               </span>
             </button>
             <button
-              className="wb-btn wb-btn--ghost"
+              className="sw-btn wb-btn wb-btn--ghost"
               onClick={() => fileInputRef.current?.click()}
               data-testid="welcome-import-board"
               title="Add a board profile (.json) to your local library"
@@ -533,7 +534,8 @@ export function WelcomeOverlay() {
         {dropError !== null && (
           <div className="wb-notice wb-notice--err" data-testid="welcome-drop-error">
             <span>{dropError}</span>
-            <button onClick={() => setDropError(null)} aria-label="Dismiss">
+            <button
+                className="sw-btn" onClick={() => setDropError(null)} aria-label="Dismiss">
               ✕
             </button>
           </div>
@@ -632,7 +634,7 @@ export function WelcomeOverlay() {
                     {i > 0 && ' · '}
                     <button
                       type="button"
-                      className="wb-door__link"
+                      className="sw-btn wb-door__link"
                       data-testid={`welcome-recent-${i}`}
                       title={recent.fileName}
                       disabled={openingRecent !== null}
@@ -651,7 +653,7 @@ export function WelcomeOverlay() {
                   {i > 0 && ' · '}
                   <button
                     type="button"
-                    className="wb-door__link"
+                    className="sw-btn wb-door__link"
                     data-testid={`welcome-starter-${starter.id}`}
                     onClick={() => {
                       enterCncWorkspace();
@@ -691,7 +693,8 @@ export function WelcomeOverlay() {
                 importNotice.error
               )}
             </span>
-            <button onClick={() => setImportNotice(null)} aria-label="Dismiss">
+            <button
+                className="sw-btn" onClick={() => setImportNotice(null)} aria-label="Dismiss">
               ✕
             </button>
           </div>
@@ -721,7 +724,7 @@ export function WelcomeOverlay() {
             ).map(([key, label]) => (
               <button
                 key={key}
-                className={`wb-chip ${sourceFilter === key ? 'wb-chip--active' : ''}`}
+                className={`sw-btn wb-chip ${sourceFilter === key ? 'wb-chip--active' : ''}`}
                 onClick={() => setSourceFilter(key)}
                 data-testid={`welcome-filter-${key}`}
               >
@@ -785,7 +788,7 @@ export function WelcomeOverlay() {
                     return (
                       <li key={board.id}>
                         <button
-                          className={`wb-card ${selectedId === board.id ? 'wb-card--selected' : ''}`}
+                          className={`sw-btn wb-card ${selectedId === board.id ? 'wb-card--selected' : ''}`}
                           onClick={() => setSelectedId(board.id)}
                           onDoubleClick={() => applyBoard(board.id)}
                           data-testid={`welcome-board-${board.id}`}
@@ -883,7 +886,7 @@ export function WelcomeOverlay() {
                   {selectedTpl ? (
                     <>
                       <button
-                        className="wb-btn wb-btn--primary"
+                        className="sw-btn wb-btn wb-btn--primary"
                         onClick={() => applyBoard(selected.board.id)}
                         data-testid="welcome-generate"
                         title={`Applies the "${selectedTpl.name}" quickstart recipe`}
@@ -891,7 +894,7 @@ export function WelcomeOverlay() {
                         ★ Create from quickstart
                       </button>
                       <button
-                        className="wb-btn"
+                        className="sw-btn wb-btn"
                         onClick={() => applyBoard(selected.board.id, { forceBlank: true })}
                         data-testid="welcome-generate-blank"
                       >
@@ -900,7 +903,7 @@ export function WelcomeOverlay() {
                     </>
                   ) : (
                     <button
-                      className="wb-btn wb-btn--primary"
+                      className="sw-btn wb-btn wb-btn--primary"
                       onClick={() => applyBoard(selected.board.id)}
                       data-testid="welcome-generate"
                     >
@@ -956,6 +959,7 @@ export function WelcomeOverlay() {
                       {selectedTemplates.map((t) => (
                         <li key={t.id}>
                           <button
+                className="sw-btn"
                             onClick={() => {
                               void applyTemplate(t.id);
                             }}
@@ -1013,11 +1017,11 @@ export function WelcomeOverlay() {
 
                 {selected.origin.kind === 'local' && (
                   <div className="wb-local-actions">
-                    <button className="wb-btn" onClick={() => onExport(selected.board.id)} data-testid="welcome-export-board">
+                    <button className="sw-btn wb-btn" onClick={() => onExport(selected.board.id)} data-testid="welcome-export-board">
                       Export JSON
                     </button>
                     <button
-                      className="wb-btn wb-btn--danger"
+                      className="sw-btn wb-btn wb-btn--danger"
                       data-testid="welcome-remove-board"
                       onClick={() => {
                         removeLocalBoard(selected.board.id);

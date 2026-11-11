@@ -47,6 +47,7 @@ export function RotaryOperationPicker({ selected, onPick, testidFor }: RotaryOpe
               return (
                 <div key={op.id} style={{ display: 'grid', gap: 2 }}>
                   <button
+                className="sw-btn"
                     type="button"
                     data-testid={testidFor(op.id)}
                     aria-pressed={on}

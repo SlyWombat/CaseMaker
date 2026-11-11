@@ -785,6 +785,7 @@ export function StartStockStep({
             {seed?.computed === true && (
               <li>
                 <button
+                className="sw-btn"
                   type="button"
                   data-testid="start-wizard-blank-card-design"
                   aria-pressed={shelfId === null && fileRead === null && seededNumbers}
@@ -824,6 +825,7 @@ export function StartStockStep({
                 return (
                   <li key={item.id}>
                     <button
+                className="sw-btn"
                       type="button"
                       data-testid={`start-wizard-shelf-item-${item.id}`}
                       data-state={matches ? (why === null ? 'ok' : 'refused') : 'other'}
@@ -860,6 +862,7 @@ export function StartStockStep({
             {/* #1105 item 6 — the list's last row: the fields, seeded from the proposal. */}
             <li>
               <button
+                className="sw-btn"
                 type="button"
                 data-testid="start-wizard-stock-other-size"
                 onClick={() => {
@@ -914,6 +917,7 @@ export function StartStockStep({
       >
         {FORM_DEFS.map((f) => (
           <button
+                className="sw-btn"
             key={f.id}
             type="button"
             data-testid={`start-wizard-form-${f.id}`}
@@ -942,6 +946,7 @@ export function StartStockStep({
       >
         {/* The section label above already says Size (#1105 review): the toggle is only the unit. */}
         <button
+                className="sw-btn"
           type="button"
           data-testid="start-wizard-size-mm"
           aria-pressed={unit === 'mm'}
@@ -954,6 +959,7 @@ export function StartStockStep({
           mm
         </button>
         <button
+                className="sw-btn"
           type="button"
           data-testid="start-wizard-size-in"
           aria-pressed={unit === 'in'}
@@ -975,6 +981,7 @@ export function StartStockStep({
             <p style={{ ...MUTED, margin: '8px 0 0' }} data-testid="start-wizard-stock-summary">
               {selectionSummary()}{' '}
               <button
+                className="sw-btn"
                 type="button"
                 data-testid="start-wizard-stock-summary-edit"
                 onClick={() => {
