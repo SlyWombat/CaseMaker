@@ -198,6 +198,10 @@ function BedSeatTap({ machine, profile }: { machine: MachineRecord; profile: Bed
   const defaults = useShopDefaultsStore((s) => s.defaults);
   const calibration = useSettingsStore((s) => s.machineCalibration);
   const tapBusy = useMountTapBusyFlag();
+  // #1201 — THE BED-CLEAR TICK. The seat is measured with the bed CLEAR, and that is the one fact
+  // the app cannot read from the machine: the operator states it, and the press stays disabled
+  // until they do. The tick clears after every run, so a second press re-affirms it.
+  const [bedClear, setBedClear] = useState(false);
   // #773/#845 — no frame read, no clearance: the row is not offered (and the hooks stay
   // unconditional, as BedJawTap's own note explains).
   const frameProblem = machineFrameProblemById(machine.profileId);
@@ -234,24 +238,37 @@ function BedSeatTap({ machine, profile }: { machine: MachineRecord; profile: Bed
   return (
     <span data-testid="manage-bed-tap-seat">
       <span className="hint" data-testid="manage-bed-tap-seat-clear">
-        The bed is clear — no blank, no clamps in the way. The touch is at machine X {point.x}, Y{' '}
-        {point.y}.
+        <label>
+          <input
+            type="checkbox"
+            data-testid="manage-bed-tap-seat-clear-tick"
+            checked={bedClear}
+            disabled={tapBusy}
+            onChange={(e) => setBedClear(e.target.checked)}
+          />{' '}
+          The bed is clear — no blank, no clamps in the way.
+        </label>{' '}
+        The touch is at machine X {point.x}, Y {point.y}.
       </span>{' '}
       <button
         type="button"
         className="btn btn--sm"
         data-testid="manage-bed-tap-seat-button"
-        disabled={tapBusy}
-        onClick={() =>
-          void api.tapJaw({
-            x: point.x,
-            y: point.y,
-            fromMachineZ: seekFromMachineZ,
-            reference: 'bracket-seat',
-            // The reading IS the seat: the touch is on the board, not the arm.
-            datumOffsetMm: 0,
-          })
-        }
+        disabled={tapBusy || !bedClear}
+        title={bedClear ? undefined : 'tick that the bed is clear first'}
+        onClick={() => {
+          void api
+            .tapJaw({
+              x: point.x,
+              y: point.y,
+              fromMachineZ: seekFromMachineZ,
+              reference: 'bracket-seat',
+              // The reading IS the seat: the touch is on the board, not the arm.
+              datumOffsetMm: 0,
+            })
+            // The statement is about ONE measurement: a second press starts unticked.
+            .finally(() => setBedClear(false));
+        }}
       >
         Measure the bracket seat
       </button>

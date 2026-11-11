@@ -136,7 +136,9 @@ export async function serveHouse(page: Page, options: HouseOptions = {}): Promis
     given !== undefined ? given : shared === null ? undefined : shared[key];
   const inventory = section(options.inventory, 'inventory');
   const stock = section(options.stock, 'stock');
-  const defaults = section(options.defaults, 'defaults');
+  // #1201 — a defaults PUT under `writes: 'applied'` lands in this copy, so a measurement whose
+  // write path also moves a shop default (the seat tap) can complete and then re-read.
+  let defaults = section(options.defaults, 'defaults') as Record<string, unknown> | undefined;
 
   const served = (options.location ?? null) as { machines?: Json[]; accessories?: Json[] } | null;
   let etag = 1;
@@ -190,6 +192,14 @@ export async function serveHouse(page: Page, options: HouseOptions = {}): Promis
       if (accessoryPath !== null && request.method() === 'DELETE') {
         const id = decodeURIComponent(accessoryPath[1]!);
         served.accessories = (served.accessories ?? []).filter((a) => a.id !== id);
+        bump();
+        return json({ ok: true });
+      }
+      // #1201 — one shop default, as `PUT /defaults/<key>`: the seat tap moves the seat default
+      // after its datum write, and this keeps that path whole instead of a partial failure.
+      const defaultPath = /^\/defaults\/(.+)$/.exec(path);
+      if (defaultPath !== null && request.method() === 'PUT' && defaults !== undefined) {
+        defaults = { ...defaults, [decodeURIComponent(defaultPath[1]!)]: request.postDataJSON() };
         bump();
         return json({ ok: true });
       }
