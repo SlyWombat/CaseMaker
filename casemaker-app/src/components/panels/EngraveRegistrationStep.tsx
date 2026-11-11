@@ -465,6 +465,9 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
   const seatTapApi = useMountTap({
     target,
     settings: regSettings,
+    // #1199 — the tap traverses to the seat at the machine's clearance, never at the plan's band
+    // approach; the clearance is the plan builders' own `seekFromMachineZ`.
+    clearanceZ: seekFromMachineZ,
     floor: jobMachine(job, calibration).envelope.z.min,
     probeId: probe?.id ?? null,
     successNote: 'the bracket seat is recorded — plan the registration again',

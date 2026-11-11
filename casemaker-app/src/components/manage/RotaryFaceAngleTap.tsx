@@ -55,6 +55,7 @@ export function RotaryFaceAngleTap({ machine, job, testIdPrefix = 'rotary-face-a
   const seekZ = clearanceZOf(profile);
 
   const api = useMountTap({
+    clearanceZ: seekZ ?? 0,
     target,
     settings,
     floor: profile.envelope.z.min,

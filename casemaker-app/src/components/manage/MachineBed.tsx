@@ -135,6 +135,7 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
   const mountTap = mountTapFor(machine, Object.values(registrations), seekFromMachineZ, mountNum(viseAcc?.unit.jawStartY) ?? -10);
 
   const api = useMountTap({
+    clearanceZ: seekFromMachineZ,
     target,
     settings: registrationSettings(defaults, probe).settings,
     floor: profile.envelope.z.min,

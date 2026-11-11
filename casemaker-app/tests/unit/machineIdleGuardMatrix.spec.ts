@@ -47,7 +47,7 @@ const OPERATIONS: readonly Operation[] = [
   { name: 'the work light', press: () => toggleLight(TARGET, true) },
   { name: 'a spindle fan', press: () => toggleAccessory(TARGET, 'spindle-fan', true) },
   { name: 'the vacuum', press: () => toggleVacuum(TARGET, true) },
-  { name: 'camera home', press: () => runCameraHome(TARGET, cameraHomeLines(POSE)) },
+  { name: 'camera home', press: () => runCameraHome(TARGET, cameraHomeLines(POSE, Z1.toolChange.clearanceZ)) },
 ];
 
 describe('#1180 the idle guard — every one-press control, one table', () => {

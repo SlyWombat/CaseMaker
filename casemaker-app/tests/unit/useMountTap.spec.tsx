@@ -95,6 +95,7 @@ function Host({
   const api = useMountTap({
     target: TARGET,
     settings: SETTINGS,
+    clearanceZ: -3,
     floor: -80,
     probeId: 'probe-1',
     successNote,
@@ -474,7 +475,7 @@ describe('#1059 the face-angle step through the hook', () => {
   }
 
   function FaceHost({ inputs = faceInputs() }: { inputs?: FaceAngleInputs }) {
-    const api = useMountTap({ target: TARGET, settings: SETTINGS, floor: -80, probeId: 'probe-1', successNote: 'the face angle is recorded' });
+    const api = useMountTap({ target: TARGET, settings: SETTINGS, clearanceZ: -3, floor: -80, probeId: 'probe-1', successNote: 'the face angle is recorded' });
     const busy = useMountTapBusyFlag();
     return (
       <div>

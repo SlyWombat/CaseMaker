@@ -122,6 +122,12 @@ export interface MountTapInputs {
   floor: number;
   /** The checked-out probe's id, written as the datum's `by`. */
   probeId: string | null;
+  /**
+   * #1199 — the machine's own travel height, machine Z (`toolChange.clearanceZ`): the height the
+   * XY move to the tap point is taken at. The tap's `fromMachineZ` is a DESCENT height and is never
+   * used for the traverse; a tap with no clearance refuses before the wire.
+   */
+  clearanceZ: number;
   /** What the caller says once the mount's reference is recorded. */
   successNote: string;
   /**
@@ -241,8 +247,10 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     handleRef.current = handle;
     try {
       const r = await runMountTap(
-        { x: tap.x, y: tap.y },
-        tap.fromMachineZ,
+        // #1199 — the tap's own approach rides with the point; the session's height is the
+        // machine's clearance, so the XY move to the seat is taken there and the descent at it.
+        { x: tap.x, y: tap.y, fromMachineZ: tap.fromMachineZ },
+        inputs.clearanceZ,
         inputs.settings,
         { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
         inputs.floor,

@@ -55,6 +55,7 @@ export function RotaryAxisTap({ machine, testIdPrefix = 'rotary-tap' }: RotaryAx
   const surfaceTop = bedProfile?.datums.surfaceTopZ ?? null;
 
   const api = useMountTap({
+    clearanceZ: seekFromMachineZ,
     target,
     settings: registrationSettings(defaults, probe).settings,
     floor: profile.envelope.z.min,
