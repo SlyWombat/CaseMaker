@@ -183,6 +183,11 @@ export interface FinishOpOptions {
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number };
   safeZMm: number;
   hopZMm: number;
+  /**
+   * #1214's ruling (b) — the post's printed axis precision (decimal places), from the job's
+   * machine: the grid the feed word is decided on (`cam/printedZ.ts`). Never a remembered three.
+   */
+  axisPrecision: number;
   toolNumber: number;
   spindleRpm: number;
   air: boolean;
@@ -585,7 +590,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       // the op's own first feed follows (9e976f0b's finding — never a descent at the cutting rate).
       // #1214's ruling (b) — a descent is decided on the POSTED grid: a move that changes no
       // printed digit is not a descent (`cam/printedZ.ts`).
-      const f = isPlunge(from.z, to.z) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
+      const f = isPlunge(from.z, to.z, opts.axisPrecision) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin;
       return [{ kind: 'feed', x: to.x, y: to.y, z: to.z, f }];
     }
     // #1030 (the manager's ruling) — A SHORT JOIN REFUSED ONLY BY THE CREASE IS FOLLOWED, not
@@ -600,6 +605,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
         levelZ,
         opts.feeds,
         SHORT_JOIN_CLIMB_BAND_MM,
+        opts.axisPrecision,
       );
       if (shortFollow !== null) {
         joinCounts.follow++;
@@ -611,7 +617,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     // gouged below the design — but only when the path is provably clear all the way and the
     // follow is FASTER than the retract it replaces (the time guard; the earlier pricing showed a
     // stay-down feed only wins inside ~25-30 mm, and this branch's joins are far shorter).
-    const follow = followCutSurface(from, to, (x, y) => opts.clSurface.dropCutter(x, y), linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ);
+    const follow = followCutSurface(from, to, (x, y) => opts.clSurface.dropCutter(x, y), linkSampleStep, levelZ, opts.feeds, opts.rapid, opts.regionRef.regionClearanceZ, opts.axisPrecision);
     if (follow !== null) {
       joinCounts.follow++;
       return follow;
@@ -831,7 +837,9 @@ export function finish(opts: FinishOpOptions): OpOutcome {
           x: entryPoint.x,
           y: entryPoint.y,
           z: entryPoint.z,
-          f: isPlunge(opts.hopZMm, entryPoint.z) ? opts.feeds.plungeFeedMmPerMin : opts.feeds.feedMmPerMin,
+          f: isPlunge(opts.hopZMm, entryPoint.z, opts.axisPrecision)
+            ? opts.feeds.plungeFeedMmPerMin
+            : opts.feeds.feedMmPerMin,
         });
       } else {
         const from: LinkPoint = { x: prevExit.x, y: prevExit.y, z: prevExit.z };

@@ -179,7 +179,7 @@ describe.each([
     const liveSurface = clSurface(geometry, region, cutter, 3);
     return finish({
       cutter, region, regionRef, clSurface: liveSurface, kind, scallopMm: 0.1, stepDownMm: 2,
-      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
   }
 
@@ -242,7 +242,7 @@ describe.each([
     const out = finish({
       cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
       maskCells: (x: number) => !(x > 5 && x < 30),
-      feeds: { feedMmPerMin: 500, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      feeds: { feedMmPerMin: 500, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
     const rapids = out.ir.operations[0]!.moves.filter((m) => m.kind === 'rapid');
     expect(rapids.some((m) => m.z === regionRef.regionClearanceZ), 'the rise was crossed without a retract').toBe(true);
@@ -263,7 +263,7 @@ describe.each([
     const out = finish({
       cutter, region, regionRef, clSurface: risen, kind, scallopMm: 0.1, stepDownMm: 2,
       maskCells: (x: number) => !(x > 5 && x < 11),
-      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
     const moves = out.ir.operations[0]!.moves;
     // FOLLOWED, not a chord: a chord would be ONE move from the row at x ≈ 4.5 straight to the
@@ -369,7 +369,7 @@ describe('#960 finish() — the ball-scallop step-over actually holds the band, 
     const liveSurface = clSurface(geometry, region, ball6, 3);
     const out = finish({
       cutter: ball6, region, regionRef, clSurface: liveSurface, kind: 'ball-scallop', scallopMm: BAND_MM, stepDownMm: 100,
-      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 }, safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
     const profile = profileOf(ball6)!;
     // One level only (`stepDownMm` wider than the region's own depth) — every pass is the LAST
@@ -438,7 +438,7 @@ describe('#1080 the finish reads the cross-row slope, not the gradient magnitude
     return finish({
       cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
       scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
-      safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
   };
 
@@ -497,7 +497,7 @@ describe('#1080 the cross-row read is gated on a straight strip', () => {
     return finish({
       cutter: ball6, region, regionRef, clSurface: clSurface(geometry, region, ball6, 3), kind: 'ball-scallop',
       scallopMm: 0.1, stepDownMm: 2, feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
-      safeZMm: 10, hopZMm: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
+      safeZMm: 10, hopZMm: 3, axisPrecision: 3, toolNumber: 1, spindleRpm: 12000, air: true, rapid,
     });
   };
 

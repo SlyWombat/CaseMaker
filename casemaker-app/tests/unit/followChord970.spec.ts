@@ -32,6 +32,7 @@ describe('#970 the follow link holds the row dropper\'s chord guarantee', () => 
       FEEDS,
       RAPID,
       10,
+      3,
     );
     expect(moves, 'the follow must be taken for this short, cheap link').not.toBeNull();
     let prev = FROM;

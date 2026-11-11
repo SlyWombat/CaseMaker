@@ -236,6 +236,7 @@ describe('#970 link sites — a buried rise under a stay-down link', () => {
       offset: makeClipperOffset(tl),
       safeZMm: 8,
       hopZMm: 3,
+      axisPrecision: 3,
       toolNumber: 1,
       spindleRpm: 12000,
       air: true,

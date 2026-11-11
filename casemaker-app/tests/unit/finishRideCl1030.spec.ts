@@ -76,7 +76,7 @@ describe('#1030 — the ride test samples a short join’s interior', () => {
   it('a refused short join is FED along the sampled CL, never retracted (the manager’s ruling)', () => {
     // The crease above: the chord is refused at 0.5, and the short join follows the CL instead —
     // interior points on the CL, about zero seconds, no rapid.
-    const moves = followShortJoin(from, to, (x) => CREASE.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    const moves = followShortJoin(from, to, (x) => CREASE.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1, 3);
     expect(moves).not.toBeNull();
     expect(moves!.length).toBeGreaterThan(2); // more than one straight chord
     for (const m of moves!) {
@@ -92,13 +92,13 @@ describe('#1030 — the ride test samples a short join’s interior', () => {
 
   it('a join whose CL climbs like a wall keeps the retract (followShortJoin refuses it)', () => {
     const wall: ClSurface = { ...CREASE, dropCutter: (x: number) => (x > 0.1 && x < 0.23 ? 0.5 : -0.02) };
-    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => wall.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => wall.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1, 3);
     expect(moves).toBeNull();
   });
 
   it('an interrupted CL keeps the retract (followShortJoin refuses it)', () => {
     const hole: ClSurface = { ...CREASE, dropCutter: (x: number) => (x > 0.1 && x < 0.23 ? null : -0.02) };
-    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => hole.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1);
+    const moves = followShortJoin({ x: 0, y: 0, z: -0.02 }, { x: 0.33, y: 0, z: -0.02 }, (x) => hole.dropCutter(x, 0), -1, 0.05, { feedMmPerMin: 500, plungeFeedMmPerMin: 200 }, 0.1, 3);
     expect(moves).toBeNull();
   });
 });

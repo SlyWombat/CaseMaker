@@ -74,6 +74,8 @@ export function followCutSurface(
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
   rapid: { xyMmPerMin: number; zMmPerMin: number },
   clearanceZMm: number,
+  /** #1214 ruling (b) — the post's printed axis precision, the grid its feed words are decided on. */
+  zDecimals: number,
 ): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
   // #970 — THE CHORD HOLDS THE ROW DROPPER'S GUARANTEE. The old point list sampled the surface
   // every `stepMm` and connected the samples with straight chords: on a convex CL corner (a ridge
@@ -117,7 +119,7 @@ export function followCutSurface(
     const a = points[i - 1]!;
     const b = points[i]!;
     const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const f = isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    const f = isPlunge(a.z, b.z, zDecimals) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
     followSeconds += (d / f) * 60;
     moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
   }
@@ -151,6 +153,8 @@ export function followShortJoin(
   clampZMm: number,
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
   climbBandMm: number,
+  /** #1214 ruling (b) — the post's printed axis precision, the grid its feed words are decided on. */
+  zDecimals: number,
 ): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
   const stride = stepMm > 0 ? stepMm : 0.05;
   const length = Math.hypot(to.x - from.x, to.y - from.y);
@@ -200,7 +204,7 @@ export function followShortJoin(
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f: isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin });
+    moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f: isPlunge(a.z, b.z, zDecimals) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin });
   }
   return moves;
 }
@@ -224,6 +228,8 @@ export function followLinearCutSurface(
   feeds: { feedMmPerMin: number; plungeFeedMmPerMin: number },
   rapid: { xyMmPerMin: number; zMmPerMin: number },
   clearanceZMm: number,
+  /** #1214 ruling (b) — the post's printed axis precision, the grid its feed words are decided on. */
+  zDecimals: number,
 ): { kind: 'feed'; x: number; y: number; z: number; f: number }[] | null {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
   const steps = Math.max(1, Math.ceil(length / stepMm));
@@ -242,7 +248,7 @@ export function followLinearCutSurface(
     const a = points[i - 1]!;
     const b = points[i]!;
     const d = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    const f = isPlunge(a.z, b.z) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
+    const f = isPlunge(a.z, b.z, zDecimals) ? feeds.plungeFeedMmPerMin : feeds.feedMmPerMin;
     followSeconds += (d / f) * 60;
     moves.push({ kind: 'feed', x: b.x, y: b.y, z: b.z, f });
   }

@@ -96,6 +96,7 @@ describe('#960 finishing by slope — the two levers', () => {
       feeds: { feedMmPerMin: 600, plungeFeedMmPerMin: 200 },
       safeZMm: 12,
       hopZMm: 11,
+      axisPrecision: 3,
       toolNumber: 1,
       spindleRpm: 10000,
       air: true,

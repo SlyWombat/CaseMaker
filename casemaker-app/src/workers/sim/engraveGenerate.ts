@@ -4898,6 +4898,9 @@ export function generateRotaryGoalProgram(
       toolNumber: toolNumberFor(tool),
       spindleRpm: resolved.params.rpm,
       air: job.cutOverride?.air ?? true,
+      // #1214's ruling (b) — the relief's own post is `postFor(mill)` below: its printed
+      // precision is the grid the finish's feed words are decided on.
+      axisPrecision: dialectOf(mill).axisPrecision,
       feeds,
       rapid: mill.rapidEstimate,
       finishScallopMm,
@@ -6291,6 +6294,9 @@ export async function generateGoalProgram(
   try {
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
     const planOpts: PlanModelCamOptions = {
+      // #1214's ruling (b) — the job's own machine's printed precision, the grid every feed word
+      // in the plan is decided on (the plan posts through this same machine's post).
+      axisPrecision: dialectOf(jobMachine(job, calibration)).axisPrecision,
       ...(onProgress === undefined
         ? {}
         : {

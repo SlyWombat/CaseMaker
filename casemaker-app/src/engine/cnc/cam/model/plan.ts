@@ -30,7 +30,7 @@ import { memTrace } from '@/engine/cnc/memTrace';
 import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
-import { Z1 } from '@/engine/cnc/machine';
+import { dialectOf, Z1 } from '@/engine/cnc/machine';
 import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
@@ -681,6 +681,13 @@ export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;
   /**
+   * #1214's ruling (b) — THE POST'S PRINTED AXIS PRECISION (decimal places), from the job's
+   * machine: the grid every feed word is decided on (`cam/printedZ.ts`). The caller that holds the
+   * job's machine passes `dialectOf(jobMachine(...)).axisPrecision`; absent → the Z1's, because
+   * this planner posts the model pipeline's own programs through `postZ1`.
+   */
+  axisPrecision?: number;
+  /**
    * #1023 — TRUE (default) emits the finish's leftover statement. `planTwoOutcomes` suppresses it
    * on the IDEAL reference run: the owned plan is the one that posts, and its statement is the one
    * that names the ideal's measured ball (one leftover statement per card, not two).
@@ -983,6 +990,9 @@ function formatSpan(seconds: number): string {
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
   // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
   memTrace('plan:start', { plan: opts.planKind ?? 'owned', setups: input.setups.length, house: input.cutters.house.length });
+  // #1214's ruling (b) — the printed precision every feed word is decided on. The Z1's only when
+  // the caller states none: `postZ1` is this planner's own post (`postZ1(ir, ..., Z1)` below).
+  const axisPrecision = opts.axisPrecision ?? dialectOf(Z1).axisPrecision;
   // #1046 — the plan's own wall time, for the ladder's cost estimate (the dump only).
   const planStartedAt = performance.now();
   const tl = await getToplevel();
@@ -1609,6 +1619,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       offset,
       safeZMm: SAFE_Z,
       hopZMm: HOP_Z,
+      // #1214's ruling (b) — the plan's printed precision rides every stage's feed decisions.
+      axisPrecision,
       memo: stageMemo,
       ...(depthBandMm === undefined ? {} : { depthBandMm }),
       geometry: curvedGeometry,
@@ -4686,6 +4698,11 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
 export interface PlanCurvedOptions {
   /** The mesh the tree's regions index into (`ModelPlanInput.geometry`). */
   geometry: FeatureSource;
+  /**
+   * #1214's ruling (b) — the post's printed axis precision (decimal places): the grid the feed
+   * words are decided on. Absent → the Z1's (this planner posts through `postZ1`).
+   */
+  axisPrecision?: number;
   /** #982 — extra remainder-style regions the curved pipeline also plans (the no-flat path's
    *  synthetic pocket floors). Absent → the tree's own remainder only. */
   extraRegions?: RemainderRegion[];
@@ -4886,6 +4903,9 @@ function regionRefOf(id: string, kind: RegionKind, footprint: Polygons, topZ: nu
 }
 
 export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): PlanCurvedResult {
+  // #1214's ruling (b) — the printed precision the stages' feed words are decided on. The Z1's
+  // only when the caller states none: this planner posts through `postZ1`.
+  const axisPrecision = opts.axisPrecision ?? dialectOf(Z1).axisPrecision;
   const ops: PlannedOp[] = [];
   const notes: string[] = [];
   // #992 — the SAME facts, typed (codes, severities, counts), for the seam to route.
@@ -5171,6 +5191,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           ...(opts.ball !== undefined && opts.ball === flat ? { cutPointInRegion: true } : {}),
           safeZMm: opts.safeZMm,
           hopZMm: opts.hopZMm,
+          axisPrecision,
           toolNumber: opts.toolNumberFor(flat),
           spindleRpm: paramsFor(flat).rpm,
           air: opts.air,
@@ -5471,6 +5492,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             feeds: feedsOf(paramsFor(floorFace.flat)),
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
+            axisPrecision,
             toolNumber: opts.toolNumberFor(floorFace.flat),
             spindleRpm: paramsFor(floorFace.flat).rpm,
             air: opts.air,
@@ -5607,6 +5629,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         feeds: feedsOf(paramsFor(finishCutter)),
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
+        axisPrecision,
         toolNumber: opts.toolNumberFor(finishCutter),
         spindleRpm: paramsFor(finishCutter).rpm,
         air: opts.air,
@@ -5716,6 +5739,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             feeds: feedsOf(paramsFor(restBallTool)),
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
+            axisPrecision,
             toolNumber: opts.toolNumberFor(restBallTool),
             spindleRpm: paramsFor(restBallTool).rpm,
             air: opts.air,
