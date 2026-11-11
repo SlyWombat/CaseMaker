@@ -406,14 +406,9 @@ export function sheetRegistrationPlan(args: {
     const planned = planFootprintRegistration(input.input);
     if (planned.ok) return { footprint: planned.plan };
   }
-  // No seat datum (or nothing to plan on it): the sheet's first touch is the seat seek, when the
-  // house can back one. Its point is measured from the plan's seed — a placed bracket's own.
-  const placed = job.workholding.kind === 'bracket' && (job.workholding.bracket as { placement?: 'anchored' | 'placed' }).placement === 'placed';
-  // #1070 (C8) — a PLACED bracket with no stated position prints NO registration block at all:
-  // neither a footprint plan nor a seat point can be placed without the bracket's position, and a
-  // block seeded from the anchor it is not on is the contradiction this replaced.
-  if (placed && (placedSeed === null || placedSeed === undefined)) return {};
-  const origin = placed && placedSeed !== null && placedSeed !== undefined ? { x: placedSeed.x, y: placedSeed.y } : null;
-  const seatSeek = seatSeekFor({ job, calibration, defaults, probe, origin });
-  return seatSeek.ok ? { seatSeek: seatSeek.seek } : {};
+  // #1201 — A JOB NEVER TOUCHES THE SEAT. The seat is a BED-SETUP datum; with no trusted seat the
+  // card measures the top ON THE BLANK (two guarded touches). The sheet prints no seat block —
+  // instructing a job-time touch on the board beside a mounted blank is the press that bent the
+  // probe (#1199). Its ordinary registration/surface steps stand; the card states the points.
+  return {};
 }

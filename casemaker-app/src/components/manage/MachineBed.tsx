@@ -31,6 +31,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import { canReachMachine } from '@/platform/capabilities';
 import { mountNum, mountTapFor, probeFor, accessoryNameFor } from '@/engine/cnc/registration/mountContext';
+import { anchorFrom, bracketDatum, bracketSettings } from '@/engine/cnc/mounts/bracket';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf, machineFrameProblemById } from '@/engine/cnc/machine';
@@ -184,6 +185,102 @@ function BedJawTap({ machine }: { machine: MachineRecord }) {
   );
 }
 
+/**
+ * #1201 — THE BRACKET SEAT IS A BED-SETUP DATUM, NOT A JOB STEP.
+ *
+ * One touch with the BED CLEAR — no blank, no clamps in the way — at the point the datum names
+ * when it names one (the spot verified solid when it was last taken), else beside the bracket's
+ * front arm. The reading is written to the ACTIVE bed profile with the probe's own M491 reference
+ * (#1189), so a job can use it as a trusted seat without ever touching the board beside a mounted
+ * blank. The Register card in a job never offers this press.
+ */
+function BedSeatTap({ machine, profile }: { machine: MachineRecord; profile: BedProfile }) {
+  const defaults = useShopDefaultsStore((s) => s.defaults);
+  const calibration = useSettingsStore((s) => s.machineCalibration);
+  const tapBusy = useMountTapBusyFlag();
+  // #773/#845 — no frame read, no clearance: the row is not offered (and the hooks stay
+  // unconditional, as BedJawTap's own note explains).
+  const frameProblem = machineFrameProblemById(machine.profileId);
+  const target = machine.address;
+  const probe = probeFor(machine);
+  const mill = jobMachine({ machineId: machine.profileId ?? 'Z1' }, calibration);
+  const seekFromMachineZ = clearanceZOf(mill) ?? 0;
+  const anchor = anchorFrom(calibration, machine.profileId ?? 'Z1');
+  const sizes = bracketSettings(defaults);
+  const datum = anchor.ok ? bracketDatum(anchor.anchor, sizes) : null;
+  const stored = profile.datums.bracketSeatZ?.at ?? null;
+  const point =
+    stored !== null
+      ? { x: stored[0], y: stored[1] }
+      : datum === null
+        ? null
+        : {
+            // The seat plane beside the front arm: the arm runs in front of the blank, so the
+            // board beside it is just beyond the arm's front face, at its mid-length.
+            x: Math.round((datum.x + sizes.settings.armLengthX / 2) * 1000) / 1000,
+            y: Math.round((datum.y - sizes.settings.armWidth / 2 - 6) * 1000) / 1000,
+          };
+  const api = useMountTap({
+    clearanceZ: seekFromMachineZ,
+    target,
+    settings: registrationSettings(defaults, probe).settings,
+    floor: mill.envelope.z.min,
+    probeId: probe?.id ?? null,
+    successNote: 'the bracket seat is recorded',
+  });
+
+  if (frameProblem !== null || !canReachMachine || target === null || point === null) return null;
+
+  return (
+    <span data-testid="manage-bed-tap-seat">
+      <span className="hint" data-testid="manage-bed-tap-seat-clear">
+        The bed is clear — no blank, no clamps in the way. The touch is at machine X {point.x}, Y{' '}
+        {point.y}.
+      </span>{' '}
+      <button
+        type="button"
+        className="btn btn--sm"
+        data-testid="manage-bed-tap-seat-button"
+        disabled={tapBusy}
+        onClick={() =>
+          void api.tapJaw({
+            x: point.x,
+            y: point.y,
+            fromMachineZ: seekFromMachineZ,
+            reference: 'bracket-seat',
+            // The reading IS the seat: the touch is on the board, not the arm.
+            datumOffsetMm: 0,
+          })
+        }
+      >
+        Measure the bracket seat
+      </button>
+      {api.note !== null && (
+        <span className="hint" data-testid="manage-bed-tap-seat-note">
+          {' '}
+          {api.note}
+        </span>
+      )}
+      {api.prompt !== null && (
+        <div className="hint" data-testid="manage-bed-tap-seat-prompt">
+          <span>
+            {api.prompt.text}{' '}
+            <button type="button" className="btn btn--sm" data-testid="engrave-mount-tap-continue" onClick={() => api.resolve(true)}>
+              Continue
+            </button>
+            <button type="button" className="btn btn--sm" data-testid="engrave-mount-tap-cancel" onClick={() => api.resolve(false)}>
+              Cancel
+            </button>
+          </span>
+          {api.prompt.kind === 'fit-probe' && (
+            <ProbeFitDiagram compact instrument={probe === null ? null : probeInstrumentOf(probe)} />
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
 export function MachineBed({ machine }: { machine: MachineRecord }) {
   const [note, setNote] = useState<string | null>(null);
   const profiles = machine.bedProfiles ?? [];
@@ -321,6 +418,15 @@ export function MachineBed({ machine }: { machine: MachineRecord }) {
                       <BedJawTap machine={machine} />
                     </>
                   )}
+                  {key === 'bracketSeatZ' &&
+                    active.placements.some(
+                      (p) => fixtures.find((f) => f.id === p.fixture)?.kind === 'bracket',
+                    ) && (
+                      <>
+                        {' '}
+                        <BedSeatTap machine={machine} profile={active} />
+                      </>
+                    )}
                 </li>
               );
             })}

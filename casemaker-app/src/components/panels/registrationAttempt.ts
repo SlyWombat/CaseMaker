@@ -22,7 +22,7 @@ import {
   type BracketSeatDatum,
 } from '@/engine/cnc/mounts/bracket';
 import type { MountDatum, ProbeSpec, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { cutRegionOf, mountObstaclesFor, seatSeekFor } from '@/engine/cnc/registration/footprintJob';
+import { cutRegionOf, mountObstaclesFor } from '@/engine/cnc/registration/footprintJob';
 import { cutBlankCandidates, cutBlankCandidatesFromMap, stockRaster, type CutProgramInput } from '@/engine/cnc/registration/cutBlank';
 import type { FinishedCutMap } from '@/platform/locationClient';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -40,6 +40,9 @@ import type { RegistrationAttempt } from './EngraveSetupRow';
  * inventing a measurement (decision 28).
  */
 const STOCK_CORNER_RADIUS_MM = 0;
+
+/** Millimetres to three decimals — the plans' own rounding. */
+const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 function expectedWords(plan: RegistrationPlan): string {
   const z = `Z from the surface touch, within ±${plan.settings.surfaceToleranceMm} mm`;
@@ -258,67 +261,94 @@ export function planRegistrationAttempt(args: {
     // wrong one. The card does NOT plan the registration touch on it: it asks for the SEAT to be
     // measured again — the same one-touch seat-seek plan a machine with no seat gets — and that
     // press writes the seat with the probe's reference, after which registration plans normally.
-    const legacySeat = expected0.ok && expected0.expectedSurface.probeRefZ === null;
-    if (!expected0.ok || legacySeat) {
-      // The seat point is measured from the plan's own seed — a placed bracket's placement, else the anchor.
-      const seat = seatSeekFor({ job, calibration, defaults, probe: args.probe, origin: datum });
-      if (!seat.ok) return { kind: 'refused', reason: seat.reason };
-      // #1189 — A RE-MEASURE SEEKS WHERE THE DATUM WAS TAKEN. The stored datum's `at` is a spot
-      // verified solid when it was measured (the bench's −175, −35); re-measuring the same datum
-      // at the planner's fresh choice would move the touch for no reason. With no datum there is
-      // nothing to return to, and the planner's point stands.
-      const storedAt = legacySeat ? (args.bracketSeat?.at ?? null) : null;
-      const atX = storedAt === null ? seat.seek.x : Math.round(storedAt[0] * 1000) / 1000;
-      const atY = storedAt === null ? seat.seek.y : Math.round(storedAt[1] * 1000) / 1000;
-      const atWork = {
-        x: Math.round((atX - datum.x) * 1000) / 1000,
-        y: Math.round((atY - datum.y) * 1000) / 1000,
-      };
+    // #1201 — NO TRUSTED SEAT IS NOT A BLOCKER. A seat measured before the probe's last fitting
+    // (#1189) is not used for the band; the top is measured ON THE BLANK, as the vendor does. The
+    // seat itself is a BED-SETUP datum now (Manage > the machine's bed, with the bed clear); the
+    // Register card never offers that touch.
+    const trustedSeat = expected0.ok && expected0.expectedSurface.probeRefZ !== null;
+    if (!trustedSeat) {
+      // The bed's known floor: the seat on file if any (even a legacy one — as a FLOOR it can only
+      // stop the seek early, never certify a top), else the bed's surface top, else the machine's
+      // own work floor. The seek accepts contact anywhere above floor + margin.
+      const floorDatum =
+        args.bracketSeat !== null
+          ? args.bracketSeat.value
+          : args.surfaceTopZ !== null
+            ? args.surfaceTopZ.value
+            : jobMachine(job, calibration).envelope.z.min;
+      const marginMm = 1;
+      const clearance = clearanceZOf(jobMachine(job, calibration)) ?? 0;
+      const floorMin = r3(floorDatum + marginMm);
+      const ceiling = r3(clearance - args.settings.parkAboveSurfaceMm);
+      if (!Number.isFinite(clearance) || !(floorMin < ceiling)) {
+        return {
+          kind: 'refused',
+          reason: 'the machine’s clearance does not bound a top seek above the bed — check the machine frame, then register again',
+        };
+      }
+      // The GUARDED seek's bound is the floor itself, not the expected-top seek's travel cap: the
+      // probe is over the stock and stops on contact; the floor only stops a missing blank. The
+      // card states the floor, so a long descent is a stated one.
+      // THE TWO TOUCH POINTS, both INSIDE the stock footprint (the #1199 guard's rule): the
+      // machining area's path-origin corner, inset by the edge margin + the probe tip, and the
+      // area's centre. The area is the cut region when the job states one, else the blank.
+      const region = cutRegionOf(job);
+      const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
+      const inset = Math.max(1, args.settings.tipRadiusMm + job.edgeMargin);
+      const ix = Math.min(inset, Math.max(0.001, (area.maxX - area.minX) / 2));
+      const iy = Math.min(inset, Math.max(0.001, (area.maxY - area.minY) / 2));
+      const clampToStock = (x: number, y: number): { x: number; y: number } => ({
+        x: r3(Math.min(Math.max(x, 0.001), dims0.x - 0.001)),
+        y: r3(Math.min(Math.max(y, 0.001), dims0.y - 0.001)),
+      });
+      const originPoint = clampToStock(area.minX + ix, area.minY + iy);
+      let centrePoint = clampToStock((area.minX + area.maxX) / 2, (area.minY + area.maxY) / 2);
+      if (Math.abs(centrePoint.x - originPoint.x) < 1 && Math.abs(centrePoint.y - originPoint.y) < 1) {
+        centrePoint = clampToStock(originPoint.x + Math.min(1, (dims0.x - originPoint.x) / 2), originPoint.y);
+      }
+      // The plan's frame comes from the ordinary builder with the floor as a NOMINAL seat (its
+      // expected surface is discarded below); the guarded band and the checks are this branch's.
+      const built = registrationFor(
+        setup,
+        mount,
+        {
+          // #1201 — THE GUARDED CONTRACT: no expected surface, a floor and a margin.
+          guarded: { floorMachineZ: r3(floorDatum), marginMm, seatIgnored: args.bracketSeat !== null ? 'legacy' : 'absent' },
+          seekFromMachineZ: clearance,
+          cornerRadius: 0,
+          bracketOrigin: datum,
+          mountObstacles: obstacles,
+          mountTap: null,
+          probe: args.probe,
+          cutCentre: { x: centrePoint.x, y: centrePoint.y },
+        },
+        args.settings,
+      ).plan;
+      if (!built.ok) return { kind: 'refused', reason: built.reason };
+      const seatIgnored: 'legacy' | 'absent' = args.bracketSeat !== null ? 'legacy' : 'absent';
+      const seatWord =
+        seatIgnored === 'legacy'
+          ? 'the seat on file was measured before the probe’s last fitting and is not used'
+          : 'the bed states no seat';
       const plan: RegistrationPlan = {
-        mount: 'bracket',
-        stock: { xMin: 0, yMin: 0, xMax: dims0.x, yMax: dims0.y, cornerRadius: 0 },
-        stockThicknessMm: dims0.z,
-        surfacePoint: atWork,
-        seek: {
-          fromMachineZ: seat.seek.fromMachineZ,
-          travelMm: Math.round((seat.seek.fromMachineZ - (seat.seek.band.min - args.settings.scanReachMm)) * 1000) / 1000,
-          band: seat.seek.band,
-        },
-        mountDatum: null,
-        probe: args.probe,
-        mountTap: {
-          x: atX,
-          y: atY,
-          fromMachineZ: seat.seek.fromMachineZ,
-          label: 'the wasteboard beside the blank (the bracket seat)',
-          reference: 'bracket-seat',
-          expectZ: seat.seek.expectZ,
-          // The reading IS the seat: the touch is on the wasteboard, not the arm.
-          datumOffsetMm: 0,
-        },
-        scans: [],
-        bracketOrigin: { x: datum.x, y: datum.y, from: datum.from, offsetMeasured: datum.offsetMeasured },
-        mountObstacles: obstacles,
-        settings: args.settings,
-        notes: legacySeat
-          ? [
-              ...seat.seek.notes,
-              'the bracket seat on file was measured before the probe was last fitted, so it is measured again now: this one touch writes the seat with the probe as it sits, and the registration plans from it',
-              ...(storedAt === null
-                ? []
-                : [`the touch is at the stored seat’s own point, machine X ${atX}, Y ${atY} — the spot verified when it was measured`]),
-            ]
-          : seat.seek.notes,
-        ...(legacySeat ? { seatRemeasure: 'probe-refit' as const } : {}),
+        ...built.plan,
+        surfacePoint: originPoint,
+        surfaceChecks: [
+          { x: originPoint.x, y: originPoint.y, depthMm: 0 },
+          { x: centrePoint.x, y: centrePoint.y, depthMm: 0 },
+        ],
+        mountTap: null,
+        notes: [
+          ...built.plan.notes,
+          `${seatWord}; the top is measured on the blank at two points, and the bed’s floor at machine Z ${r3(floorDatum)} bounds the seek`,
+        ],
       };
       return {
         kind: 'plan',
         method: 'bracket',
         plan,
-        summary: legacySeat
-          ? `Measure the bracket seat again — the seat on file predates the probe’s last fitting · machine X ${atX}, Y ${atY}`
-          : `Measure the bracket seat — one Z seek on the wasteboard beside the blank · machine X ${atX}, Y ${atY}`,
-        expected: 'the seat from the seek, inside ±1.5 mm of the derived value',
+        summary: summarizePlan(plan),
+        expected: 'the top on the blank, from two touches that must agree',
       };
     }
     // #1133 — THE PLAN IS THE SURFACE TOUCH. A bracket hold fixes X, Y and rotation (repeat

@@ -1304,12 +1304,12 @@ describe('#607 — the Register step of a chuck job carries the axis tap', () =>
   });
 });
 
-describe('#1070 the proposals need no saved setup for a bed-held job', () => {
-  it('a bracket job with setups: [] shows the seat press — nothing walked, nothing saved', () => {
+describe('#1201 a bracket job with no trusted seat measures the top on the blank', () => {
+  function bedJob(name: string): EngraveJob {
     const base = defaultEngraveJob();
-    const job: EngraveJob = {
+    return {
       ...base,
-      name: 'setups-less 1070',
+      name,
       stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
       labels: [],
       shapes: [],
@@ -1319,45 +1319,44 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
         bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' },
       },
     };
+  }
+  const CAL = {
+    frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
+    machineId: 'Z1',
+    measuredAt: '2026-11-07T20:00:00.000Z',
+    softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
+    source: 'config',
+  };
+
+  it('no seat: the card shows the top-on-the-blank plan and NO seat press', () => {
+    const job = bedJob('setups-less 1201');
     useEngraveJobStore.setState({ job });
     resetEngraveRegistrationStore();
     useEngraveRunStore.setState({ acknowledged: true });
     beddedLocation();
-    // The machine's anchor-1 calibration with the soft endstop, and the 6 mm wasteboard bed with
-    // NO seat datum yet: the proposal must be the seat press, planned from the job alone.
-    const cal = {
-      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
-      machineId: 'Z1',
-      measuredAt: '2026-11-07T20:00:00.000Z',
-      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
-      source: 'config',
-    };
-    useSettingsStore.setState({ machineCalibration: cal as unknown as ReturnType<typeof useSettingsStore.getState>['machineCalibration'] });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
+    // #1201 — REGISTER, never a seat press: the seat is a bed-setup datum.
     const button = screen.getByTestId('engrave-registration-approve-start') as HTMLButtonElement;
-    expect(button.textContent).toContain('Measure the bracket seat');
-    const seatLine = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
-    expect(seatLine).toContain('seat');
-    // #1189 — the card STATES the machine XY of the touch before the press (not only the live
-    // console line), so the operator knows where the probe will go.
-    expect(seatLine).toContain('machine X ');
+    expect(button.textContent).toContain('Register');
+    expect(button.textContent).not.toContain('seat');
+    // The plan is the top on the blank, and the card STATES both machine XY points before the press.
+    const line = screen.getByTestId('engrave-registration-proposal-line').textContent ?? '';
+    expect(line).toContain('the top on the blank');
+    expect(line).toContain('machine X ');
+    expect(screen.getByTestId('engrave-registration-top-on-blank').textContent).toContain(
+      'the bed states no seat',
+    );
+    // No control that could touch off the stock.
+    expect(screen.queryByText(/Measure the bracket seat/)).toBeNull();
+    expect(screen.queryByTestId('engrave-registration-seat-prompt')).toBeNull();
   });
 
-  it('#1189 — the seat tap draws its prompt ON THE CARD, the tick answers it, and the reading re-plans', async () => {
-    const base = defaultEngraveJob();
-    const job: EngraveJob = {
-      ...base,
-      name: 'seat remeasure 1189',
-      stock: { ...base.stock, length: 160, width: 126, thickness: 25, material: 'hardwood' },
-      labels: [],
-      shapes: [],
-      setups: [],
-      workholding: { kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [{ edge: 'back', at: 63 }], source: 'default' } },
-    };
+  it('a LEGACY seat: the card says it is not used, and still offers only Register', () => {
+    const job = bedJob('legacy seat 1201');
     beddedLocation();
     const loc = useLocationStore.getState().location as unknown as {
       machines: { bedProfiles: { datums: Record<string, unknown> }[] }[];
-      [k: string]: unknown;
     };
     loc.machines[0]!.bedProfiles[0]!.datums['bracketSeatZ'] = {
       value: -85.788,
@@ -1365,52 +1364,17 @@ describe('#1070 the proposals need no saved setup for a bed-held job', () => {
       by: 'fx-probe-1',
       at: [-175, -35],
     };
-    const writes: MachineRecord[] = [];
-    useLocationStore.setState({
-      location: { ...loc } as never,
-      saveMachine: async (record: MachineRecord) => {
-        writes.push(record);
-        const cur = useLocationStore.getState().location as unknown as { machines: MachineRecord[] };
-        useLocationStore.setState({ location: { ...cur, machines: cur.machines.map((m) => (m.id === record.id ? record : m)) } as never });
-        return 'ok';
-      },
-    });
+    useLocationStore.setState({ location: { ...loc } as never });
     useEngraveJobStore.setState({ job });
     resetEngraveRegistrationStore();
-    useEngraveRunStore.setState({ acknowledged: false });
-    const cal = {
-      frame: { anchor1: [-190.89, -193.83], anchor2Offset: [88.5, 45], clearanceXY: [-11.6, -14.6], clearanceZ: -3, toolrackOffset: [48.8, 181], toolrackZ: -108 },
-      machineId: 'Z1',
-      measuredAt: '2026-11-07T20:00:00.000Z',
-      softEndstop: { enabled: true, xMin: -207, yMin: -206, zMin: -102, source: 'config-get sd' },
-      source: 'config',
-    };
-    useSettingsStore.setState({ machineCalibration: cal as never });
-    install({
-      seek: { band: { min: -87, max: -84 } },
-      settings: registrationSettings(null).settings,
-      stock: { xMin: 0, yMin: 0, xMax: 160, yMax: 126 },
-      scans: [],
-    } as unknown as RegistrationPlan);
+    useEngraveRunStore.setState({ acknowledged: true });
+    useSettingsStore.setState({ machineCalibration: CAL as never });
     render(<EngraveRegistrationStep job={job} target={TARGET} />);
-    // UNTICKED: the seat press is offered and the tap's question is drawn where the press was
-    // made — before this fix it waited on a prompt the Register card never rendered.
-    await act(async () => {
-      fireEvent.click(await screen.findByTestId('engrave-registration-approve-start'));
-    });
-    const prompt = await screen.findByTestId('engrave-registration-seat-prompt', undefined, { timeout: 5000 });
-    expect(prompt.textContent).toContain('probe');
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('engrave-mount-tap-continue'));
-    });
-    // The reading is stated with the change from the datum on file; the datum write carries the
-    // reference; the card re-plans from the new seat (no second press).
-    const reading = await screen.findByTestId('engrave-registration-seat-reading', undefined, { timeout: 10_000 });
-    expect(reading.textContent).toContain('was -85.788');
-    expect(writes.length).toBeGreaterThan(0);
-    expect(JSON.stringify(writes.at(-1))).toContain('probeRefZ');
-    expect(await screen.findByTestId('engrave-registration-proposal-line')).toBeTruthy();
-  }, 30_000);
+    expect(screen.getByTestId('engrave-registration-approve-start').textContent).toContain('Register');
+    expect(screen.getByTestId('engrave-registration-top-on-blank').textContent).toContain(
+      'last measured before this probe was fitted and is not used',
+    );
+  });
 });
 
 describe('#1088 — a flipped setup registers side 2 on the bores', () => {
