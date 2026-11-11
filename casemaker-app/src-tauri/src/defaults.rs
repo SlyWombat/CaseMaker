@@ -429,6 +429,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("plan.clearanceSeconds", 10.0, "s", "chosen, not measured: the vacuum off and the clearance move after a cut (observed, not timed)"),
     ("plan.finishSeconds", 15.0, "s", "chosen, not measured: the end of a job, M332, spindle off, G28 (observed, not timed)"),
     ("plan.autoLevelPoints", 9.0, "points", "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"),
+    // #1192 — the proposal screen's two numbers (the analyst's recommendation: 4 and 25 %).
+    ("plan.proposalTopK", 4.0, "candidates", "chosen, not measured: how many of the top estimated candidate chains the real CAM prices before the margin (the analyst's recommendation, #1192's screen)"),
+    ("plan.proposalMarginPct", 25.0, "%", "chosen, not measured: how far past the best estimate a candidate still earns the real CAM, until 2 x the top K (the analyst's recommendation, #1192's screen)"),
     ("plan.autoLevelPointSeconds", 10.0, "s", "chosen, not measured: one auto-level point; an estimate until #176 runs a grid here"),
     ("plan.autoLevelShallowMm", 0.5, "mm", "chosen, not measured: on stock not known flat, a cut shallower than this wants an auto-level grid (Makera Studio's own rule)"),
     // ── #421 (end)
@@ -1313,6 +1316,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "plan.autoLevelPoints" => Some(need(
             n.is_some_and(|v| v.fract() == 0.0 && (4.0..=400.0).contains(&v)),
             "a whole number of points, 4 to 400",
+        )),
+        "plan.proposalTopK" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1.0..=16.0).contains(&v)),
+            "a whole number of candidates, 1 to 16",
+        )),
+        "plan.proposalMarginPct" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 %",
         )),
         "plan.autoLevelShallowMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),

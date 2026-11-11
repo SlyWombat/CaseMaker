@@ -1430,6 +1430,20 @@
       "unit": "points",
       "note": "chosen, not measured: the auto-level grid's point count, Makera Studio's own 3 x 3 default"
     },
+    "plan.proposalTopK": {
+      "value": 4.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "candidates",
+      "note": "chosen, not measured: how many of the top estimated candidate chains the real CAM prices before the margin (the analyst's recommendation, #1192's screen)"
+    },
+    "plan.proposalMarginPct": {
+      "value": 25.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "%",
+      "note": "chosen, not measured: how far past the best estimate a candidate still earns the real CAM, until 2 x the top K (the analyst's recommendation, #1192's screen)"
+    },
     "plan.autoLevelPointSeconds": {
       "value": 10.0,
       "source": "seeded",

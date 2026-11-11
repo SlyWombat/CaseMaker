@@ -504,6 +504,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'plan.clearanceSeconds': { label: 'vacuum off and clearance after a cut (chosen)', unit: 's', rule: z.number().min(0).max(300), fallback: 10 },
   'plan.finishSeconds': { label: 'end of the job (chosen)', unit: 's', rule: z.number().min(0).max(600), fallback: 15 },
   'plan.autoLevelPoints': { label: 'auto-level grid points (chosen)', unit: 'points', rule: z.number().int().min(4).max(400), fallback: 9 },
+  // #1192 — THE PROPOSAL SCREEN'S TWO NUMBERS (#1207: registry entries, not constants).
+  'plan.proposalTopK': { label: 'candidates priced by estimate rank (chosen)', unit: 'candidates', rule: z.number().int().min(1).max(16), fallback: 4 },
+  'plan.proposalMarginPct': { label: 'estimate margin that still earns a price (chosen)', unit: '%', rule: z.number().min(0).max(100), fallback: 25 },
   'plan.autoLevelPointSeconds': { label: 'one auto-level point (chosen)', unit: 's', rule: z.number().min(1).max(120), fallback: 10 },
   'plan.autoLevelShallowMm': { label: 'a cut shallower than this wants a grid (chosen)', unit: 'mm', rule: z.number().min(0.05).max(10), fallback: 0.5 },
   // ── #421 (end)
