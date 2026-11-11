@@ -37,6 +37,7 @@ import { classifyLine, stripComment } from './gcode/lexer';
 import type { MoveEvent, ParseResult, Pos } from './gcode/types';
 import { applyEvent, buildTimeline, initialState, type MachineState } from './emulator/timeline';
 import { holderOf, rotaryOf, type Mill } from './machine';
+import { FIRMWARE_A_MAX_DEG_PER_MIN, FIRMWARE_ROTARY_PERIMETER_EXTRA_MM, rotaryRate } from './rotaryClock';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
 import type { Setup } from './setup';
 // inPath only (types from bracket): the verifier runs in workers and must not pull in the defaults client.
@@ -760,10 +761,11 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
             known3(toW)
           ) {
             const radiusMm = Math.abs(toW[2]);
-            const perimeter = radiusMm > 1 ? 2 * Math.PI * radiusMm + 30 : 2 * Math.PI + 30;
-            const askedDegPerSec = (m.feed / 60 / perimeter) * 360;
-            const capDegPerSec = (rotaryOf(ctx.machine)?.maxRate ?? 3600) / 60;
-            const allowedDegPerSec = Math.min(askedDegPerSec, capDegPerSec);
+            const rate = rotaryRate(m.feed, radiusMm, {
+              aMaxDegPerMin: rotaryOf(ctx.machine)?.maxRate ?? FIRMWARE_A_MAX_DEG_PER_MIN,
+              perimeterExtraMm: FIRMWARE_ROTARY_PERIMETER_EXTRA_MM,
+            });
+            const { askedDegPerSec, capDegPerSec, allowedDegPerSec } = rate;
             const surfaceMmMin = allowedDegPerSec * (Math.PI / 180) * radiusMm * 60;
             const dA = Math.abs(m.a - lastA);
             const zDemandMmMin = (Math.abs(toW[2] - fromW[2]) / dA) * allowedDegPerSec * 60;

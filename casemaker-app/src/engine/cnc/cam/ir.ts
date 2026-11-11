@@ -25,6 +25,7 @@
 
 import { cuttingDiameter, type Tool } from '../tool';
 import { vCone } from '../vProfile';
+import { DEFAULT_ROTARY_CLOCK, rotaryFeedSeconds, rotaryRapidTurnSeconds, type RotaryClock } from '../rotaryClock';
 
 /**
  * One straight move, every axis resolved (#240 for `a`).
@@ -458,6 +459,8 @@ export interface RapidEstimate {
   spinUpSeconds?: number | null;
   /** Where the spin-up time came from; present exactly when {@link spinUpSeconds} is. */
   spinUpSource?: string;
+  /** The A axis's ceiling, degrees per minute; absent on a machine with no rotary. */
+  aMaxDegPerMin?: number;
   /** Where those numbers came from, in words, for the panel and the run sheet to quote. */
   source: string;
 }
@@ -517,6 +520,13 @@ export function moveSeconds(distance: number, rate: number, accel: number): numb
 export const JUNCTION_CORNER_DEG = 10;
 const JUNCTION_COS = Math.cos((JUNCTION_CORNER_DEG * Math.PI) / 180);
 
+/** #1218 — the rotary clock a rapid model states: its own A ceiling, or the shipped default. */
+function clockOf(rapid: RapidEstimate): RotaryClock {
+  return rapid.aMaxDegPerMin !== undefined && rapid.aMaxDegPerMin > 0
+    ? { ...DEFAULT_ROTARY_CLOCK, aMaxDegPerMin: rapid.aMaxDegPerMin }
+    : DEFAULT_ROTARY_CLOCK;
+}
+
 /**
  * Estimated CYCLE time in seconds for one operation's moves — cutting PLUS rapids, timed through
  * the trapezoid (#242, #281). This is THE one estimate: the Engrave panel's row and the run sheet
@@ -575,8 +585,27 @@ export function estimateCycleSeconds(
       run = null;
     }
   };
+  const clock: RotaryClock = clockOf(rapid);
   for (const move of moves) {
     if (previous === null) {
+      previous = move;
+      continue;
+    }
+    // planner v3 B3 — A MOVE THAT TURNS A is timed the way the firmware runs it (rotaryClock.ts),
+    // not as an arc at the design radius. Only on a rotary program, and only when A changes.
+    const dA = rotaryRadius === undefined ? 0 : (move.a ?? 0) - (previous.a ?? 0);
+    if (rotaryRadius !== undefined && Math.abs(dA) > 1e-9) {
+      endRun();
+      const ddx = move.x - previous.x;
+      const ddz = move.z - previous.z;
+      if (move.kind === 'feed') {
+        seconds += rotaryFeedSeconds(ddx, ddz, dA, move.f, move.z, clock);
+      } else {
+        seconds += Math.max(
+          moveSeconds(Math.hypot(ddx, ddz), rapidRate(rapid, ddx, 0, ddz), rapid.accelMmPerS2),
+          rotaryRapidTurnSeconds(dA, clock),
+        );
+      }
       previous = move;
       continue;
     }
@@ -682,10 +711,17 @@ function entryMoveSeconds(
       ? to.y - from.y
       : (((to.a ?? 0) - (from.a ?? 0)) * Math.PI * rotaryRadius) / 180;
   const dz = to.z - from.z;
-  return {
-    seconds: moveSeconds(Math.hypot(dx, dy, dz), rapidRate(rapid, dx, dy, dz), rapid.accelMmPerS2),
-    mm: Math.hypot(dx, dy),
-  };
+  // planner v3 B3 — when the entry turns A, the firmware's rule times the turn (rotaryClock.ts);
+  // the linear part is the X/Z travel only, exactly as the estimate's own turning moves are timed.
+  const dA = (to.a ?? 0) - (from.a ?? 0);
+  const seconds =
+    rotaryRadius !== undefined && Math.abs(dA) > 1e-9
+      ? Math.max(
+          moveSeconds(Math.hypot(dx, dz), rapidRate(rapid, dx, 0, dz), rapid.accelMmPerS2),
+          rotaryRapidTurnSeconds(dA, clockOf(rapid)),
+        )
+      : moveSeconds(Math.hypot(dx, dy, dz), rapidRate(rapid, dx, dy, dz), rapid.accelMmPerS2);
+  return { seconds, mm: Math.hypot(dx, dy) };
 }
 
 /** #927 — the program's cycle as named terms; see {@link CycleTerms}. */

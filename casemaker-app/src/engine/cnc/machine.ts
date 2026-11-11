@@ -743,6 +743,7 @@ export const Z1: MillProfile = {
     // #927 — the same number as the profile's own field below, set from one constant.
     spinUpSeconds: Z1_SPIN_UP_SECONDS,
     spinUpSource: Z1_SPIN_UP_SOURCE,
+    aMaxDegPerMin: 3600,
   },
   // #927 — the spindle's ramp at this machine's working speed, read from the 2026-10-15 cut trace:
   // `S:36.8` at 17:18:08.262 and `S:12011.7` at 17:18:20.296, with the intermediate samples between
