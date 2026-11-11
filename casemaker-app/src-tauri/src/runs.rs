@@ -1103,20 +1103,20 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(
-            args,
-            vec![
-                "/opt/casemaker/scripts/casemaker.mjs",
-                "cut",
-                "/tmp/runs/run-1/job.json",
-                "--out",
-                "/tmp/runs/run-1/out",
-                "--json",
-                "--events",
-                "--generated",
-                "/tmp/runs/run-1/out/generated.json",
-            ]
-        );
+        // #1211 follow-up — PATH-SEPARATOR-AGNOSTIC: the expected argv is built from the same
+        // PathBuf joins `child_command` uses, so this passes on Windows (`\`) and Unix (`/`).
+        let expected: Vec<String> = vec![
+            config.cli.to_string_lossy().into_owned(),
+            "cut".into(),
+            dir.join("job.json").to_string_lossy().into_owned(),
+            "--out".into(),
+            out.to_string_lossy().into_owned(),
+            "--json".into(),
+            "--events".into(),
+            "--generated".into(),
+            out.join("generated.json").to_string_lossy().into_owned(),
+        ];
+        assert_eq!(args, expected);
         // The job is a path here, never its content: shell metacharacters in a job cannot reach a
         // command line because there is no command line to reach.
         assert!(!args.iter().any(|a| a.contains("$(") || a.contains(';')));
@@ -1157,10 +1157,13 @@ mod tests {
             true,
             Some(&dir.join("tools.json")),
         ));
-        assert_eq!(
-            &args[args.len() - 3..],
-            ["--rest-ladder", "--tools", "/tmp/runs/run-1/tools.json"]
-        );
+        // #1211 follow-up — built with the same join as `child_command`, so the separators match.
+        let expected: Vec<String> = vec![
+            "--rest-ladder".into(),
+            "--tools".into(),
+            dir.join("tools.json").to_string_lossy().into_owned(),
+        ];
+        assert_eq!(&args[args.len() - 3..], expected);
     }
 
     /// #1175 — a submit carrying the tools writes them beside the job and the run remembers both
