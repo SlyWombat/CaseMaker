@@ -536,8 +536,24 @@ export function OperationStep({
       ? `The board is in: ${String(Number(seed.board.length.toFixed(2)))} × ${String(Number(seed.board.width.toFixed(2)))} mm.`
       : null,
   );
-  /** #870 — the picked set, named for the file field, and its refusal when the set did not read. */
-  const [pcbFilesName, setPcbFilesName] = useState<string | null>(null);
+  /**
+   * #870 — the picked set, named for the file field, and its refusal when the set did not read.
+   * #1099 item 2 — a Back seeds it from the job's own source records, so the read state (and the
+   * thumbnail beside it) still draws instead of collapsing to an empty picker.
+   */
+  const seedPcbSources =
+    seed?.type === 'pcb'
+      ? (job.sourceFiles ?? []).filter((s) => s.kind === 'gerber' || s.kind === 'excellon')
+      : [];
+  const [pcbFilesName, setPcbFilesName] = useState<string | null>(() =>
+    seedPcbSources.length === 0
+      ? null
+      : seedPcbSources.length === 1
+        ? seedPcbSources[0]!.name
+        : `${seedPcbSources.length} files · ${seedPcbSources[0]!.name}`,
+  );
+  /** #1099 item 2 — the set's file count for the thumbnail's facts; null when it is not known. */
+  const [pcbFileCount, setPcbFileCount] = useState<number | null>(seedPcbSources.length === 0 ? null : seedPcbSources.length);
   const [pcbError, setPcbError] = useState<string | null>(null);
   // #743 P-4b review — the board-on-a-non-PCB-blank fact and its one-click fix; never a refusal.
   const [pcbStockFix, setPcbStockFix] = useState<string | null>(null);
@@ -660,9 +676,12 @@ export function OperationStep({
       if (!out.ok) {
         setPcbError(out.reason);
         setPcbBoard(null);
+        setPcbFileCount(null);
       } else {
         setPcbImported(true);
         setPcbBoard({ length: out.board.width, width: out.board.height });
+        // #1099 item 2 — "N Gerber files" is the import's own count.
+        setPcbFileCount(out.fileCount);
       }
       setPcbSummary(
         out.ok
@@ -1524,6 +1543,16 @@ export function OperationStep({
             reading={pcbReading}
             chosen={pcbFilesName === null ? null : { name: pcbFilesName }}
             error={pcbError}
+            // #1099 item 2 — a read board shows its outline and the set's file count, with the
+            // same proposal sentence a mesh's thumbnail carries.
+            thumbnail={
+              pcbBoard !== null ? (
+                <WizardThumbnail
+                  source={{ kind: 'board', board: pcbBoard, files: pcbFileCount }}
+                  sentence={proposalSentence}
+                />
+              ) : undefined
+            }
             onFiles={(files) => void readPcbSet(files)}
           />
           <p style={MUTED}>

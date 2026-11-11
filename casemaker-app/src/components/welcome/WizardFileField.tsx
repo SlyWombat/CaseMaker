@@ -90,7 +90,8 @@ export function WizardFileField(props: WizardFileFieldProps): JSX.Element {
           if (files.length > 0) props.onFiles(files);
         }}
       />
-      {chosen !== null && state !== 'reading' && props.thumbnail !== undefined && props.thumbnail}
+      {/* #1099 item 8 — the name row reads FIRST; the drawing follows with its facts beside it,
+          so the thumbnail is never the thing standing between the name and its change button. */}
       {chosen !== null && state !== 'reading' && (
         <div className="sw-file__row">
           <span className="sw-file__name" data-testid={props.nameTestId}>
@@ -109,6 +110,7 @@ export function WizardFileField(props: WizardFileFieldProps): JSX.Element {
           )}
         </div>
       )}
+      {chosen !== null && state !== 'reading' && props.thumbnail !== undefined && props.thumbnail}
       {state === 'refused' && (
         <p className="sw-file__error" role="alert" data-testid={props.errorTestId}>
           {error}

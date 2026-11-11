@@ -114,7 +114,7 @@ export function proposedMaterialFor(
  * the same part rather than three near-copies of it.
  */
 export interface PartFootprint {
-  kind: 'mesh' | 'outline' | 'text' | 'pcb';
+  kind: 'mesh' | 'outline' | 'text' | 'pcb' | 'cutout' | 'pocket';
   length: number;
   width: number;
   /** How far it stands above the blank's top (a mesh's Z, a line's depth); null when none. */
@@ -129,6 +129,16 @@ export function partFootprintFor(work: WorkShape): PartFootprint | null {
       return { kind: 'text', length: work.size.length, width: work.size.width, height: work.depth };
     case 'pcb':
       return { kind: 'pcb', length: work.outline.length, width: work.outline.width, height: null };
+    // #1099 item 1 — the presets draw as the part too: a drawing, a cut-out and a pocket each
+    // answer their own footprint from the size the question already measured (a circle carries
+    // its diameter in both, so it needs no case of its own). Their height is the blank's cut,
+    // not a top-surface stand, so the side strip draws no work above it.
+    case 'outline':
+      return { kind: 'outline', length: work.length, width: work.width, height: null };
+    case 'cutout':
+      return { kind: 'cutout', length: work.length, width: work.width, height: null };
+    case 'pocket':
+      return { kind: 'pocket', length: work.length, width: work.width, height: null };
     default:
       return null;
   }

@@ -285,6 +285,10 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
       },
       { timeout: 30_000 },
     );
+    // #1099 item 2 — the read board carries the outline thumbnail and the set's file count.
+    const thumb = screen.getByTestId('wizard-thumbnail');
+    expect(thumb.textContent).toContain('60 × 40 mm');
+    expect(thumb.textContent).toContain('1 Gerber file');
     const itemsBefore = jobItemCount(useEngraveJobStore.getState().job);
     expect(itemsBefore).toBeGreaterThan(0);
 
