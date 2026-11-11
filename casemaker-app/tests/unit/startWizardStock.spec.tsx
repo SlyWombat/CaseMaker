@@ -152,12 +152,12 @@ describe('the material-first start (#418)', () => {
     expect(plate.getAttribute('data-state')).toBe('ok');
     fireEvent.click(plate);
 
-    // The shelf row IS the answer: its numbers sit in the panel's own size fields (#683).
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('100');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
-    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('5');
+    // The shelf row IS the answer: #1105 item 6 shows it as one summary line; the fields are behind
+    // "edit" (which would make the entry the operator's own, so this walk keeps the shelf entry).
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('100 × 100 × 5 mm');
+    expect(screen.queryByTestId('start-wizard-make-length')).toBeNull();
     // No prose repeats what the row and the fields already say (#683, A8).
-    expect(screen.queryByTestId('start-wizard-stock-summary')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-stock-notes')).toBeNull();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
@@ -439,6 +439,9 @@ describe('the material-first start (#418)', () => {
     expect(discRow.getAttribute('data-state')).toBe('ok');
     expect(discRow.textContent).toContain('⌀50 × 5 mm');
     fireEvent.click(discRow);
+    // #1105 item 6 — the row shows its summary; "edit" opens the fields on its numbers.
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('50 Ø × 5 mm');
+    fireEvent.click(screen.getByTestId('start-wizard-stock-summary-edit'));
     expect((screen.getByTestId('start-wizard-make-diameter') as HTMLInputElement).value).toBe('50');
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('5');
 
@@ -446,6 +449,9 @@ describe('the material-first start (#418)', () => {
     expect(tubeRow.getAttribute('data-state')).toBe('ok');
     expect(tubeRow.textContent).toContain('⌀40 × 100 mm, wall 2 mm');
     fireEvent.click(tubeRow);
+    // The tube's summary, then the same fields with the wall included.
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('40 Ø × 2 wall × 100 mm');
+    fireEvent.click(screen.getByTestId('start-wizard-stock-summary-edit'));
     // The tube's number lands in its own fields, wall included, and its surface is shown.
     expect((screen.getByTestId('start-wizard-make-diameter') as HTMLInputElement).value).toBe('40');
     expect((screen.getByTestId('start-wizard-make-wall') as HTMLInputElement).value).toBe('2');

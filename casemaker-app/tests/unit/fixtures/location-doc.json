@@ -1710,6 +1710,13 @@
       "unit": "x",
       "note": "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"
     },
+    "stock.shelfMatchMm": {
+      "value": 1.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"
+    },
     "clamp.refuseFraction": {
       "value": 0.5,
       "source": "seeded",

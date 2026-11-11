@@ -39,7 +39,7 @@ import type { InventoryItem } from '@/platform/houseClient';
 import type { EngraveJob, FilamentFibre } from '@/types/engraveJob';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { MACHINES } from '@/engine/cnc/machine';
-import { isPlasticMaterial } from '@/engine/cnc/materials';
+import { materialFamilyOf } from '@/engine/cnc/materials';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { createStatusLog, readStatusFields, type StatusLog } from '@/engine/cnc/engrave/runStatusLog';
 import { newStockId, useStockStore } from './stockStore';
@@ -701,9 +701,10 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
             ...(prepared.context?.vacuumSpan === undefined ? {} : { vacuumSpan: prepared.context.vacuumSpan }),
             // #564 — the antistatic runs for plastic jobs only. The run's context carries the job's
             // stock material (runContextFor); a run prepared without one (a file uploaded outside the
-            // job flow) has no material to gate on, so the antistatic stays off.
+            // job flow) has no material to gate on, so the antistatic stays off. #1105 item 3 — the
+            // FAMILY is the predicate, the same one the material list and the facing rule read.
             antistatic:
-              prepared.context?.material !== undefined && isPlasticMaterial(prepared.context.material),
+              prepared.context?.material !== undefined && materialFamilyOf(prepared.context.material) === 'plastic',
             // #1060 — the blower, on the same footing as the antistatic: the run switches it, the
             // file never carries it. Gated on the machine's own capability where the id is known.
             blow,

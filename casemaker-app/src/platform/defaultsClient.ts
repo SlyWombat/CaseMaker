@@ -223,6 +223,17 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     fallback: CLAMP_REFUSE_FRACTION_FALLBACK,
   },
   // ── #448 (end)
+  // ── #1105 (begin) — the stock step's chosen tolerance: a shelf blank within this of the
+  // proposal's length, width and thickness (either orientation) is the same blank for the
+  // operator's purpose and is pre-selected on arrival. The house's blanks are drawn in round
+  // numbers, not cut to the design's tenths.
+  'stock.shelfMatchMm': {
+    label: 'Stock step: a shelf blank within this of the proposal is pre-selected (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0).max(10),
+    fallback: 1,
+  },
+  // ── #1105 (end)
   // #423 — the run screen's watch. 2000 ms is the poll's floor (0.6 s faulted the controller, #386).
   'run.pollMs': { label: 'run status poll', unit: 'ms', rule: z.number().min(2000).max(60000), fallback: 2000 },
   'run.noProgressMs': { label: 'no-progress timeout', unit: 'ms', rule: z.number().min(15000).max(600000), fallback: 30000 },

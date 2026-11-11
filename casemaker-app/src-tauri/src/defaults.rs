@@ -531,6 +531,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("vise.jawSideClearanceMm", 6.0, "mm", "chosen, not measured: a cut within this of the gripped edge can be under the jaws — the largest cutter radius the wizard expects (3 mm) plus 3 mm"),
     ("vise.jawTopToleranceMm", 0.5, "mm", "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"),
     ("vise.minCoverageFraction", 0.5, "x", "chosen, not measured: the share of the stock's width the vise jaws must cover in Y before the short-jaw warning"),
+    // #1105 — the stock step pre-selects a shelf blank within this of the proposal (both the
+    // thickness and the length × width, either orientation).
+    ("stock.shelfMatchMm", 1.0, "mm", "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"),
     ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
 ];
@@ -878,6 +881,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "vise.minCoverageFraction" => Some(need(
             n.is_some_and(|v| (0.05..=1.0).contains(&v)),
             "0.05 to 1, a share of the stock's width",
+        )),
+        "stock.shelfMatchMm" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm",
         )),
         "clamp.refuseFraction" => Some(need(
             n.is_some_and(|v| (0.01..=5.0).contains(&v)),
