@@ -1322,6 +1322,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         {
           console: { send: (line, timing) => handle.send(line, timing) },
           operator: askOperator,
+          // #1199 — the live machine's clearance, even for the origin write's session.
+          liveClearanceZ: seekFromMachineZ,
           // #933 — the Stop is live while the origin is written too: the button is on screen for
           // the whole phase, and a press that did nothing would be a dead press.
           stopRequested: () => stopRef.current,

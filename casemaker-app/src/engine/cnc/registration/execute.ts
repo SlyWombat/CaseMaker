@@ -239,10 +239,10 @@ export interface ExecDeps {
    * #1199 item 2 — THE LIVE MACHINE'S CLEARANCE at RUN time (`toolChange.clearanceZ` of the
    * resolved machine/profile), read by the caller when the run starts. The executor refuses when
    * the plan's travel height or its recorded clearance sits below this, and builds the safe-Z
-   * guard from it. Absent (a caller that has not wired it yet): the plan's own recorded field is
-   * the fallback, which is why every caller that can should pass this.
+   * guard from it. REQUIRED: a run proves its plan against the machine as it is now, and tsc
+   * makes every caller state the value (a test may pass the plan's own clearance).
    */
-  liveClearanceZ?: number;
+  liveClearanceZ: number;
 }
 
 /**

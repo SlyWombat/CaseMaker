@@ -107,7 +107,7 @@ const yes = async () => true;
 describe('#607 runRotaryTap on a bench-shaped chuck', () => {
   it('writes the axis Z, axis Y and radius from one chord and the crown, with a clean check chord', async () => {
     const fake = fakeChuck();
-    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    const result = await runRotaryTap(options(), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.circle.axisY).toBeCloseTo(AXIS.y, 2);
     expect(result.circle.radiusMm).toBeCloseTo(NOMINAL_R, 1);
@@ -129,7 +129,7 @@ describe('#607 runRotaryTap on a bench-shaped chuck', () => {
 
   it('measures an off-nominal chuck: R 41 is read, not the record’s 40', async () => {
     const fake = fakeChuck(41);
-    const result = await runRotaryTap(options(), { console: fake.console, operator: yes });
+    const result = await runRotaryTap(options(), { liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.circle.radiusMm).toBeCloseTo(41, 1);
     expect(result.circle.axisZ).toBeCloseTo(AXIS.z, 1);

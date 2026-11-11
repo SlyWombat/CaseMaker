@@ -81,6 +81,8 @@ import { otherPackageFilesFor, packageKeyOf } from '@/engine/cnc/engrave/package
 import { machineKey, runContextFor, useMachineRunStore, type RunContext } from './machineRunStore';
 import { registrationKey, useEngraveRegistrationStore } from './engraveRegistrationStore';
 import { finishedProgramsFor, localMachine } from './locationStore';
+import { jobMachine } from '@/engine/cnc/calibration';
+import { clearanceZOf } from '@/engine/cnc/machine';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { firstRegistrationFor, setupRegistrationFor } from './engraveRegistrationStore';
@@ -561,11 +563,18 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     );
     const handle = attachConsole(rec.target);
     try {
+      // #1199 item 2 — the LIVE machine's clearance, so the facing run proves the plan against
+      // the machine as it is now.
+      const liveClearanceZ = clearanceZOf(jobMachine(rec.job, localMachine().calibration ?? null)) ?? 0;
       const r = await retouchAndCorrectAfterFacing(
         first.plan,
         first.outcome,
         { removedMm, defaults: useShopDefaultsStore.getState().defaults, engravingCutter: file.toolKey },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: (step) => askOperator(machine, step) },
+        {
+          console: { send: (line, timing) => handle.send(line, timing) },
+          operator: (step) => askOperator(machine, step),
+          liveClearanceZ,
+        },
         { confirmed: true },
       );
       if (get().records[machine] === undefined) return;

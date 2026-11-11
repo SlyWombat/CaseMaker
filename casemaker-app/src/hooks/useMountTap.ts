@@ -252,7 +252,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         { x: tap.x, y: tap.y, fromMachineZ: tap.fromMachineZ },
         inputs.clearanceZ,
         inputs.settings,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
         inputs.floor,
         mountKindOf(tap.reference),
         // #1070 — the probe is stated (null here: the hook's caller carries no instrument object;
@@ -393,7 +393,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           surfaceFeed: inputs.settings.surfaceSlowFeed,
           parkAboveSurfaceMm: inputs.settings.parkAboveSurfaceMm,
         },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {
@@ -460,7 +460,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
       }
       const r = await runFaceAngle(
         { plan: planned, touchFeed: req.touchFeed },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {
