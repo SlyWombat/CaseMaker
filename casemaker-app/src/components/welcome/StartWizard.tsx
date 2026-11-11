@@ -16,6 +16,7 @@ import { newItemDepthFor, useEngraveJobStore } from '@/store/engraveJobStore';
 import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
 import { toLineTraces, toVectorShape } from '@/engine/import/outlineImport';
 import { useMachineStore } from '@/store/machineStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import { useLocationStore } from '@/store/locationStore';
 import { machineForJob } from '@/platform/bedProfiles';
 import { useStartWizardStore } from '@/store/startWizardStore';
@@ -33,7 +34,7 @@ import { addOperationOfType, jobHasOperations } from '@/components/panels/operat
 import type { Project } from '@/types/project';
 import type { BracketHold, EngraveJob, JobStockEntry, RotaryChuck, StockHold, TapeHold } from '@/types/engraveJob';
 import { defaultSetupAnswers, type SetupAnswers } from '@/engine/cnc/engrave/setupFlow';
-import { facingShopFrom, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
+import { facingShopFrom, isJobForm, isRoundStock, jobItemCount, rodDimsOf } from '@/engine/cnc/stockStart';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import '@/store/stockEntryFollow';
 import {
@@ -1112,6 +1113,8 @@ export function StartWizard(): JSX.Element {
           // #1103 — the recommended seat reads what the work takes, from the question step.
           work={workFactsOf(operationChoice, proposal, work)}
           onAnswers={applyHoldAnswers}
+          onOpenManage={() => useManageModeStore.getState().openManage('machines')}
+          onBackToStock={() => setStep('stock')}
           onRotary={applyRotaryHolding}
           onBedHold={applyBedHolding}
           onHold={applyStockHold}
@@ -1149,8 +1152,10 @@ export function StartWizard(): JSX.Element {
   // too long for it, Next is disabled and carries the one sentence that unblocks it (hold it in
   // the rotary chuck, or change the stock). The mount options already refuse those seats; this is
   // the footer's same rule, because a job opened on a vise mount would otherwise pass through.
+  // #1104 — one predicate for "round": a rod, a tube or a cylinder (isRoundStock), the same one the rows use.
   const roundStock =
-    job.stockEntry?.form === 'rod' || job.stockEntry?.form === 'tube' || job.stock.shape === 'cylinder';
+    (job.stockEntry?.form !== undefined && isJobForm(job.stockEntry.form) && isRoundStock(job.stockEntry.form)) ||
+    job.stock.shape === 'cylinder';
   // The answers' mount is the rotary when the job is in the chuck; otherwise the vise answers'
   // seat names it (the same reading HoldingStep draws its radios from).
   const currentHolding = answers.workholding === 'rotary' ? 'rotary' : currentMount(answers);

@@ -23,6 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
+import { HoldingPicture } from '@/components/welcome/HoldingStep';
 import { MachineChangeWizard } from '@/components/machine-change';
 import {
   applyMount,
@@ -45,6 +46,7 @@ import { resetMachineChange, useMachineChangeStore } from '@/store/machineChange
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { resetMachineStore } from '@/store/machineStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useManageModeStore } from '@/store/manageModeStore';
 import {
   MachineRecordSchema,
   type BedProfile,
@@ -400,13 +402,16 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(screen.queryByTestId('engrave-setup-change-machine')).toBeNull();
   });
 
-  it('a build that cannot drive a machine does not show the machine-only options at all', () => {
+  it('#1104 — a build that cannot drive a machine keeps the machine-only rows, disabled, and never offers the change wizard', () => {
     caps.drive = false;
     seedLocation(machineWith(null));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
     expect(screen.getByTestId('engrave-setup-mount-ledge')).toBeTruthy();
-    expect(screen.queryByTestId('engrave-setup-mount-bed-tape')).toBeNull();
+    // The bed's rows are one Manage press away, not hidden (item 4): no dead end on the web.
+    expect(radio('bed-tape').disabled).toBe(true);
+    expect(screen.getByTestId('engrave-setup-action-bed-tape').textContent).toBe('in Manage › Machines');
+    expect(screen.queryByTestId('engrave-setup-change-bed-tape')).toBeNull();
     expect(screen.queryByTestId('engrave-setup-change-machine')).toBeNull();
   });
 });
@@ -660,21 +665,19 @@ describe('#684 — the picture, the folds, and the technical provenance', () => 
     expect(svg.textContent).toContain('⌀ 55');
   });
 
-  it('#705 — a mount that needs the machine change still draws on hover, labelled with what it needs', () => {
+  it('#1104 item 5 — hovering a row does not change the main picture (the picture follows the selection)', () => {
     seedLocation(machineWith(null));
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
-    // The bed options are shown (this build can drive a machine) and disabled: the vise is on the
-    // pins. Hovering one draws it, with the cost line — there is no pretend selection.
     const row = screen.getByTestId('engrave-setup-mount-row-bed-tape');
     expect(row.getAttribute('data-disabled')).toBe('true');
-    // #705/#897 — the preview follows pointer MOVEMENT over the row (a pointer resting on one as
-    // the step opens must not preview it), so the browser's first move is what draws it.
+    const picture = screen.getByTestId('engrave-setup-holding-picture');
+    const drawn = picture.getAttribute('data-mount');
+    expect(drawn).toBe('ledge');
     fireEvent.mouseMove(row);
-    expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('bed-tape');
-    expect(screen.getByTestId('engrave-setup-holding-note').textContent).toContain(
-      'Take the vise off the pins',
-    );
+    fireEvent.mouseEnter(row);
+    fireEvent.focus(row);
+    expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe(drawn);
     fireEvent.mouseOut(row);
     expect(screen.getByTestId('engrave-setup-holding-picture').getAttribute('data-mount')).toBe('ledge');
   });
@@ -1011,5 +1014,58 @@ describe('#783 the hold choice', () => {
     expect(moved.itemsHold).toEqual({ x: 'width', y: 'thickness', z: 'length' });
     expect(moved.labels[0]!.position.x).toBeCloseTo(20, 6);
     expect(moved.labels[0]!.position.y).toBeCloseTo(6, 6);
+  });
+});
+
+describe('#1104 items 2, 4, 6 — the actions in place, the web build’s rows, the empty cell', () => {
+  it('a not-owned row offers "add it in Manage › Machines" in place, and pressing it opens Manage › Machines', () => {
+    seedLocation(machineWith(BOARDS_AND_TAPE)); // the house owns a vise, no rotary
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+    expect(rowText('rotary')).toContain('Not in this location’s accessories');
+    const action = screen.getByTestId('engrave-setup-action-rotary');
+    expect(action.textContent).toBe('add it in Manage › Machines');
+    fireEvent.click(action);
+    expect(useManageModeStore.getState().open).toBe(true);
+    expect(useManageModeStore.getState().scope).toBe('machines');
+  });
+
+  it('web build: the bed rows stay, disabled, with "in Manage › Machines" as their action', () => {
+    caps.drive = false;
+    seedLocation(machineWith(BOARDS_AND_TAPE));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+    expect(screen.getByTestId('engrave-setup-mount-row-bed-tape')).toBeTruthy();
+    expect(rowText('bed-tape')).toContain('Take the vise off the pins');
+    const action = screen.getByTestId('engrave-setup-action-bed-tape');
+    expect(action.textContent).toBe('in Manage › Machines');
+    expect(screen.queryByTestId('engrave-setup-change-bed-tape')).toBeNull();
+    fireEvent.click(action);
+    expect(useManageModeStore.getState().scope).toBe('machines');
+  });
+
+  it('a cell with no rows renders the guard and its actions; Back to the stock step goes to Stock', () => {
+    // A 150 mm rod with no machine record: no vise seat exists for it, and no rotary is offered
+    // without a machine — the cell is empty, and says what to do instead of a silent gap.
+    const rod: JobStockEntry = { kind: 'made', shelfId: null, file: null, form: 'rod', finish: 'rough', conductive: false };
+    openHolding(dj({ length: 12, width: 12, thickness: 150, shape: 'cylinder' as const, diameter: 12 }, rod));
+    const guard = screen.getByTestId('engrave-setup-no-hold');
+    expect(guard.textContent).toContain('Nothing set up here can hold a');
+    fireEvent.click(screen.getByTestId('engrave-setup-no-hold-add-machine'));
+    expect(useManageModeStore.getState().scope).toBe('machines');
+    act(() => {
+      useManageModeStore.getState().closeManage();
+    });
+    fireEvent.click(screen.getByTestId('engrave-setup-no-hold-back'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('Stock');
+  });
+
+  it('item 1 — a disc’s caption says "or tape it" only while the tape row is on offer', () => {
+    const draw = (tapeOffered: boolean): string => {
+      cleanup();
+      render(<HoldingPicture mount="ledge" form="disc" stock={{ length: 50, width: 50, thickness: 5 }} tapeOffered={tapeOffered} />);
+      return document.body.textContent ?? '';
+    };
+    expect(draw(true)).toContain('take light cuts, or tape it.');
+    expect(draw(false)).toContain('take light cuts.');
+    expect(draw(false)).not.toMatch(/tape it/);
   });
 });

@@ -96,6 +96,7 @@ import {
   armsAboveStock,
   bedAnchor,
   bedBracketHold,
+  bedOffered,
   bedTapeHold,
   boardChoices,
   boardProvenance,
@@ -206,7 +207,10 @@ export function HoldingPicture({
   checks = [],
   rotary = null,
   part = null,
+  tapeOffered = true,
 }: {
+  /** #1104 — "or tape it" is said only while the tape row is on offer. */
+  tapeOffered?: boolean;
   mount?: HoldingMount;
   stock: { length: number; width: number; thickness: number };
   form?: JobStockForm | null;
@@ -226,15 +230,20 @@ export function HoldingPicture({
   part?: PartFootprint | null;
 }): JSX.Element {
   const mechanism = mechanismOf(mount);
-  const round = form === 'disc' || form === 'rod';
+  // #1104 — ROUND is the one predicate: a disc, or a rod or a tube (isRoundStock).
+  const round = form === 'disc' || (form !== null && isRoundStock(form));
   const dims = round ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
-  const formWord = form === 'rod' ? 'rod' : form === 'disc' ? 'disc' : 'blank';
+  const formWord = form === 'rod' ? 'rod' : form === 'tube' ? 'tube' : form === 'disc' ? 'disc' : 'blank';
   const rim = round ? ', gripped on its rim' : '';
   // #743 §4.2 — TWO LINES OF GRIP RESIST TURNING LESS THAN TWO FACES. The picture already draws
   // the circle; the caption says what that means at the jaws, and it is the sentence that sends a
   // thin disc to the tape instead.
   const discGrip =
-    form === 'disc' ? ' A disc is gripped on two lines; take light cuts, or tape it.' : '';
+    form === 'disc'
+      ? tapeOffered
+        ? ' A disc is gripped on two lines; take light cuts, or tape it.'
+        : ' A disc is gripped on two lines; take light cuts.'
+      : '';
   const boardName = boardMm === null ? 'a waste board' : `a ${fmt(boardMm)} mm board`;
   const caption = ((): string => {
     switch (mount) {
@@ -971,11 +980,10 @@ function BedTopView({
   const bracket = bed?.bracket ?? null;
   const settings = bed?.clamps ?? bracketSettings(null).settings;
   const boardMm = bed?.boardMm ?? null;
-  const dims =
-    form === 'disc' || form === 'rod' ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
-  const formWord = form === 'rod' ? 'rod' : form === 'disc' ? 'disc' : 'blank';
-  // #705 — a disc, and a rod on end, are round seen from above: the picture draws the circle.
-  const round = form === 'disc' || form === 'rod';
+  // #1104 — ROUND is the one predicate (a disc, a rod or a tube): the picture draws the circle.
+  const round = form === 'disc' || (form !== null && isRoundStock(form));
+  const dims = round ? `⌀ ${fmt(stock.length)}` : `${fmt(stock.length)} × ${fmt(stock.width)}`;
+  const formWord = form === 'rod' ? 'rod' : form === 'tube' ? 'tube' : form === 'disc' ? 'disc' : 'blank';
 
   const end = (): void => {
     setDrag(null);
@@ -1390,6 +1398,10 @@ export interface HoldingStepProps {
   work?: WorkFacts;
   /** Apply the answer immediately: there is no later Finish to collect it. */
   onAnswers: (answers: SetupAnswers) => void;
+  /** #1104 — a row's "Manage › Machines" action, and the empty cell's "Add a machine…". */
+  onOpenManage?: () => void;
+  /** #1104 — a row's "Back to the stock step" action, and the empty cell's "Change the blank". */
+  onBackToStock?: () => void;
   /**
    * #240 — selecting the rotary chuck (or the vise again) is ONE store write, because the
    * workholding and the stock box change together: `rotary` null is the vise, and `next` carries
@@ -1542,6 +1554,8 @@ export function HoldingStep({
   answers,
   work,
   onAnswers,
+  onOpenManage,
+  onBackToStock,
   onRotary,
   onBedHold,
   onHold,
@@ -1645,14 +1659,17 @@ export function HoldingStep({
         disc: job.stock.shape === 'disc',
         through: work?.through === true || throughCut,
         tape,
+        canReachMachine,
       }),
     [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape],
   );
   // #1103 — WHAT THE WORK TAKES, and the seat it recommends; the reason is shown under the rows.
   const houseBoards = useMemo(() => boardChoices(profile), [profile]);
+  // #1104 — "tape it" is said only where the tape row is on offer.
+  const tapeOffered = bedOffered(options);
   const seatChoice = useMemo(
-    () => recommendSeat(answers.stock, work ?? null, houseBoards),
-    [answers.stock, work, houseBoards],
+    () => recommendSeat(answers.stock, work ?? null, houseBoards, tapeOffered),
+    [answers.stock, work, houseBoards, tapeOffered],
   );
 
   // #240/#715 — the mount the job is IN: the job's own workholding first (a rotary, or one of the
@@ -1679,28 +1696,18 @@ export function HoldingStep({
   useEffect(() => {
     onMountBlocked?.(mountBlocked);
   }, [mountBlocked, onMountBlocked]);
-  // #705 — the picture follows the radio: the operator's chosen mount, or the option under the
-  // pointer/focus when it is a disabled one that needs a machine change (drawn with its cost line).
-  const [previewMount, setPreviewMount] = useState<HoldingMount | null>(null);
-  const drawnMount: HoldingMount = previewMount ?? current;
+  // #1104 — THE PICTURE FOLLOWS THE SELECTION. A row under the pointer or focus no longer redraws
+  // it (hover used to swap the main picture to the hovered mount, so moving across the list
+  // redrew the one the job is in); there is no replacement preview.
+  const drawnMount: HoldingMount = current;
   const drawnOption = options.find((o) => o.mount === drawnMount) ?? null;
   const bedInteractive = drawnMount === current && isBedMount(current) && jobHold !== null;
 
-  // The machine-only options have no way out when this build cannot drive a machine; a disabled
-  // control with no escape is hidden (A10), not narrated. A writable mount the machine already
-  // carries needs no escape and stays on offer.
-  // #934 hid the bed mounts — "HOLDING OFFERS THE VISE ONLY", until tape and the bracket each had
-  // a dated bench run. The maintainer's rule lifts the hide: "we test using the program", and the
-  // dated run is 2026-11-08. Both bed mounts are offered again, their row words unchanged; the
-  // rotary is unaffected (its programs carry their own bench refusal, #545).
-  const bedOffered = true;
-  const shown = options.filter(
-    (o) =>
-      (bedOffered || mechanismOf(o.mount) !== 'bed') &&
-      (canReachMachine ||
-        mechanismOf(o.mount) === 'vise' ||
-        (!o.disabled && now !== null && now.mount === mechanismOf(o.mount))),
-  );
+  // #1104 — EVERY ROW STAYS. A row that needs a machine change is shown disabled with its action in
+  // place; on a build that cannot drive a machine the action points at Manage › Machines instead of
+  // the change wizard, so the web build has no dead end (before this, its disabled rows were hidden
+  // and a rotary or bed cell was empty).
+  const shown = options;
   // #715 — when the vise is not on the pins, its three seat choices are one line: none of them
   // can be used anyway, and the bed step's radio list is the two bed mounts' (mockup station 2).
   const rows =
@@ -1745,7 +1752,9 @@ export function HoldingStep({
     rotaryArrived.current = now.profile.id;
     if (job.workholding.kind !== 'vise') return;
     if (answers.vise.source === 'saved' || answers.sacrificial.under !== null) return;
-    const round = job.stockEntry?.form === 'rod' || job.stock.shape === 'cylinder';
+    const round =
+      (job.stockEntry?.form !== undefined && isJobForm(job.stockEntry.form) && isRoundStock(job.stockEntry.form)) ||
+      job.stock.shape === 'cylinder';
     if (!round) return;
     // #877 — no framed fourth axis means nothing to fit: the Z1's envelope is not applied here.
     if (rotaryCap.kind !== 'framed') return;
@@ -2557,13 +2566,44 @@ export function HoldingStep({
       >
         <div style={{ display: 'grid', gap: 8 }}>
           <div data-testid="engrave-setup-holding-vise" style={{ display: 'grid', gap: 7 }}>
+            {rows.length === 0 && (
+              // #1104 — A CELL WITH NO ROW AT ALL says what to do instead of leaving a silent gap
+              // (it is reachable: a 150 mm rod with no machine record has no vise seat and no chuck).
+              <div data-testid="engrave-setup-no-hold" style={{ display: 'grid', gap: 6 }}>
+                <p style={{ ...MUTED, margin: 0 }}>
+                  Nothing set up here can hold a {fmt(answers.stock.length)} × {fmt(answers.stock.width)} ×{' '}
+                  {fmt(answers.stock.thickness)} mm {form ?? 'blank'}.
+                </p>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {machine === null && (
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      data-testid="engrave-setup-no-hold-add-machine"
+                      onClick={() => onOpenManage?.()}
+                    >
+                      Add a machine in Manage › Machines
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="engrave-setup-no-hold-back"
+                    onClick={() => onBackToStock?.()}
+                  >
+                    Change the blank — Back to the stock step
+                  </button>
+                </div>
+              </div>
+            )}
             {rows.map((option) => (
               <MountRow
                 key={option.mount}
                 option={option}
                 checked={!option.disabled && current === option.mount}
                 onChoose={() => choose(option.mount)}
-                onPreview={setPreviewMount}
+                onOpenManage={onOpenManage}
+                onBackToStock={onBackToStock}
                 onMachineChange={() => {
                   if (option.escape !== null) {
                     changeMachine(
@@ -2758,6 +2798,7 @@ export function HoldingStep({
               checks={bedChecks}
               rotary={drawnMount === 'rotary' ? rotaryPicture : null}
               part={part}
+              tapeOffered={tapeOffered}
             />
           </div>
           {narrow && (
@@ -2821,7 +2862,8 @@ function MountRow({
   option,
   checked,
   onChoose,
-  onPreview,
+  onOpenManage,
+  onBackToStock,
   onMachineChange,
   boardControl,
   details = null,
@@ -2829,13 +2871,9 @@ function MountRow({
   option: MountOption;
   checked: boolean;
   onChoose: () => void;
-  /**
-   * #705 — the picture follows the option under the pointer or focus, disabled ones included.
-   * #878/#897 — it follows MOVEMENT over the row, not mere containment: the welcome page's
-   * starters sit under this list, so a pointer that happens to rest on a row as the step opens
-   * would otherwise replace the picture of the mount the job is actually in.
-   */
-  onPreview: (mount: HoldingMount | null) => void;
+  /** #1104 — the row's in-place actions that leave the step. */
+  onOpenManage?: () => void;
+  onBackToStock?: () => void;
   onMachineChange: () => void;
   boardControl: JSX.Element | null;
   /** #715 — the selected bed option's own fields, indented under its radio. */
@@ -2851,10 +2889,6 @@ function MountRow({
     <div
       data-testid={`engrave-setup-mount-row-${option.mount}`}
       data-disabled={option.disabled}
-      onMouseMove={() => onPreview(option.mount)}
-      onMouseLeave={() => onPreview(null)}
-      onFocus={() => onPreview(option.mount)}
-      onBlur={() => onPreview(null)}
     >
       <label style={{ ...FIELD_LABEL, opacity: option.disabled ? 0.65 : 1 }}>
         <input
@@ -2880,15 +2914,24 @@ function MountRow({
           <Explain term="jaw-ledge" />
         </div>
       )}
-      {option.disabled && option.escape !== null && canReachMachine && (
+      {option.disabled && option.action != null && (
         <button
           type="button"
           className="btn btn--sm"
           style={{ marginLeft: 22, marginTop: 2 }}
-          data-testid={`engrave-setup-change-${option.mount}`}
-          onClick={onMachineChange}
+          // The change wizard's press keeps its own id; the other two are `…-action-…`.
+          data-testid={
+            option.action.kind === 'change-machine'
+              ? `engrave-setup-change-${option.mount}`
+              : `engrave-setup-action-${option.mount}`
+          }
+          onClick={() => {
+            if (option.action?.kind === 'change-machine') onMachineChange();
+            else if (option.action?.kind === 'manage-link') onOpenManage?.();
+            else onBackToStock?.();
+          }}
         >
-          Change the machine…
+          {option.action.label}
         </button>
       )}
       {option.mount === 'board' && boardControl !== null && (
