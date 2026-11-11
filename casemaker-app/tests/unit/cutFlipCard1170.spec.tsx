@@ -259,6 +259,114 @@ describe('#1170 the flip card', () => {
   });
 });
 
+/**
+ * The drawn content's bounds in an SVG's user units, STROKES INCLUDED — what a tight viewBox must
+ * cover. Read from the rendered attributes, never from the component's own arithmetic, so the
+ * assertion does not restate the implementation.
+ */
+function svgContentBounds(svg: SVGElement): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const add = (x0: number, y0: number, x1: number, y1: number): void => {
+    minX = Math.min(minX, x0);
+    minY = Math.min(minY, y0);
+    maxX = Math.max(maxX, x1);
+    maxY = Math.max(maxY, y1);
+  };
+  const num = (el: Element, name: string): number => Number(el.getAttribute(name));
+  for (const el of Array.from(svg.querySelectorAll('path, rect, circle'))) {
+    const stroke = el.getAttribute('stroke') === null ? 0 : Number(el.getAttribute('stroke-width') ?? 1);
+    const half = stroke / 2;
+    if (el.tagName === 'rect') {
+      const x = num(el, 'x');
+      const y = num(el, 'y');
+      add(x - half, y - half, x + num(el, 'width') + half, y + num(el, 'height') + half);
+    } else if (el.tagName === 'circle') {
+      const cx = num(el, 'cx');
+      const cy = num(el, 'cy');
+      const r = num(el, 'r') + half;
+      add(cx - r, cy - r, cx + r, cy + r);
+    } else {
+      // The bracket's one shape: `M x y H x V y` (an L: bottom edge then right edge).
+      const m = /^M\s*(-?[\d.]+)[\s,]+(-?[\d.]+)\s+H\s*(-?[\d.]+)\s+V\s*(-?[\d.]+)$/.exec(
+        (el.getAttribute('d') ?? '').trim(),
+      );
+      if (m === null) throw new Error(`unexpected path: ${el.getAttribute('d') ?? ''}`);
+      const [x0, y0, x1, y1] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+      // Butt caps: a stroke spreads ACROSS its line, never past an end.
+      add(x0, y0 - half, x1, y0 + half); // M(x0,y0) H x1 — the bottom edge
+      add(x1 - half, Math.min(y0, y1), x1 + half, Math.max(y0, y1)); // V y1 — the right edge
+    }
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+// #1170 (the flip-drawing finding) — the drawing is TIGHT and the words are HTML.
+describe('#1170 the flip picture', () => {
+  function drawCard(): void {
+    const job = bracketJob();
+    useEngraveJobStore.setState({ job });
+    render(
+      <CutFlipCard
+        job={job}
+        pkg={packageOf(job)}
+        finishedHashes={sideOneDone}
+        target={TARGET}
+        onRegister={() => {}}
+        arrival={fakeArrival()}
+      />,
+    );
+  }
+
+  it('draws no text: the labels and the turn sentence are HTML, not SVG', () => {
+    drawCard();
+    const svgs = screen.getAllByTestId('engrave-flip-diagram') as unknown as SVGElement[];
+    expect(svgs).toHaveLength(2);
+    for (const svg of svgs) expect(svg.querySelectorAll('text')).toHaveLength(0);
+    // The words live outside the drawings, in the card's body type.
+    for (const testid of ['engrave-flip-label-before', 'engrave-flip-label-after', 'engrave-flip-axis']) {
+      const el = screen.getByTestId(testid);
+      expect(el.closest('svg')).toBeNull();
+      expect((el as HTMLElement).style.fontSize).toBe('var(--cm-text-body-size)');
+    }
+    expect(screen.getByTestId('engrave-flip-label-before').textContent).toContain('Before');
+    expect(screen.getByTestId('engrave-flip-label-after').textContent).toContain('After');
+    expect(screen.getByTestId('engrave-flip-axis').textContent).toBe('left ↔ right');
+  });
+
+  it('sets each viewBox to the drawn content’s bounds plus 4 % of the larger side', () => {
+    drawCard();
+    for (const svg of screen.getAllByTestId('engrave-flip-diagram') as unknown as SVGElement[]) {
+      const b = svgContentBounds(svg);
+      const width = b.maxX - b.minX;
+      const height = b.maxY - b.minY;
+      const pad = Math.max(width, height) * 0.04;
+      const vb = (svg.getAttribute('viewBox') ?? '').split(/\s+/).map(Number);
+      expect(vb).toHaveLength(4);
+      expect(vb[0]).toBeCloseTo(b.minX - pad, 2);
+      expect(vb[1]).toBeCloseTo(b.minY - pad, 2);
+      expect(vb[2]).toBeCloseTo(width + 2 * pad, 2);
+      expect(vb[3]).toBeCloseTo(height + 2 * pad, 2);
+      // The fixed 560 × 220 canvas was the empty-margin defect.
+      expect(svg.getAttribute('viewBox')).not.toBe('0 0 560 220');
+      // The acceptance's own limit: no side may leave more than 6 % of the width empty.
+      expect(Math.abs(vb[0]! - b.minX) / vb[2]!).toBeLessThanOrEqual(0.06);
+      expect(Math.abs(vb[0]! + vb[2]! - b.maxX) / vb[2]!).toBeLessThanOrEqual(0.06);
+    }
+  });
+
+  it('holds every stroke at one weight at any size', () => {
+    drawCard();
+    for (const svg of screen.getAllByTestId('engrave-flip-diagram') as unknown as SVGElement[]) {
+      const stroked = Array.from(svg.querySelectorAll('[stroke]'));
+      expect(stroked.length).toBeGreaterThan(0);
+      for (const el of stroked) expect(el.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    }
+  });
+});
+
 describe('#1170 the flip arrival', () => {
   it('a homed head takes the light only; an unhomed one is homed first', async () => {
     const calls: string[] = [];
