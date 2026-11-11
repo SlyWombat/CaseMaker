@@ -57,12 +57,23 @@ describe('#1164 the planning field pools the fine one', () => {
     expect(coarse.minRadius).toBe(R - 3);
   });
 
-  it('a block half groove, half envelope reads the envelope (max over the footprint)', () => {
-    const fine = field([-3, -3, -3, 0, 0]);
+  it('a block reads the envelope when any of ITS OWN fine cells is the surface — blocks are centred', () => {
+    // z = [−3, −3, −3, −3, 0] over the 5-cell cycle: columns 0–3 of each cycle are the groove,
+    // column 4 is the surface. A planning cell owns its nearest five fine columns, so the cell at
+    // column 0 (owning 0–2) reads the groove and the cell at column 5 (owning 3–7, its own
+    // column 4 the surface) reads the envelope.
+    const fine = field([-3, -3, -3, -3, 0]);
     const coarse = poolRadialField(fine, 0.5);
-    // Each block takes five consecutive fine cells cycling; blocks whose five include a 0 read 0.
-    expect(Math.max(...coarse.z)).toBe(0);
-    expect(Math.min(...coarse.z)).toBe(0);
+    expect(coarse.z[0]).toBe(-3);
+    expect(coarse.z[1]).toBe(0);
+  });
+
+  it('a centred block states its half-extent — the tip drop judges the value there, not at the coordinate', () => {
+    const fine = field([-1]);
+    const coarse = poolRadialField(fine, 0.5); // five fine cells per planning cell
+    // The block is five samples centred on the coordinate: two either side, 0.2 mm at 0.1 mm.
+    expect(coarse.footprintHalfMm).toBe(0.2);
+    expect(coarse.coveredCount).toBe(coarse.nx * coarse.ny);
   });
 
   it('an uncovered fine cell is the stock surface under the coarse cell', () => {

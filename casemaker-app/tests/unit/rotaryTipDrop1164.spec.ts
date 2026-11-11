@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import type { GoalRadialField } from '@/engine/cnc/rotary/radialField';
+import { cutterFloorOnColumn } from '@/engine/cnc/rotary/columnRay';
 import { radialFieldAsHeightfield, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { poolRadialField } from '@/engine/cnc/rotary/poolRadialField';
 import { finishTipField } from '@/engine/cnc/cam/dropTip';
@@ -107,6 +108,101 @@ function goal(tris: Tri[]): EngraveTargetObject {
   };
 }
 
+/**
+ * A FINE field that depends on the arc alone, shaped like the giraffe's worst column: the envelope
+ * out to `flatTo` mm of arc, then a wall falling at `slope` mm of radius per mm of arc down to
+ * `floorZ`. The 1 mm planning blocks then fall at known angles, and every block carries material
+ * that continues BELOW the block's own leading sample — the case a cell-centre plan does not see.
+ */
+function rampFine(
+  nx: number,
+  radius: number,
+  pitch: number,
+  flatTo: number,
+  slope: number,
+  floorZ: number,
+): GoalRadialField {
+  const ny = Math.ceil((2 * Math.PI * radius) / pitch);
+  const z = new Float32Array(nx * ny);
+  const covered = new Uint8Array(nx * ny);
+  let minRadius = Infinity;
+  for (let j = 0; j < ny; j++) {
+    const arc = j * pitch;
+    const v = arc <= flatTo ? 0 : Math.max(floorZ, -slope * (arc - flatTo));
+    if (radius + v < minRadius) minRadius = radius + v;
+    for (let i = 0; i < nx; i++) {
+      z[j * nx + i] = v;
+      covered[j * nx + i] = 1;
+    }
+  }
+  return {
+    nx,
+    ny,
+    x0: 0,
+    y0: 0,
+    pitch,
+    radius,
+    minRadius,
+    maxRadius: radius,
+    z,
+    covered,
+    coveredCount: nx * ny,
+    resolutionNote: 'test ramp',
+  };
+}
+
+/**
+ * THE NO-GOUGE PROPERTY against the FINE field itself: for every planning cell the ball sits on,
+ * every fine column within the ball's reach must be left at or above its own goal radius. The tip
+ * field's rule is exactly this predicate; judging it on the fine field (not the pooled one) is
+ * what makes a conservative plan conservative.
+ */
+function worstFineGouge(
+  fine: GoalRadialField,
+  pooled: GoalRadialField,
+  tips: Float32Array,
+  radius: number,
+  ballR: number,
+): number {
+  const cutter = { radius: 0, tanHalf: null, cornerRadius: ballR, outerRadius: ballR };
+  const reachArc = Math.asin(Math.min(1, ballR / Math.max(pooled.minRadius, 1e-6))) * radius;
+  const rows = Math.ceil(reachArc / fine.pitch) + 1;
+  const cols = Math.ceil(ballR / fine.pitch) + 1;
+  const circ = 2 * Math.PI * radius;
+  let worst = 0;
+  for (let j = 0; j < pooled.ny; j++) {
+    for (let i = 0; i < pooled.nx; i++) {
+      if (pooled.covered[j * pooled.nx + i] === 0) continue;
+      const tipAbs = radius + tips[j * pooled.nx + i]!;
+      const xC = pooled.x0 + i * pooled.pitch;
+      const arcC = pooled.y0 + j * pooled.pitch;
+      const k0 = Math.round((arcC - fine.y0) / fine.pitch);
+      const c0 = Math.round((xC - fine.x0) / fine.pitch);
+      for (let dk = -rows; dk <= rows; dk++) {
+        const k = (((k0 + dk) % fine.ny) + fine.ny) % fine.ny;
+        let dArc = fine.y0 + k * fine.pitch - arcC;
+        dArc = ((dArc % circ) + circ) % circ;
+        if (dArc > circ / 2) dArc -= circ;
+        for (let dc = -cols; dc <= cols; dc++) {
+          const c = c0 + dc;
+          if (c < 0 || c >= fine.nx) continue;
+          const at = k * fine.nx + c;
+          if (fine.covered[at] === 0) continue;
+          const rho = radius + fine.z[at]!;
+          const floor = cutterFloorOnColumn(
+            cutter,
+            tipAbs,
+            dArc / radius,
+            fine.x0 + c * fine.pitch - xC,
+          );
+          if (floor !== null && floor < rho - 1e-9 && rho - floor > worst) worst = rho - floor;
+        }
+      }
+    }
+  }
+  return worst;
+}
+
 /** The field cell nearest (x, arc). */
 function cellAt(field: GoalRadialField, x: number, arc: number): number {
   const i = Math.round((x - field.x0) / field.pitch);
@@ -177,6 +273,19 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
     const { field, flat, k, x, arc } = setup();
     const newTips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
     expect(sweepAt(flat, x, arc, newTips[k]! - 0.1)).toBeGreaterThan(0.02);
+  }, 600_000);
+
+  it('a pooled plan clears every FINE column in its cell’s block — the block is judged at its near edge', () => {
+    // The giraffe's worst column, synthetic: the envelope out to arc 3.2 mm, then a wall falling
+    // 2.7 mm of radius per mm of arc. A 1 mm cell at arc 3 carries the envelope (its leading
+    // sample at 3.0) while the material at 3.4–3.5 is only ~0.5 mm below it; a plan that reads the
+    // cell's value as if it sat at the cell's own coordinate stands ~0.9 mm too low there and the
+    // ball's flank cuts the wall (the acceptance's 0.4077 mm, line 11807).
+    const fine = rampFine(20, R, 0.1, 3.2, 2.7, -8.4);
+    const field = poolRadialField(fine, PITCH);
+    const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
+    const worst = worstFineGouge(fine, field, tips, R, BALL_R);
+    expect(worst, `the plan gouges the fine field by ${worst.toFixed(3)} mm`).toBeLessThanOrEqual(0.05);
   }, 600_000);
 
   it('a plain rod with no groove asks for no lift', () => {

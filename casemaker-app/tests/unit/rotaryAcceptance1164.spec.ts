@@ -3,25 +3,27 @@
 // The committed fixture is the analyst's own: `job.json` (rotary-chuck, ⌀44.5 × 100 cylinder,
 // giraffe.stl embedded, surface gridPitchMm 1) and the pinned `tris.json` mesh in the rod frame.
 // The spec generates the job with the ⌀6 ball, times the run, sweeps the POSTED program with the
-// helper that reproduces the analyst's baseline exactly, and checks the retracts.
+// helper that reproduces the analyst's baseline exactly, and checks the retracts. THE BAR (the
+// analyst's acceptance): the rough may cut into the goal only as far as the stock it deliberately
+// leaves (the JOB's stockToLeave); the finish must not gouge beyond 0.05 mm at all.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { parseEngraveJob } from '@/store/engraveJobSchema';
-import { setLocatedFeedTable, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { setLocatedFeedTable, type FeedCatalogueRow, type StoredFeedRow } from '@/engine/cnc/feeds';
 import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
 import { getTools, resetRegistry, setRegistry } from '@/engine/cnc/toolRegistry';
 import { resolvedFeedsTable } from '@/engine/cnc/feeds';
 import { inventoryConditions } from '@/engine/cnc/toolCondition';
 import { jobTool } from '@/engine/cnc/engrave/jobSetup';
 import { toPartPlan } from '@/engine/cnc/engrave/partPlan';
-import { writeSetupPlan } from '@/engine/cnc/engrave/setupWork';
 import { readDefault, ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { pickForEngrave } from '@/workers/sim/smartPickRun';
 import { engraveGenerate, supportingFloors, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { DEFAULT_STOCK_TO_LEAVE_MM } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { tl } from './helpers/manifoldExec';
 import { parseRotaryMoves, sweepRotaryPenetration } from './helpers/rotaryPenetration';
 import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
@@ -74,7 +76,7 @@ describe('#1164 the giraffe acceptance on the production generate', () => {
     // chooses one, exactly as the bench run's search did.
     const loc = JSON.parse(readFileSync(join(DIR, 'setb', 'location.json'), 'utf8')) as {
       inventory: { id: string; tool: unknown }[];
-      feeds: FeedCatalogueRow[];
+      feeds: StoredFeedRow[];
       defaults: unknown;
     };
     // The vendor catalogue is what holds the ball the bench search chose (the owned inventory does
@@ -88,7 +90,7 @@ describe('#1164 the giraffe acceptance on the production generate', () => {
       ...cat.tools,
       ...loc.inventory.map((i) => ({ key: `inv:${i.id}`, tool: i.tool, provenance: 'setb' })),
     ] as never);
-    setLocatedFeedTable(cat.feeds);
+    setLocatedFeedTable(loc.feeds);
     const defaults = ShopDefaultsSchema.parse(loc.defaults);
     const shop: EngraveShopOpts = engraveShopOpts(defaults);
     let out: Awaited<ReturnType<typeof engraveGenerate>>;
@@ -122,7 +124,9 @@ describe('#1164 the giraffe acceptance on the production generate', () => {
       // A rotary relief is ONE program on the rod: the job carries the chosen cutter, never a
       // manual-rotation setup list (`writeSetupPlan` writes those for flat jobs).
       const single = pick.runnable.plan.cutters[0]!;
-      const chosen = { ...job, toolKey: single.key, tool: single.tool } as typeof job;
+      // `jobTool` resolves the chosen key from the registry — the pick's candidate carries the
+      // key, not the tool.
+      const chosen = { ...job, toolKey: single.key } as typeof job;
       const tool = jobTool(chosen);
       if (tool === null) throw new Error('the chosen cutter is not in the registry');
       console.log(`ACCEPT pick: ${pick.runnable.plan.cutters.map((c) => c.key).join('+')}`);
@@ -139,17 +143,47 @@ describe('#1164 the giraffe acceptance on the production generate', () => {
     expect(nc.length).toBeGreaterThan(0);
 
     const { tris } = JSON.parse(readFileSync(join(DIR, 'tris.json'), 'utf8')) as { tris: number[] };
+    // THE OPERATION SPLIT. The rotary post writes no per-operation marker (vendor parity, z1.ts's
+    // own header), so the split is read off the posted programme: the rough's A sweeps are the only
+    // G1s that carry an A word — every finish G1 holds its row's A, the raster changing it by rapid
+    // — and the relief posts roughing first, finishing second.
+    const ncLines = nc.split(/\r?\n/);
+    let roughEnd = 0;
+    for (let k = 1; k <= ncLines.length; k++) {
+      if (/^G1\b/.test(ncLines[k - 1]!) && /A-?[\d.]+/.test(ncLines[k - 1]!)) roughEnd = k;
+    }
+    const operationOf = (_line: string, lineNumber: number): string =>
+      lineNumber <= roughEnd ? 'rough' : 'finish';
     const sweep = sweepRotaryPenetration({
       triangles: tris,
       R,
-      moves: parseRotaryMoves(nc, () => 'all'),
+      moves: parseRotaryMoves(nc, operationOf),
       cutter: { radius: 3, shape: 'ball' },
     });
-    // REPORTED for the hand-in table (asserted once the operation split is wired from the result).
+    // THE BAR. The rough's allowance is the JOB's stockToLeave — the stock it deliberately leaves —
+    // never a histogram band; the finish's 0.05 mm is the analyst's own (design note, #1164).
+    const jobSurface = (job.targetObject as { surface?: { stockToLeaveMm?: number } } | null)?.surface;
+    const stockToLeave = jobSurface?.stockToLeaveMm ?? DEFAULT_STOCK_TO_LEAVE_MM;
+    const rough = sweep.byOperation.rough;
+    const finish = sweep.byOperation.finish;
+    expect(rough, 'the rough posts moves the sweep can label').toBeDefined();
+    expect(finish, 'the finish posts moves the sweep can label').toBeDefined();
+    // REPORTED for the hand-in table: the programme's size and cycle beside the bar.
     console.log(
-      `ACCEPT giraffe: cost ${costMs} ms; worst ${sweep.worst?.penMm?.toFixed(4) ?? '0'} mm at line ${sweep.worst?.line ?? '-'}; ` +
-        `moves >0.3 ${sweep.moves.filter((m) => m.maxPenMm > 0.3).length}; samples ${JSON.stringify(sweep.samples)}`,
+      `ACCEPT giraffe: cost ${costMs} ms; cutting moves ${out.cam!.cuttingMoves}; estimated ${out.cam!.estimatedSeconds} s; ` +
+        `worst ${sweep.worst?.penMm?.toFixed(4) ?? '0'} mm at line ${sweep.worst?.line ?? '-'}; ` +
+        `rough ${rough!.maxPenetrationMm.toFixed(4)} mm (${rough!.movesOver(stockToLeave)} moves >${stockToLeave}, line ${rough!.line ?? '-'}); ` +
+        `finish ${finish!.maxPenetrationMm.toFixed(4)} mm (${finish!.movesOver(0.05)} moves >0.05, line ${finish!.line ?? '-'}); ` +
+        `samples ${JSON.stringify(sweep.samples)}`,
     );
+    expect(
+      rough!.maxPenetrationMm,
+      `the rough cuts ${rough!.maxPenetrationMm.toFixed(3)} mm into the goal — over the ${stockToLeave} mm stock it may leave (line ${rough!.line ?? '-'})`,
+    ).toBeLessThanOrEqual(stockToLeave);
+    expect(
+      finish!.maxPenetrationMm,
+      `the finish gouges ${finish!.maxPenetrationMm.toFixed(3)} mm into the goal — over the 0.05 mm bar (line ${finish!.line ?? '-'})`,
+    ).toBeLessThanOrEqual(0.05);
     assertRetracts(nc);
   }, 1_800_000);
 });

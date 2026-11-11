@@ -174,7 +174,7 @@ export function sweepRotaryPenetration(input: {
 
   // ── the pose sweep ──────────────────────────────────────────────────────────────────────────
   const gouged = new Float32Array(total);
-  const worstOfPose = (x: number, z: number, aDeg: number, line: number): number => {
+  const worstOfPose = (x: number, z: number, aDeg: number): number => {
     const a = (sign * aDeg * Math.PI) / 180;
     const uy = Math.sin(a);
     const uz = Math.cos(a);
@@ -217,7 +217,6 @@ export function sweepRotaryPenetration(input: {
         move.startX + f * (move.x - move.startX),
         move.startZ + f * (move.z - move.startZ),
         move.startA + f * (move.aDeg - move.startA),
-        move.line,
       );
       if (pen > maxPen) maxPen = pen;
     }
