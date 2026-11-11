@@ -463,23 +463,21 @@ export function WelcomeOverlay() {
         {/* #1123-48 — CONTINUE FIRST: the work that is still open, one press back to exactly where
             the operator was (the stores were never touched by Home). Absent on a first visit. */}
         {continueInfo !== null && (
-          <div
-            data-testid="welcome-continue"
-            style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '10px 0 2px', flexWrap: 'wrap' }}
-          >
+          <section className="wb-continue" data-testid="welcome-continue" aria-label="Continue">
+            <div className="wb-continue__text">
+              <h2>Continue</h2>
+              <p data-testid="welcome-continue-what">{continueInfo}</p>
+            </div>
             <button
               type="button"
-              className="wb-btn wb-btn--primary"
+              className="wb-btn wb-btn--primary wb-continue__action"
               data-testid="welcome-continue-open"
               onClick={() => useProjectStore.getState().resume()}
               title="Back to the workspace, exactly as you left it — nothing was discarded"
             >
               Continue
             </button>
-            <span style={{ fontSize: 12, opacity: 0.78 }} data-testid="welcome-continue-what">
-              {continueInfo}
-            </span>
-          </div>
+          </section>
         )}
         {/* #878 — the front door. The hero names the product in one line; the four cards are the
             capabilities, each with its own picture and one way in. The library controls sit to
