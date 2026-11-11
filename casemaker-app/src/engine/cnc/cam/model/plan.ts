@@ -3696,7 +3696,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
   const demand = { features };
 
-  const cutters: CutterCandidates = { house: [...opts.houseFlats], catalogue: [] };
+  const cutters: CutterCandidates = {
+    house: [...opts.houseFlats],
+    catalogue: [],
+    // #1192 rule 2 — THE ROW EACH CUTTER ACTUALLY RUNS, for the exact dominance prune: its own
+    // row's numbers, or the borrowed numbers `paramsFor` resolved. Two cutters on one row are
+    // compared there; absent `paramsFor` every cutter shares the single `stepDownMm`/feed row, so
+    // the comparison still holds on the numbers the caller gave.
+    rowKey: (tool: Tool) => {
+      const p = cutParamsFor(tool);
+      return `${p.feed}:${p.stepDown}:${p.stepOver}`;
+    },
+  };
 
   // #990 — EVERY CANDIDATE FLAT, ITS OWN ROW. `opts.paramsFor`, when the caller supplies it
   // (`planModelCam` now does, for every tool in the house), resolves feed/plunge/step-down/RPM

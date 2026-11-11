@@ -67,6 +67,12 @@ export interface CutterCandidates {
   catalogue: Tool[];
   /** A key the operator pinned per op kind; honoured and labelled, never silently replaced. */
   pinned?: Partial<Record<PlannedOpKind, string>>;
+  /**
+   * #1192 rule 2 — THE FEED ROW A CUTTER WILL ACTUALLY RUN, as one comparable string (its own
+   * row's numbers, or the borrowed row's). The caller resolves it (plan.ts's `resolvedCutParams`);
+   * absent, the prune falls back to the feeds KIND alone, which can only prune less.
+   */
+  rowKey?: (tool: Tool) => string | null;
 }
 
 /**
@@ -621,13 +627,39 @@ export function candidateSequences(
   const primaries = freed && !chosenPrimaries.some(canFree)
     ? [...chosenPrimaries, ...eligiblePrimaries.filter((c) => canFree(c) && !chosenPrimaries.includes(c))]
     : chosenPrimaries;
+  // #1192 rule 2 — THE EXACT DOMINANCE PRUNE (the analyst's field): a candidate is dropped
+  // unpriced when a KEPT one has the same shape and the SAME FEED ROW (own, or the same borrowed
+  // numbers), at least as long a STATED reach and at least as large a diameter — on one row a
+  // larger cutter cannot cut slower — and covers every region the dropped one could (a larger
+  // cutter that cannot enter a narrow region never dominates there). A dominated primary stays a
+  // rest/finish candidate through `flatsDesc` (the chains add it only where it is needed).
+  const rowOf = (c: CandidateCutter): string =>
+    cutters.rowKey === undefined ? c.feeds : `${c.feeds}:${cutters.rowKey(c.tool) ?? 'unknown'}`;
+  const dominates = (big: CandidateCutter, small: CandidateCutter): boolean => {
+    if (big.key === small.key) return false;
+    if ((big.tool.shape ?? 'flat') !== (small.tool.shape ?? 'flat')) return false;
+    if (rowOf(big) !== rowOf(small)) return false;
+    const rb = big.tool.fluteLength;
+    const rs = small.tool.fluteLength;
+    if (rb === null || rs === null || rb < rs) return false;
+    const db = cuttingDiameter(big.tool);
+    const ds = cuttingDiameter(small.tool);
+    if (db === null || ds === null || db < ds) return false;
+    // A strict order somewhere, so two otherwise-identical cutters keep exactly one (by key).
+    const strictly = db > ds || rb > rs || big.key < small.key;
+    if (!strictly) return false;
+    const regions = [...pocketFeatures, ...contourFeatures];
+    return regions.every((f) => !coversFeature(small.tool, f) || coversFeature(big.tool, f));
+  };
+  const undominated = primaries.filter((c) => !primaries.some((other) => dominates(other, c)));
+  const screenedPrimaries = undominated.length > 0 ? undominated : primaries;
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
   // #1192/#1195 — THE BALL FALLBACK IS NOT THE SHORTLIST'S. The shortlist is a rule about FLATS
   // (the incumbent and the best own-row flat); the fallback exists precisely for the demand NO
   // flat can cut, so gating it by a list of flats emptied the candidate set and refused plans the
   // engine could plan (a V-floor part whose only cutter is the ball: "no cutter sequence").
-  const roughs: CandidateCutter[] = primaries.length > 0
-    ? primaries
+  const roughs: CandidateCutter[] = screenedPrimaries.length > 0
+    ? screenedPrimaries
     : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
   if (curvedFeatures.length > 0 && balls.length === 0) { return []; }
   if (rimFeatures.length > 0 && chamfers.length === 0) { return []; }
