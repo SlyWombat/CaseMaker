@@ -99,7 +99,7 @@ import {
 } from './outcome';
 import type { FlipZ0 } from '@/engine/cnc/engrave/flipChoice';
 import { referenceOutcome } from './references';
-import { correctedPlanForProbe, shiftedRecordedTopMachineZ } from './probeShift';
+import { correctedPlanForProbe, probeShiftMm, shiftedRecordedTopMachineZ } from './probeShift';
 import {
   CUT_BLANK_ABOVE_BAND_FALLBACK_MM,
   CUT_BLANK_AGREE_FALLBACK_MM,
@@ -1677,6 +1677,15 @@ export interface RotaryTapOptions {
   parkAboveSurfaceMm: number;
   /** How far a release backs the ball off before any G0, mm. */
   releaseMm?: number;
+  /**
+   * #1190 — the probe's `M491` reference when the stored axis Z was measured. The axis datum is a
+   * RAW machine Z; the trial chord and the crown's band are placed from it BEFORE the run's M491,
+   * so a probe refitted since then would place them by the seating difference. Once the M491 is
+   * known the trial, the check chord and the band are shifted by `today − this`. Absent/null: a
+   * legacy datum with no reference — the trial keeps its numbers (and the tap's own band says so
+   * if the module is not where it expects).
+   */
+  probeRefZ?: number | null;
 }
 
 const f4r = (n: number): string => String(Math.round(n * 1000) / 1000);
@@ -1718,6 +1727,21 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
     if (/Probe:\s*1\b/.test(rest)) throw new Stop('the probe reads touched at rest; check it is seated and plugged in');
     const refPrb = lastPrb(await io.send('M491', { timing: PROBE_TIMING }));
     if (refPrb === null || !refPrb.touched) throw new Stop('M491 answered no tool-length reading');
+    // #1190 — THE STORED AXIS Z IS A RAW MACHINE Z, measured with the probe as it sat THAT day.
+    // The trial chord, the check chord and the crown's band were placed from it before this M491;
+    // a refit shifts every trigger by today's reading less the datum's own reference, so the
+    // geometry is corrected once, here, and the run says so.
+    let trial = opts.trial;
+    let crownBandMm = opts.crownBandMm;
+    const seating = probeShiftMm(refPrb.z, opts.probeRefZ ?? null);
+    if (seating !== null && Math.abs(seating) >= 0.005) {
+      trial = { z1: r3(opts.trial.z1 + seating), z2: r3(opts.trial.z2 + seating) };
+      crownBandMm = { min: r3(opts.crownBandMm.min + seating), max: r3(opts.crownBandMm.max + seating) };
+      io.at(
+        `the probe sits ${f(Math.abs(seating))} mm ${seating > 0 ? 'further out' : 'further in'} than when the axis was measured ` +
+          `(M491 ${f(refPrb.z)} today) — the trial chord is corrected to machine Z ${f(trial.z1)} and the crown’s band to ${f(crownBandMm.min)} to ${f(crownBandMm.max)}`,
+      );
+    }
 
     /** One ±Y chord pair at `zMachine`; returns the chord (MACHINE Y and face width). */
     const chordAt = async (zMachine: number): Promise<ChordReading> => {
@@ -1769,10 +1793,10 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
       return { y: r3((balls[0]! + balls[1]!) / 2), widthMm: r3(Math.abs(balls[1]! - balls[0]!) - 2 * opts.probeRadiusMm), zMachine };
     };
 
-    const chord = await chordAt(opts.trial.z1);
+    const chord = await chordAt(trial.z1);
 
     // THE CROWN at the chord's own Y.
-    const bandBottom = r3(opts.crownBandMm.min);
+    const bandBottom = r3(crownBandMm.min);
     const descentMm = r3(opts.seekFromMachineZ - bandBottom);
     if (!(descentMm > 0)) {
       throw new Stop(`the crown's band floor (machine Z ${f(bandBottom)}) is not below the travel height ${f(opts.seekFromMachineZ)}`);
@@ -1797,11 +1821,11 @@ export async function runRotaryTap(opts: RotaryTapOptions, deps: ExecDeps): Prom
     if (!solved.ok) throw new Stop(solved.reason);
 
     // THE CHECK chord at its own height: information, never a refusal.
-    const check = await chordAt(opts.trial.z2);
+    const check = await chordAt(trial.z2);
     const residualMm = chordResidualMm(check, solved.circle);
     const residualLine =
       residualMm > ROTARY_CHORD_TOLERANCE_MM
-        ? `the check chord at machine Z ${f(opts.trial.z2)} measured ${f(check.widthMm)} mm wide, ${f(residualMm)} mm off the fitted circle (tolerance ${ROTARY_CHORD_TOLERANCE_MM} mm) — the chuck may not be round, or a wall may have been touched in the wrong place`
+        ? `the check chord at machine Z ${f(trial.z2)} measured ${f(check.widthMm)} mm wide, ${f(residualMm)} mm off the fitted circle (tolerance ${ROTARY_CHORD_TOLERANCE_MM} mm) — the chuck may not be round, or a wall may have been touched in the wrong place`
         : null;
 
     return { ok: true, circle: solved.circle, residualMm, residualLine, probeRefZ: r3(refPrb.z), transcript: io.transcript };
