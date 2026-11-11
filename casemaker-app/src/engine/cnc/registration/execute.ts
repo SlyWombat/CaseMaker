@@ -1043,8 +1043,14 @@ async function proveCutBlankTop(
       {
         ...plan.seek.band,
         ...band,
-        at: `as low as machine Z ${f(band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`,
-        expect: 'no wood was found at this check point on a blank that has been cut',
+        at:
+          plan.guarded === undefined
+            ? `as low as machine Z ${f(band.min)} for the cut-blank check at (${f(check.x)}, ${f(check.y)})`
+            : `as low as machine Z ${f(band.min)} for the top touch at (${f(check.x)}, ${f(check.y)})`,
+        expect:
+          plan.guarded === undefined
+            ? 'no wood was found at this check point on a blank that has been cut'
+            : 'nothing was found above the bed’s floor at this point',
       },
       {
         point: check,
@@ -1128,10 +1134,15 @@ async function proveCutBlankTop(
       above === undefined
         ? ''
         : `something is lying on the blank at (${f(above.x)}, ${f(above.y)}) — clear the top and register again; `;
-    throw new Stop(`the top on this cut blank could not be proved: ${lead}${words} — no two implied tops agree within ${f(agreeMm)} mm`);
+    throw new Stop(
+      plan.guarded === undefined
+        ? `the top on this cut blank could not be proved: ${lead}${words} — no two implied tops agree within ${f(agreeMm)} mm`
+        : `the top on the blank could not be proved: ${lead}${words} — no two touches agree within ${f(agreeMm)} mm above the bed’s floor`,
+    );
   }
   io.at(
-    `the top is proved on a cut blank: implied machine Z ${f(accepted.level)} at (${f(accepted.from.reading.x)}, ${f(accepted.from.reading.y)}) — ${accepted.agreement}` +
+    (plan.guarded === undefined ? 'the top is proved on a cut blank' : 'the top on the blank is proved') +
+      `: implied machine Z ${f(accepted.level)} at (${f(accepted.from.reading.x)}, ${f(accepted.from.reading.y)}) — ${accepted.agreement}` +
       (accepted.outlier !== null
         ? `; the lone high reading implied ${f(accepted.outlier.implied)} at (${f(accepted.outlier.reading.x)}, ${f(accepted.outlier.reading.y)}) was not used`
         : ''),
@@ -2158,6 +2169,9 @@ export async function runRegistration(
     // the stock, with finished programs on the machine. The operator answers with a top measured
     // before, the bracket's own top, or today's seek; a typed or derived answer moves nothing.
     const bracketTopFallback =
+      // #1201 — A GUARDED TOP SEEK HAS NO EXPECTED SURFACE, so there is no derived top to offer:
+      // #1166's question would offer `band.max − tolerance` (the park height), which is nonsense.
+      plan.guarded === undefined &&
       plan.mount === 'bracket' &&
       plan.bracketOrigin !== null &&
       surfacePointOnStock(plan) &&
@@ -2438,7 +2452,8 @@ export async function runRegistration(
         })
         .join('; ');
       outcome.notes.push(
-        `the top was measured on a cut blank: ${read}; the accepted implied top is machine Z ${f(slow.z)} (${cutBlankOutlier === null ? 'the higher of two agreeing touches or the level three agree on' : `three checks agree; the lone high reading implied ${f(cutBlankOutlier.machineZ)} at (${f(cutBlankOutlier.at.x)}, ${f(cutBlankOutlier.at.y)}) is a chip or an unrecorded floor and was not used`})` +
+        (plan.guarded === undefined ? 'the top was measured on a cut blank' : 'the top on the blank was proved') +
+          `: ${read}; the accepted implied top is machine Z ${f(slow.z)} (${cutBlankOutlier === null ? 'the higher of two agreeing touches or the level three agree on' : `three checks agree; the lone high reading implied ${f(cutBlankOutlier.machineZ)} at (${f(cutBlankOutlier.at.x)}, ${f(cutBlankOutlier.at.y)}) is a chip or an unrecorded floor and was not used`})` +
           (plan.surfaceChecksUnknown === true
             ? ' — the earlier plan’s cuts are not recorded, so the check points are outside today’s footprint and assumed uncut'
             : '') +

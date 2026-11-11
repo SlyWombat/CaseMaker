@@ -122,6 +122,11 @@ export function registrationFor(
     mountTap?: { x: number; y: number; fromMachineZ: number; label: string } | null;
     /** #1133 — where the surface touch should land, work XY: the cut area's centre. */
     cutCentre?: { x: number; y: number };
+    /**
+     * #1201 — a GUARDED top seek: no expected surface. The band is the bed's floor + margin to the
+     * machine's clearance less the park height; the plan's checks prove the reading.
+     */
+    guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
     bracketOrigin?: BracketOrigin;
     /** Bracket (#427): the clamps and arms as placed, and whether to take the confirming touch. */
     mountObstacles?: PlanObstacle[];
@@ -136,15 +141,20 @@ export function registrationFor(
 ): { plan: PlanResult; references: ReferenceFeature[] } {
   const dims = machineSize(setup.rotation, setup.stockBefore.bounds);
   const datum = mount.kind === 'vise' ? (input.mountDatum ?? null) : null;
-  const expected = expectedSurface(
-    setup,
-    dims,
-    datum,
-    input.surfaceTopZ ?? null,
-    input.seatMachineZ,
-    input.seatProbeRefZ ?? null,
-    input.seatProbeRefLabel ?? null,
-  );
+  // #1201 — a guarded plan has no expected surface; the placeholder is never read (the band comes
+  // from `guarded`), and NaN keeps a caller that forgets from silently planning a wrong band.
+  const expected =
+    input.guarded !== undefined
+      ? { machineZ: Number.NaN, from: 'the top on the blank (guarded)', probeRefZ: null, probeRefLabel: null, floorProbeRefZ: null }
+      : expectedSurface(
+          setup,
+          dims,
+          datum,
+          input.surfaceTopZ ?? null,
+          input.seatMachineZ,
+          input.seatProbeRefZ ?? null,
+          input.seatProbeRefLabel ?? null,
+        );
   const plan = planRegistration(
     {
       stock: { xMin: 0, yMin: 0, xMax: dims.x, yMax: dims.y, cornerRadius: input.cornerRadius },
@@ -162,6 +172,7 @@ export function registrationFor(
       bracketOrigin: input.bracketOrigin,
       mountObstacles: input.mountObstacles,
       bracketConfirm: input.bracketConfirm,
+      ...(input.guarded === undefined ? {} : { guarded: input.guarded }),
       // #743 — a disc keeps its own four-edge plan; a rectangle's input has no `disc`.
       ...(input.disc !== undefined ? { disc: input.disc } : {}),
       ...(input.cutCentre !== undefined ? { cutCentre: input.cutCentre } : {}),

@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { ConsoleSendResult } from '@/platform/machineConsole';
@@ -290,36 +290,37 @@ describe('#1189 the Register card and a legacy datum', () => {
     settings: S,
   });
 
-  it('a seat measured before the probe was last fitted is re-measured at its OWN point, with the press offered', () => {
+  it('#1201 — a seat measured before the probe was last fitted is NOT used: the top is measured on the blank', () => {
     const attempt = planRegistrationAttempt(
       args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-09T00:00:00.000Z', at: [-175, -35] }),
     );
-    // #1189 — the card does NOT plan the registration touch on a reference-less seat; it offers
-    // the one-touch seat seek again, and that seek lands where the datum was taken.
+    // #1201 supersedes #1189 field 3: the legacy seat is a bed-setup datum to re-measure later,
+    // never a job-time press. The card plans the guarded top seek on the stock.
     expect(attempt.kind).toBe('plan');
     if (attempt.kind !== 'plan') return;
-    expect(attempt.plan.seatRemeasure).toBe('probe-refit');
-    expect(attempt.plan.mountTap?.x).toBe(-175);
-    expect(attempt.plan.mountTap?.y).toBe(-35);
-    expect(attempt.summary).toContain('Measure the bracket seat again');
-    expect(attempt.summary).toContain('machine X -175, Y -35');
-    expect(attempt.plan.notes.join(' ')).toContain('stored seat’s own point');
-    // After the re-measure (the reference written), the same card plans the registration itself.
+    expect(attempt.plan.guarded?.seatIgnored).toBe('legacy');
+    expect(attempt.plan.mountTap).toBeNull();
+    expect(attempt.plan.seatRemeasure).toBeUndefined();
+    expect(attempt.summary).toContain('TOP OF THE BLANK');
+    expect(attempt.plan.notes.join(' ')).toContain('measured before the probe’s last fitting and is not used');
+    // After the seat is re-measured at BED SETUP (the reference written), the same card plans the
+    // ordinary trusted-seat registration.
     const fresh = planRegistrationAttempt(
       args({ value: SEAT, what: 'bracket seat', measuredAt: '2026-11-10T00:00:00.000Z', probeRefZ: REF_THEN, at: [-175, -35] }),
     );
     expect(fresh.kind).toBe('plan');
     if (fresh.kind !== 'plan') return;
     expect(fresh.plan.probeRefZ).toBe(REF_THEN);
-    expect(fresh.plan.seatRemeasure).toBeUndefined();
+    expect(fresh.plan.guarded).toBeUndefined();
   });
 
-  it('with no seat at all the seek uses the planner’s own point', () => {
+  it('#1201 — with no seat at all the plan is the same guarded top seek, and no tap', () => {
     const attempt = planRegistrationAttempt(args(null));
     expect(attempt.kind).toBe('plan');
     if (attempt.kind !== 'plan') return;
-    expect(attempt.plan.seatRemeasure).toBeUndefined();
-    expect(attempt.plan.mountTap?.x).not.toBe(-175);
+    expect(attempt.plan.guarded?.seatIgnored).toBe('absent');
+    expect(attempt.plan.mountTap).toBeNull();
+    expect(attempt.plan.surfaceChecks).toHaveLength(2);
   });
 
   it('a jaw top measured before the probe was last fitted asks for the tap again', () => {
@@ -398,5 +399,59 @@ describe('#1179 amendment — above-band readings at a check point', () => {
       (p) => Math.min(p.x, 100 - p.x) <= 15 && Math.min(p.y, 60 - p.y) <= 15,
     );
     expect(corners.length).toBeLessThan(3);
+  });
+});
+
+// #1201 — THE EXECUTOR'S GUARDED TOP SEEK. No expected surface: the reading is the top, proved by
+// two agreeing touches above the bed's floor; #1166's derived-top question is never asked.
+describe('#1201 a guarded top seek in the executor', () => {
+  const checks = [
+    { x: 20, y: 20, depthMm: 0 },
+    { x: 50, y: 30, depthMm: 0 },
+  ];
+  /** Machine XY = the bracket origin (−200) + work XY. */
+  const at = (x: number, y: number, wx: number, wy: number): boolean =>
+    Math.abs(x - (-200 + wx)) < 0.6 && Math.abs(y - (-200 + wy)) < 0.6;
+  const agreeing = (x: number, y: number): number | null => {
+    if (at(x, y, 20, 20)) return TOP;
+    if (at(x, y, 50, 30)) return TOP - 0.03;
+    return null;
+  };
+  const guarded = () =>
+    bracketPlan({
+      guarded: { floorMachineZ: SEAT, marginMm: 1, seatIgnored: 'absent' },
+      surfaceChecks: checks,
+      seekFromMachineZ: -3,
+    });
+
+  it('two agreeing touches above the floor are the top, and the derived-top question is never asked', async () => {
+    const fake = fakeConsole(REF_THEN, agreeing);
+    const askTop = vi.fn();
+    const result = await runRegistration(guarded(), {
+      ...deps(fake.console),
+      hasFinishedPrograms: true,
+      askTop,
+    });
+    expect(result.ok, result.ok ? '' : result.reason).toBe(true);
+    if (!result.ok) return;
+    expect(result.outcome.surfaceZ).toBeCloseTo(TOP, 3);
+    // #1201 — the guarded plan has no expected surface, so #1166 must not offer a derived top.
+    expect(askTop).not.toHaveBeenCalled();
+    expect(result.outcome.notes.join(' ')).toContain('the top on the blank was proved');
+    expect(result.outcome.notes.join(' ')).not.toContain('cut blank');
+  });
+
+  it('two touches that do not agree stop with the blank sentence, never a derived top', async () => {
+    const disagreeing = (x: number, y: number): number | null => {
+      if (at(x, y, 20, 20)) return TOP;
+      if (at(x, y, 50, 30)) return TOP + 1;
+      return null;
+    };
+    const fake = fakeConsole(REF_THEN, disagreeing);
+    const result = await runRegistration(guarded(), deps(fake.console));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('the top on the blank could not be proved');
+    expect(result.reason).toContain('above the bed’s floor');
   });
 });

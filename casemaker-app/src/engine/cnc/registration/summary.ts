@@ -13,6 +13,24 @@ export function summarizePlan(plan: RegistrationPlan): string {
   // #640 — the probe the plan will actually use: the 3D probe touches edges sideways, so the
   // narration must not send the operator to fit the wired one.
   const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? 'the 3D probe' : 'the wired probe';
+  // #1201 — A GUARDED TOP SEEK has no expected surface: the card names BOTH points before the
+  // press and the floor under them, so the operator can clear the spots and see where the probe
+  // will stop if the blank is not there.
+  if (plan.guarded !== undefined) {
+    const points = (plan.surfaceChecks ?? [])
+      .map((check) => `(${n(check.x)}, ${n(check.y)})`)
+      .join(' and ');
+    const floor = plan.guarded.floorMachineZ + plan.guarded.marginMm;
+    const clamps = plan.mountObstacles.filter((o) => o.kind === 'clamp').map((o) => o.label);
+    const assumes =
+      plan.mount === 'bracket'
+        ? ` It assumes ${clamps.length === 0 ? 'no clamps on the stock' : clamps.join('; ')} — you confirm that before the probe moves.`
+        : '';
+    return (
+      `Home, fit ${probeWords} and measure it (M491); touch the TOP OF THE BLANK at ${points} — ` +
+      `two touches that must agree, each seek stopping above the bed at machine Z ${n(floor)}; home when finished.${assumes}`
+    );
+  }
   if (plan.references) {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (

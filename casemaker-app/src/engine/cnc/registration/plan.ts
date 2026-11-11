@@ -266,6 +266,13 @@ export interface PlanInput {
    */
   expectedSurface: { machineZ: number; from: string };
   /**
+   * #1201 — A GUARDED TOP SEEK: no expected surface. The band becomes
+   * [floorMachineZ + marginMm, seekFromMachineZ − parkAboveSurfaceMm] and any contact in it is the
+   * reading (the agreement checks prove it). `expectedSurface` is then unused; the #1166 derived-top
+   * offer is off. The card plans this for a bracket job with no trusted seat.
+   */
+  guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
+  /**
    * #598 — the MEASURED mount datum (the vise's jaw top, machine Z). Present on the normal vise path;
    * null/absent means the caller could not supply one and turns the plan into a `need-datum` ("tap the
    * jaw first"), exactly as `need-seat` today. The legacy typed-seat path (the expert override) passes
@@ -427,6 +434,20 @@ export interface RegistrationPlan {
   machineClearanceZ?: number;
   /** The surface touch: from the machine's travel height (`seekFromMachineZ`), at most this far down; and the band a reading must land in. */
   seek: { fromMachineZ: number; travelMm: number; band: { min: number; max: number } };
+  /**
+   * #1201 — A GUARDED TOP SEEK: NO EXPECTED TOP.
+   *
+   * A bracket job whose bed has no trusted seat does not need one: the top is measured on the
+   * blank. The plan's `surfaceChecks` are the two touch points (the path origin, inset, and the
+   * cut area's centre), both at `depthMm: 0`; the seek starts at the machine's clearance and stops
+   * on contact anywhere above `floorMachineZ + marginMm`. The executor accepts the reading as the
+   * top (it must not offer #1166's derived top, which would be the band's ceiling) and the two
+   * readings are proved by the agreement rule. The seat stays a bed-setup datum.
+   *
+   * `seatIgnored` is why the plan is guarded, in the card's words: `legacy` — a seat is on file
+   * but was measured before the probe's last fitting; `absent` — the bed states none.
+   */
+  guarded?: { floorMachineZ: number; marginMm: number; seatIgnored?: 'legacy' | 'absent' };
   /** #598 — the measured mount datum the seek is a search from, or null on the legacy seat path. */
   mountDatum: MountDatum | null;
   /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
@@ -518,8 +539,10 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
 
   // The surface seek: bounded to the expected surface ± tolerance, and started from the machine's own
   // travel height (`seekFromMachineZ`) — the SAME value the obstacle check below is measured from.
+  // #1201 — a GUARDED seek has no expected top: its band is the bed's floor to the clearance.
+  const guarded = input.guarded ?? null;
   const exp = input.expectedSurface.machineZ;
-  if (!Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
+  if (guarded === null && !Number.isFinite(exp)) return { ok: false, reason: 'the job does not say where it expects the stock’s top' };
   const seekFromMachineZ = input.seekFromMachineZ;
   if (!Number.isFinite(seekFromMachineZ)) return { ok: false, reason: 'the machine’s travel height is not known' };
   const mountDatum = input.mountDatum ?? null;
@@ -565,9 +588,15 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   // stock the probe can only meet the stock), not a band around the estimate; the ceiling is the
   // expected surface + tolerance either way. The legacy seat path — and a datum with the stock recessed
   // below the jaw tops (#517) — keeps the band's own floor.
-  const floorFromDatum = mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ;
+  const floorFromDatum = guarded === null && mount === 'vise' && mountDatum !== null && exp > mountDatum.jawTopZ;
   const seekFloor = floorFromDatum ? r3(mountDatum!.jawTopZ - s.surfaceToleranceMm) : r3(exp - s.surfaceToleranceMm);
-  const band = { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) };
+  const band =
+    guarded === null
+      ? { min: seekFloor, max: r3(exp + s.surfaceToleranceMm) }
+      : { min: r3(guarded.floorMachineZ + guarded.marginMm), max: r3(seekFromMachineZ - s.parkAboveSurfaceMm) };
+  if (guarded !== null && !(band.min < band.max)) {
+    return { ok: false, reason: 'the guarded seek has no room between the bed’s floor and the machine’s clearance' };
+  }
   // #1189 — the floor is the JAW's when it comes from the jaw datum; it then shifts by that
   // datum's own reference, which may differ from the expected surface's (a surface top above, a
   // jaw measured in another seating). Absent, both follow the expected surface's datum.
@@ -576,7 +605,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     return { ok: false, reason: `the stock's top is expected at machine Z ${exp}: too high to park ${s.parkAboveSurfaceMm} mm above it` };
   }
   const travel = r3(seekFromMachineZ - band.min);
-  if (travel > s.surfaceSeekMm) {
+  if (guarded === null && travel > s.surfaceSeekMm) {
     return {
       ok: false,
       reason: `the stock's top is expected ${r3(seekFromMachineZ - exp)} mm below the start, more than the ${s.surfaceSeekMm} mm the surface touch may travel`,
@@ -659,7 +688,8 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
           y: r3((input.region.min[1] + input.region.max[1]) / 2),
         },
         machineClearanceZ: seekFromMachineZ,
-      seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+        seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+        ...(guarded === null ? {} : { guarded }),
         mountDatum,
         probe,
         mountTap,
@@ -882,7 +912,10 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     }
   }
   notes.push(
-    `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`,
+    guarded === null
+      ? `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`
+      // #1201 — the guarded seek's own sentence: no expectation, a floor, and what proves the reading.
+      : `the top is guarded: no expected surface — the seek stops on contact above machine Z ${band.min} (the bed’s floor + a margin), and the two check points must agree`,
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,
     // #1133 — the band, its provenance, and what it buys: the maintainer's own rule.
     `every edge find stays within ±${s.edgeBandMm} mm of where the edge is expected (the stock's own size error, the mount's repeat 0.05 mm and fit 0.1 mm, plus margin); the probe stops at the first touch off the stock`,
@@ -904,6 +937,7 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       surfacePoint,
       machineClearanceZ: seekFromMachineZ,
       seek: { fromMachineZ: seekFromMachineZ, travelMm: travel, band },
+      ...(guarded === null ? {} : { guarded }),
       mountDatum,
       probe,
       mountTap,
