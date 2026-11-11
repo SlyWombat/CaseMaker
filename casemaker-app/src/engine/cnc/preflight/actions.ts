@@ -20,7 +20,7 @@
 import type { PreflightRow } from './types';
 
 /** The acts a Do row can offer, named for the surface that owns the handler. */
-export type FindingAction = 'change-machine' | 'choose-cutter' | 'clearance';
+export type FindingAction = 'change-machine' | 'choose-cutter' | 'clearance' | 'set-feeds';
 
 export interface FindingActionDef {
   action: FindingAction;
@@ -42,8 +42,19 @@ export const FINDING_ACTIONS: Readonly<Partial<Record<string, FindingActionDef>>
   'released-onto-board': { action: 'clearance', label: 'Read the clearance statement' },
 };
 
-/** The action a row offers, or null when its act has no in-app control. */
-export function findingActionFor(row: Pick<PreflightRow, 'code'>): FindingActionDef | null {
+/**
+ * The action a row offers, or null when its act has no in-app control.
+ *
+ * #1123 item 56(a) — the borrowed-feeds row is the one act that is not a fixed code: the same
+ * `goal-cutter-substituted` code is a Know when a cutter was swapped, and the feeds row only when
+ * a feed row was borrowed. Its act opens the house's feeds table (Manage › Tools › feeds).
+ */
+export function findingActionFor(
+  row: Pick<PreflightRow, 'code' | 'feedsProxyMm'>,
+): FindingActionDef | null {
+  if (row.code === 'goal-cutter-substituted' && row.feedsProxyMm !== undefined) {
+    return { action: 'set-feeds', label: 'Set their feeds' };
+  }
   return FINDING_ACTIONS[row.code] ?? null;
 }
 
@@ -55,11 +66,14 @@ export interface FindingActionHooks {
   openCutters: () => void;
   /** Reveal the clearance statement and focus its checkbox — never write the tick. */
   showClearance: () => void;
+  /** #1123 item 56(a) — open the house's feeds table (Manage › Tools › feeds). */
+  openFeeds: () => void;
 }
 
 /** Run one act through the surface's own handler. */
 export function runFindingAction(action: FindingAction, hooks: FindingActionHooks): void {
   if (action === 'change-machine') hooks.changeMachine();
   else if (action === 'choose-cutter') hooks.openCutters();
+  else if (action === 'set-feeds') hooks.openFeeds();
   else hooks.showClearance();
 }

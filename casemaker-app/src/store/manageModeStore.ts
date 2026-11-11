@@ -22,6 +22,13 @@ export type ManageScope = 'tools' | 'accessories' | 'materials' | 'machines';
 /** The filter chips. `all` is the one that shows the list as the tier grouping draws it. */
 export type TierFilter = 'all' | 'owned' | 'yours' | 'catalogue' | 'builtin';
 
+/**
+ * #1123 item 56(a) — the two panes of Manage › Tools. The cutter list is the default; `feeds` is
+ * the house's feeds table. It lives here, not in `ToolsScope`, because the Cut step's borrowed-
+ * feeds row lands the operator ON the table, not one chip away from it.
+ */
+export type ToolsPane = 'cutters' | 'feeds';
+
 /** The three ways into the register frame — the doors, whose panels are #309's. */
 export type RegisterDoor = 'scan' | 'catalogue' | 'type';
 
@@ -36,9 +43,17 @@ export interface ManageModeState {
   /** Whether the rail is showing the register frame instead of a row's detail. */
   registerOpen: boolean;
   door: RegisterDoor;
+  /** Which pane of Tools is showing. `cutters` unless something asked for feeds. */
+  toolsPane: ToolsPane;
 
   /** Enter the mode, optionally straight into a scope. Always starts at the top of that scope. */
   openManage: (scope?: ManageScope) => void;
+  /**
+   * #1123 item 56(a) — the Cut step's borrowed-feeds row opens Manage › Tools ON the feeds table,
+   * so "set their feeds" lands where the rows are edited rather than on the cutter list.
+   */
+  openFeeds: () => void;
+  setToolsPane: (pane: ToolsPane) => void;
   closeManage: () => void;
   setScope: (scope: ManageScope) => void;
   select: (key: string | null) => void;
@@ -60,12 +75,15 @@ const CLOSED = {
   tier: 'owned' as TierFilter,
   registerOpen: false,
   door: 'scan' as RegisterDoor,
+  toolsPane: 'cutters' as ToolsPane,
 };
 
 export const useManageModeStore = create<ManageModeState>()((set) => ({
   ...CLOSED,
 
   openManage: (scope) => set({ ...CLOSED, open: true, scope: scope ?? 'tools' }),
+  openFeeds: () => set({ ...CLOSED, open: true, scope: 'tools', toolsPane: 'feeds' }),
+  setToolsPane: (toolsPane) => set({ toolsPane }),
   // Closing keeps nothing: re-entering the mode is a fresh look at the house, not a resumed place.
   closeManage: () => set({ ...CLOSED }),
   setScope: (scope) =>

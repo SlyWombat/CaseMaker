@@ -41,12 +41,14 @@ function row(
 const BLOCK = (s: number): PreflightRow[] => [
   row(s, 'warning', 'sacrificial-default', 'The sacrificial defaults were used: 3 mm under the blank.'),
   row(s, 'warning', 'goal-fixture-unmodelled', 'The plan does not model the fixture envelope.'),
+  // #1186 rule 4's one statement — the plan's own sentence, with the borrowed minutes typed
+  // beside it for the Do row (#1123-56a).
   row(
     s,
     'warning',
     'goal-cutter-substituted',
-    "The ⌀6 flat's feeds: hardwood's largest covered row (3.2 mm) answered, the conservative side.",
-    { feedsProxyMm: 3.2 },
+    "the ⌀ 6 mm flat end, the ⌀ 6 mm flat end and the ⌀ 0.6 mm flat end have no feed of their own for hardwood and cut at the 3.2 mm row's slower feed and step-down — about 27 min of this plan",
+    { feedsProxyMm: 3.2, borrowedMinutes: 27 },
   ),
   row(s, 'info', 'goal-plan-tradeoff', 'The measured pick saves 4 min and leaves one more bit change.'),
   row(s, 'info', 'goal-pocket-floor-rest', 'The pocket floor strip is finished by the ball nose.'),
@@ -87,16 +89,17 @@ describe('#1128 — Do / Check / Know on the Cut step', () => {
   it('bands the report, counts what matters, and puts Do first', () => {
     render(<EngravePreflight report={reportOf(ROWS)} />);
 
-    // 1 Do (the machine record), 3 Check (sacrificial, fixture envelope, borrowed feeds), 5 Know
-    // (two coverage lines, the tradeoff, the finish note, the substitution).
+    // #1123-56a — the borrowed-feeds row carries an act (set their feeds), so it is Do: 2 Do
+    // (the machine record and the borrowed feeds), 2 Check (sacrificial, fixture envelope),
+    // 5 Know (two coverage lines, the tradeoff, the finish note, the substitution).
     expect(screen.getByTestId('engrave-preflight-summary').textContent).toBe(
-      '1 to do · 3 to check · 5 to know',
+      '2 to do · 2 to check · 5 to know',
     );
     const doBand = screen.getByTestId('engrave-preflight-do');
     const checkBand = screen.getByTestId('engrave-preflight-check');
     const knowBand = screen.getByTestId('engrave-preflight-know');
-    expect(doBand.getAttribute('data-count')).toBe('1');
-    expect(checkBand.getAttribute('data-count')).toBe('3');
+    expect(doBand.getAttribute('data-count')).toBe('2');
+    expect(checkBand.getAttribute('data-count')).toBe('2');
     expect(knowBand.getAttribute('data-count')).toBe('5');
     // Document order: Do, then Check, then Know.
     expect(doBand.compareDocumentPosition(checkBand) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -112,13 +115,23 @@ describe('#1128 — Do / Check / Know on the Cut step', () => {
     // The sacrificial and fixture-envelope rows exist once each, not once per setup.
     expect(screen.getAllByText(/The sacrificial defaults were used/)).toHaveLength(1);
     expect(screen.getAllByText(/does not model the fixture envelope/)).toHaveLength(1);
-    // Five merged lines name both setups (the three Check rows and the tradeoff and finish Knows).
+    // Five merged lines name both setups (the borrowed-feeds Do, the two Checks, and the tradeoff
+    // and finish Knows).
     expect(screen.getAllByText('setups 1 and 2')).toHaveLength(5);
-    // The borrowed-feeds line is Check (it changes what happens on the bed), and it is merged too.
-    expect(screen.getAllByText(/largest covered row \(3.2 mm\)/)).toHaveLength(1);
+    // #1186 rule 4's ONE statement is the row, and it is merged across setups too.
+    expect(screen.getAllByText(/no feed of their own for hardwood/)).toHaveLength(1);
     // The coverage lines differ (57.5 % vs 58.1 %), so both stay, per setup.
     expect(screen.getByText(/57\.5 % of the goal/)).toBeTruthy();
     expect(screen.getByText(/58\.1 % of the goal/)).toBeTruthy();
+  });
+
+  it('#1123-56a — the row carries rule 4’s typed minutes, and the plan’s own sentence', () => {
+    render(<EngravePreflight report={reportOf(ROWS)} />);
+    const borrowed = screen.getByTestId('engrave-preflight-row-1-goal-cutter-substituted');
+    expect(borrowed.getAttribute('data-band')).toBe('do');
+    // The number is read from the row's typed field — never parsed out of the sentence.
+    expect(borrowed.getAttribute('data-borrowed-minutes')).toBe('27');
+    expect(borrowed.textContent).toContain('about 27 min of this plan');
   });
 
   it('keeps the planner facts out of the operator list', () => {

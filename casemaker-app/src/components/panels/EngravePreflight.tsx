@@ -100,6 +100,8 @@ function Row({
       data-owner={row.owner}
       data-code={row.code}
       data-band={triaged.band}
+      // #1123-56a — rule 4's minutes as DATA (the sentence beside it is the plan's own).
+      data-borrowed-minutes={row.borrowedMinutes}
       data-expanded={expanded ? 'true' : 'false'}
       style={{ display: 'flex', gap: 6, fontSize: 12, lineHeight: 1.45, margin: '3px 0', color: '#d1d5db' }}
     >

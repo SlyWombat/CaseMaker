@@ -17,8 +17,8 @@ import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-990', name: 'flat-6' });
-const FLAT15 = flatEndMill(1.5, { number: 2, id: 'flat-1.5-990', name: 'flat-1.5' });
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6-990', name: 'flat-6', fluteLength: 30 });
+const FLAT15 = flatEndMill(1.5, { number: 2, id: 'flat-1.5-990', name: 'flat-1.5', fluteLength: 30 });
 
 function meshOf(solid: ReturnType<typeof tl.Manifold.cube>): ParsedMesh {
   const m = solid.getMesh();
@@ -68,9 +68,13 @@ describe('#990 the smaller rest plans at its own PLA step-down', () => {
     // ⌀0.8–1.6 → 0.3 mm (the ⌀1.5). Each cutter's passes take its own number.
     expect(new Set(six), 'the ⌀6’s proxy row').toEqual(new Set([0.5]));
     expect(new Set(two), 'the ⌀1.5 must post its own 0.3, not the primary’s 0.5').toEqual(new Set([0.3]));
-    // The proxy is STATED, once, naming the cutter — the issue's "notes name each cutter's row".
+    // #1186 rule 4 RE-PIN — the borrow is STATED ONCE for every borrowed bit, naming the bits, the
+    // row it borrows and what it costs (the #1114 shape was one line per cutter; three identical
+    // warnings was the bench's complaint). The behaviour this test is about — each cutter's OWN
+    // PLA step-down, never the primary's — is asserted above and unchanged.
     const notes = out.perSetup.flatMap((s2) => s2.notes).join('\n');
-    expect(notes).toContain('flat-6: no starting row covers its diameter');
-    expect((notes.match(/flat-6: no starting row/g) ?? []).length, 'the note is printed once').toBe(1);
+    expect(notes).toContain('no feed of its own for pla');
+    expect(notes).toContain("row's slower feed and step-down");
+    expect((notes.match(/no feed of (its|their) own for/g) ?? []).length, 'the borrow is stated once').toBe(1);
   }, 120_000);
 });

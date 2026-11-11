@@ -70,9 +70,9 @@ const GOLDEN = join(HERE, 'fixtures', 'golden', 'model');
 const UPDATE = process.env.CASEMAKER_UPDATE_GOLDEN === '1';
 
 const HOUSE: Tool[] = [
-  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
-  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' }),
-  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' }),
+  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
+  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 }),
+  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2', fluteLength: 30 }),
 ];
 
 const CASES: { id: string; kind: PartKind; seed: number; note: string }[] = [

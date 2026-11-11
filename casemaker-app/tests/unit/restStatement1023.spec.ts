@@ -124,7 +124,7 @@ describe('#1023 — the finish states what it leaves', () => {
     // that `twoPlans.ts` carries the answer from the CALLER's catalogue onto the owned run.
     const target = goalTarget();
     const job = goalJob(target);
-    const flat1: Tool = flatEndMill(1, { name: '1 mm flat end', diameter: 1 });
+    const flat1: Tool = flatEndMill(1, { name: '1 mm flat end', diameter: 1, fluteLength: 30 });
     const input = await buildModelPlanInputForGoal(job, target, BALL6, { tools: [], feeds: SHOP_FEEDS }, undefined, [flat1]);
     expect(input.cutters.catalogue.length).toBe(1);
     const two = await planTwoOutcomes(input);

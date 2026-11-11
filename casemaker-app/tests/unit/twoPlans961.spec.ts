@@ -23,11 +23,11 @@ import { planChoiceOf } from '@/types/engraveJob';
 import { PLAN_MATERIALITY, comparePlanOutcomes, idealWorsenings } from '../tools/tradeoff';
 import { scoreSevenLines, type ProgramScore } from '../tools/sevenLines';
 
-const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose' };
-const v90: Tool = flatEndMill(3.175, { number: 3, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
-const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1' });
-const flat3175: Tool = flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' });
+const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const ball6: Tool = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose' };
+const v90: Tool = flatEndMill(3.175, { number: 3, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1, fluteLength: 30 });
+const smallFlat: Tool = flatEndMill(1, { number: 9, id: 'flat-1', name: 'flat-1', fluteLength: 30 });
+const flat3175: Tool = flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 
 /** The `sloped` random part (seed 1) — the same working synthetic mesh the #959 plan specs use. */
 /** #1180 B1 — the synthetic part is deterministic; build its mesh ONCE per file. Every `input()`

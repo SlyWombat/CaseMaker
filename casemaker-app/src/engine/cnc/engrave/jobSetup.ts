@@ -483,6 +483,8 @@ export type JobFindingCode =
   // the run sheet's missing hand-cut step is stated rather than silent.
   | 'tab-release-skipped'
   | 'goal-cutter-substituted'
+  // #1186 rule 6 — the job-level sibling merge: stated once, info.
+  | 'goal-sibling-merged'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
   | 'goal-fixture-unmodelled'
@@ -630,6 +632,11 @@ export interface JobFinding {
    * on it (a substitution is Know; borrowed feeds are Check).
    */
   feedsProxyMm?: number;
+  /**
+   * #1186 rule 4 — on the ONE `goal-cutter-substituted` row for borrowed feed rows: the minutes
+   * this plan pays for the borrow. G's Do row ("Set their feeds") reads this field.
+   */
+  borrowedMinutes?: number;
   /**
    * #785 — the GOAL target object a finding is about, when it is about one (the panel's per-goal
    * presses patch the goal the sentence names).

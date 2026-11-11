@@ -25,10 +25,10 @@ import { assertFixtureMesh } from '../tools/fixtureMesh';
 const PLAN_BUDGET_MS = 120_000;
 
 const HOUSE: Tool[] = [
-  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
-  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' }),
-  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' }),
-  { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2' }), typeText: 'Ball Nose', shape: 'ball' },
+  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
+  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 }),
+  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2', fluteLength: 30 }),
+  { ...flatEndMill(2, { number: 4, id: 'ball-2', name: 'ball-2', fluteLength: 30 }), typeText: 'Ball Nose', shape: 'ball' },
 ];
 
 function trayMesh(): ParsedMesh {

@@ -43,6 +43,19 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     // reach and leg are excused (`whoOk` still holds — the V is the deepest stamp there) and the
     // residual returns to 0. The cells are the 368 counted before the seed included the silhouette.
     expect(measured, 'the tray measured nothing').not.toBeNull();
+    // #1186 — THE TRAY'S CYCLE IS PINNED (±5 %; RE-PIN ONLY WITH A STATED REASON). Rule 1 ranks
+    // candidate chains by the time they will really take, so the tray is the acceptance tier's
+    // canary for the picker: this is the whole plan's posted-text cycle through `planModelCam`
+    // (5309.07 s measured on 1186-bench @ 70e83ce48, 2026-11-10: 20 pockets + 1 contour, 5 runs on
+    // 4 cutters, coverage 99.75 % against the vendor's 99.52 %, cut-into 0.00 %, seven lines
+    // passing; the same 5309.07 s was measured on 1186-planner-time @ 079d3f75c). A change that
+    // moves it is either a real improvement — re-pin and say why here — or a regression to fix.
+    const TRAY_CYCLE_PIN_SECONDS = 5309;
+    const cycleDrift = Math.abs(measured!.ours.cycleSeconds - TRAY_CYCLE_PIN_SECONDS) / TRAY_CYCLE_PIN_SECONDS;
+    expect(
+      cycleDrift,
+      `tray cycle ${measured!.ours.cycleSeconds.toFixed(1)} s against the ${TRAY_CYCLE_PIN_SECONDS} s pin (±5 %)`,
+    ).toBeLessThanOrEqual(0.05);
     expect(measured!.adjudicatedFraction, 'the chamfer cut a rim that is covered from above').toBe(0);
     // #961 (the maintainer's 11-05 ruling): the 1-point line is 98.52 % against the vendor's
     // 99.52 %, and the picker must OFFER the rest that buys it — T1 → T2, priced. Before the

@@ -48,8 +48,8 @@ import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrav
 
 const TRAY = process.env.CM_959_TRAY_STEP;
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 
 function pocketOptions(shadowMesh: PlanPocketsOptions['shadowMesh']): Omit<PlanPocketsOptions, 'offset'> {
   return {

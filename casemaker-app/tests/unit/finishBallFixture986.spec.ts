@@ -21,12 +21,12 @@ import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
-const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 // All three reach the part's deepest remainder (flute 30 mm), so all three are CANDIDATES;
 // the prune is what decides how many are measured.
-const ball2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
-const ball4: Tool = { ...flatEndMill(4, { number: 4, id: 'ball-4', name: 'ball-4' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
-const ball6: Tool = { ...flatEndMill(6, { number: 5, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
+const ball2: Tool = { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
+const ball4: Tool = { ...flatEndMill(4, { number: 4, id: 'ball-4', name: 'ball-4', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
+const ball6: Tool = { ...flatEndMill(6, { number: 5, id: 'ball-6', name: 'ball-6', fluteLength: 30 }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 };
 
 describe('#986 the prune’s order and early exit', () => {
   it('measures fine → coarse, stops at the first non-improvement, and the coarse candidate is visibly skipped', async () => {

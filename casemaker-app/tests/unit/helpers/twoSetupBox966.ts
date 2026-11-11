@@ -70,7 +70,10 @@ export function entry(key: string, tool: Tool): ToolLibraryEntry {
 // cutter outside that table (`cam/model/plan.ts`'s own header note), but the OLD heightfield path
 // this spec's "flag off" case also exercises does not, so a 6 mm cutter refuses there with no
 // feeds at all — picking a covered diameter keeps BOTH paths green on their own terms.
-export const FLAT3: Tool = flatEndMill(3, { number: 1, id: 'flat-3', name: 'flat-3' });
+// #1195 — the flat states a flute (30 mm, over the box's 20 mm profile): the freeing cut may only
+// be taken by a STATED-reaching flute, so an unstated record can no longer free this box and the
+// pinned contour would leave no candidate to honour it.
+export const FLAT3: Tool = flatEndMill(3, { number: 1, id: 'flat-3', name: 'flat-3', fluteLength: 30 });
 export const SHOP: EngraveShopOpts = { tools: [entry('inv:flat-3', FLAT3)] };
 
 /** Setup 0 (top) + setup 1 (bottom, the vise flip) — the placed mesh's own top at Z 0, bottom at

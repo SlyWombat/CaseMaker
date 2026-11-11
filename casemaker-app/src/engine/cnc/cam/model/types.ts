@@ -61,6 +61,9 @@ export type PlanFindingCode =
   | 'goal-not-freed'
   | 'goal-region-uncut'
   | 'goal-cutter-substituted'
+  // #1186 rule 6 — a same-shape-and-diameter sibling left the set (the longer reach is the job's
+  // one cutter for that dimension), so the change it would have cost is not paid.
+  | 'goal-sibling-merged'
   | 'goal-skin-standing'
   | 'goal-rim-unbroken'
   | 'goal-fixture-unmodelled'
@@ -148,6 +151,12 @@ export interface PlanFindingStatement {
    */
   floorMm?: number;
   usableMm?: number;
+  /**
+   * #1186 rule 4 — on `goal-cutter-substituted` from BORROWED FEED ROWS: the minutes this plan
+   * pays for the borrow (its priced total minus the cheapest considered chain that uses none of
+   * the borrowed bits). The operator's Do row reads THIS; the sentence states the same number.
+   */
+  borrowedMinutes?: number;
 }
 
 export interface PlanSheetStatement {

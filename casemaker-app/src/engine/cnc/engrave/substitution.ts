@@ -46,8 +46,16 @@ export function setupSubstitutionSentence(s: EngraveSetupSubstitution): string {
  * if only the fold says it.
  */
 export function feedsProxyNotes(
-  statements: readonly { code: string; feedsProxyMm?: number }[],
+  statements: readonly { code: string; feedsProxyMm?: number; text?: string }[],
 ): string[] {
+  // #1186 rule 4 — THE PLAN STATES THE BORROWED BITS ONCE, with the row and what the borrow costs
+  // this plan. When that grouped statement carries its text, the note IS the sentence — the same
+  // one the Check row shows, so the Cutters summary and the Check row carry the same minutes. The
+  // row-only form below remains for a result written before the grouping (one note per row).
+  const grouped = statements.find(
+    (statement) => statement.code === 'goal-cutter-substituted' && statement.feedsProxyMm !== undefined && (statement.text ?? '').trim() !== '',
+  );
+  if (grouped !== undefined) return [grouped.text!.trim()];
   const mms: number[] = [];
   for (const statement of statements) {
     if (statement.code !== 'goal-cutter-substituted' || statement.feedsProxyMm === undefined) continue;

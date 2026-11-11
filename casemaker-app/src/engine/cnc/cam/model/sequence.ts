@@ -220,6 +220,13 @@ export interface SequenceOptions {
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
   feedsKind?: (tool: Tool) => 'row' | 'fallback';
   /**
+   * #1192 rule 3's MORNING MINIMUM — WHICH FLATS MAY BE PRIMARIES. The screen's shortlist by key
+   * (the incumbent and the best estimate); a flat off the list is never a primary, but STAYS in
+   * the rest/finish pool (a dropped primary remains available as a rest — the fields' rule 2).
+   * Absent → every fitting flat is a primary, as rule 1 said.
+   */
+  allowPrimary?: (cutterKey: string) => boolean;
+  /**
    * The most cutters a chain may use, including the primary and the ball/chamfer — the card's
    * "vendor + 1" budget. Absent → no cap; a chain past it is simply not generated.
    */
@@ -481,6 +488,16 @@ function reachesFeature(tool: Tool, f: SequenceFeature): boolean {
   return !(f.depthMm > 0 && tool.fluteLength !== null && tool.fluteLength + EPS < f.depthMm);
 }
 
+/**
+ * #1195 — THE FREEING CUT'S STATED-REACH RULE. `reachesFeature` lets an UNSTATED flute "reach" a
+ * floor, because for a pocket unknown is not excluded and the op states the risk. The freeing
+ * contour must be decided on stated numbers only: an unstated or short flute cannot take it.
+ */
+function reachesContour(tool: Tool, f: SequenceFeature): boolean {
+  if (!(f.depthMm > 0)) return true;
+  return tool.fluteLength !== null && tool.fluteLength + EPS >= f.depthMm;
+}
+
 /** Whether a flat's radius fits a feature's tightest inside corner. */
 function fitsCorner(tool: Tool, f: SequenceFeature): boolean {
   const d = diameterOf(tool);
@@ -520,7 +537,7 @@ interface ChainLink {
 export function candidateSequences(
   demand: SequenceDemand,
   cutters: CutterCandidates,
-  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters'>,
+  opts?: Pick<SequenceOptions, 'feedsKind' | 'maxCutters' | 'allowPrimary'>,
 ): CandidateSequence[] {
   const features = demand.features;
   // The part's freeing cut (the outer contour) is NOT a pocket and is not folded into a pocket
@@ -570,25 +587,50 @@ export function candidateSequences(
   // contour being one of the "pocket" features; now it is said explicitly.
   const canCutSomething = (c: CandidateCutter): boolean =>
     canRoughPocket(c)
+    // #1195 — geometry only HERE: a primary may still be proposed for a contour it cannot PROVE
+    // it frees; such a chain posts no freeing step, is stated with the contour unreachable, and
+    // loses the rank's completeness key to a chain that frees. Refusing the plan outright would
+    // hide the pocket work the cutter CAN do (and turned 31 fixture files red on the guard alone).
     || contourFeatures.some((f) => coversFeature(c.tool, f))
     || (searchPockets.length === 0 && contourFeatures.length === 0);
-  // The LARGEST cutter that can rough the part is the ONE primary — "largest flat roughs what it
-  // enters; next smaller for what the previous cannot reach" (the #961 ruling). A smaller flat
-  // that also roughs a pocket is a REST, never a second primary: without this the ⌀3.175 chain is
-  // complete on the organizer too (it covers the 27 the ⌀6 cannot enter), ties on `leftBehind`
-  // and, being cheaper, wins — shrinking the whole job, 26.8 mm contour included, to a 3 mm cutter.
-  const maximal = (cs: CandidateCutter[]): CandidateCutter[] => {
-    const top = Math.max(...cs.map((c) => diameterOf(c.tool) ?? 0));
-    return cs.filter((c) => (diameterOf(c.tool) ?? 0) >= top - EPS);
-  };
-  const primaries = maximal(flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c)));
+  // #1186 — EVERY FLAT THAT CAN ROUGH THE PART IS PROPOSED. "The largest flat is the one primary"
+  // (#961) was an ORDERING rule, and it assumed the largest is also the fastest: on a borrowed feed
+  // row it is not (the m1 tray: ⌀6 on the 3.2 mm row at F400/0.5 mm against ⌀3.175 at F1000/1.0).
+  // Rule 1 of #1186's fields: an ordering rule may only PROPOSE candidates; the priced total
+  // decides. The chains are still complete-part chains — a smaller primary keeps its rest/contour
+  // steps, and `leftBehind` still ranks an uncut feature above price — so proposing them cannot
+  // silently shrink the job; it can only let a cheaper complete chain win, which is the point.
+  // #1192 rule 3 (the morning minimum) — only the shortlisted flats may PRIMARY; a flat off the
+  // list keeps its rest/finish roles through `flatsDesc` below, never a program of its own.
+  const mayPrimary = (c: CandidateCutter): boolean => opts?.allowPrimary === undefined || opts.allowPrimary(c.key);
+  // #1192/#1195 — THE SHORTLIST MAY NARROW THE PICK, NEVER EMPTY IT. Its two names are the
+  // incumbent (the largest flat) and the best own-row flat; on a part whose only capable flat is
+  // neither (a V-floor pocket only a ⌀0.6 flat enters, against a larger flat that cannot enter it)
+  // filtering by name left NO primary and refused a plan the engine could make. The screen applies
+  // only while it leaves at least one flat that can actually cut something.
+  const eligiblePrimaries = flatsDesc.filter((c) => reachesCurved(c) && canCutSomething(c));
+  const shortlisted = eligiblePrimaries.filter(mayPrimary);
+  const chosenPrimaries = shortlisted.length > 0 ? shortlisted : eligiblePrimaries;
+  // #1195 — THE SHORTLIST MAY NOT STARVE THE FREEING CONSTRAINT. Set B's shortlist picked the
+  // ⌀3.175 ×25 by price, and only the ×42 proves the 25.3 mm profile: with the ×42 off the
+  // shortlist, every chain was excluded and the plan refused on a part main freed. When none of
+  // the shortlisted cutters can free the profile, the eligible cutters that CAN join them.
+  const canFree = (c: CandidateCutter): boolean =>
+    contourFeatures.every((f) => coversFeature(c.tool, f) && reachesContour(c.tool, f));
+  const freed = contourFeatures.some((f) => (f.depthMm ?? 0) > 0);
+  const primaries = freed && !chosenPrimaries.some(canFree)
+    ? [...chosenPrimaries, ...eligiblePrimaries.filter((c) => canFree(c) && !chosenPrimaries.includes(c))]
+    : chosenPrimaries;
   // A part with pockets needs SOME round tool; a ball is the fallback only when no flat can.
+  // #1192/#1195 — THE BALL FALLBACK IS NOT THE SHORTLIST'S. The shortlist is a rule about FLATS
+  // (the incumbent and the best own-row flat); the fallback exists precisely for the demand NO
+  // flat can cut, so gating it by a list of flats emptied the candidate set and refused plans the
+  // engine could plan (a V-floor part whose only cutter is the ball: "no cutter sequence").
   const roughs: CandidateCutter[] = primaries.length > 0
     ? primaries
-    : maximal(ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c)));
-
-  if (curvedFeatures.length > 0 && balls.length === 0) return [];
-  if (rimFeatures.length > 0 && chamfers.length === 0) return [];
+    : ballsAll.filter((c) => reachesCurved(c) && canCutSomething(c));
+  if (curvedFeatures.length > 0 && balls.length === 0) { return []; }
+  if (rimFeatures.length > 0 && chamfers.length === 0) { return []; }
   // #1019 — a demand whose pockets are ALL un-enterable, with no contour to cut, is trivially
   // satisfied the way #987 treats an empty demand: nothing for the pocket chain, every pocket
   // stated by its own number. It is NOT the line-902 refusal, which is reserved for a demand a
@@ -598,7 +640,7 @@ export function candidateSequences(
     // the id off the sentence), so the operator sees one line per pocket, never two.
     return [{ steps: [], unreachable: [...unenterable], leftBehind: 0 }];
   }
-  if (searchPockets.length > 0 && roughs.length === 0) return [];
+  if (searchPockets.length > 0 && roughs.length === 0) { return []; }
 
   const ballChoices: (CandidateCutter | null)[] = curvedFeatures.length > 0 ? balls : [null];
   const chamferChoices: (CandidateCutter | null)[] = rimFeatures.length > 0 ? chamfers : [null];
@@ -692,16 +734,22 @@ export function candidateSequences(
   };
 
   // The freeing step's cutter is a CHAIN cutter, never a new one: the chain was sized for the
-  // pockets. `coversContour` is the geometry check a pocket gets (floor reach, stated opening and
-  // corner). Moving it to the chain's LAST cutter (so no return change) needs more — the flute
-  // must be STATED to reach the profile's floor: an unstated flute is unknown, and the freeing
-  // cut is the one cut that must not be guessed (a rest cutter one flute-length short would rub
-  // its shank through the part on the last pass).
-  const coversContour = (c: CandidateCutter): boolean => contourFeatures.every((f) => coversFeature(c.tool, f));
-  const canFreeLast = (c: CandidateCutter): boolean =>
-    contourFeatures.every((f) =>
-      coversFeature(c.tool, f)
-      && !(f.depthMm > 0 && (c.tool.fluteLength === null || c.tool.fluteLength + EPS < f.depthMm)));
+  // pockets. Both links that can take it — the cover link (the first chain cutter that covers the
+  // profile, usually the primary) and the chain's LAST cutter (so no return change) — need the
+  // same two clauses: the geometry a pocket gets (floor reach, stated opening and corner) AND a
+  // STATED flute at least as long as the profile's floor. An unstated flute is unknown, and the
+  // freeing cut is the one cut that must not be guessed (a cutter one flute-length short would
+  // rub its shank through the part on the last pass). `coversFeature` deliberately lets an
+  // unstated flute "reach" a pocket floor — right for a pocket, wrong here.
+  const coversContour = (c: CandidateCutter): boolean =>
+    contourFeatures.every((f) => coversFeature(c.tool, f) && reachesContour(c.tool, f));
+  // #1195 — the cover link used to check GEOMETRY ONLY, so a chain whose primary's flute fell
+  // short of the profile handed the freeing cut to the first link `coversFeature` accepted — an
+  // unstated-flute rest bit. On Set B top (1186-planner-time @ 079d3f75c, 2026-11-10) that posted
+  // a 1 h 51 min contour for a 25.3 mm profile on the ⌀0.9 PCB router bit. Both links now share
+  // the one rule; a chain with no stated-reaching cutter posts NO freeing step, is STATED with
+  // the contour unreachable, and loses the rank's completeness key to a chain that frees.
+  const canFreeLast = coversContour;
 
   for (const primary of roughs) {
     const geometric = chainFrom(primary);
@@ -758,9 +806,13 @@ export function candidateSequences(
         freeLinks.push(coverLink);
         if (lastLink !== coverLink && canFreeLast(lastLink.cutter)) freeLinks.push(lastLink);
       }
-      const freeChoices: (ChainLink | null)[] = contourFeatures.length === 0
-        ? [null]
-        : freeLinks.length > 0 ? freeLinks : [null];
+      // #1195 (the analyst's field, 6784826782) — THE FREEING REACH IS A HARD CONSTRAINT ON THE
+      // PICK: a chain with no cutter whose STATED flute reaches the profile (plus the cut-through)
+      // is not a candidate at all, not merely out-ranked. It is #1114's "sufficient" applied to
+      // the freeing cut. The refusal below is the last line of defence, for when NO owned cutter
+      // reaches or the operator pinned one that does not.
+      if (contourFeatures.length > 0 && freeLinks.length === 0) continue;
+      const freeChoices: (ChainLink | null)[] = contourFeatures.length === 0 ? [null] : freeLinks;
       for (const ball of ballChoices) {
         for (const chamfer of chamferChoices) {
           for (const free of freeChoices) {
@@ -949,7 +1001,7 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -960,13 +1012,39 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
   const catalogue = ranked.sequence.steps.filter((s) => !s.cutter.house).length;
   const fallback = ranked.sequence.steps.filter((s) => s.cutter.feeds === 'fallback').length;
   const signature = ranked.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+  // #1114 — THE SAME-DIAMETER DECIDER MUST COME BEFORE THE RAW SIGNATURE. The signature was added
+  // (#1186 rule 1) to make equal chains deterministic across house orders, but as the last key it
+  // also decided same-diameter ties by KEY — the ⌀3.175 × 22 ball beat the × 10 and the × 25 flat
+  // beat the × 12 (lexicographically smaller ids), overriding the stiffest-adequate rule the
+  // maintainer ruled on. The flute sum is that rule as a key: identical chains differ only in the
+  // tied cutter, so the shorter stated flute sorts first; an unstated flute sorts last, after
+  // every stated one (unknown is not preferred).
+  const fluteRank = ranked.sequence.steps.reduce(
+    (n, s) => n + (s.cutter.tool.fluteLength ?? Number.POSITIVE_INFINITY),
+    0,
+  );
   // #961 — the maintainer's ruling: completeness is the SURFACE left above the band after the
   // chain (the caller's simulated outcome), not the pocket count. A candidate the caller could
   // not simulate ranks after every simulated one; with no goal at all every key is +∞ and the
   // old order (leftBehind first) stands unchanged.
   const leftover = ranked.coverage ?? Number.POSITIVE_INFINITY;
   const demoted = ranked.eligible ? 0 : 1;
-  return [demoted, leftover, ranked.leftBehind, ranked.failures.length, catalogue, fallback, ranked.cost.totalSeconds, signature] as const;
+  // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
+  // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
+  // after the change count (#1186 rule 1: ties to fewer bit changes, then to owned).
+  return [
+    demoted,
+    leftover,
+    ranked.leftBehind,
+    ranked.failures.length,
+    ranked.cost.totalSeconds,
+    ranked.cost.toolChanges,
+    catalogue,
+    fallback,
+    // #1114's stiffest-adequate preference, then the raw signature as the last resort.
+    fluteRank,
+    signature,
+  ] as const;
 }
 
 /** The rank WITHOUT the coverage keys — the order the picker used before #961, and the one the
@@ -1004,6 +1082,42 @@ export function chooseSequence(
 ): SequenceChoice {
   const candidates = candidateSequences(demand, cutters, opts);
   if (candidates.length === 0) {
+    // #1195 (the analyst's field) — THE REFUSAL IS NAMED AND ONLY WHEN IT MUST BE: no owned
+    // cutter with a STATED flute reaches the profile, or the operator pinned a cutter that does
+    // not. The sentence always carries the way out — the cutters that reach, or the ones whose
+    // flute needs stating. A cutter the PLANNER wrote back into the job is not a pin; only
+    // `job.sources.tool === 'user'` sets `pinned.contour` (engraveGenerate).
+    const contourDepth = demand.features
+      .filter((f) => f.kind === 'contour')
+      .reduce((m, f) => Math.max(m, f.depthMm ?? 0), 0);
+    const depthWords = Number(contourDepth.toFixed(3));
+    if (contourDepth > 0) {
+      const all = [...cutters.house, ...cutters.catalogue];
+      const reaching = all.filter((tool) => tool.fluteLength !== null && tool.fluteLength + 1e-9 >= contourDepth);
+      const unstated = all.filter((tool) => tool.fluteLength === null);
+      const names = (list: readonly Tool[]): string => list.map((tool) => tool.name || tool.id || 'cutter').join(', ');
+      const pinnedContourKey = cutters.pinned?.['contour'];
+      const pinnedTool = pinnedContourKey === undefined ? undefined : all.find((tool) => cutterKeyOf(tool) === pinnedContourKey);
+      const pinnedReaches = pinnedTool !== undefined
+        && pinnedTool.fluteLength !== null
+        && pinnedTool.fluteLength + 1e-9 >= contourDepth;
+      if (pinnedTool !== undefined && !pinnedReaches) {
+        const what = pinnedTool.name || pinnedTool.id || 'the chosen cutter';
+        const flute = pinnedTool.fluteLength === null ? 'not stated' : `${pinnedTool.fluteLength} mm`;
+        throw new Error(
+          `the chosen cutter ${what} cannot free this part: its flute is ${flute} against a ${depthWords} mm profile — `
+          + (reaching.length > 0
+            ? `${names(reaching)} reaches it; choose that cutter, or state this one's flute length`
+            : 'none of your cutters has a stated flute of that length; state a flute length on: ' + (names(unstated) || 'no cutter')),
+        );
+      }
+      if (reaching.length === 0) {
+        throw new Error(
+          `nothing can free this part: none of your cutters has a stated flute of ${depthWords} mm or more — `
+          + 'state a flute length on: ' + (names(unstated) || 'no cutter'),
+        );
+      }
+    }
     throw new Error(
       'no cutter sequence can be planned for this demand: no cutter in the house or catalogue '
       + 'can cut every feature (a flat wide for the tightest corner, a flute short of the deepest '
@@ -1119,7 +1233,7 @@ export function chooseSequence(
   const compareRanked = (a: RankedSequence, b: RankedSequence): number => {
     const ra = rankOf(a);
     const rb = rankOf(b);
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 8; i++) {
       if (ra[i]! < rb[i]!) return -1;
       if (ra[i]! > rb[i]!) return 1;
     }
@@ -1134,7 +1248,12 @@ export function chooseSequence(
       );
       if (picked !== 0) return picked > 0 ? -1 : 1;
     }
-    return ra[7]! < rb[7]! ? -1 : ra[7]! > rb[7]! ? 1 : 0;
+    // #1186 — the tuple's tail: the flute rank (index 8), then the signature (index 9). The
+    // signature used to sit at 8 and decide same-diameter ties by id before #1114's preference
+    // could; the flute rank now takes that place.
+    if (ra[8]! < rb[8]!) return -1;
+    if (ra[8]! > rb[8]!) return 1;
+    return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
   };
   feasible.sort(compareRanked);
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient

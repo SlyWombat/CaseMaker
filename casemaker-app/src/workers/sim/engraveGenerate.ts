@@ -5432,6 +5432,13 @@ export async function buildModelPlanInputForGoal(
   if (chamferWant !== undefined && chamferEntry !== undefined && chamferCone !== null) {
     cutters.pinned = { ...(cutters.pinned ?? {}), chamfer: cutterKeyOf(chamferEntry.tool) };
   }
+  // #1195 (the analyst's field, 6784826782) — A USER-CHOSEN CUTTER IS A PIN FOR THE FREEING CONTOUR;
+  // a tool the planner wrote back into the job is not. `job.sources.tool === 'user'` is that
+  // provenance (#254): only a user's own choice makes the contour a pin, so only then does the
+  // pick refuse (naming the cutters that reach) instead of choosing a cutter that reaches.
+  if (job.sources?.tool === 'user') {
+    cutters.pinned = { ...(cutters.pinned ?? {}), contour: cutterKeyOf(tool) };
+  }
 
   // #869/#966 — THE CURVED PIPELINE'S OWN ROUGH, independent of whatever `planModelCam` picks as
   // `primary` for this goal's (usually nonexistent) pockets: `goal.roughToolKey`, validated by the
@@ -5698,6 +5705,8 @@ export async function postModelPlan(
       // #1128 — the borrowed-row fact travels with the finding: it is what tells the Cut step a
       // feeds proxy (Check) from a cutter substitution (Know).
       ...(s.feedsProxyMm === undefined ? {} : { feedsProxyMm: s.feedsProxyMm }),
+      // #1186 rule 4 — the borrow's minutes travel too: G's Do row reads the number, not the prose.
+      ...(s.borrowedMinutes === undefined ? {} : { borrowedMinutes: s.borrowedMinutes }),
     }));
   // #966 ROUND 3 — THE CUTOVER NOW COVERS MULTI-SETUP. `planModelCam` ran and returned a
   // `SetupPlan` per setup (#965's registration/freeing-cl work, underneath); every setup's own

@@ -23,6 +23,13 @@
  * that hand-off — the old tick's and the run's. Stopping the timer cannot recall a request already
  * on the wire; the generation counter only guarantees the old answer cannot start a second chain.
  *
+ * A RE-ACQUIRE NO LONGER DOUBLES THE SOCKET (#1188, analyst 2026-11-10 evening). The pin unmounting
+ * while Manage mounts left the old chain's inspect open and started a new chain beside it: two
+ * ESTABLISHED sessions to the controller in 20–30 % of idle samples. `inspectTarget`
+ * (`machinePollClient.ts`) now makes a second ask for the same target JOIN the inspection already
+ * in flight, so idle's maximum is one session; the run hand-off above is the only remaining overlap,
+ * and it is between the poller's socket and the RUN's own console session, not two pollers'.
+ *
  * THE STORE IS THE ONLY OWNER OF A READING. This module never keeps a status of its own: every
  * answer goes through `machineStore` (`noteLiveStatusLine`, `noteDiagnoseLine`, `noteHeartbeat`),
  * and the transition notice through `machineNoticeStore`. It owns only the timers and the holds.
@@ -30,7 +37,7 @@
 
 import {
   HEARTBEAT_POLL_MS,
-  loadMachineHeartbeatClient,
+  inspectTarget,
   setMachineHeartbeatLoader,
   type HeartbeatTarget,
 } from '@/platform/machinePollClient';
@@ -93,8 +100,10 @@ function startTimer(entry: StatusPoller): void {
     let line: string | null = null;
     let diagnoseLine: string | null = null;
     try {
-      const client = await loadMachineHeartbeatClient();
-      const reading = await client.inspect(entry.target);
+      // #1188 — ONE SESSION PER TARGET. A poll in flight when this chain (or another) asks again
+      // is joined, never doubled: the client gate is keyed on the address, so a re-acquire cannot
+      // open a second socket beside the previous one.
+      const reading = await inspectTarget(entry.target);
       reachable = reading.status.ok;
       // #527 — the same answer is the viewport's live position: keep the raw line, not just a bit.
       // Only the ANSWER is kept, so a failed poll leaves the last reading in place and the

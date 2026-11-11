@@ -20,7 +20,7 @@ import {
   type MachineHeartbeatClient,
 } from '@/platform/machineStatusPoller';
 import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
-import type { HeartbeatInspection } from '@/platform/machinePollClient';
+import { clearMachineHeartbeatInFlight, type HeartbeatInspection } from '@/platform/machinePollClient';
 import { resetMachineNoticeStore } from '@/store/machineNoticeStore';
 import { resetMachineStore, useMachineStore } from '@/store/machineStore';
 import { machineKey, resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
@@ -70,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   releaseAllStatusPollers();
+  clearMachineHeartbeatInFlight();
   setMachineHeartbeatLoader(null);
   setMachineConsoleLoader(null);
   resetMachineRunStore();
@@ -197,6 +198,10 @@ describe('#1173 — a run IS the status poller', () => {
   // NEW one: a tick in flight while a run takes and releases the poll sees `running === true` again
   // and schedules its own timer beside the new tick's, so two chains poll forever. The generation
   // counter is what makes that old tick return.
+  //
+  // #1188 — AND THE NEW CHAIN JOINS THE OLD TICK'S INSPECTION. The generation guard stops a second
+  // timer chain; the client gate (`inspectTarget`) additionally stops a second SOCKET: the new
+  // chain's first tick shares the inspection already in flight instead of connecting beside it.
   it('a tick in flight across a run hold cannot start a second chain', async () => {
     const OK: HeartbeatInspection = { status: { ok: true, text: '<Idle|MPos:0,0,0>' }, diagnose: null };
     let inspects = 0;
@@ -216,14 +221,12 @@ describe('#1173 — a run IS the status poller', () => {
     const releaseRun = acquireStatusPoll(TARGET, 'run', { pollsItself: true });
     releaseRun();
     await vi.advanceTimersByTimeAsync(0);
-    expect(resolvers).toHaveLength(2); // tick 2 started
+    // #1188 — the new chain JOINS tick 1's inspection: still one session, one resolver.
+    expect(resolvers).toHaveLength(1);
 
-    // Tick 1 answers NOW. With a bare boolean it thinks the poll is still running (it is — for tick
-    // 2) and schedules a timer of its own.
-    const [oldTick, newTick] = resolvers.splice(0);
-    oldTick!(OK);
-    await vi.advanceTimersByTimeAsync(0);
-    newTick!(OK);
+    // Tick 1 answers NOW. The old chain is generation-stale and returns; the new chain takes the
+    // shared answer and schedules its own next timer — exactly one.
+    resolvers.splice(0)[0]!(OK);
     await vi.advanceTimersByTimeAsync(0);
 
     const before = inspects;
@@ -232,7 +235,7 @@ describe('#1173 — a run IS the status poller', () => {
       for (const resolve of resolvers.splice(0)) resolve(OK);
       await vi.advanceTimersByTimeAsync(0);
     }
-    // ONE chain: one inspect per interval. A second chain would be two per interval.
+    // ONE chain: one inspect per interval (plus the shared one was already counted before `before`).
     expect(inspects - before).toBe(3);
     releasePin();
   });

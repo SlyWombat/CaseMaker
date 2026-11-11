@@ -20,8 +20,11 @@ import { tl } from './manifoldExec';
 /** The #966 cluster's ball: ⌀2, catalogue-shaped, numbered 1. */
 export const BALL_2_Q966: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
 
-/** The #966 cluster's flat: ⌀3, numbered 2. */
-export const FLAT_3_Q966: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3' });
+/**
+ * The #966 cluster's flat: ⌀3, numbered 2, flute 30 (#1195 — the freeing cut needs a STATED
+ * reaching flute; an unstated record now leaves the pinned contour with no candidate).
+ */
+export const FLAT_3_Q966: Tool = flatEndMill(3, { number: 2, id: 'flat-3', name: 'flat-3', fluteLength: 30 });
 
 /** The notched plate's ⌀6 ball — no stated flute. */
 export const BALL6_NOTCHED: Tool = { ...flatEndMill(6), name: '6 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 6, cornerRadius: 3 };
@@ -35,7 +38,8 @@ export const BALL2_NOTCHED_LONG: Tool = { ...BALL2_NOTCHED, fluteLength: 40 };
 
 /** The house the #1076/#1054 sloped fixture plans with: ⌀6 flat + ⌀2/4/6 balls, all flute 30. */
 export const SLOPED_HOUSE: Tool[] = [
-  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
+  // #1195 — the flat states its flute too: it is the cutter that frees the part.
+  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
   { ...flatEndMill(2, { number: 3, id: 'ball-2', name: 'ball-2' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 },
   { ...flatEndMill(4, { number: 4, id: 'ball-4', name: 'ball-4' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 },
   { ...flatEndMill(6, { number: 5, id: 'ball-6', name: 'ball-6' }), shape: 'ball', typeText: 'Ball Nose', fluteLength: 30 },

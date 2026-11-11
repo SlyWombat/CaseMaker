@@ -690,13 +690,13 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
       }
     }
     const geometry = { triangles: { positions: mesh.positions, indices: mesh.indices, triangleCount: mesh.indices.length / 3, bbox: { min, max } } };
-    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End' });
-    const vbit = flatEndMill(3.175, { number: 3, id: 'v90', name: '91 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End', fluteLength: 30 });
+    const vbit = flatEndMill(3.175, { number: 3, id: 'v90', name: '91 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1, fluteLength: 30 });
     const result = planTreePrograms(tree, {
       offset: makeClipperOffset(tl),
       pockets: {
-        houseFlats: [flat, flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175' })],
+        houseFlats: [flat, flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 })],
         // #975 — the V bits are the chain's last resort for pockets no flat enters (the digits).
         houseVs: [vbit],
         stepDownMm: 1.5,
@@ -855,10 +855,10 @@ describe('#959 acceptance — the curved pipeline (every op entered)', () => {
       unreachable: [],
       report: { source: 'mesh', patches: 1, planarArea: 800, remainderArea: 800, tolerances: {} as never, slivers: [], notes: [] },
     };
-    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End' });
-    const small = flatEndMill(3.175, { number: 3, id: 'flat-3.175', name: 'flat-3.175' });
-    const vbit = flatEndMill(3.175, { number: 4, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1 });
+    const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+    const ball = flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', shape: 'ball', typeText: 'Ball End', fluteLength: 30 });
+    const small = flatEndMill(3.175, { number: 3, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
+    const vbit = flatEndMill(3.175, { number: 4, id: 'v90', name: '90 chamfer', shape: 'chamfer', typeText: 'Chamfer', angle: 90, halfAngle: 45, tipDiameter: 0.1, fluteLength: 30 });
     const base = {
       geometry, offset: makeClipperOffset(tl),
       flat, ball, vbit,

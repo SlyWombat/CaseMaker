@@ -28,7 +28,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { buildRandomPart } from '../tools/randomParts';
 import { tl } from './helpers/manifoldExec';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const RAPID = Z1.rapidEstimate;
 
 /** A 40x20 plate with one 10x10 root pocket and `skinMm` of stock above the part top. */

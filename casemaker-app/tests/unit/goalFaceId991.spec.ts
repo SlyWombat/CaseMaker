@@ -31,7 +31,8 @@ function fixture(name: string): ArrayBuffer {
 }
 
 const BALL: Tool = { ...flatEndMill(2), name: '2 mm ball nose', shape: 'ball', typeText: 'Ball', diameter: 2, cornerRadius: 1 };
-const FLAT: Tool = { ...flatEndMill(6), id: 'flat-6-991', name: 'flat-6' };
+// #1195 — the fixture's flat states a flute: the freeing cut needs a STATED reach.
+const FLAT: Tool = { ...flatEndMill(6, { fluteLength: 30 }), id: 'flat-6-991', name: 'flat-6' };
 const SHOP: EngraveShopOpts = {
   tools: [{ key: 'inv:flat-6-991', tool: FLAT, provenance: 'test' }],
 };

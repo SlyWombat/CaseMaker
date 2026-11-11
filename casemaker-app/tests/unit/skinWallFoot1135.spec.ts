@@ -36,7 +36,7 @@ import { buildBinaryStl } from '@/workers/export/stlBinary';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
 const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
-const FLAT3175: Tool = flatEndMill(3.175, { number: 1, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 20 });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 1, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 })  // #1195 — reaches the 27.2 mm tray profile;
 
 interface Placed {
   positions: Float32Array;

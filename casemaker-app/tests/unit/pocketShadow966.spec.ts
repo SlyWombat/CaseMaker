@@ -79,7 +79,8 @@ function flat(d: number, number: number): Tool {
   return {
     number, id: `flat-${d}`, name: `⌀${d} flat`, typeText: 'flat', shape: 'flat',
     handleDiameter: d, tipDiameter: null, diameter: d, cornerRadius: null,
-    angle: null, halfAngle: null, fluteLength: 20, shoulderLength: null,
+    // #1195 — a STATED flute that reaches this fixture's 25 mm profile (it was 20).
+    angle: null, halfAngle: null, fluteLength: 30, shoulderLength: null,
     stickout: null, centreCutting: true,
   };
 }

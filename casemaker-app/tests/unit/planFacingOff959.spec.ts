@@ -21,7 +21,7 @@ import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
 import { tl } from './helpers/manifoldExec';
 
 const RAPID: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
-const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+const flat = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 
 /** A 20×10 part under a skin: stock top 0, part top −skin, one CORNER pocket (so the land the
  * skin pass takes is real ground, not the pocket's own). */
@@ -78,7 +78,7 @@ function skinGeometry(skinMm: number): { triangles: { positions: Float32Array; i
 }
 
 function planSkin(tree: FeatureTree, skinMm: number, extra: Record<string, unknown> = {}) {
-  const ball = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6' }), shape: 'ball' as const, typeText: 'Ball Nose' };
+  const ball = { ...flatEndMill(6, { number: 2, id: 'ball-6', name: 'ball-6', fluteLength: 30 }), shape: 'ball' as const, typeText: 'Ball Nose' };
   return planCurvedForTree(tree, {
     geometry: skinGeometry(skinMm),
     offset: makeClipperOffset(tl),

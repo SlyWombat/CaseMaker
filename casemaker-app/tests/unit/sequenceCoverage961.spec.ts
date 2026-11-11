@@ -124,8 +124,11 @@ const BELOW_HOUSE = ORGANIZER_ROWS.filter(([, narrowest]) => narrowest < 3.175 -
 /** The 27 the ⌀3.175 fits once the ⌀6 primary has done what it can. */
 const CUTTABLE_REST = ORGANIZER_ROWS.filter(([, narrowest]) => narrowest >= 3.175 - 1e-9 && narrowest < 6 - 1e-9).map(([id]) => id);
 
-const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+// #1195 — the ⌀6 states a flute (30 mm, over the 26.8 mm profile): the freeing cut may only be
+// taken by a STATED-reaching flute, so a house whose records state none cannot free this demand
+// at all — the fixture's original unstated ⌀6 was relying on the hole #1195 closes.
+const FLAT6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 const HOUSE: CutterCandidates = { house: [FLAT6, FLAT3175], catalogue: [] };
 
 function ir(tool: SequenceStep['cutter']['tool'], moves: number): ToolpathIR {
@@ -159,10 +162,12 @@ function opts(planStep: SequenceOptions['planStep'] = (s) => standIn(s)): Sequen
 }
 
 describe('#961 the organizer demand: cover what a house cutter can cut', () => {
-  it('the ⌀3.175 rest covers the 27 4.1–4.9 mm pockets; only the 16 below the house set are stated', () => {
+  it('the 27 4.1–4.9 mm pockets are covered; only the 16 below the house set are stated', () => {
+    // #1186 rule 1 RE-PIN: the same coverage is now bought by the ⌀3.175 as the PRIMARY (it covers
+    // the 27 and the rest of the part, at its own row), not by a rest step under a ⌀6 primary — the
+    // cheaper COMPLETE chain wins. What this test has always judged is the coverage, and it stands.
     const choice = chooseSequence(DEMAND, HOUSE, opts());
-    expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
-    expect(choice.steps[0]!.cutter.key).toBe('flat-6');
+    expect(choice.steps.some((s) => (s.kind === 'pocket' || s.kind === 'rest') && s.cutter.key === 'flat-3.175')).toBe(true);
     for (const id of CUTTABLE_REST) expect(choice.unreachable).not.toContain(id);
     // #1019 — an un-enterable pocket is stated as its own sentence ("id: 0.541 mm opening …"),
     // not a bare id: the ids named are still exactly the below-house set.
@@ -172,29 +177,35 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
     expect(BELOW_HOUSE).toHaveLength(16);
   });
 
-  it('price never outvotes coverage: an absurdly dear rest step still beats leaving the 27 uncut', () => {
+  it('price never outvotes coverage: an absurdly dear small-flat pass still beats leaving the 27 uncut', () => {
+    // #1186 rule 1 RE-PIN: the dear step is now the ⌀3.175 primary (there is no rest to be dear);
+    // the rule this test prices is unchanged — coverage ranks before price, so the chain that
+    // covers the 27 is chosen whatever its minutes.
     const choice = chooseSequence(
       DEMAND,
       HOUSE,
-      opts((step) => standIn(step, step.kind === 'rest' ? 5000 : 10)),
+      opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 5000 : 10)),
     );
-    expect(choice.steps.some((s) => s.kind === 'rest' && s.cutter.key === 'flat-3.175')).toBe(true);
+    expect(choice.steps.some((s) => (s.kind === 'pocket' || s.kind === 'rest') && s.cutter.key === 'flat-3.175')).toBe(true);
     // #1019 — the ids ride beside their sentences: count the distinct pockets named.
     expect(new Set(choice.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size).toBe(BELOW_HOUSE.length);
   });
 
-  it('every candidate prices the same demand; the primary alone is the one that leaves cuttable pockets', () => {
+  it('every candidate prices the same demand; a ⌀6-only chain is the one that leaves cuttable pockets', () => {
+    // #1186 rule 1 RE-PIN: both primaries are PROPOSED now (the field's "an ordering rule only
+    // proposes"); the ⌀6-only chain still leaves the 27 cuttable, and the ⌀3.175-primary chain
+    // covers them — that difference, not which chain is legal, is what this test has always judged.
     const candidates = candidateSequences(DEMAND, HOUSE);
-    const only6 = candidates.find((c) => !c.steps.some((s) => s.kind === 'rest'))!;
-    const chain = candidates.find((c) => c.steps.some((s) => s.kind === 'rest'))!;
+    const only6 = candidates.find((c) => c.steps.every((s) => s.cutter.key === 'flat-6'))!;
+    const chain = candidates.find((c) => c.steps.some((s) => s.cutter.key === 'flat-3.175'))!;
     // #1019 — ids and sentences both ride `unreachable`: compare the distinct pockets named.
     const distinct = (c: (typeof candidates)[number]): number =>
       new Set(c.unreachable.map((u) => (u.includes(': ') ? u.slice(0, u.indexOf(': ')) : u))).size;
     expect(distinct(only6)).toBe(43);
     expect(distinct(chain)).toBe(16);
-    // …and no chain ever shrinks the primary to the smaller flat, however cheap that is: the
-    // chain is the largest flat + rest, the ruling's own shape.
-    for (const c of candidates) expect(c.steps[0]!.cutter.key).toBe('flat-6');
+    // #1186 rule 1: the smaller primary is a legal PROPOSAL (it was never priced before); the rank
+    // decides on the total, never on the order of proposal.
+    expect(candidates.some((c) => c.steps[0]!.cutter.key === 'flat-3.175')).toBe(true);
     expect(only6.leftBehind).toBe(27);
     expect(chain.leftBehind).toBe(0);
   });
@@ -202,7 +213,13 @@ describe('#961 the organizer demand: cover what a house cutter can cut', () => {
 
 describe('#961 the freeing cut is priced, not left as an unpriced return', () => {
   it('the contour is its own LAST step; an unstated flute means the last cutter cannot take it, so the return change is charged', () => {
-    const choice = chooseSequence(DEMAND, HOUSE, opts());
+    // #1186 rule 1 RE-PIN: the ⌀3.175 alone is now the cheapest chain, so this test prices its
+    // cutting dear to keep the flat-6 primary + rest shape the mechanic is about. #1195 RE-PIN: the
+    // small flat is UNSTATED here (the shared fixture states 30 so other tests can free at all), so
+    // the last-cutter path is refused and the return change is charged — the mechanic this test is
+    // about. A stated small flat is the next test's case.
+    const UNSTATED_SMALL = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+    const choice = chooseSequence(DEMAND, { house: [FLAT6, UNSTATED_SMALL], catalogue: [] }, opts((step) => standIn(step, step.cutter.key === 'flat-3.175' ? 50 : 10)));
     const last = choice.steps[choice.steps.length - 1]!;
     expect(last.kind).toBe('contour');
     expect(last.cutter.key).toBe('flat-6');
@@ -219,7 +236,9 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     const longFlute = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
     const choice = chooseSequence(DEMAND, { house: [FLAT6, longFlute], catalogue: [] }, opts());
     expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
-    expect(choice.cost.toolChanges).toBe(1);
+    // #1186 rule 1 RE-PIN: the long-flute ⌀3.175 now cuts the whole demand as the primary, so
+    // there is no change at all (it used to be the rest, one change behind the ⌀6).
+    expect(choice.cost.toolChanges).toBe(0);
     expect(choice.steps[choice.steps.length - 1]!.kind).toBe('contour');
   });
 
@@ -234,10 +253,13 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
       opts((step) => standIn(step, step.kind === 'contour' && step.cutter.key === 'flat-3.175' ? 70 : 10)),
     );
     expect(choice.freeing).toEqual({ cutterKey: 'flat-3.175', extraToolChange: false, lastCutterEligible: true });
-    expect(choice.cost.toolChanges).toBe(1);
-    // The real comparison is between the two COMPLETE chains (the rest step present), which
-    // differ only in the freeing step: the dearer profile still wins on the total.
-    const complete = choice.considered.filter((c) => c.steps.some((s) => s.kind === 'rest') && c.cost !== null);
+    // #1186 rule 1 RE-PIN: the ⌀3.175 primary cuts the whole demand, so the chosen chain has no
+    // change at all (it used to ride behind the ⌀6 as a rest, one change).
+    expect(choice.cost.toolChanges).toBe(0);
+    // The real comparison is between the two COMPLETE chains — both covering the 27 — which differ
+    // in the freeing step: the dearer profile still wins on the total. #1186 rule 1 RE-PIN: the
+    // complete chains are now the ⌀3.175-primary one and the flat-6 + rest one (leftBehind 0).
+    const complete = choice.considered.filter((c) => c.cost !== null && c.leftBehind === 0);
     const cheapest = (key: string): number => Math.min(...complete
       .filter((c) => c.steps[c.steps.length - 1]!.cutterKey === key)
       .map((c) => c.cost!));
@@ -245,8 +267,10 @@ describe('#961 the freeing cut is priced, not left as an unpriced return', () =>
     expect(cheapest('flat-3.175')).toBeCloseTo(choice.cost.totalSeconds, 6);
     // The primary alone is cheaper still, and still not chosen: 27 cuttable pockets are not a
     // discount.
-    const incomplete = choice.considered.filter((c) => !c.steps.some((s) => s.kind === 'rest'));
-    expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
+    const incomplete = choice.considered.filter((c) => c.leftBehind > 0);
+    if (incomplete.length > 0) {
+      expect(Math.min(...incomplete.map((c) => c.cost ?? Infinity))).toBeLessThan(choice.cost.totalSeconds);
+    }
   });
 });
 
@@ -301,9 +325,9 @@ describe('#961 the coverage rest pays its way — full catalogue, no maxCutters'
   // A house ⌀6 with a catalogue holding every smaller flat: with no budget the picker offers each
   // of them as a coverage rest, so only the PRICE may prune them. The first rest buys a real
   // surface; each further one shaves a cell and costs a long pass.
-  const FLAT2 = flatEndMill(2, { number: 3, id: 'cat-2', name: 'cat-2' });
-  const FLAT15 = flatEndMill(1.5, { number: 4, id: 'cat-1.5', name: 'cat-1.5' });
-  const FLAT1 = flatEndMill(1, { number: 5, id: 'cat-1', name: 'cat-1' });
+  const FLAT2 = flatEndMill(2, { number: 3, id: 'cat-2', name: 'cat-2', fluteLength: 30 });
+  const FLAT15 = flatEndMill(1.5, { number: 4, id: 'cat-1.5', name: 'cat-1.5', fluteLength: 30 });
+  const FLAT1 = flatEndMill(1, { number: 5, id: 'cat-1', name: 'cat-1', fluteLength: 30 });
   const CATALOGUE_SET: CutterCandidates = { house: [FLAT6], catalogue: [FLAT3175, FLAT2, FLAT15, FLAT1] };
   // pocket-15 is 28.5 mm wide — every flat enters it, so every smaller one is a COVERAGE rest.
   const ONE_WIDE: SequenceDemand = {

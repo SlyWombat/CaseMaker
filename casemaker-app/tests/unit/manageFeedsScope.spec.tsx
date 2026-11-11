@@ -12,7 +12,7 @@ import { ToolsScope } from '@/components/manage/ToolsScope';
 import { setHouseClientLoader, type HouseCall, type HouseClient } from '@/platform/houseClient';
 import type { FeedRow } from '@/platform/feedClient';
 import { resetFeedTableStore } from '@/store/feedTableStore';
-import { resetManageMode } from '@/store/manageModeStore';
+import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { useToolRegistryStore } from '@/store/toolRegistryStore';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -81,6 +81,14 @@ afterEach(() => {
 });
 
 describe('#450 Manage › Tools › Feeds', () => {
+  it('#1123-56a — the Cut step’s feeds act opens Tools ON the feeds pane', async () => {
+    fakeTable();
+    useManageModeStore.getState().openFeeds();
+    render(<ToolsScope />);
+    expect(screen.getByTestId('manage-tools-pane-feeds').getAttribute('aria-pressed')).toBe('true');
+    await screen.findByTestId('manage-feeds-table');
+  });
+
   it('lists each row with its band, its seven parameters and its provenance', async () => {
     fakeTable();
     await openFeeds();

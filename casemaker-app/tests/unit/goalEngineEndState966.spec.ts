@@ -432,7 +432,8 @@ describe('#966 end-state, part 4 — the freeing-contour safety clamp and the po
   }
 
   const THICKNESS = 20;
-  const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
+  // #1195 — states its flute (30 mm, over the 20 mm part): the freeing cut needs a STATED reach.
+  const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
   const BALL3: Tool = { ...flatEndMill(3, { number: 2, id: 'ball-3', name: 'ball-3' }), typeText: 'Ball Nose', shape: 'ball' };
 
   function lShapeInput(): ModelPlanInput {

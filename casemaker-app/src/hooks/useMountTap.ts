@@ -242,7 +242,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
     const token = {};
     if (!useMountTapGate.getState().begin(token)) {
       // #1189 — a press swallowed by another tap's gate says so, where the press was made.
-      noteNow('a seat measurement is already running');
+      noteNow('a probe measurement is already running');
       return;
     }
     tokenRef.current = token;

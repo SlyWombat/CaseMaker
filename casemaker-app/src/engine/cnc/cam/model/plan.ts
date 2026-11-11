@@ -752,6 +752,82 @@ const RIM_CLOSE_TOL_MM = 0.01;
  * beside the plan's own programs, and its feeds must be the SAME row this resolver gave that
  * program's contour flat (the release cuts the band the contour's floor left).
  */
+/**
+ * #1186 rule 6 — ONE CUTTER PER SHAPE AND DIAMETER, AT THE JOB LEVEL.
+ *
+ * The maintainer at the bench: "a tool change that takes 5 minutes for a tool run that is 40
+ * seconds and can be done with the same tool but a longer length is not useful." Two owned cutters
+ * of the same shape and diameter must not be split across a job's setups (the tray's ⌀6 ×15/×25,
+ * ⌀1 ×4/×7, ball ×10/×22): the longest STATED reach is the job's one cutter for that dimension,
+ * so the merged plan carries one program per program-role and one fewer change.
+ *
+ * THE DATA'S EXCEPTION: a shorter sibling stays a candidate when the longest would run on a
+ * BORROWED feed row and the shorter has its own (`hasOwnRow`) — the shorter's own numbers are the
+ * data saying so, and the priced rank then chooses between them per setup. An unstated flute is
+ * never merged away or merged into: its reach cannot be vouched for.
+ */
+/**
+ * #1186 rule 6 — THE SHEET'S SENTENCE when the job-level merge saved a change: what the dropped
+ * sibling would have cut, and the kept cutter that now does it. Pure, so the wording is pinned by
+ * a unit test rather than only by a sheet snapshot.
+ */
+export function siblingMergeSentence(dropped: readonly Tool[], kept: readonly Tool[]): string | null {
+  if (dropped.length === 0) return null;
+  const nameOf = (tool: Tool): string => tool.name || tool.id || `${cuttingDiameter(tool) ?? '?'} mm ${tool.shape}`;
+  const pairs = dropped.map((tool) => {
+    const diameter = cuttingDiameter(tool);
+    const partner = kept.find((candidate) => candidate.shape === tool.shape && cuttingDiameter(candidate) !== null && diameter !== null && Math.abs((cuttingDiameter(candidate) ?? 0) - diameter) < 1e-6);
+    return partner === undefined
+      ? `${nameOf(tool)} is not needed`
+      : `${nameOf(tool)} is not needed — the ${nameOf(partner)} cuts its work`;
+  });
+  return `${pairs.join('; ')}, so ${dropped.length === 1 ? 'its change is' : 'their changes are'} not paid`;
+}
+
+export function mergeSiblingCutters<T extends Tool>(tools: readonly T[], hasOwnRow: (tool: T) => boolean): T[] {
+  const groups = new Map<string, T[]>();
+  for (const tool of tools) {
+    const diameter = cuttingDiameter(tool);
+    const key = `${tool.shape}:${diameter === null ? '?' : diameter.toFixed(4)}`;
+    const list = groups.get(key) ?? [];
+    list.push(tool);
+    groups.set(key, list);
+  }
+  const keep: T[] = [];
+  for (const group of groups.values()) {
+    const stated = group.filter((tool) => tool.fluteLength !== null);
+    if (group.length === 1 || stated.length === 0) {
+      keep.push(...group);
+      continue;
+    }
+    const longest = [...stated].sort((a, b) => (b.fluteLength ?? 0) - (a.fluteLength ?? 0))[0]!;
+    keep.push(longest);
+    // An unstated flute is never merged away: its reach cannot be vouched for.
+    keep.push(...group.filter((tool) => tool !== longest && tool.fluteLength === null));
+    // The data's exception: the longest borrows, the shorter has its own row.
+    if (!hasOwnRow(longest)) {
+      keep.push(...group.filter((tool) => tool !== longest && tool.fluteLength !== null && hasOwnRow(tool)));
+    }
+  }
+  return keep;
+}
+
+/**
+ * #1186 rule 6 — THE MERGE APPLIES ONLY WHERE A CHANGE CAN CROSS A SETUP BOUNDARY. The rule exists
+ * to stop paying a bit change between two setups that could share one cutter; a ONE-SETUP job has
+ * no such boundary, so every same-diameter sibling stays a candidate and the picker weighs each on
+ * its own price (the shortest sufficient flute, #1114). Merging there swaps a cutter for no change
+ * saved: on Set B the bottom's rest ball moved ⌀2 × 12 → ⌀2 × 15 with nothing to show for it (the
+ * top uses no ⌀2 ball at all), caught when the bench build's Set B was re-pinned for #1186.
+ */
+export function jobSiblingMerge<T extends Tool>(
+  tools: readonly T[],
+  hasOwnRow: (tool: T) => boolean,
+  setupCount: number,
+): T[] {
+  return setupCount > 1 ? mergeSiblingCutters(tools, hasOwnRow) : [...tools];
+}
+
 export function resolvedCutParams(
   input: ModelPlanInput,
   tool: Tool,
@@ -1180,7 +1256,52 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // the candidate set BEFORE feeds are asked — a probe would otherwise be reported as "no cutting
   // parameters", which is true but the wrong statement — and one aggregate line names them.
   const instruments = input.cutters.house.filter((tool) => !isCuttingRecord(tool));
-  const candidateHouse = input.cutters.house.filter((tool) => {
+  // #1186 rule 6 — one cutter per shape and diameter across the job's setups, with the own-row
+  // exception. Pinned lookups below read the FULL list, so a pinned cutter survives the merge.
+  const hasOwnRow = (tool: Tool): boolean => {
+    try {
+      return resolvedCutParams(input, tool).substitution === null;
+    } catch {
+      return false;
+    }
+  };
+  const siblingMergedHouse = jobSiblingMerge(input.cutters.house, hasOwnRow, input.setups.length);
+  // #1192 rule 3 (the morning minimum) — THE SHORTLIST: the INCUMBENT (the pre-#1186 order's
+  // choice: the largest-diameter flat the feeds admit) and the BEST ESTIMATE (the greatest
+  // material removal rate among flats running their OWN row: feed × step-down × step-over — the
+  // cheap estimate's own formula, no toolpath). Every other flat stays a rest/finish candidate;
+  // only these two may price as a primary, so no job's cycle can rise from the screen.
+  const paramsIfAny = (tool: Tool): CutParams | null => {
+    try {
+      return resolvedCutParams(input, tool).params;
+    } catch {
+      return null;
+    }
+  };
+  const shortlistedPrimaryKeys = ((): Set<string> => {
+    const flats = siblingMergedHouse.filter((tool) => tool.shape === 'flat' || tool.shape === undefined);
+    const keyed = flats
+      .map((tool) => ({ tool, key: cutterKeyOf(tool), diameter: cuttingDiameter(tool), params: paramsIfAny(tool) }))
+      .filter((row): row is { tool: Tool; key: string; diameter: number; params: CutParams } => row.params !== null && row.diameter !== null);
+    const keys = new Set<string>();
+    // #1192/#1114 — EQUAL DIAMETERS ARE THE PICK'S, NOT THE LIST'S. The incumbent is the largest
+    // flat; among equal diameters the tie falls to the #1114 decider's own preference — the
+    // shortest STATED flute that reaches (the stiffest adequate tool), an unstated flute last,
+    // then the key — never house order (which made the ⌀3.175 × 25 beat the × 12 on list order).
+    const incumbent = [...keyed].sort(
+      (a, b) =>
+        b.diameter - a.diameter
+        || ((a.tool.fluteLength ?? Number.POSITIVE_INFINITY) - (b.tool.fluteLength ?? Number.POSITIVE_INFINITY))
+        || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+    )[0];
+    if (incumbent !== undefined) keys.add(incumbent.key);
+    const bestOwnRow = keyed
+      .filter((row) => hasOwnRow(row.tool))
+      .sort((a, b) => b.params.feed * b.params.stepDown * b.params.stepOver - a.params.feed * a.params.stepDown * a.params.stepOver)[0];
+    if (bestOwnRow !== undefined) keys.add(bestOwnRow.key);
+    return keys;
+  })();
+  const candidateHouse = siblingMergedHouse.filter((tool) => {
     if (!isCuttingRecord(tool)) return false;
     if (chosenKey !== null && cutterKeyOf(tool) === chosenKey) return true;
     if (pinnedChamferKey !== undefined && cutterKeyOf(tool) === pinnedChamferKey) return true;
@@ -1347,8 +1468,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // THE REVIEW'S FINDING (item 8): the ball and the V each get their OWN catalogue row — not
     // the primary flat's, reused as every tool's numbers before this.
     // #1123 item 8 — the note carries the borrowed row's diameter when it came from a feed proxy.
-    const toolSubstitutions: { text: string; feedsProxyMm?: number }[] =
-      substitution === null ? [] : [{ text: substitution, ...(substitutionMm === undefined ? {} : { feedsProxyMm: substitutionMm }) }];
+    // #1186 — each entry also names the bit (its key and display name), so rule 4's ONE row can
+    // name the borrowed bits and price the borrow against a chain that uses none of them.
+    const toolSubstitutions: { text: string; feedsProxyMm?: number; cutterKey: string; cutterName: string }[] =
+      substitution === null
+        ? []
+        : [{
+            text: substitution,
+            cutterKey: cutterKeyOf(primary),
+            cutterName: primary.name || primary.id || `${cuttingDiameter(primary) ?? '?'} mm cutter`,
+            ...(substitutionMm === undefined ? {} : { feedsProxyMm: substitutionMm }),
+          }];
     const vbitParams = vbit === undefined ? null : toolCutParams(input, vbit, pocketParams);
 
     // #985/#965 — THE STATED TOLERANCE, as a function of the ball: a stated cusp (`finishMm`)
@@ -1803,14 +1933,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const restBall = restBallFor(ball);
     const ballParams = ball === undefined ? null : toolCutParams(input, ball, pocketParams);
     if (ballParams?.note !== null && ballParams?.note !== undefined) {
-      toolSubstitutions.push({ text: ballParams.note, ...(ballParams.noteMm === undefined ? {} : { feedsProxyMm: ballParams.noteMm }) });
+      toolSubstitutions.push({ text: ballParams.note, cutterKey: cutterKeyOf(ball!), cutterName: ball!.name || ball!.id || 'ball', ...(ballParams.noteMm === undefined ? {} : { feedsProxyMm: ballParams.noteMm }) });
     }
     if (vbitParams?.note !== null && vbitParams?.note !== undefined) {
-      toolSubstitutions.push({ text: vbitParams.note, ...(vbitParams.noteMm === undefined ? {} : { feedsProxyMm: vbitParams.noteMm }) });
+      toolSubstitutions.push({ text: vbitParams.note, cutterKey: cutterKeyOf(vbit!), cutterName: vbit!.name || vbit!.id || 'V-bit', ...(vbitParams.noteMm === undefined ? {} : { feedsProxyMm: vbitParams.noteMm }) });
     }
     const restBallParams = restBall === undefined ? null : toolCutParams(input, restBall, pocketParams);
     if (restBallParams?.note !== null && restBallParams?.note !== undefined) {
-      toolSubstitutions.push({ text: restBallParams.note, ...(restBallParams.noteMm === undefined ? {} : { feedsProxyMm: restBallParams.noteMm }) });
+      toolSubstitutions.push({ text: restBallParams.note, cutterKey: cutterKeyOf(restBall!), cutterName: restBall!.name || restBall!.id || 'ball', ...(restBallParams.noteMm === undefined ? {} : { feedsProxyMm: restBallParams.noteMm }) });
     }
     // #990 — EVERY OTHER CUTTER GETS ITS OWN ROW TOO: a rest flat, the goal's own
     // `curvedRoughTool`, a smaller skin/rest flat — anything in the house that differs from
@@ -1832,7 +1962,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       otherParams.set(key, params);
       if (note !== null && !notedOthers.has(key)) {
         notedOthers.add(key);
-        toolSubstitutions.push({ text: note, ...(noteMm === undefined ? {} : { feedsProxyMm: noteMm }) });
+        toolSubstitutions.push({ text: note, cutterKey: key, cutterName: tool.name || tool.id || `${cuttingDiameter(tool) ?? '?'} mm cutter`, ...(noteMm === undefined ? {} : { feedsProxyMm: noteMm }) });
       }
       return params;
     };
@@ -2204,6 +2334,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const result = planTreePrograms(tree, {
       offset,
       floorStrips: buildFloorStrips,
+      // #1192 rule 3 (minimum) — only the shortlisted flats may primary this setup.
+      allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
       // #1038 — the tree's boundary ticks reach the run as the plan's own progress reports.
       ...(opts.onProgress === undefined
         ? {}
@@ -2224,6 +2356,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           ? {}
           : { stockFootprintMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width } }),
         houseFlats: flats,
+        // #1192 rule 3 (minimum) — the job's shortlist gates which flats may primary this setup.
+        allowPrimary: (key) => shortlistedPrimaryKeys.has(key),
         houseAll: input.cutters.house,
         ...(input.sacrificialBreakthroughMm === undefined ? {} : { sacrificialBreakthroughMm: input.sacrificialBreakthroughMm }),
         // #975 — the V bits are the pocket chain's last resort: a pocket no flat covers gets the
@@ -2398,7 +2532,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           : `Cut only the stock's ${face} ${mm3(depthBandMm)} mm; nothing of the goal is below the band`,
       );
     }
-    notes.push(...toolSubstitutions.map((entry) => entry.text));
+    // #1186 rule 4 — the borrowed bits are stated ONCE (below), with their cost, not once per bit.
     // #986 (the ruling) — the ball rank's own statement: the measured candidates, the winner and
     // the uncapped best, so the operator sees what the cap cost.
     notes.push(...ballRankNotes);
@@ -2480,14 +2614,34 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             },
       );
     }
-    for (const substitution of toolSubstitutions) {
-      // A cutter cut with another tool's numbers (a fallback/proxy feed row) changes the cut.
+    // #1186 rule 4 — ONE ROW FOR THE BORROWED BITS. The old loop printed the same warning once per
+    // cutter; the operator gets one row naming the bits, the row they borrow, and what the borrow
+    // costs THIS plan: its priced total against the cheapest chain the picker considered that uses
+    // none of them ('no faster owned alternative was found' when there is none).
+    if (toolSubstitutions.length > 0) {
+      const borrowedKeys = new Set(toolSubstitutions.map((entry) => entry.cutterKey));
+      const chosenSeconds = result.choice.cost?.totalSeconds ?? null;
+      const alternatives = result.choice.considered
+        .filter((candidate) => candidate.cost !== null && candidate.steps.every((step) => !borrowedKeys.has(step.cutterKey)))
+        .map((candidate) => candidate.cost!);
+      const bestSeconds = alternatives.length === 0 ? null : Math.min(...alternatives);
+      const borrowedMinutes = chosenSeconds === null || bestSeconds === null ? null : Math.round((chosenSeconds - bestSeconds) / 60);
+      const names = [...new Set(toolSubstitutions.map((entry) => entry.cutterName))];
+      const rowMm = Math.max(...toolSubstitutions.map((entry) => entry.feedsProxyMm ?? 0));
+      const rowWords = Number.isFinite(rowMm) && rowMm > 0 ? `${rowMm} mm row's slower feed and step-down` : "borrowed feed row's slower numbers";
+      const costWords = borrowedMinutes === null || borrowedMinutes <= 0 ? 'no faster owned alternative was found' : `about ${borrowedMinutes} min of this plan`;
+      const text =
+        `${names.join(', ')} ${names.length === 1 ? 'has no feed of its own' : 'have no feed of their own'} for ${input.stock.material} ` +
+        `and cut at the ${rowWords} — ${costWords}`;
+      notes.push(text);
       statements.push({
         severity: 'warning',
         code: 'goal-cutter-substituted',
-        count: 1,
-        text: substitution.text,
-        ...(substitution.feedsProxyMm === undefined ? {} : { feedsProxyMm: substitution.feedsProxyMm }),
+        count: toolSubstitutions.length,
+        text,
+        ...(Number.isFinite(rowMm) && rowMm > 0 ? { feedsProxyMm: rowMm } : {}),
+        // #1186 rule 4 — the N as DATA: G's Do row reads it (no parsing the sentence).
+        ...(borrowedMinutes !== null && borrowedMinutes > 0 ? { borrowedMinutes } : {}),
       });
     }
     if (ballUncutIds.length > 0) {
@@ -2654,6 +2808,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     });
     finishStageMs += result.finishStageMs;
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
+    // #1186 rule 6 — THE MERGE IS STATED, once, on the job: a same-shape-and-diameter sibling left
+    // the candidate set, so the change it would have cost is not paid.
+    const mergedAway = input.cutters.house.filter((tool) => !siblingMergedHouse.includes(tool));
+    const mergeSentence = siblingMergeSentence(mergedAway, siblingMergedHouse);
+    if (mergeSentence !== null && perSetup.length > 0) {
+      const first = perSetup[0]!;
+      const text = mergeSentence;
+      first.notes.push(text);
+      first.statements.push({ severity: 'info', code: 'goal-sibling-merged', count: mergedAway.length, text });
+    }
+
   }
   // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
   // Nothing new is simulated: every program's IR is posted and stamped once (the cache above), the
@@ -3291,6 +3456,8 @@ export interface PlanPocketsOptions {
    * sets it.
    */
   planRegionForTest?: (outcome: OpOutcome | null, id: string) => OpOutcome | null;
+  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
+  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /**
@@ -3706,6 +3873,17 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       return planRestRegion(id, step, prefix);
     }
     if (id === 'contour') {
+      // #1195 — THE SUITE-WIDE INVARIANT, ENFORCED AT THE POST. The pick excludes every chain whose
+      // freeing cutter cannot prove its reach; this makes it impossible for ANY path to post a
+      // freeing contour deeper than its cutter's STATED flute — so every plan the suite (or the
+      // 33-sample bench) posts carries the invariant. It should never fire.
+      if (contourDepthMm > 0 && (cutter.fluteLength === null || cutter.fluteLength + 1e-9 < contourDepthMm)) {
+        const who = cutter.name || cutter.id || 'the cutter';
+        const flute = cutter.fluteLength === null ? 'no stated flute' : `a ${cutter.fluteLength} mm flute`;
+        throw new Error(
+          `#1195 invariant: the plan tried to post a ${contourDepthMm} mm freeing contour on ${who} with ${flute} — the pick must never offer this chain`,
+        );
+      }
       return contourOp({
         cutter,
         contour: tree.contour,
@@ -3941,6 +4119,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
     planStep,
     maxCutters: opts.maxCutters,
+    ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.goalCoverage === undefined
@@ -5967,6 +6146,8 @@ export interface PlanTreeOptions {
   onProgress?: (op: ModelPlanProgress['op'], fraction: number) => void;
   /** #1038 — the caller's stop, checked at the same boundary hooks (one per tick). */
   signal?: AbortSignal;
+  /** #1192 rule 3's minimum — the flats allowed to PRIMARY (the shortlist); absent = all. */
+  allowPrimary?: (cutterKey: string) => boolean;
 }
 
 /** #1021 — see {@link PlanTreeOptions.floorStrips}. */

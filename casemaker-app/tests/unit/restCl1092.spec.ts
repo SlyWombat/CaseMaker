@@ -26,8 +26,8 @@ import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
 
-const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
-const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' });
+const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
+const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
 const R = 3.175 / 2;
 
 /** A 40 x 20 plate with one 36 x 16 pocket whose floor stands at −12, walls vertical. */
@@ -71,7 +71,12 @@ function plan(): PlanPocketsResult {
 
 function restFeeds(result: PlanPocketsResult): { x: number; y: number; z: number }[] {
   return result.ops
-    .filter((op) => op.outcome.ir.tool.id === 'flat-3.175')
+    // #1195 RE-PIN — by STEP KIND, not by tool id: the ⌀3.175 can now be the PRIMARY (rule 1's
+    // price), and its pocket/contour moves are not rest moves. The rest step is the one this test
+    // pins.
+    // #1195 RE-PIN — the ⌀3.175 can now be the PRIMARY's second cutter AND the contour's cutter;
+    // its REST op is the one this test pins. The contour (outside the pocket) is excluded by kind.
+    .filter((op) => op.kind !== 'contour' && op.outcome.ir.tool.id === 'flat-3.175')
     .flatMap((op) => op.outcome.ir.operations.flatMap((o) => o.moves.filter((m) => m.kind === 'feed').map((m) => ({ x: m.x, y: m.y, z: m.z }))));
 }
 

@@ -176,9 +176,16 @@ export interface PreflightRow {
   /**
    * #1123 item 8 / #1128 — a `goal-cutter-substituted` row from a FEED-ROW PROXY: the borrowed
    * row's diameter, mm. The fact is what separates "the cutter was swapped" (Know) from "the cut
-   * runs on another diameter's numbers" (Check) — see {@link bandFor}.
+   * runs on another diameter's numbers" (Do) — see {@link bandFor}.
    */
   feedsProxyMm?: number;
+  /**
+   * #1186 rule 4 / #1123 item 56(a) — the minutes this plan pays for the borrow (its priced total
+   * minus the cheapest considered chain using none of the borrowed bits), carried as DATA from the
+   * plan's statement through the worker's finding map. The Cut step's Do row reads THIS; the
+   * sentence states the same number, and the row never parses it back out.
+   */
+  borrowedMinutes?: number;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -201,7 +208,7 @@ export type FindingBand = 'do' | 'check' | 'know';
 export const FINDING_BANDS: Readonly<Partial<Record<string, FindingBand>>> = {
   // The plan's substitution line ("the job names X; the run posts Y") is information about a
   // decision already made — a warning by severity, a Know by band (#1128 item 4). The feeds-proxy
-  // variant is split out by `bandFor` below.
+  // variant is split out by `bandFor` below: it carries the feeds act, so it is Do.
   'goal-cutter-substituted': 'know',
   // Coverage of this setup: a number to know, not a warning to act on (#1128 item 1).
   'goal-unreached': 'know',
@@ -222,11 +229,11 @@ export const DEFAULT_BAND: Readonly<Record<PreflightSeverity, FindingBand>> = {
 };
 
 /**
- * The band one row is read in. A feeds-proxy substitution is the Check the issue names ("borrowed
- * feeds") even though its code's own line is the substitution Know; everything else is the table,
- * else its severity.
+ * The band one row is read in. A feeds-proxy substitution is the "borrowed feeds" row the issue
+ * names, and #1123 item 56(a) gives it an act (set their feeds), so it is Do; a plain substitution
+ * stays the code's own Know. Everything else is the table, else its severity.
  */
 export function bandFor(row: Pick<PreflightRow, 'severity' | 'code' | 'feedsProxyMm'>): FindingBand {
-  if (row.code === 'goal-cutter-substituted' && row.feedsProxyMm !== undefined) return 'check';
+  if (row.code === 'goal-cutter-substituted' && row.feedsProxyMm !== undefined) return 'do';
   return FINDING_BANDS[row.code] ?? DEFAULT_BAND[row.severity];
 }

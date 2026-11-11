@@ -25,9 +25,9 @@ import { Z1 } from '@/engine/cnc/machine';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 
 const HOUSE: Tool[] = [
-  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
-  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175' }),
-  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2' }),
+  flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
+  flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 }),
+  flatEndMill(2, { number: 3, id: 'flat-2', name: 'flat-2', fluteLength: 30 }),
 ];
 const MAX_CUTTERS = HOUSE.length + 1;
 const SEEDS = [1, 2, 3, 4, 5] as const;
