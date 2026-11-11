@@ -29,6 +29,8 @@ export interface EstimateStep {
   regionIds: readonly string[];
   /** null when the cutter has no usable feed row. */
   rates: CutterRates | null;
+  /** For a 'contour' step: the outline's length and the depth it is cut to. Absent: the step is unpriced. */
+  contour?: { perimeterMm: number; depthMm: number };
 }
 
 export interface ChainEstimate {
@@ -44,6 +46,8 @@ export interface ChainEstimate {
   leftoverMm2: number;
   /** Steps the estimate could not price. */
   unpriced: number;
+  /** Cutting seconds per cutter, in the order the cutters first appear in the chain. */
+  perCutter: { cutterKey: string; cutSeconds: number }[];
 }
 
 export function estimateChain(
@@ -63,6 +67,7 @@ export function estimateChain(
     return step === undefined ? 0 : step.areaMm2;
   };
 
+  const perCutter: { cutterKey: string; cutSeconds: number }[] = [];
   let cutSeconds = 0;
   let changeSeconds = 0;
   let changes = 0;
@@ -73,15 +78,29 @@ export function estimateChain(
   for (const step of steps) {
     let stepSeconds = 0;
     const rates = step.rates;
-    const priceable =
+    const areaPriceable =
       (step.kind === 'pocket' || step.kind === 'rest') &&
       rates !== null &&
       rates.feed > 0 &&
       rates.stepDown > 0 &&
       rates.stepOver > 0 &&
       step.diameterMm > 0;
-    if (!priceable) unpriced += 1;
-    if (priceable && rates !== null) {
+    const contourPriceable =
+      step.kind === 'contour' &&
+      step.contour !== undefined &&
+      step.rates !== null &&
+      step.rates.feed > 0 &&
+      step.rates.stepDown > 0 &&
+      step.contour.perimeterMm > 0;
+    if (!areaPriceable && !contourPriceable) unpriced += 1;
+    if (contourPriceable) {
+      const rates = step.rates!;
+      const c = step.contour!;
+      const levels = c.depthMm > 0 ? Math.ceil(c.depthMm / rates.stepDown) : 1;
+      const perLevel = (c.perimeterMm / rates.feed) * 60 + (rates.plungeFeed > 0 ? (rates.stepDown / rates.plungeFeed) * 60 : 0);
+      stepSeconds += levels * perLevel;
+    }
+    if (areaPriceable && rates !== null) {
       for (const id of step.regionIds) {
         const pocket = pocketById.get(id);
         if (pocket === undefined) continue;
@@ -107,6 +126,13 @@ export function estimateChain(
     runSeconds += stepSeconds;
     previousKey = step.cutterKey;
     cutSeconds += stepSeconds;
+    // Every step lands on its cutter's row — an unpriced one adds 0, so the cutter still appears.
+    let entry = perCutter.find((e) => e.cutterKey === step.cutterKey);
+    if (entry === undefined) {
+      entry = { cutterKey: step.cutterKey, cutSeconds: 0 };
+      perCutter.push(entry);
+    }
+    entry.cutSeconds += stepSeconds;
   }
 
   let leftoverMm2 = 0;
@@ -119,5 +145,6 @@ export function estimateChain(
     totalSeconds: cutSeconds + changeSeconds,
     leftoverMm2,
     unpriced,
+    perCutter,
   };
 }

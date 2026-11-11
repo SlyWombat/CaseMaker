@@ -61,3 +61,16 @@ export function flatReach(region: Polygons, diametersMm: readonly number[], offs
   }
   return steps;
 }
+
+/** The total length of every contour of a region, mm (each contour closed back to its first point). */
+export function polygonsPerimeter(region: Polygons): number {
+  let total = 0;
+  for (const contour of region) {
+    for (let k = 0; k < contour.length; k++) {
+      const a = contour[k]!;
+      const b = contour[(k + 1) % contour.length]!;
+      total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+  }
+  return total;
+}

@@ -30,6 +30,8 @@ export interface ShadowInput {
   considered: readonly ConsideredSequence[];
   /** The signature of the chain the real planner chose. */
   chosenSignature: string;
+  /** The length of the outline the contour step follows, mm; 0 when the job has no contour. */
+  contourPerimeterMm: number;
 }
 
 /** Every number a trace row carries is rounded to three decimals (milliseconds stay integers). */
@@ -40,6 +42,8 @@ export function traceShadowSelection(input: ShadowInput): void {
   const t0 = performance.now();
 
   const candidates = candidateSequences(input.demand, input.cutters, input.candidateOpts);
+  // planner v3 C1 — the depth the freeing contour is cut to, for its contour price.
+  const contourDepthMm = input.demand.features.filter((f) => f.kind === 'contour').reduce((m, f) => Math.max(m, f.depthMm), 0);
 
   // The diameters the candidate steps would ask for — collected once, because flatReach costs two
   // Clipper offsets per diameter per pocket.
@@ -94,6 +98,9 @@ export function traceShadowSelection(input: ShadowInput): void {
       diameterMm: cuttingDiameter(s.cutter.tool) ?? 0,
       regionIds: s.regionIds,
       rates: ratesOf(s.cutter.key, s.cutter.tool),
+      ...(s.kind === 'contour' && input.contourPerimeterMm > 0
+        ? { contour: { perimeterMm: input.contourPerimeterMm, depthMm: contourDepthMm } }
+        : {}),
     }));
     const est = estimateChain(steps, pockets, input.changePrice);
     const real = input.considered.find(
@@ -110,6 +117,7 @@ export function traceShadowSelection(input: ShadowInput): void {
       realEstimateSeconds: real?.estimateSeconds ?? -1,
       realLeftoverCells: real?.leftoverCells ?? -1,
       realRank: real?.rank ?? -1,
+      estEntries: JSON.stringify(est.perCutter.map((e) => [e.cutterKey, Math.round(e.cutSeconds * 1000) / 1000])),
     });
     estimates.push({ signature, est });
   }

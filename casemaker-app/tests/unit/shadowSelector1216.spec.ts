@@ -58,6 +58,8 @@ function input(over: Partial<ShadowInput> = {}): ShadowInput {
     changePrice: () => 91.4,
     considered: [],
     chosenSignature: 'pocket:t6',
+    // #1225 — the contour's outline length; 0 keeps this fixture's steps contour-free.
+    contourPerimeterMm: 0,
     ...over,
   };
 }
@@ -86,6 +88,13 @@ describe('#1216 traceShadowSelection', () => {
     expect(choice[0]!.pockets).toBe(1);
     expect(candidateRows.every((r) => r.realSeconds === -1)).toBe(true);
     expect(candidateRows.every((r) => typeof r.estLeftoverMm2 === 'number' && (r.estLeftoverMm2 as number) >= 0)).toBe(true);
+    // #1225 — every candidate row carries its per-cutter estimate, parseable and non-empty.
+    for (const r of candidateRows) {
+      expect(typeof r.estEntries).toBe('string');
+      const parsed = JSON.parse(r.estEntries as string) as unknown[];
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.length).toBeGreaterThanOrEqual(1);
+    }
   });
 
   it('with no trace sink it writes nothing and does not throw', () => {
@@ -187,6 +196,12 @@ describe('#1216 the planner runs the shadow only with a trace on', () => {
     });
     expect(rows.some((r) => r.stage === 'shadow:choice' || r.stage === 'shadow:error')).toBe(true);
     expect(rows.filter((r) => r.stage === 'shadow:error')).toHaveLength(0);
+    // #1225 — the real planner's own per-cutter price rows are in the same trace.
+    const priced = rows.filter((r) => r.stage === 'chain:price');
+    expect(priced.length).toBeGreaterThanOrEqual(1);
+    const entries = JSON.parse(priced[0]!.entries as string) as unknown[];
+    expect(Array.isArray(entries)).toBe(true);
+    expect((entries[0] as unknown[]).length).toBe(3);
     const without = planFace();
     expect(JSON.stringify(without)).toBe(JSON.stringify(withTrace));
   });

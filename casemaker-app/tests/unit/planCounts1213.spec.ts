@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { planModelCam } from '@/engine/cnc/cam/model/plan';
 import { setMemTraceSink } from '@/engine/cnc/memTrace';
-import { parseTrace, summarizeTrace, type TraceRow } from '../../tools/plan-counts/summarize';
+import { cutterRows, parseTrace, summarizeTrace, type TraceRow } from '../../tools/plan-counts/summarize';
 import { slopedInput } from './helpers/goalFixtures';
 
 describe('#1213 plan-counts — the summariser', () => {
@@ -115,4 +115,21 @@ describe('#1213 plan-counts — the stamp row', () => {
     },
     240_000,
   );
+});
+
+describe('#1225 cutter rows join the two sides', () => {
+  it('cutter rows join the two sides', () => {
+    const rows: TraceRow[] = [
+      { t: 0, stage: 'chain:price', signature: 'pocket:t6+rest:t3', entries: '[["t6",100,0],["t3",40,91.4]]' },
+      { t: 1, stage: 'shadow:candidate', signature: 'pocket:t6+rest:t3', estEntries: '[["t6",90],["t3",25]]' },
+      { t: 2, stage: 'shadow:candidate', signature: 'pocket:t6', estEntries: '[["t6",90]]' },
+      { t: 3, stage: 'shadow:choice' },
+      { t: 4, stage: 'shadow:candidate', signature: 'pocket:t6+rest:t3', estEntries: 'not json' },
+    ];
+    expect(cutterRows(rows)).toEqual([
+      { signature: 'pocket:t6+rest:t3', cutterKey: 't6', estSeconds: 90, realSeconds: 100, realChangeSeconds: 0 },
+      { signature: 'pocket:t6+rest:t3', cutterKey: 't3', estSeconds: 25, realSeconds: 40, realChangeSeconds: 91.4 },
+      { signature: 'pocket:t6', cutterKey: 't6', estSeconds: 90, realSeconds: null, realChangeSeconds: null },
+    ]);
+  });
 });
