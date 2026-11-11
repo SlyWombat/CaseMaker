@@ -222,8 +222,11 @@ body, html, #root {
   padding: var(--cm-space-4);
 }
 .context-panel--rail {
-  /* In rail mode the grid handles width; full height. */
+  /* In rail mode the grid handles width; full height. #1123 (walk row 4): border-box, so the
+     panel's own padding is INSIDE that height — a content-box `100%` plus 32 px of padding ran the
+     rail 32 px past its row, over the status bar and the engine stats on it. */
   height: 100%;
+  box-sizing: border-box;
 }
 .context-panel--drawer {
   position: fixed;
