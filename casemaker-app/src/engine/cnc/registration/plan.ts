@@ -881,6 +881,14 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       );
     }
   }
+  // #1200 (manager's note) — A RESTRICTED 3D UNIT IS A NEW PATH: it has never run a registration
+  // on this machine, and it stays under the first-run guard until the bench proves it. Said on the
+  // plan's own notes, so the card and the record carry it.
+  if (probe !== null && probe.instrument === 'xyz' && probe.touches === 'z-only') {
+    notes.push(
+      'the 3D probe has not run a registration on this machine yet: this top-touches-only path is its first run and stays under the first-run guard until the bench proves it',
+    );
+  }
   notes.push(
     `the surface is expected at machine Z ${exp} (${input.expectedSurface.from}); a reading outside ${band.min} to ${band.max} stops the run`,
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,

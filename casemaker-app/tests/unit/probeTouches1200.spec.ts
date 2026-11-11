@@ -221,6 +221,8 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     // What was planned INSTEAD is stated, naming the edges the free mount would have side-touched.
     expect(p.notes.join(' ')).toContain('restricted to top touches');
     expect(p.notes.join(' ')).toContain('found by stepping Z over');
+    // The manager's note: a restricted 3D unit is a first-run path, and the plan says so.
+    expect(p.notes.join(' ')).toContain('first run and stays under the first-run guard');
   });
 
   it('a datum’d vise: the free front edge is not side-touched on a restricted unit', () => {
@@ -254,6 +256,7 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     expect(p.probe?.touches).toBe('all');
     expect(p.scans.every((sc) => sideTouchSelected(p, sc.edge))).toBe(true);
     expect(p.notes.join(' ')).not.toContain('restricted to top touches');
+    expect(p.notes.join(' ')).not.toContain('first-run guard');
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
     const r = await runRegistration(p, { console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
