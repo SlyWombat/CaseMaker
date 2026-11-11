@@ -2314,6 +2314,14 @@ const registrationPlanSchema = z.object({
         .finite()
         .optional()
         .describe('The unit’s stated tip lateral uncertainty, millimetres; a top touch keeps it plus the tip radius clear of an edge.'),
+      // #1200 — the ball diameter the OPERATOR STATED when nobody measured the tip. The top-touch
+      // inset may use it; the rim offset never does.
+      statedTipDiameterMm: z
+        .number()
+        .finite()
+        .nullable()
+        .optional()
+        .describe('The operator-stated ball diameter, millimetres (provenance stated); not a measurement.'),
       // #1203 — the fitted post's shank diameter, so the run's prompts name the collet.
       shankMm: z
         .number()
@@ -2336,6 +2344,15 @@ const registrationPlanSchema = z.object({
     .nullable()
     .default(null)
     .describe('The checked-out probe on the plan, or null/absent.'),
+  // #1200 — the top-touch tip the inset used and where its ball diameter came from. Absent on a
+  // plan stored before the chain; a reloaded plan keeps the card's provenance line either way.
+  topTouchTip: z
+    .object({
+      diameterMm: z.number().finite().nullable().describe('The ball diameter the top-touch inset used, millimetres; null = the registry floor stands.'),
+      source: z.enum(['measured', 'stated', 'vendor', 'floor']).describe('Where that diameter came from.'),
+    })
+    .optional()
+    .describe('The top-touch tip and its source (#1200).'),
   mountTap: z
     .object({
       x: z.number().finite().describe('The tap point X, machine coordinates, in millimetres.'),

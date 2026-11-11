@@ -32,7 +32,7 @@
 
 import { lastPrb } from './readings';
 import { topTouchEdgeMarginsMm } from './cutBlank';
-import type { EdgeScan, RegistrationPlan } from './plan';
+import { topTouchTipRadiusMm, type EdgeScan, type RegistrationPlan } from './plan';
 
 export interface MotionOrderGuardOptions {
   /**
@@ -140,7 +140,12 @@ export function jobDescentRegion(
     hold === undefined || floor === undefined
       ? null
       : topTouchEdgeMarginsMm(
-          { tipRadiusMm: plan.settings.tipRadiusMm, tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? 0 },
+          {
+            // #1200 — the inset's radius is the TOP-TOUCH chain's; a plan stored before it keeps
+            // the old settings value.
+            tipRadiusMm: plan.topTouchTip === undefined ? plan.settings.tipRadiusMm : topTouchTipRadiusMm(plan.topTouchTip),
+            tipLateralUncertaintyMm: plan.probe?.tipLateralUncertaintyMm ?? 0,
+          },
           { floorMm: floor, hold },
         );
   const stock = plan.stock;

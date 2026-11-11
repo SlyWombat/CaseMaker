@@ -71,10 +71,13 @@ function whereaboutsLine(
 /** The probe's measured line — `tip ⌀ 2.0 · rim 0.70 ± 0.25 · M491 −76.06 · rest 0`. */
 function probeLine(record: FixtureRecord): string | null {
   const tip = record.unit['tipDiameterMm'];
+  const stated = record.unit['statedTipDiameterMm'];
   const rim = record.unit['rimOffsetMm'];
   const unc = record.unit['rimOffsetUncertaintyMm'];
   const bits: string[] = [];
   if (typeof tip === 'number') bits.push(`tip ⌀ ${mm(tip)}`);
+  // #1200 — an operator-stated diameter is not a measurement and says so.
+  if (typeof stated === 'number') bits.push(`stated ⌀ ${mm(stated)} (not measured)`);
   if (typeof rim === 'number') bits.push(`rim ${mm(rim)}${typeof unc === 'number' ? ` ± ${mm(unc)}` : ''}`);
   const m491 = record.unit['lastM491'];
   if (typeof m491 === 'object' && m491 !== null) {
@@ -636,6 +639,12 @@ function AccessoryDetail({
    */
   const [zOnly, setZOnly] = useState(item.touches === 'z-only');
   const [touchReason, setTouchReason] = useState(item.touchesReason ?? '');
+  /**
+   * #1200 — THE OPERATOR-STATED BALL DIAMETER: the top-touch inset's second source, separate from
+   * the measured rim offset (which an edge correction still requires).
+   */
+  const recordedStated = typeof item.unit.statedTipDiameterMm === 'number' ? item.unit.statedTipDiameterMm : null;
+  const [statedTip, setStatedTip] = useState(recordedStated === null ? '' : String(recordedStated));
   // #595 — the probe's last registration reading (M491 + rest), and the machine's own bed datum for
   // a mount that has no tapped reading of its own yet.
   const probeReadings = item.kind === 'probe' ? probeReadingsLine(item) : null;
@@ -648,7 +657,11 @@ function AccessoryDetail({
   const productChanged = product !== (item.product ?? '');
   const variantChanged = variant !== (item.variant ?? '');
   const touchesChanged = zOnly !== (item.touches === 'z-only') || touchReason.trim() !== (item.touchesReason ?? '');
-  const touched = productChanged || variantChanged || touchesChanged;
+  const statedValue = statedTip.trim() === '' ? null : Number(statedTip);
+  const statedProblem =
+    statedValue !== null && (!Number.isFinite(statedValue) || statedValue <= 0) ? 'the stated ball diameter must be a number above 0' : null;
+  const statedChanged = (statedValue ?? null) !== recordedStated;
+  const touched = productChanged || variantChanged || touchesChanged || statedChanged;
 
   const save = async (record: FixtureRecord): Promise<boolean> => {
     const ok = (await saveAccessory(record)) === 'ok';
@@ -656,9 +669,22 @@ function AccessoryDetail({
     return ok;
   };
 
-  const saveLabel = () =>
+  const saveLabel = () => {
+    if (statedProblem !== null) return;
+    const now = new Date().toISOString();
+    const unit = { ...item.unit };
+    const provenance = { ...item.provenance };
+    if (statedValue === null) {
+      delete unit.statedTipDiameterMm;
+      delete provenance.statedTipDiameterMm;
+    } else {
+      unit.statedTipDiameterMm = statedValue;
+      provenance.statedTipDiameterMm = `stated:${now}`;
+    }
     void save({
       ...item,
+      unit,
+      provenance,
       product: product.trim() === '' ? null : product.trim(),
       variant: variant.trim() === '' ? null : variant.trim(),
       // #1200 — the restriction and its record. `touchesSince` moves only when the decision does.
@@ -674,6 +700,7 @@ function AccessoryDetail({
           }
         : {}),
     });
+  };
 
   const checkout = () =>
     void save({
@@ -777,6 +804,28 @@ function AccessoryDetail({
               />
             </label>
           )}
+          {/* #1200 — the top-touch inset's stated source: never a measurement, never a rim offset. */}
+          <label className="lf">
+            <span>stated ball ⌀ (not measured)</span>
+            <input
+              className="fld fld--num"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="—"
+              data-testid="manage-acc-stated-tip"
+              value={statedTip}
+              onChange={(e) => setStatedTip(e.target.value)}
+            />
+          </label>
+          <p className="hint">
+            The top-touch inset may use a stated ball diameter; an edge correction still needs a measured rim offset.
+          </p>
+          {statedProblem !== null && (
+            <p className="hint" data-testid="manage-acc-stated-tip-problem">
+              {statedProblem}
+            </p>
+          )}
         </>
       )}
       <div className="btn-row">
@@ -784,8 +833,8 @@ function AccessoryDetail({
           type="button"
           className="btn btn--sm btn--primary"
           data-testid="manage-acc-save"
-          disabled={!touched}
-          title={touched ? 'Save the label and variant' : 'Nothing to save yet'}
+          disabled={!touched || statedProblem !== null}
+          title={statedProblem ?? (touched ? 'Save the label, variant and stated tip' : 'Nothing to save yet')}
           onClick={saveLabel}
         >
           Save

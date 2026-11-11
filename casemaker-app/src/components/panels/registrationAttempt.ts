@@ -31,7 +31,7 @@ import { registrationSettings } from '@/engine/cnc/registration/settings';
 import { summarizePlan } from '@/engine/cnc/registration/summary';
 import { referenceOpenings, registrationFor, type MountSpec, type Setup } from '@/engine/cnc/setups';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
-import { holdUncertaintyFor } from '@/engine/cnc/registration/plan';
+import { holdUncertaintyFor, topTouchTipFor, topTouchTipRadiusMm } from '@/engine/cnc/registration/plan';
 import { topTouchEdgeMarginsMm } from '@/engine/cnc/registration/cutBlank';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationAttempt } from './EngraveSetupRow';
@@ -96,7 +96,8 @@ function cutBlankCheckPoints(
   // THIS face (per setup), at its stored pitch; the package raster below is the fallback for a
   // blank with no id or an `unknown` map (the unknown-cuts footprint path).
   const probe = {
-    tipRadiusMm: plan.settings.tipRadiusMm,
+    // #1200 — the top-touch inset's radius is the chain's, not the rim offset.
+    tipRadiusMm: plan.topTouchTip === undefined ? plan.settings.tipRadiusMm : topTouchTipRadiusMm(plan.topTouchTip),
     tipLengthMm: plan.probe?.tipLengthMm ?? null,
     bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
     // #1200 — the unit's stated lateral uncertainty, so a top touch keeps clear of the edges.
@@ -123,7 +124,7 @@ function cutBlankCheckPoints(
     shrinkMm,
     holdUncertainty,
     probe: {
-      tipRadiusMm: plan.settings.tipRadiusMm,
+      tipRadiusMm: plan.topTouchTip === undefined ? plan.settings.tipRadiusMm : topTouchTipRadiusMm(plan.topTouchTip),
       tipLengthMm: plan.probe?.tipLengthMm ?? null,
       bodyDiameterMm: plan.probe?.bodyDiameterMm ?? null,
       // #1200 — the same top-touch floor on the raster fallback path.
@@ -331,7 +332,8 @@ export function planRegistrationAttempt(args: {
         };
       }
       const guardedMargins = topTouchEdgeMarginsMm(
-        { tipRadiusMm: args.settings.tipRadiusMm, tipLateralUncertaintyMm: args.probe?.tipLateralUncertaintyMm ?? 0 },
+        // #1200 — the guarded touch is a TOP touch: its radius comes from the chain.
+        { tipRadiusMm: topTouchTipRadiusMm(topTouchTipFor(args.probe)), tipLateralUncertaintyMm: args.probe?.tipLateralUncertaintyMm ?? 0 },
         { floorMm: guardedFloor, hold: guardedHold },
       );
       const insetX = Math.max(job.edgeMargin, guardedMargins.xMm);

@@ -164,6 +164,68 @@ export interface ProbeSpec {
    * spindle. The tip values belong to the sensor and survive a swap; only this changes.
    */
   shankMm?: number | null;
+  /**
+   * #1200 — THE BALL DIAMETER THE OPERATOR STATED for this unit, mm, when nobody has measured it.
+   * Provenance `stated` on the accessory record; a TOP touch may use it (with the vendor's figure
+   * and the registry floor behind it), but an EDGE CORRECTION may not: the rim offset is measured
+   * only, never stated.
+   */
+  statedTipDiameterMm?: number | null;
+}
+
+/** #1200 — where a top touch's ball diameter came from, best first. */
+export type TopTouchTipSource = 'measured' | 'stated' | 'vendor' | 'floor';
+
+/** #1200 — the tip a TOP touch used, and which source supplied its ball diameter. */
+export interface TopTouchTip {
+  /** The ball diameter used for the top-touch inset, mm; null = no source (the floor stands). */
+  diameterMm: number | null;
+  source: TopTouchTipSource;
+}
+
+/**
+ * #1200 — THE VENDOR'S PUBLISHED BALL DIAMETER, per probe variant. EMPTY ON PURPOSE: no Makera
+ * figure for the 3D (or wired) probe's ball is in our captures (the wiki names the product only),
+ * so none ships until one is captured from Makera's page. A captured figure goes here, and the
+ * chain uses it after a measured or operator-stated one — never as a rim offset.
+ */
+export const VENDOR_PROBE_BALL_DIAMETER_MM: Readonly<Record<string, number>> = {};
+
+/**
+ * #1200 — THE TOP-TOUCH TIP CHAIN: measured → operator-stated → vendor → the registry floor (no
+ * diameter). A plan with no sideways touch and no edge find uses this for its inset; the rim
+ * offset stays measured-only and refuses an edge-correction plan without one.
+ */
+export function topTouchTipFor(probe: ProbeSpec | null): TopTouchTip {
+  if (probe !== null) {
+    if (probe.tip !== null) return { diameterMm: probe.tip.diameterMm, source: 'measured' };
+    const stated = probe.statedTipDiameterMm;
+    if (stated !== undefined && stated !== null && Number.isFinite(stated) && stated > 0) {
+      return { diameterMm: stated, source: 'stated' };
+    }
+    const vendor = probe.variant === null ? undefined : VENDOR_PROBE_BALL_DIAMETER_MM[probe.variant];
+    if (vendor !== undefined && Number.isFinite(vendor) && vendor > 0) return { diameterMm: vendor, source: 'vendor' };
+  }
+  return { diameterMm: null, source: 'floor' };
+}
+
+/** #1200 — the radius the top-touch inset uses: the chain's diameter over two, or 0 with no source. */
+export function topTouchTipRadiusMm(tip: TopTouchTip | undefined): number {
+  return tip === undefined || tip.diameterMm === null ? 0 : tip.diameterMm / 2;
+}
+
+/** #1200 — the tip's source in the card's provenance line, e.g. `tip: registry floor, 3 mm — not measured`. */
+export function topTouchTipWords(tip: TopTouchTip, floorMm: number | undefined): string {
+  switch (tip.source) {
+    case 'measured':
+      return `tip: measured ⌀${r3(tip.diameterMm ?? 0)} mm`;
+    case 'stated':
+      return `tip: stated ⌀${r3(tip.diameterMm ?? 0)} mm — not measured`;
+    case 'vendor':
+      return `tip: vendor ⌀${r3(tip.diameterMm ?? 0)} mm — not measured`;
+    case 'floor':
+      return `tip: registry floor, ${r3(floorMm ?? 0)} mm — not measured`;
+  }
 }
 
 /** How a probe can touch: straight down only, or sideways as well (#525). */
@@ -522,6 +584,11 @@ export interface RegistrationPlan {
   mountDatum: MountDatum | null;
   /** #598 — the probe checked out to the machine, whose tip/rim resolved the settings; null with none. */
   probe: ProbeSpec | null;
+  /**
+   * #1200 — THE TOP-TOUCH TIP: the ball diameter its inset used and the source that supplied it
+   * (measured → stated → vendor → the registry floor). Absent on a plan stored before the chain.
+   */
+  topTouchTip?: TopTouchTip;
   /** #599/#607 — the mount tap the executor touches before the surface seek, or null. */
   mountTap: PlanMountTap | null;
   scans: EdgeScan[];
@@ -618,17 +685,31 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
   const mountDatum = input.mountDatum ?? null;
   const probe = input.probe ?? null;
   const mountTap = input.mountTap ?? null;
-  // #525 — a checked-out probe with no measured tip refuses the plan. Falling back to the shop's
-  // wired-probe values would plan a sideways touch with an assumed radius, which offsets every edge
-  // it finds by the difference — silently. The wired probe's record is measured; the 3D probe's is
-  // not, so the first thing its owner sees is this sentence, not a plausible-looking plan.
-  if (probe !== null && probe.tip === null) {
+  // #1200 — A MISSING TIP IS ONLY FATAL FOR A PLAN THAT CORRECTS AN EDGE (analyst's ruling): the
+  // refusal is wrong for a plan with no sideways touch and no edge find, and right for any plan
+  // that corrects a sideways or edge-stepping reading. The top touch's inset takes its ball
+  // diameter from measured → stated → vendor → the registry floor; the RIM OFFSET stays measured
+  // only, never stated or vendor.
+  const topTouchTip = topTouchTipFor(probe);
+  const needsEdgeCorrection =
+    input.corner !== undefined ||
+    input.disc !== undefined ||
+    input.region !== undefined ||
+    // Vise and tape plans scan edges; a bracket plan (post-#1133) is the surface touch only.
+    mount !== 'bracket';
+  if (probe !== null && probe.tip === null && needsEdgeCorrection) {
+    // #1200 field 5 — a unit RESTRICTED TO TOP TOUCHES cannot make this plan's measurement at all:
+    // the remedy is another probe, not a tip measurement this unit may not take.
+    const restricted = probe.touches === 'z-only';
     return {
       ok: false,
-      reason:
-        `measure the ${probeInstrumentOf(probe) === 'xyz' ? '3D probe' : 'checked-out probe'}'s tip first: ` +
-        `it has no measured tip values, and a probe correction cannot be assumed. Measure its tip on a known-width ` +
-        `feature and record it in Manage › Accessories, then plan again`,
+      reason: restricted
+        ? 'this plan needs an edge correction (it scans or touches an edge sideways), which uses the probe’s rim offset — ' +
+          'and this unit is restricted to top touches. A rim offset is measured only, never stated or vendor, and this ' +
+          'unit has none: fit a probe that can correct an edge (or one with measured tip values), then plan again'
+        : `measure the ${probeInstrumentOf(probe) === 'xyz' ? '3D probe' : 'checked-out probe'}'s tip first: ` +
+          `it has no measured tip values, and a probe correction cannot be assumed. Measure its tip on a known-width ` +
+          `feature and record it in Manage › Accessories, then plan again`,
     };
   }
   // #525 — THE CORNER ROUTINE's own preconditions, refused before any scan is built:
@@ -694,7 +775,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     return { ok: false, reason: 'the hold’s placement uncertainty is not stated, so the top touch’s distance from the edge cannot be proven — state the hold’s placement figures' };
   }
   const margins = topTouchEdgeMarginsMm(
-    { tipRadiusMm: s.tipRadiusMm, tipLateralUncertaintyMm: lateralSigma },
+    // #1200 — the INSET's radius is the TOP-TOUCH chain's (ball diameter over two), never the rim
+    // offset: the rim offset is the edge correction and is measured-only.
+    { tipRadiusMm: topTouchTipRadiusMm(topTouchTip), tipLateralUncertaintyMm: lateralSigma },
     { floorMm, hold },
   );
   const insetX = Math.max(stock.cornerRadius, margins.xMm);
@@ -716,7 +799,11 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       ok: false,
       reason:
         `the surface touch point is not well inside the stock: a top touch keeps ${r3(insetX)} mm clear in X and ${r3(insetY)} mm in Y ` +
-        `(the tip's ${r3(s.tipRadiusMm)} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''}, the hold's placement and the registry floor)`,
+        `(${
+          topTouchTip.diameterMm === null
+            ? 'the tip’s ball diameter is not known, so the registry floor stands'
+            : `the tip’s ${r3(topTouchTipRadiusMm(topTouchTip))} mm radius${lateralSigma > 0 ? ` plus its ${r3(lateralSigma)} mm lateral uncertainty` : ''}`
+        }, the hold’s placement and the registry floor)`,
     };
   }
 
@@ -843,7 +930,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       }
     }
     // The surface point must not be under (or beside) anything standing above the stock.
-    const grow = s.tipRadiusMm + s.cornerClearanceMm;
+    // #1200 — the clearance past an obstacle grows by the TOP-TOUCH tip radius (the chain), not
+    // the rim offset: a bracket plan corrects no edge.
+    const grow = topTouchTipRadiusMm(topTouchTip) + s.cornerClearanceMm;
     const under = mountObstacles.find(
       (o) => surfacePoint.x > o.min[0] - grow && surfacePoint.x < o.max[0] + grow && surfacePoint.y > o.min[1] - grow && surfacePoint.y < o.max[1] + grow,
     );
@@ -1018,7 +1107,11 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
     `every touch stops at the surface − ${s.capBelowSurfaceMm} mm: a touch that finds nothing by then is a miss, not a dive`,
     // #1133 — the band, its provenance, and what it buys: the maintainer's own rule.
     `every edge find stays within ±${s.edgeBandMm} mm of where the edge is expected (the stock's own size error, the mount's repeat 0.05 mm and fit 0.1 mm, plus margin); the probe stops at the first touch off the stock`,
-    `the probe reads the stock until its centre is ${s.tipRadiusMm} mm past the edge (the measured effective rim offset); the edges are corrected by it`,
+    // #1200 — a plan with no edge correction has no rim offset to claim: its sentence is the TOP
+    // touch's inset and the tip source the chain found.
+    needsEdgeCorrection
+      ? `the probe reads the stock until its centre is ${s.tipRadiusMm} mm past the edge (the measured effective rim offset); the edges are corrected by it`
+      : `top touches are kept clear of the edges by the shared inset; ${topTouchTipWords(topTouchTip, s.probeFootprintShrinkMm)}`,
   );
   return {
     ok: true,
@@ -1041,6 +1134,9 @@ export function planRegistration(input: PlanInput, s: RegistrationSettings): Pla
       ...(guarded === null ? {} : { guarded }),
       mountDatum,
       probe,
+      // #1200 — the tip the TOP-TOUCH inset used and where its ball diameter came from; the rim
+      // offset is not this field (it stays in the settings, measured-only).
+      topTouchTip,
       mountTap,
       scans,
       bracketOrigin,
