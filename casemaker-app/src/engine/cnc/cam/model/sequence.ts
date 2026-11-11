@@ -215,6 +215,11 @@ export interface SequenceOptions {
   toolChangeSeconds: number;
   /** #1114 — the shop's `reach.marginMm`: the gate a tie's candidates must clear. */
   reachMarginMm?: number;
+  /**
+   * planner v3 A1 — the leftover two chains may differ by and still rank as equal, in percent of
+   * the goal's covered cells (`plan.leftoverEquivalencePct`). Absent or 0: every difference counts.
+   */
+  leftoverEquivalencePct?: number;
   /** Build the step's moves; the op implementations, or a stand-in. */
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
@@ -242,6 +247,8 @@ export interface SequenceOptions {
     coveredCells: number;
     /** The goal field's own cell area, mm² — the unit the rest price is stated in. */
     cellAreaMm2: number;
+    /** planner v3 A1b — cells standing above the shop's tall height; absent counts as 0. */
+    tallCells?: number;
   } | null;
   /**
    * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
@@ -373,6 +380,11 @@ export interface SequenceChoice {
    * sufficient flute, or the key). The row names the decider; no policy is pending.
    */
   pickNote?: string | null;
+  /**
+   * planner v3 A1 — set only when the leftover tolerance changed the pick: the chosen chain is
+   * not the least-leftover chain. Cells and seconds are the picker's own numbers.
+   */
+  leftoverTolerance?: { tolerancePct: number; chosenLeftoverCells: number; bestLeftoverCells: number; cellAreaMm2: number; savedSeconds: number };
 }
 
 const EPS = 1e-9;
@@ -989,6 +1001,10 @@ interface RankedSequence {
   leftBehind: number;
   /** #961 — the simulated cells left above the band; null when the caller supplied no goal. */
   coverage: number | null;
+  /** The goal's covered cell count the caller reported with `coverage`; null with no goal. */
+  coveredCells: number | null;
+  /** Cells standing more than the shop's tall height above the goal; null with no goal. */
+  tallCells: number | null;
   /** The goal field's cell area, mm² — with `coverage`, the leftover expressed in mm². */
   cellAreaMm2: number | null;
   /** #961 — what this candidate's coverage rests buy and cost against the chain without them. */
@@ -1001,7 +1017,7 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence): readonly [number, number, number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null): readonly [number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -1027,7 +1043,19 @@ function rankOf(ranked: RankedSequence): readonly [number, number, number, numbe
   // chain (the caller's simulated outcome), not the pocket count. A candidate the caller could
   // not simulate ranks after every simulated one; with no goal at all every key is +∞ and the
   // old order (leftBehind first) stands unchanged.
-  const leftover = ranked.coverage ?? Number.POSITIVE_INFINITY;
+  // planner v3 A1 + A1b — with the tolerance on: fewer TALL cells always ranks first (the factor
+  // makes one tall cell outweigh any leftover count), and a leftover at or under the floor ranks AS
+  // the floor. With the tolerance off (`leftoverFloor` null) this is the plain leftover, as before.
+  const floored =
+    ranked.coverage === null
+      ? Number.POSITIVE_INFINITY
+      : leftoverFloor !== null && ranked.coverage <= leftoverFloor
+        ? leftoverFloor
+        : ranked.coverage;
+  const leftover =
+    leftoverFloor === null || ranked.coverage === null
+      ? floored
+      : (ranked.tallCells ?? 0) * 2 * ((ranked.coveredCells ?? 0) + 1) + floored;
   const demoted = ranked.eligible ? 0 : 1;
   // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
   // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
@@ -1177,7 +1205,7 @@ export function chooseSequence(
     demand.features.filter((f) => f.kind === 'pocket' || f.kind === 'contour').map((f) => f.id),
   );
   const feasible: RankedSequence[] = priced
-    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number } | null } => p.priced !== null)
+    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null } => p.priced !== null)
     .map(({ sequence, priced: price, coverage }) => {
       const failedFeatures = new Set(
         price.failures.flatMap((f) => f.regionIds).filter((id) => demandFeatureIds.has(id)),
@@ -1189,6 +1217,8 @@ export function chooseSequence(
         failures: price.failures,
         leftBehind: sequence.leftBehind + failedFeatures.size,
         coverage: coverage === null ? null : coverage.leftoverCells,
+        coveredCells: coverage === null ? null : coverage.coveredCells,
+        tallCells: coverage === null ? null : (coverage.tallCells ?? 0),
         cellAreaMm2: coverage === null ? null : coverage.cellAreaMm2,
         restPrice: null,
         eligible: true,
@@ -1230,9 +1260,21 @@ export function chooseSequence(
   const deepestFeatureMm = demand.features.reduce((m, f) => Math.max(m, f.depthMm ?? 0), 0);
   const reachMarginMm = opts.reachMarginMm ?? REACH_MARGIN_FALLBACK_MM;
   const primaryOf = (r: RankedSequence): Tool | undefined => r.sequence.steps[0]?.cutter.tool;
+  // planner v3 A1 — the floor, from the eligible chains that have a leftover number.
+  const tolerancePct = opts.leftoverEquivalencePct ?? 0;
+  const measured = feasible.filter((r) => r.eligible && r.coverage !== null);
+  let leftoverFloor: number | null = null;
+  let bestLeftover: number | null = null;
+  if (tolerancePct > 0 && measured.length > 0) {
+    const fewestTall = Math.min(...measured.map((r) => r.tallCells ?? 0));
+    const cleanest = measured.filter((r) => (r.tallCells ?? 0) === fewestTall);
+    bestLeftover = Math.min(...cleanest.map((r) => r.coverage!));
+    const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
+    leftoverFloor = bestLeftover + (tolerancePct / 100) * coveredCells;
+  }
   const compareRanked = (a: RankedSequence, b: RankedSequence): number => {
-    const ra = rankOf(a);
-    const rb = rankOf(b);
+    const ra = rankOf(a, leftoverFloor);
+    const rb = rankOf(b, leftoverFloor);
     for (let i = 0; i < 8; i++) {
       if (ra[i]! < rb[i]!) return -1;
       if (ra[i]! > rb[i]!) return 1;
@@ -1256,6 +1298,27 @@ export function chooseSequence(
     return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
   };
   feasible.sort(compareRanked);
+  // planner v3 A1 — did the tolerance change the pick? Compare with the order the old rule gives.
+  let leftoverTolerance: SequenceChoice['leftoverTolerance'];
+  const chosenRanked = feasible[0];
+  if (leftoverFloor !== null && bestLeftover !== null && chosenRanked !== undefined && chosenRanked.coverage !== null && chosenRanked.coverage > bestLeftover) {
+    const strict = [...feasible].sort((a, b) => {
+      const ra = rankOf(a);
+      const rb = rankOf(b);
+      for (let i = 0; i < 8; i++) {
+        if (ra[i]! < rb[i]!) return -1;
+        if (ra[i]! > rb[i]!) return 1;
+      }
+      return 0;
+    })[0]!;
+    leftoverTolerance = {
+      tolerancePct,
+      chosenLeftoverCells: chosenRanked.coverage,
+      bestLeftoverCells: bestLeftover,
+      cellAreaMm2: chosenRanked.cellAreaMm2 ?? 0,
+      savedSeconds: Math.round(strict.cost.totalSeconds - chosenRanked.cost.totalSeconds),
+    };
+  }
   // #1114 — the row still exists, but it states the DECIDER (the gate, the shortest sufficient
   // flute, or the key) instead of deferring to a policy issue.
   let pickNote: string | null = null;
@@ -1343,6 +1406,7 @@ export function chooseSequence(
     freeing,
     unplanned: best.failures,
     ...(pickNote === null ? {} : { pickNote }),
+    ...(leftoverTolerance === undefined ? {} : { leftoverTolerance }),
   };
 }
 

@@ -374,6 +374,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // chosen, not measured, and `defaultsClient.ts` states the same bounds and fallbacks.
     ("adaptive.entryClearanceMm", 0.5, "mm", "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"),
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
+    ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured: two cutter chains whose leftover differs by less than this share of the goal's surface count as equal on leftover, so time and bit changes decide between them"),
+    ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured: leftover standing more than this above the goal is tall; the leftover tolerance never treats two cutter chains as equal when one leaves more tall material"),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
     // ── #451 adaptive settings (end)
@@ -1437,6 +1439,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "adaptive.maxCells" => Some(need(
             n.is_some_and(|v| v.fract() == 0.0 && (1000.0..=100_000_000.0).contains(&v)),
             "a whole number of cells, 1000 to 100000000",
+        )),
+        "plan.leftoverEquivalencePct" => Some(need(
+            n.is_some_and(|v| (0.0..=5.0).contains(&v)),
+            "a percentage, 0 to 5",
+        )),
+        "plan.leftoverTallMm" => Some(need(
+            n.is_some_and(|v| (0.1..=50.0).contains(&v)),
+            "a height in mm, 0.1 to 50",
         )),
         "adaptive.residualShare" => Some(need(
             n.is_some_and(|v| (0.0..=0.5).contains(&v)),
