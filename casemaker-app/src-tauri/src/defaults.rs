@@ -376,6 +376,9 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
     ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured. Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen."),
     ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."),
+    // #1242 (planner v3 C3) — how many chains get a real plan; 0 is off (every chain, slower,
+    // the same pick). Chosen, not measured.
+    ("plan.shortlistSize", 8.0, "cutter sets", "chosen, not measured. How many of the most promising sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
     // ── #451 adaptive settings (end)
@@ -1385,6 +1388,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "plan.autoLevelPoints" => Some(need(
             n.is_some_and(|v| v.fract() == 0.0 && (4.0..=400.0).contains(&v)),
             "a whole number of points, 4 to 400",
+        )),
+        // #1242 — the shortlist's size: a whole number of cutter sets; 0 is off.
+        "plan.shortlistSize" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (0.0..=200.0).contains(&v)),
+            "a whole number of cutter sets, 0 to 200",
         )),
         "plan.autoLevelShallowMm" => Some(need(
             n.is_some_and(|v| (0.05..=10.0).contains(&v)),
