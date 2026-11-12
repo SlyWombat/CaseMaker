@@ -48,7 +48,7 @@ import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNot
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
 import { estimateCandidates, traceShadowSelection, type CandidateEstimates } from '../fields/shadowSelector';
-import { shortlistOf } from '../fields/shortlist';
+import { shortlistNote, shortlistOf } from '../fields/shortlist';
 import { polygonsPerimeter } from '../fields/flatReach';
 import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CandidateSequence, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
@@ -4829,11 +4829,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   }
   // #1242 (planner v3 C3) — THE SHORTLIST'S NOTE (a note, not a sheet line): one sentence when the
   // planner worked out fewer chains than it considered, so a shorter run has its reason on it.
-  if (shortlistRecord.counts !== null && shortlistRecord.counts.kept < shortlistRecord.counts.candidates) {
-    notes.push(
-      `The planner worked out ${shortlistRecord.counts.kept} of ${shortlistRecord.counts.candidates} possible sets of cutters ` +
-        'in full, the most promising by estimate (a shop setting).',
-    );
+  if (shortlistRecord.counts !== null) {
+    const note = shortlistNote(shortlistRecord.counts);
+    if (note !== null) notes.push(note);
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {

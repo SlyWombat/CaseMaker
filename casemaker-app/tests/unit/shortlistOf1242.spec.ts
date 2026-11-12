@@ -148,3 +148,22 @@ describe('#1242 estimateCandidates', () => {
     expect(strip(withEstimates)).toEqual(strip(without));
   });
 });
+
+import { shortlistNote, shortlistOf as shortlistAgain } from '@/engine/cnc/cam/fields/shortlist';
+
+describe('#1242 shortlistNote', () => {
+  it('names what was worked out when the shortlist dropped anything', () => {
+    expect(shortlistNote({ candidates: 23, kept: 8 })).toBe(
+      'The planner worked out 8 of 23 possible sets of cutters in full, the most promising by estimate (a shop setting).',
+    );
+  });
+
+  it('is absent when nothing was dropped', () => {
+    expect(shortlistNote({ candidates: 8, kept: 8 })).toBeNull();
+    expect(shortlistNote({ candidates: 3, kept: 8 })).toBeNull();
+  });
+
+  it('the module still exports the selection', () => {
+    expect(typeof shortlistAgain).toBe('function');
+  });
+});
