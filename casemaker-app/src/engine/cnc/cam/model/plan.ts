@@ -2594,10 +2594,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(input.houseNote === undefined ? [] : [input.houseNote]),
       ...earlyNotes,
       ...result.notes,
-      // #1206 — every op's own notes reach the plan's notes (the field existed, nothing collected
-      // it): the freeing contour's tab statements — asked/placed and each tight tab — are what the
-      // operator reads on the sheet.
-      ...ops.flatMap((op) => op.outcome.notes ?? []),
+      // #1206 — THE FREEING CONTOUR'S notes reach the plan's notes (the field existed, nothing
+      // collected it): asked/placed and each tight tab are what the operator reads on the sheet.
+      // Deliberately ONLY the contour: the finish op's own notes (#960/#1033 wall-row and join
+      // lines) are a separate sheet-text gap, left for its own issue.
+      ...ops.filter((op) => op.kind === 'contour').flatMap((op) => op.outcome.notes ?? []),
       ...emptyStages,
       ...freeingNotes,
       ...freshSameDiameterNotes,
