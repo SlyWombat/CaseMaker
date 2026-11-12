@@ -13,6 +13,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { modelTopLiftMm } from '@/workers/sim/engraveGenerate';
+import { setupRecordFor } from '@/engine/cnc/setups/setupRecord';
 import { jobForSetup, setupPrograms } from '@/engine/cnc/engrave/programs';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
@@ -153,6 +155,28 @@ describe('#1247 (body) — the verifier’s Setup is the setup’s own stock', (
     expect(envelopeMove(recheckFindings(job, SHAPEOKO, 'G1 Z-26 F100'))).toBe(true);
     // The mirror: a move the real stock allows and the job-blank body refuses.
     expect(envelopeMove(recheckFindings(job, SHAPEOKO, 'G0 Z75'))).toBe(false);
+  });
+});
+
+describe('#1247 (d) — the model path states the fitted top’s lift', () => {
+  it('the model mount boxes take maxSurfaceLift, not 0 — the cautious direction', () => {
+    const job = flipJob();
+    expect(modelTopLiftMm(job, {})).toBe(0);
+    const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0.02 }, z0: 0 };
+    // Corners of the 120 × 160 blank: 0.01·120 + 0.02·160 = 4.4 mm.
+    expect(modelTopLiftMm(job, { surface })).toBeCloseTo(4.4, 9);
+    const mount = {
+      obstacles: [{ id: 'clamp', kind: 'clamp' as const, label: 'the clamp', fix: 'move it', min: [0, 0] as [number, number], max: [10, 10] as [number, number], topZ: 22 }],
+      uncertainty: 0.1,
+      fixture: { boxes: [], source: 'default' as const, uncertainty: 0.1 },
+    };
+    const record = setupRecordFor(job, 0, {
+      setup: toSetup(job, Z1),
+      mount,
+      clearanceMm: 0.5,
+      topLiftMm: modelTopLiftMm(job, { surface }),
+    });
+    expect(record.holds?.topLift).toBeCloseTo(4.4, 9);
   });
 });
 
