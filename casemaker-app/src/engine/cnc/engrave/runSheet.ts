@@ -4609,7 +4609,7 @@ export function buildRunSheet(
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
   // same plan, so the diagram and the depth notes cannot disagree about where the voids are.
-  const plan = toPartPlan(job);
+  const plan = toPartPlan(job, { defaults: options.defaults ?? null });
   const items = plan.engraves;
   const diagram = buildDiagram(job, plan);
   const stackUp = buildStackUp(job);

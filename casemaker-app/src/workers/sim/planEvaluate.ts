@@ -57,6 +57,7 @@ import {
 } from '@/engine/cnc/engrave/measuredPick';
 import { kindedWork } from '@/engine/cnc/engrave/cutterPlan';
 import { toPartPlan, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { PRIOR_REFUSAL_CODES } from '@/engine/cnc/engrave/programSweep';
 import type { OracleReport } from '@/engine/cnc/engrave/oracle';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -360,11 +361,16 @@ export async function evaluatePlan(
  * setup change cannot alter a part, and re-building it would also have discarded every cutter's
  * measured rows beside it.
  */
-function partOf(job: EngraveJob): { part: PartPlan; raisedOf: Map<string, PartPlan['raisedTexts']> } {
+function partOf(
+  job: EngraveJob,
+  // #1244 — the map from the caller's context; it is not part of the cache key: only the rotary
+  // branch reads it, and that is decided by the job's own holding and section.
+  defaults: ShopDefaults | null,
+): { part: PartPlan; raisedOf: Map<string, PartPlan['raisedTexts']> } {
   const key = measureFingerprint(job);
   const hit = partCache.get(key);
   if (hit !== undefined) return hit;
-  const part = toPartPlan(job);
+  const part = toPartPlan(job, { defaults });
   const raisedOf = new Map<string, PartPlan['raisedTexts']>();
   for (const raised of part.raisedTexts) {
     const list = raisedOf.get(raised.id) ?? [];
@@ -392,12 +398,12 @@ function measuresFor(
   const key = `${measureFingerprint(job)}\u0000${JSON.stringify(tool)}`;
   const hit = cutterCache.get(key);
   if (hit !== undefined) return hit;
-  const engravability = measureEngraving(ctx.tl, job, tool);
+  const engravability = measureEngraving(ctx.tl, job, tool, ctx.shop.defaults ?? null);
   // The pinch detail rides the raised measure's OWN radius choice (a flat's radius, a cone's
   // top-face opening). #857 — it is measured whether or not the letters fuse at that width: a
   // cutter that keeps every letter apart can still leave a counter filled, and that is a loss the
   // ranking must see.
-  const radiusFor = raisedTextRadius(ctx.tl, job, part)(tool);
+  const radiusFor = raisedTextRadius(ctx.tl, job, ctx.shop.defaults ?? null, part)(tool);
   const cone = vCone(tool) !== null;
   const raisedDetails: RaisedTextDetail[] = [];
   for (const raised of part.raisedTexts) {
@@ -470,7 +476,7 @@ function measureItems(
   tools: readonly ToolLibraryEntry[],
   swept: SweptRaised | null = null,
 ): EvaluatedItem[] {
-  const { part, raisedOf } = partOf(job);
+  const { part, raisedOf } = partOf(job, ctx.shop.defaults ?? null);
   const work = kindedWork(job, floorsOf(ctx, part));
   const hasRest = plan.cutters.some((c) => c.items.length === 0);
   // #860 — A MALE INLAY HALF'S fidelity is not its cutaway's cut (which reproduces its own design
@@ -591,7 +597,7 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
     return { ...base, ok: false, refusal: 'a multi-setup job is not evaluated by one plan yet', items: [], seconds: null };
   }
   // #940 — the floors are the plan's own: a cone's reach is the cut below its item's floor.
-  const reach = measureReach(job, plan, ctx.tools, floorsOf(ctx, partOf(job).part));
+  const reach = measureReach(job, plan, ctx.tools, floorsOf(ctx, partOf(job, ctx.shop.defaults ?? null).part));
   return {
     ...base,
     ok: true,
@@ -646,7 +652,7 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
   const refusal = gen.ok
     ? null
     : (gen.errors[0]?.message ?? gen.findings.find((f) => f.severity === 'error')?.message ?? 'the plan does not post');
-  const { part } = partOf(job);
+  const { part } = partOf(job, ctx.shop.defaults ?? null);
   const levels = raisedLevels(part);
   const { sweep, sweepNote, raisedCuts } = gen.ok
     ? sweepPlan(ctx, applied, gen, genShop, levels)
@@ -835,7 +841,7 @@ function sweptRaisedDetails(
     const key = effectiveCutter(plan, w.id);
     const tool = key === null ? null : toolFor(ctx.tools, key);
     if (tool === null) continue;
-    const radiusFor = raisedTextRadius(ctx.tl, job, part)(tool);
+    const radiusFor = raisedTextRadius(ctx.tl, job, ctx.shop.defaults ?? null, part)(tool);
     const cone = vCone(tool) !== null;
     for (const raised of part.raisedTexts) {
       if (raised.id !== w.id) continue;

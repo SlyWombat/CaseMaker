@@ -972,14 +972,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #760 — the raised-text measurement rides the same scan: a cutter that joins a raised
     // label's letters is not one that "keeps every item intact", and the pick must see the gap
     // the finding will quote. One `PartPlan` build serves every candidate.
-    const raised = raisedTextMeasure(tl, job);
+    const raised = raisedTextMeasure(tl, job, shopDefaults);
     return reachabilityFor(
       job,
       getTools(),
       catalogueRows,
       (key) => {
         const entry = entryFor(key);
-        return entry === null ? [] : measureEngraving(tl, job, entry.tool);
+        return entry === null ? [] : measureEngraving(tl, job, entry.tool, shopDefaults);
       },
       undefined,
       null,
@@ -2047,7 +2047,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       conditions: inventoryConditions(),
       shop: pickShop,
       // #940 — the same floors rule; the candidate list is the one the search would measure.
-      floors: supportingFloors(tl, toPartPlan(job)),
+      floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
     }).some(
       (p) => p.cutters.length > 1 && p.cutters[0]?.key === job.toolKey,
     );
@@ -2102,7 +2102,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           // #1134 — the FULL evaluations plan the program the cut would post: the run shop, mount
           // included. The pick's own score keeps the picker's shop (the both-doors rule, #947).
           runShop: { ...shop, mount: mountFor(job) },
-          floors: supportingFloors(tl, toPartPlan(job)),
+          floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
         });
         const searchMs = Date.now() - searchStart;
         // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
@@ -2265,7 +2265,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           catalogue: catalogueRows,
           conditions: inventoryConditions(),
           shop: pickShop,
-          floors: supportingFloors(tl, toPartPlan(sub)),
+          floors: supportingFloors(tl, toPartPlan(sub, { defaults: shopDefaults })),
         });
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
@@ -2793,7 +2793,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // is derived here for each program's OWN job rather than assumed from the kind of program a
         // rest pass writes today: a trace-bearing second program must not print a step-over.
         const traceOnlyOf = (j: EngraveJob): boolean =>
-          toPartPlan(j).engraves.length === 0 &&
+          toPartPlan(j, { defaults: shopDefaults }).engraves.length === 0 &&
           (j.traces?.some((t) => t.enabled && !t.construction) ?? false);
         facts = {
           rough: {

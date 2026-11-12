@@ -65,8 +65,8 @@ function goalRegion(job: EngraveJob): FootprintBox | null {
 }
 
 /** The union of the item pipeline's cut extents, or null when the job cuts nothing it can measure. */
-function itemRegion(job: EngraveJob): FootprintBox | null {
-  const spread = surfaceSpreadPlan(job);
+function itemRegion(job: EngraveJob, defaults: ShopDefaults | null): FootprintBox | null {
+  const spread = surfaceSpreadPlan(job, { defaults });
   if (spread === null || spread.regions.length === 0) return null;
   let minX = Infinity;
   let minY = Infinity;
@@ -82,8 +82,8 @@ function itemRegion(job: EngraveJob): FootprintBox | null {
 }
 
 /** Where this job's cut will land, work XY: the goal's footprint, else the items' extents. */
-export function cutRegionOf(job: EngraveJob): FootprintBox | null {
-  return goalRegion(job) ?? itemRegion(job);
+export function cutRegionOf(job: EngraveJob, defaults: ShopDefaults | null): FootprintBox | null {
+  return goalRegion(job) ?? itemRegion(job, defaults);
 }
 
 export interface FootprintJobArgs {
@@ -128,7 +128,7 @@ export function footprintInputFor(given: FootprintJobArgs): FootprintJobResult {
   if (job.stock.shape === 'disc') {
     return { ok: false, reason: 'a disc’s rim registration has not been run on this machine yet — use a rectangular blank' };
   }
-  const region = cutRegionOf(job);
+  const region = cutRegionOf(job, defaults);
   if (region === null) {
     return { ok: false, reason: 'this job states no cut region to register on — add the part to cut, or register by hand' };
   }

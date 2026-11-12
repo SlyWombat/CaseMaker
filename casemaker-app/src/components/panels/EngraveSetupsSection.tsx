@@ -151,7 +151,7 @@ export function EngraveSetupsSection({
   }, [job.labels, job.customFonts]);
   const derivedStock = useMemo(
     () =>
-      labelFontsLoaded(job.labels, job.customFonts ?? []) ? derivedSetupStock(job, measuredThickness) : null,
+      labelFontsLoaded(job.labels, job.customFonts ?? []) ? derivedSetupStock(job, measuredThickness, useShopDefaultsStore.getState().defaults) : null,
     // The epoch is the memo's cue: a face landing must re-derive even when the job object is unchanged.
     [job, measuredThickness, facesEpoch],
   );

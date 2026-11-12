@@ -39,7 +39,7 @@ const CHAMFER_90 = flatEndMill(3.175, {
 describe('#760 raised-text gaps, measured', () => {
   it('j02 "Software" at 14 mm: gaps 1.08 mm — a 1.5 mm flat joins, a 1 mm keeps', () => {
     const job = jobOf('j02-raised-cnx.json');
-    const measure = raisedTextMeasure(tl, job, toPartPlan(job));
+    const measure = raisedTextMeasure(tl, job, null, toPartPlan(job));
     const wide = measure(flat(1.5));
     expect(wide).toHaveLength(1);
     expect(wide[0]!.text).toBe('Software');
@@ -51,7 +51,7 @@ describe('#760 raised-text gaps, measured', () => {
 
   it('the coin’s "Software" at 3.6 mm: gaps 0.278 mm — every flat from 0.3 up joins it', () => {
     const job = jobOf('j04-coin-disc-pla.json');
-    const measure = raisedTextMeasure(tl, job, toPartPlan(job));
+    const measure = raisedTextMeasure(tl, job, null, toPartPlan(job));
     const one = measure(flat(1));
     expect(one).toHaveLength(1);
     expect(one[0]!.text).toBe('Software');
@@ -62,7 +62,7 @@ describe('#760 raised-text gaps, measured', () => {
 
   it('judges a V at its TOP-FACE opening: the 90° 0.1 mm chamfer opens 0.9 mm there', () => {
     const job = jobOf('j04-coin-disc-pla.json');
-    const measure = raisedTextMeasure(tl, job, toPartPlan(job));
+    const measure = raisedTextMeasure(tl, job, null, toPartPlan(job));
     const rows = measure(CHAMFER_90);
     expect(rows.map((r) => r.labelId)).toEqual(['software']);
     // 0.05 mm tip radius + 0.4 mm of flank at tan 45° = 0.45 mm half-width → 0.9 mm opening.

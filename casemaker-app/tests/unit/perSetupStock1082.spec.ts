@@ -59,9 +59,9 @@ describe('#1082 a setup’s own stock', () => {
 
   it('a flipped setup DERIVES the freed part’s box — extents from side 1, measured thickness when known', () => {
     // RED at the parent: no resolver existed and the schema stripped the field.
-    expect(derivedSetupStock(flipJob(), 25)).toEqual({ length: 106, width: 136, thickness: 25, provenance: 'derived' });
+    expect(derivedSetupStock(flipJob(), 25, null)).toEqual({ length: 106, width: 136, thickness: 25, provenance: 'derived' });
     // No house measurement → the blank's stated thickness.
-    expect(derivedSetupStock(flipJob(), null)).toMatchObject({ length: 106, width: 136, thickness: 28, provenance: 'derived' });
+    expect(derivedSetupStock(flipJob(), null, null)).toMatchObject({ length: 106, width: 136, thickness: 28, provenance: 'derived' });
   });
 
   it('#1082 stage 2 — toSetup builds the part from the SETUP’s stock, not the blank', () => {
@@ -152,7 +152,7 @@ describe('#1082 a setup’s own stock', () => {
     expect(measuredBlankThickness({ datums: { surfaceTopZ: null, bracketSeatZ: { value: -72.4 } } })).toBeNull();
     expect(measuredBlankThickness(null)).toBeNull();
     // And the derived box takes it when the caller has it.
-    expect(derivedSetupStock(flipJob(), 24.2)).toMatchObject({ thickness: 24.2, provenance: 'derived' });
+    expect(derivedSetupStock(flipJob(), 24.2, null)).toMatchObject({ thickness: 24.2, provenance: 'derived' });
   });
 
   it('the resolver: the STATED box wins; a non-flip setup has none', () => {

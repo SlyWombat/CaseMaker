@@ -1013,10 +1013,16 @@ export interface EngraveGenerated {
  * Returns `[]` for a cutter that cannot open a region at all: a non-flat, or a V-bit, whose groove
  * width is a function of depth (#405). Nothing was measured, so nothing is claimed.
  */
-export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: Tool): LabelEngravability[] {
+export function measureEngraving(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  tool: Tool,
+  // #1244 — the caller's edge supplies the map the part plan's rotary branch reads.
+  defaults: ShopDefaults | null,
+): LabelEngravability[] {
   const usable = cuttingForTrace(tool);
   if (!usable.ok || usable.tool.shape !== 'flat') return [];
-  return measureLabels(tl, toPartPlan(job), usable.tool.radius, job.edgeMargin, perCharFor(job));
+  return measureLabels(tl, toPartPlan(job, { defaults }), usable.tool.radius, job.edgeMargin, perCharFor(job));
 }
 
 /**
@@ -1033,10 +1039,12 @@ export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: To
 export function raisedTextMeasure(
   tl: ManifoldToplevel,
   job: EngraveJob,
-  plan: PartPlan = toPartPlan(job),
+  // #1244 — the map from the caller's edge (see measureEngraving).
+  defaults: ShopDefaults | null,
+  plan: PartPlan = toPartPlan(job, { defaults }),
 ): (tool: Tool) => RaisedTextMeasurement[] {
   if (plan.raisedTexts.length === 0) return () => [];
-  const radiusOf = raisedTextRadius(tl, job, plan);
+  const radiusOf = raisedTextRadius(tl, job, defaults, plan);
   // The scan asks about a hundred cutters, and most share their width with a dozen others: a flat
   // row is a function of its radius (a V's, of the plane radii it cuts at), so each distinct
   // measurement is made once. The rows carry their own `cutterRadius`, so the cache key is the
@@ -1063,7 +1071,8 @@ export function raisedTextMeasure(
 export function raisedTextRadius(
   tl: ManifoldToplevel,
   job: EngraveJob,
-  plan: PartPlan = toPartPlan(job),
+  defaults: ShopDefaults | null,
+  plan: PartPlan = toPartPlan(job, { defaults }),
 ): (tool: Tool) => ((cutawayId: string) => number | null) | null {
   if (plan.raisedTexts.length === 0) return () => null;
   const floors = supportingFloors(tl, plan);
@@ -1115,6 +1124,8 @@ function ratioAtFor(
   tl: ManifoldToplevel,
   job: EngraveJob,
   radius: number,
+  // #1244 — the map from the caller's edge (engraveRegions' shop); null: the recommendations.
+  defaults: ShopDefaults | null,
   radiusFor?: (labelId: string) => number,
 ): LabelRatioAt {
   return (labelId, size) => {
@@ -1123,7 +1134,7 @@ function ratioAtFor(
     const probe: EngraveJob = { ...job, shapes: [], labels: [{ ...label, size }] };
     const r = radiusFor?.(labelId) ?? radius;
     if (!(r > 0)) return 0;
-    return measureLabels(tl, toPartPlan(probe), r, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
+    return measureLabels(tl, toPartPlan(probe, { defaults }), r, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
   };
 }
 
@@ -1977,8 +1988,10 @@ export function engraveRegions(
   const plan = toPartPlan(
     job,
     derivedCores === undefined || derivedCores.length === 0
-      ? {}
+      ? { defaults: shop.defaults ?? null }
       : {
+          // #1244 — the map from this worker's shop (the shop parameter above).
+          defaults: shop.defaults ?? null,
           derivedEngraves: derivedCores.map((core) => ({
             id: core.id,
             name: core.name,
@@ -2112,8 +2125,8 @@ export function engraveRegions(
         );
   const ratioAt =
     cone === null
-      ? ratioAtFor(tl, job, radius ?? 0)
-      : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
+      ? ratioAtFor(tl, job, radius ?? 0, shop.defaults ?? null)
+      : ratioAtFor(tl, job, cone.tipRadius, shop.defaults ?? null, planeRadiusFor);
   // #665 — the engravability measurement judges a region against ONE cutter width at the plane;
   // a variable-depth item's width follows its own design at every point, so its `item-empty`
   // (a plane radius of 0 on a point-tip bit) would refuse a cut that is entirely sound. #677 — a
@@ -3833,7 +3846,8 @@ function restProgramFact(
     params: one.feeds !== null && one.feeds.ok ? one.feeds.params : null,
     passes: cam?.passes ?? 1,
     traceOnly:
-      toPartPlan(job).engraves.length === 0 &&
+      // #1244 — item PRESENCE only; the map's rotary branch moves coordinates, never this count.
+      toPartPlan(job, { defaults: null }).engraves.length === 0 &&
       (job.traces?.some((t) => t.enabled && !t.construction) ?? false),
     moves: cam?.cuttingMoves ?? 0,
     seconds: Math.round(cam?.estimatedSeconds ?? 0),
@@ -4203,7 +4217,7 @@ async function generateRestPair(
   // cutter's bore as "rest of Bore", its through vector as a deep pocket and its cut-out as an
   // outline whose part had vanished.
   const measureJob = roughJob;
-  const measured = measureEngraving(tl, measureJob, roughTool);
+  const measured = measureEngraving(tl, measureJob, roughTool, shop.defaults ?? null);
   const glyphArea = measured.reduce((sum, m) => sum + m.glyphArea, 0);
   const openedArea = measured.reduce((sum, m) => sum + m.openedArea, 0);
   const roughShare = glyphArea > 0 ? openedArea / glyphArea : 0;
@@ -7637,7 +7651,7 @@ export async function engraveGenerate(
   // sub-job holds only its own items, and the pocket a label is written into may be cut by another
   // setup's program. One plan, one map, handed to every program so every file judges the label
   // from the floor the run cuts under it.
-  const documentFloors = supportingFloors(tl, toPartPlan(job));
+  const documentFloors = supportingFloors(tl, toPartPlan(job, { defaults: shop.defaults ?? null }));
   onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut

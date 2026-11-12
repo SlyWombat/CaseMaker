@@ -301,7 +301,10 @@ export function buildRunRecord(
     actualSeconds: actualSeconds !== null && actualSeconds > 0 ? actualSeconds : null,
     cutter: { fluteLengthMm: null, stickOutMm: null },
     stockProudMm: null,
-    depths: recordDepths(toPartPlan(job)).map((d) => ({
+    depths: recordDepths(
+      // #1244 — the record's rows read item DEPTHS, which the map's rotary branch never moves.
+      toPartPlan(job, { defaults: null }),
+    ).map((d) => ({
       id: d.id,
       name: d.name,
       planned: d.depth,
