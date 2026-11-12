@@ -1,15 +1,19 @@
 /**
- * #1237 — THE CLI PLANS WITH THE LOCATION'S SHOP SETTINGS, AND THE RECEIPT SAYS WHICH.
+ * #1237 — THE SHOP'S SETTINGS REACH THE PLANNER IN BOTH PATHS, AND THE BELLY OF THE BUG.
  *
- * The one that would have caught the bug: the same small goal job planned through the command
- * twice, with two copies of the fixture location that differ in one planner key whose effect is
- * visible on the job. The receipts' plans differ, each matches the app-side planner under the
- * same install, and the changed key — and only the changed key — is in the receipt's provenance.
+ * The planner's seven settings travel in `ModelPlanInput`; this spec proves the two halves the
+ * analyst ruled on:
+ *  1. the APP path — the same entry `sim.worker` uses for Generate: a location whose bit-change
+ *     price differs from the recommendation plans to a cycle that differs by EXACTLY the price
+ *     delta times the changes (one change), so the app cannot regress to fallbacks unseen;
+ *  2. the CLI path — the same job through the command twice, with two copies of the location that
+ *     differ only in that price: the receipts' plans differ by the same exact amount, and each
+ *     arm matches the app-side planner byte for byte (the #922 parity, with a setting that
+ *     differs from its recommendation), and the changed receipt names the key as `located`.
  *
- * The job is the near-sphere on a 30 × 30 × 30 blank held on tape: it posts a flat program and a
- * ball program, so the bit-change rule (read by `planModelCam` through the live source) has work
- * to price. Long-reach tool records are stated in both location copies, identically, so the only
- * difference between the arms is the one key.
+ * The job is a half-scale near-sphere on a 15 × 15 × 15 blank held on tape: its flat program runs
+ * ~1 min 14 s, so the ball change is ATTENDED (its price is exactly `bitChange.attendedChangeSeconds`,
+ * not the rising interpolation), which is what makes the difference exact.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +25,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { engraveShopOpts } from '@/engine/cnc/engrave/feeds';
+import { setRegistry } from '@/engine/cnc/toolRegistry';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
 import { installShopDefaults, resetLiveShopDefaults, type ShopDefaults } from '@/platform/defaultsClient';
 import type { Receipt } from '@/platform/headless/receipt';
@@ -38,17 +43,34 @@ afterAll(() => {
   rmSync(SCRATCH, { recursive: true, force: true });
 });
 
-/** The near-sphere job, built the way the app builds a goal job (the corpus helper's shape). */
-async function nearSphereJob(): Promise<EngraveJob> {
-  const name = 'near-sphere.stl';
-  const bytes = readFileSync(join(APP, 'tests/fixtures/goals', name));
-  const read = await readTargetObjectFile(new File([bytes], name), `goal-${name}`);
+/** A binary STL with every vertex scaled — the corpus sphere at half size, in the test's temp dir. */
+function scaledStl(src: Buffer, k: number): Buffer {
+  const out = Buffer.from(src);
+  const triangles = out.readUInt32LE(80);
+  for (let i = 0; i < triangles; i++) {
+    const base = 84 + i * 50 + 12;
+    for (let v = 0; v < 3; v++) {
+      for (let a = 0; a < 3; a++) {
+        const at = base + v * 12 + a * 4;
+        out.writeFloatLE(out.readFloatLE(at) * k, at);
+      }
+    }
+  }
+  return out;
+}
+
+async function halfSphereJob(): Promise<EngraveJob> {
+  const src = readFileSync(join(APP, 'tests/fixtures/goals/near-sphere.stl'));
+  const bytes = scaledStl(src, 0.5);
+  const view = new Uint8Array(bytes.byteLength);
+  view.set(bytes);
+  const read = await readTargetObjectFile(new File([view], 'near-sphere-half.stl'), 'goal-near-sphere-half');
   if (!read.ok) throw new Error(read.error);
   const size = read.size as { x: number; y: number; z: number };
   const base = defaultEngraveJob();
   return {
     ...base,
-    name: 'near-sphere',
+    name: 'near-sphere-half',
     labels: [],
     shapes: [],
     drills: [],
@@ -121,47 +143,75 @@ async function runCli(jobPath: string, locationPath: string): Promise<Receipt> {
   return receipt as unknown as Receipt;
 }
 
+/** The app-side planner: the entry `sim.worker.engraveGenerate` calls, with the realm's install. */
+async function appPlan(job: EngraveJob, location: { path: string; defaults: ShopDefaults }) {
+  resetLiveShopDefaults();
+  installShopDefaults(() => location.defaults);
+  // The registry the CLI's bootstrap leaves behind (`bootstrap.ts`): the location's tool entries.
+  setRegistry(JSON.parse(readFileSync(location.path, 'utf8')).tools ?? []);
+  const generated = await generate(tl, job, null, [], undefined, engraveShopOpts(location.defaults, location.path));
+  expect(generated.ok).toBe(true);
+  return generated;
+}
+
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
 /** The claimed run's own cycle, from the receipt's details (a job receipt; else undefined). */
-const runCycleOf = (receipt: Receipt): { totalSeconds: number } | undefined =>
-  (receipt.details as { runCycle?: { totalSeconds: number } }).runCycle;
+const runCycleOf = (receipt: Receipt): { totalSeconds: number; changes: number } | undefined =>
+  (receipt.details as { runCycle?: { totalSeconds: number; changes: number } }).runCycle;
 
-describe('#1237 the CLI plans with the location’s settings', () => {
-  it('a changed bit-change price changes the plan, and the receipt names it', async () => {
-    const job = await nearSphereJob();
-    const jobPath = join(SCRATCH, 'near-sphere.job.json');
+describe('#1237 the planner reads the shop’s settings from its input', () => {
+  it('the app path: a changed bit-change price moves the cycle by exactly the price difference × the changes', async () => {
+    const job = await halfSphereJob();
+    const base = locationCopy('app-base');
+    const changed = locationCopy('app-changed', { key: 'bitChange.attendedChangeSeconds', value: 180 });
+    const basePlan = await appPlan(job, base);
+    const changedPlan = await appPlan(job, changed);
+
+    const baseCycle = basePlan.runCycle;
+    const changedCycle = changedPlan.runCycle;
+    expect(baseCycle).not.toBeNull();
+    expect(changedCycle).not.toBeNull();
+    // The change is attended, so its price is exactly the key. One change: 180 − 120 s.
+    expect(baseCycle!.changes).toBe(1);
+    expect(changedCycle!.changes).toBe(1);
+    const delta = changedCycle!.totalSeconds - baseCycle!.totalSeconds;
+    expect(Math.round(delta * 1e6) / 1e6).toBe((180 - 120) * 1);
+    // Nothing else moved: the posted programs are the same bytes.
+    expect(changedPlan.programs.map((p) => sha(p.nc))).toEqual(basePlan.programs.map((p) => sha(p.nc)));
+  }, 300_000);
+
+  it('the CLI path: the same job plans the same (changed) cycle as the app, and the receipt names the key', async () => {
+    const job = await halfSphereJob();
+    const jobPath = join(SCRATCH, 'near-sphere-half.job.json');
     writeFileSync(jobPath, JSON.stringify(job, null, 1));
-    const base = locationCopy('base');
-    const changed = locationCopy('changed', { key: 'bitChange.attendedChangeSeconds', value: 3600 });
+    const base = locationCopy('cli-base');
+    const changed = locationCopy('cli-changed', { key: 'bitChange.attendedChangeSeconds', value: 180 });
 
     const baseReceipt = await runCli(jobPath, base.path);
     const changedReceipt = await runCli(jobPath, changed.path);
+    const baseCycle = runCycleOf(baseReceipt);
+    const changedCycle = runCycleOf(changedReceipt);
+    expect(baseCycle?.changes).toBe(1);
+    expect(Math.round(((changedCycle!.totalSeconds - baseCycle!.totalSeconds) * 1e6)) / 1e6).toBe(60);
 
-    // The plans differ exactly where the key acts: the priced bit change, and so the cycle.
-    const baseCycle = runCycleOf(baseReceipt)?.totalSeconds;
-    const changedCycle = runCycleOf(changedReceipt)?.totalSeconds;
-    expect(baseCycle).toBeGreaterThan(0);
-    expect(changedCycle).toBeGreaterThan(baseCycle! * 1.5);
-
-    // The receipt says which setting made the difference — and only the changed arm says it.
-    const changedEntry = changedReceipt.provenance.find((p) => p.name === 'bitChange.attendedChangeSeconds');
-    expect(changedEntry).toEqual({ name: 'bitChange.attendedChangeSeconds', value: 3600, unit: 's', source: 'located' });
+    // The changed receipt names the setting; the recommended one lists no bit-change key.
+    expect(changedReceipt.provenance.find((p) => p.name === 'bitChange.attendedChangeSeconds')).toEqual({
+      name: 'bitChange.attendedChangeSeconds',
+      value: 180,
+      unit: 's',
+      source: 'located',
+    });
     expect(baseReceipt.provenance.some((p) => p.name === 'bitChange.attendedChangeSeconds')).toBe(false);
 
-    // And the app-side planner, with the same install, plans the same cycle as the CLI receipt.
+    // App and CLI agree byte for byte, and on the cycle, for each location.
     for (const [loc, receipt] of [[base, baseReceipt], [changed, changedReceipt]] as const) {
-      resetLiveShopDefaults();
-      installShopDefaults(() => loc.defaults);
-      const generated = await generate(tl, job, null, [], undefined, engraveShopOpts(loc.defaults));
-      expect(generated.ok).toBe(true);
-      expect(generated.runCycle?.totalSeconds).toBeCloseTo(runCycleOf(receipt)?.totalSeconds as number, 6);
-      // The programs the app-side planner generated are the files the CLI wrote.
+      const generated = await appPlan(job, loc);
+      expect(generated.runCycle?.totalSeconds).toBeCloseTo(runCycleOf(receipt)!.totalSeconds, 6);
       const cliHashes = receipt.outputs
         .filter((o) => String(o.path).endsWith('.nc'))
         .map((o) => o.sha256)
         .sort();
-      const appHashes = generated.programs.map((p) => sha(p.nc)).sort();
-      expect(appHashes).toEqual(cliHashes);
+      expect(generated.programs.map((p) => sha(p.nc)).sort()).toEqual(cliHashes);
     }
   }, 300_000);
 });

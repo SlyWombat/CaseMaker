@@ -168,7 +168,7 @@ import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
-import { efficiencyThresholds, goalPassCoverage, installShopDefaults, KNOWN_DEFAULTS, readDefault, requireShopDefaultsFrom } from '../../../src/platform/defaultsClient';
+import { efficiencyThresholds, goalPassCoverage, installShopDefaults, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { plannerDefaultsProvenance } from '../../../src/platform/plannerDefaults';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
 import { goalCauseFacts, goalCauseOf } from '../../../src/engine/cnc/engrave/goalCause';
@@ -805,11 +805,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * same thing the app itself does with no house service.
    */
   const shopDefaults = boot.location?.defaults ?? null;
-  // #1237 — THE ONE INSTALL: the planner reads its settings through the live source, and the
-  // app's store is not this process. A location given must be installed before any planning;
-  // the guard in `plannerShopDefaults` makes a missed install an error rather than a fallback.
+  // #1237 — THE ONE INSTALL, for the engine readers that still take the source as a default
+  // argument (the rotary map, the run totals, the probe residuals — the follow-up audit). The
+  // PLANNER does not read this source any more: its seven settings ride ModelPlanInput, built
+  // below from the same map, so a location given can never fall back to the recommendations.
   installShopDefaults(() => shopDefaults);
-  if (boot.location !== null) requireShopDefaultsFrom(boot.location.path);
   /**
    * #922 — ONE SHOP OBJECT, ONE BUILDER, FOR BOTH DOORS. `engraveShopOpts` (`engine/cnc/engrave/
    * feeds.ts`) is built field-for-field to match what `engraveRunStore.ts` sends the worker for the
@@ -825,7 +825,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * registry, and a drill-shaped cutter needs the shop's own point angle); the builder folds them
    * in too, so this is the one place the CLI assembles the bag the generator reads.
    */
-  const shop: EngraveShopOpts = engraveShopOpts(shopDefaults);
+  const shop: EngraveShopOpts = engraveShopOpts(shopDefaults, boot.location?.path ?? null);
   /**
    * #1068 — THE JOB'S MOUNT, DERIVED AS THE APP DERIVES IT. `jobMountObstacles` is the one
    * derivation `engraveRunStore.ts` calls, so the command line and the browser check a bracket
@@ -1291,7 +1291,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         {
           ...(opts.reusedOwnedPlan === undefined || opts.reusedOwnedPlan === null ? {} : { reusedOwnedPlan: opts.reusedOwnedPlan }),
           ...(args.deferIdeal === true ? { deferIdeal: true } : {}),
-          ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam({ defaults: shopDefaults }) } : {}),
+          ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam() } : {}),
           ...(args.restLadder === true ? { restLadder: true } : {}),
         },
       );

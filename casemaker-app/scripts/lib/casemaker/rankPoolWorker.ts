@@ -33,9 +33,10 @@ for (const key of BUNDLED_FONT_KEYS) {
 }
 // The registry takes ENTRIES, keyed by the identity a posted program stamps (`cutterKeyOf`).
 setRegistry(rankHouseEntries(task.input.cutters.house));
-// #1237 — THE SHOP'S SETTINGS, IN THIS REALM: the seam sends the parent's installed defaults;
-// the planner's own reads go through this realm's live source, which is otherwise empty.
-installShopDefaults(() => task.defaults ?? null);
+// #1237 — THE SHOP'S SETTINGS, IN THIS REALM: the planner reads its seven settings from the
+// input (which travels here by clone); the install covers the engine readers that still take the
+// ambient source as a default argument (the rotary map, the run totals, the probe residuals).
+installShopDefaults(() => task.input.defaults ?? null);
 
 const reply = (msg: RankWorkerReply): void => port.postMessage(msg);
 

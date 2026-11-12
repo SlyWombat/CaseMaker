@@ -15,17 +15,14 @@ import {
   installShopDefaults,
   KNOWN_DEFAULTS,
   liveShopDefaults,
-  plannerShopDefaults,
   readDefault,
-  requireShopDefaultsFrom,
   resetLiveShopDefaults,
   type ShopDefaults,
 } from '@/platform/defaultsClient';
 import { PLANNER_DEFAULTS_KEYS, plannerDefaultsProvenance } from '@/platform/plannerDefaults';
 import { BIT_CHANGE_KEYS } from '@/engine/cnc/cam/model/bitChange';
 import { ROTARY_LIMIT_KEYS } from '@/engine/cnc/rotary/limits';
-import { rankPoolSeam } from '../../scripts/lib/casemaker/rankPool';
-import type { RankMeasureRequest } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -52,18 +49,18 @@ describe('#1237 the install and the guard', () => {
     );
   });
 
-  it('a location given but not installed is an error naming the file; installing clears it', () => {
-    requireShopDefaultsFrom('/tmp/location.json');
-    expect(() => plannerShopDefaults()).toThrow(/\/tmp\/location\.json/);
-    installShopDefaults(() => ({ 'plan.leftoverTallMm': entry(5, 'seeded', 'mm') }));
-    expect(plannerShopDefaults()).not.toBeNull();
-  });
-
-  it('no location and no install is the recommendation path, not an error', () => {
-    expect(plannerShopDefaults()).toBeNull();
-    expect(readDefault(plannerShopDefaults(), 'toolChange.seconds').value).toBe(
-      KNOWN_DEFAULTS['toolChange.seconds']!.fallback,
+  it('a location stated in the planner input without defaults is an error naming it', async () => {
+    // The guard is the planner's own: the input says where it came from and carries no map.
+    const err = await planModelCam({ defaultsFrom: '/tmp/location.json' } as unknown as ModelPlanInput).catch(
+      (e: Error) => e,
     );
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/\/tmp\/location\.json/);
+    // A location WITH no defaults section passes `defaults: null` and is not the guard's business.
+    const later = await planModelCam({ defaultsFrom: '/tmp/location.json', defaults: null } as unknown as ModelPlanInput).catch(
+      (e: Error) => e,
+    );
+    expect((later as Error).message).not.toMatch(/no shop defaults/);
   });
 });
 
@@ -105,23 +102,6 @@ function tsFiles(dir: string): string[] {
 }
 
 describe('#1237 the workers get the settings', () => {
-  it('the rank pool sends the parent’s installed defaults to each worker', async () => {
-    const map: ShopDefaults = { 'plan.leftoverTallMm': entry(5, 'seeded', 'mm') };
-    const seam = rankPoolSeam({
-      cap: 1,
-      entry: new URL('./fixtures/rankPoolDefaultsEcho.mjs', import.meta.url),
-      defaults: map,
-    });
-    const handle = seam({
-      input: { cutters: { house: [], catalogue: [] } },
-      setupIndex: 0,
-      candidates: [{ id: 'one', name: 'one' }],
-    } as unknown as RankMeasureRequest);
-    const metric = (await handle.metric(0)) as unknown as { defaultsSeen: ShopDefaults | null };
-    handle.cancel();
-    expect(metric.defaultsSeen).toEqual(map);
-  });
-
   it('every planning realm installs what it receives', () => {
     // The one install function, called where each realm begins: the app's worker, and the CLI's
     // two pools. A realm added later must call it too — this is the check that says so.

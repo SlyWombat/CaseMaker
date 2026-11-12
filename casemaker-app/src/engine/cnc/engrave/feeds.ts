@@ -130,12 +130,14 @@ export function shopFeedsTable(): readonly FeedsEntry[] {
  * them resolves them where the job asks for a bracket mount or a calibration file — exactly as
  * before this function existed.
  */
-export function engraveShopOpts(defaults: ShopDefaults | null): {
+export function engraveShopOpts(defaults: ShopDefaults | null, defaultsFrom: string | null = null): {
   lostDetailWarnRatio: number;
   /** #1111 — `reach.marginMm`: the gate a cutter's flute must clear past the deepest cut it serves. */
   reachMarginMm: number;
   peckClearanceMm: number;
   defaults: ShopDefaults | null;
+  /** #1237 — where the defaults came from (a location file), for the planner's input and guard. */
+  defaultsFrom?: string | null;
   feeds: readonly FeedsEntry[];
   tools: readonly ReturnType<typeof getTools>[number][];
   conditions: ReturnType<typeof inventoryConditions>;
@@ -152,6 +154,7 @@ export function engraveShopOpts(defaults: ShopDefaults | null): {
     reachMarginMm: readDefault(defaults, 'reach.marginMm').value,
     peckClearanceMm: readDefault(defaults, 'drill.peckClearanceMm').value,
     defaults,
+    defaultsFrom,
     feeds: shopFeedsTable(),
     // #922 — one entry per physical cutter, the owned key over the catalogue's definition, so
     // the app's `/tools`+inventory and the CLI's `--location` registry choose the same key.

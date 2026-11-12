@@ -876,8 +876,6 @@ export function readDefault(map: ShopDefaults | null, key: string): ReadDefault 
 type DefaultsSource = () => ShopDefaults | null;
 /** `null` = nothing installed. A function answers null when its own section is not read yet. */
 let liveSource: DefaultsSource | null = null;
-/** #1237 — the location a command was given, when one was; planning without an install is an error. */
-let requiredFrom: string | null = null;
 
 /**
  * #1237 — THE ONE INSTALL. The app's store, the CLI and every worker install the location's shop
@@ -890,14 +888,6 @@ let requiredFrom: string | null = null;
  */
 export function installShopDefaults(source: DefaultsSource): void {
   liveSource = source;
-}
-
-/**
- * #1237 — THIS COMMAND WAS GIVEN A LOCATION. Set by a command that booted a location document, so
- * planning before an install is an error rather than a quiet use of the recommendations.
- */
-export function requireShopDefaultsFrom(path: string): void {
-  requiredFrom = path;
 }
 
 /**
@@ -914,26 +904,9 @@ export function liveShopDefaults(): ShopDefaults | null {
   }
 }
 
-/**
- * #1237 — THE PLANNER'S READ. The same source, with one addition: when a command was given a
- * location (`requireShopDefaultsFrom`), nothing may plan until the location's defaults were
- * installed through {@link installShopDefaults}. The error names the file, because a silent
- * fallback would plan a different job than the app does.
- */
-export function plannerShopDefaults(): ShopDefaults | null {
-  if (liveSource === null && requiredFrom !== null) {
-    throw new Error(
-      `the shop defaults were not installed before planning: ${requiredFrom} was given as the location, ` +
-        'so the planner must use its settings rather than the recommended fallbacks',
-    );
-  }
-  return liveShopDefaults();
-}
-
-/** Test seam: the source and the location requirement, both cleared. */
+/** Test seam: the installed source is cleared (the no-service state). */
 export function resetLiveShopDefaults(): void {
   liveSource = null;
-  requiredFrom = null;
 }
 
 /** The desktop machine transport's four windows, ms (#449, "smaller timings"). */
