@@ -1936,6 +1936,8 @@ function registrationSteps(
   footprint?: FootprintPlan,
   /** #1070 — the seat seek that must run first, when the seat has never been measured. */
   seatSeek?: SeatSeek,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null = null,
 ): RunSheetStep[] {
   if (footprint === undefined && seatSeek !== undefined) return seatRegistrationSteps(onBoard, facingRun, seatSeek);
   // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
@@ -1956,7 +1958,7 @@ function registrationSteps(
   const judged = judgedAgainstWords(job);
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
-  const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm });
+  const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm }, defaults);
 
   if ('refuse' in plan) {
     return [
@@ -2323,13 +2325,15 @@ function materialPositionSteps(
   probeInstrument?: ProbeFitInstrument,
   /** #1053 — the checked-out probe's name, so the fit step names the instrument it means. */
   probeName?: string,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null = null,
 ): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
   // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
   // refusal step, and a scan printed under it would be a sequence the sheet has just declined to
   // stand behind. (`registrationFor` is pure point maths on the stock rectangle, so asking it twice
   // costs nothing and keeps this function's own contract — never a scan for an unresolvable origin.)
-  if ('refuse' in registrationFor(job, { ...PROBE_SPEC, tipDiameter: scan.tipDiameterMm })) return [];
+  if ('refuse' in registrationFor(job, { ...PROBE_SPEC, tipDiameter: scan.tipDiameterMm }, defaults)) return [];
   // #449/#452 — the scan steps, lifts and caps by the SAME shop defaults the registration planner
   // reads (`RunSheetOptions.scan`); with none passed, their labelled fallbacks, which are the seeds.
   const plan = planMaterialScan(job, scan);
@@ -5342,7 +5346,7 @@ export function buildRunSheet(
   // as `materialPositionSteps` (which also asks `registrationFor` rather than receive the answer).
   const registrationRefused =
     'refuse' in
-    registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm });
+    registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm }, options.defaults ?? null);
   const originSteps: RunSheetStep[] = statedOrigin !== undefined
     ? senderOriginSteps(statedOrigin, onBoard)
     : rotary !== null
@@ -5367,7 +5371,9 @@ export function buildRunSheet(
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek),
+    ...registrationSteps(
+      job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek, options.defaults ?? null,
+    ),
     // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
     // band they must land in, and (when the caller has readings) the measured verdict. Additive:
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
@@ -5375,7 +5381,7 @@ export function buildRunSheet(
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
     ...(options.materialScan === true && clearanceZ !== null
-      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument, options.probeName)
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument, options.probeName, options.defaults ?? null)
       : []),
   ];
 

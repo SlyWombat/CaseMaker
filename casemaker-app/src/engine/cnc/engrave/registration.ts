@@ -32,8 +32,8 @@ import {
   type ProbeTouch,
   probeResiduals,
 } from '@/engine/cnc/probePlan';
-import { liveShopDefaults } from '@/platform/defaultsClient';
 import { workholdingFor } from './jobSetup';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { Mm, Vec2 } from '@/types/units';
@@ -84,10 +84,14 @@ export function probePartFor(job: EngraveJob): JobProbePart {
  * which blank edges are left to touch and where on them, what is still uncertain afterwards — or
  * a refusal when no reachable edge can resolve an open axis.
  */
-export function registrationFor(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC): ProbeResult {
-  // #1241 — the residuals are stated, not defaulted: this caller reads the realm's installed
-  // source explicitly (the main-thread store or a worker's install), the audit's remaining seam.
-  return planProbing(probePartFor(job), workholdingFor(job), probe, probeResiduals(liveShopDefaults()));
+export function registrationFor(
+  job: EngraveJob,
+  probe: ProbeSpec = PROBE_SPEC,
+  // #1244 — the map from the caller's edge (the sheet's own options, a component's store); null:
+  // no location, the labelled recommendations.
+  defaults: ShopDefaults | null = null,
+): ProbeResult {
+  return planProbing(probePartFor(job), workholdingFor(job), probe, probeResiduals(defaults));
 }
 
 /** A touch, in the words someone standing at the machine can act on. */
