@@ -257,11 +257,48 @@ The keys added since v0.2, with their recommendations:
 | `registration.mountTapSlackMm` | 2 mm | 0–10 | The jaw tap: how far a reading may sit from the stored jaw top before the run says so. |
 | `registration.faceAngleBallClearanceMm` | 3 mm | 0–20 | The face-angle step: the ball's clearance to a keep-out. |
 | `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
+| `plan.leftoverEquivalencePct` | 0.5 % | 0–5 | The cutter-chain rank (#1217): sets of cutters whose leftover differs by no more than this share of the covered surface count as equal on that key, and the faster set is chosen. |
+| `plan.leftoverTallMm` | 1 mm | 0.1–50 | The same rank (#1224): material standing taller than this is never given up for a faster set, however much time the trade would save. |
 
 The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
 into the rotary-chuck workholding, and the verifier and both simulators read the setup's copy, so
 a sweep or a simulation cannot disagree with the plan about the bands. At the recommended values
 every program, finding and sentence is byte-identical to the pre-key build.
+
+### The planner's settings — how they reach a plan, and what the receipt states
+
+Seven of the registry keys decide what the planner chooses and what it says the plan costs:
+`toolChange.seconds` (91.4 s), the four `bitChange.*` (5 min attended, 120 s attended change,
+30 min walk-away, 15 min return) and the two `plan.leftover*` above. They travel **on the plan's
+input** (`ModelPlanInput.defaults`, with `defaultsFrom` naming the location they came from): every
+realm that plans already carries the input — the app's sim worker, the CLI and both of its pool
+workers (#1237). A caller that states a location but passes no defaults is refused by name rather
+than planned on fallbacks; no location means the recommendations, stated as such.
+
+The receipt's **provenance** lists every planner-read key whose value differs from its
+recommendation, with the value, its unit and the location's own source (`located`, `measured` or
+`typed`); with no location it lists every planner key at its recommendation, so a reader can see
+the plan ran on the recommendations rather than assume it. The key list (`PLANNER_DEFAULTS_KEYS`)
+is held to the code by a source-scanning test, so a new read site cannot go unlisted. The same scan
+covers the other families the plan reads — the rotary limits (`rotary.*`), the face-angle pair,
+the probe residuals (`registration.*ResidualMm`, `bracket.repeatMm`), the bit-change rule and
+`probe.colletMatchMm`; those are read through the shared installer (`installShopDefaults`), called
+at each realm's edge, and a test pins the installer call in each realm.
+
+**What the sheet says a plan costs.** The run sheet prints the plan's own statements, so those
+settings are visible as words on paper, not only as a different program:
+
+- the plan's cycle: "this plan's cycle is <h m s>: cutting and rapids <h m s>, bit changes
+  <h m s> in <n> changes; a bit change is priced from the program before it: <attended> up to <a> min,
+  <away> from <b> min on, and a smooth rise (3t² − 2t³) between" — the four `bitChange.*` keys in
+  the shape they are applied in;
+- the rank's give-up, when the tolerance decided: "The cutters chosen leave <X> mm² more than the
+  most thorough set would, and save about <Y> min." (`plan.leftoverEquivalencePct`);
+- the tall rule's give-up, when it kept a slower set: "A set of cutters about <N> min faster was
+  passed over: it would leave <X> mm² more standing over <T> mm tall. Material that tall is never
+  traded for time (a shop setting)." (`plan.leftoverTallMm`);
+- the run's own cycle over every posted program, printed with the cutting and the bit changes
+  separated (#1193).
 
 ### Test API — `window.__caseMaker`
 

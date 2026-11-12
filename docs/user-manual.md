@@ -396,13 +396,17 @@ no control in a job moves the machine for it.
 ### The Cut screen's cards
 
 The Cut screen states the run's condition in cards rather than one long column. While a program
-plays, a card follows the program's percent and the time the app's own clock implies, another
+plays, a card follows the program's percent and the time left — the app's own clock, started when
+the machine first reports progress, and on a job with several programs the WHOLE run's remaining
+rather than the current file's (the firmware's own `P:` third field is used for nothing) — another
 names the next program that needs a different bit, and the waiting card owns the tool-change
 recovery. The Job panel above shows one **Program ready · N min** line once a run has passed, and
 the cutter list states its count once — in the Cutters group's summary — rather than repeating
 every missing name under the rows. On a job with several programs the card's **Start** is the
 release's own: it uploads every program and plays them in order, so the one press begins the
-whole cut.
+whole cut. The background plan comparison says what it is doing — the owned plan (the shop's own
+bits) against the catalogue ideal with every bit the app knows — that Cut can go on meanwhile, and
+where the answer appears.
 
 ### A run that survives a reload and a new build
 
@@ -426,6 +430,32 @@ where the browser has no folder picker). The names are the sheet's own — `<job
 `<job>-pNN-frame.nc` beside it. The run sheet lists each program with its own cut, its cutter and
 its own **Save** row, so one file can still be saved on its own; the run record travels with the set
 and lists every program's name and hash.
+
+### What the run sheet says it costs
+
+The run sheet prints what the plan chose and what that choice costs, in words, beside the steps:
+
+- **The plan's cycle, with the bit changes priced as they were applied** — "this plan's cycle is
+  <h m s>: cutting and rapids <h m s>, bit changes <h m s> in <n> changes; a bit change is priced
+  from the program before it: <attended> up to <a> min, <away> from <b> min on, and a smooth rise
+  (3t² − 2t³) between". The four numbers are shop settings: a change while you are still there
+  costs the attended time, a change after a long program costs the attended time plus your walk
+  back, and the rise between is the curve the sentence names.
+- **What a near-equal set gave up** — when two sets of cutters leave within 0.5 % of the surface
+  of each other, the faster one is chosen and the sheet says so: "The cutters chosen leave <X> mm²
+  more than the most thorough set would, and save about <Y> min."
+- **What the tall rule kept** — material standing more than 1 mm (the shop's `plan.leftoverTallMm`)
+  is never traded for speed; when that kept a faster set out, the sheet says: "A set of cutters
+  about <N> min faster was passed over: it would leave <X> mm² more standing over <T> mm tall.
+  Material that tall is never traded for time (a shop setting)."
+- **The run's own cycle** over every posted program, cutting and bit changes separated, so a
+  multi-program run's figure is the whole run's and not the first program's plan.
+
+A finishing pass may run past the stock's own edge by up to the cutter's radius, so the surface
+at the edge is cut with the cutter's centre over air — the heights there come from the real model,
+never an extrapolation, and nothing runs into a modelled fixture. A cutting feed further outside
+the footprint than that allowance is a planning fault the verifier reports (`cut-outside-footprint`
+in the CNC guide), not something to fix at the machine.
 
 ### Two-sided jobs (the flip)
 
@@ -475,7 +505,10 @@ centre, body length and housing radius (12, 40 and 45 mm) are shop settings with
 values: at the recommended values every program, finding and sentence is exactly as before, a
 measured value is used, and the numbers the shop actually uses are printed where they decide the
 job. A rotary probing routine also descends in a region clear of the chuck — nothing moves at X
-inside the jaws' keep-out at any height, and the A axis turns only where its floor allows.
+inside the jaws' keep-out at any height, and the A axis turns only where its floor allows. The
+centre find is placed against the job's stated hold (its footprint, margin, band, body radius and
+the modelled obstacles) and the chuck's keep-out; when that leaves it nowhere to go the step
+refuses in words before it sends a line.
 
 ### Materials
 

@@ -6,6 +6,45 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Milestone 1.5 — after land18: the planner's settings and the sheet's costs, the tray's edge, and the footprint rule (2026-11-12)
+
+The landings on top of land18: the shop's settings reach the planner in both the app and the CLI
+([#1237](https://github.com/SlyWombat/CaseMaker/issues/1237)) — and the receipt states which of
+them shaped the plan; planner v3's rank lets time decide between near-equal leftovers (0.5 % of the
+surface) and never forgives tall material, with the sheet saying so; pocket programs take the
+cutter's own step-over, finish one lobe at a time and run the wall pass one posted step closer;
+exact edge contact replaces the numerical drop-cutter search; the ball finish may run one cutter
+radius past the stock's own edge, and the verifier now notices a cutting feed outside the footprint;
+the Cut card's time left is our own clock over the whole run; the comparing card says what, so what
+and where; and the centre find obeys the rotary job's region.
+
+**The shop's settings reach the planner.**
+
+- **The planner reads the shop's settings — in the app and in the CLI — and the receipt says which** ([#1237](https://github.com/SlyWombat/CaseMaker/issues/1237)): the planner's seven settings (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm` and the four `bitChange.*`) used to be read from a source only the app's main thread installed, so the planner ran in workers where no source was installed and planned on the recommendations — a shop's own numbers never reached a plan anywhere. The seven now travel as part of the plan's input, every realm that plans already carries the input (the app's worker and both CLI pool workers), and a caller that names a location but passes no defaults is refused by name rather than planned on fallbacks. The receipt lists every planner-read key whose value differs from its recommendation, with the value, the unit and the location's own source, and with no location it states that the recommendations were used; the list is pinned to the code by a source scan, so a new read cannot go unlisted. At the recommended values every program is byte-identical.
+
+**What the plan chooses, and what the sheet states it costs.**
+
+- **Near-equal leftovers are ranked by time, and tall material is never traded for speed** ([#1217](https://github.com/SlyWombat/CaseMaker/issues/1217), [#1224](https://github.com/SlyWombat/CaseMaker/issues/1224)): sets of cutters whose leftover differs by no more than `plan.leftoverEquivalencePct` (0.5 % of the covered surface) count as equal on that key and the faster set wins; and material standing taller than `plan.leftoverTallMm` (1 mm) is never given up for a faster set, however small the time saved. When the tolerance decides, the plan states what the choice gave up: "The cutters chosen leave <X> mm² more than the most thorough set would, and save about <Y> min."
+- **The sheet says when the tall rule kept a slower set** ([#1232](https://github.com/SlyWombat/CaseMaker/issues/1232)): a pick that would have been faster but for material over the tall limit says so on the run sheet and in the plan's statements — "A set of cutters about <N> min faster was passed over: it would leave <X> mm² more standing over <T> mm tall. Material that tall is never traded for time (a shop setting)." Both settings say in their help text that they are chosen, not measured, and what they govern.
+- **Pocket programs take the cutter's own step-over and finish one lobe at a time** ([#1219](https://github.com/SlyWombat/CaseMaker/issues/1219), [#1223](https://github.com/SlyWombat/CaseMaker/issues/1223)): the spacing between a pocket's passes is the cutter's feed row's own step-over rather than a fixed quarter of its diameter, and each lobe of a pocket is finished before the next starts, so the tool stops hopping back and forth between lobes — on the tray's big pocket about 125 of its 134 retracts were lobe-to-lobe jumps, and the depth-first order removes them. The pocket programs post fewer, wider-spaced passes.
+- **The wall pass runs one posted step closer** ([#1227](https://github.com/SlyWombat/CaseMaker/issues/1227)): the posted program carries three decimals, so a wall pass at "one radius inside" could stand half a thousandth short of the wall — read by the goal check as a strip of material 5.77 mm tall, which kept a second cutter and a bit change to remove air. The pass now runs one posted step (0.001 mm) closer, and the strip is gone.
+- **Exact edge contact, and the plunge rule on the machine's own precision** ([#1214](https://github.com/SlyWombat/CaseMaker/issues/1214)): the drop-cutter's contact with a ball or V cutter is one closed form in place of a numerical search — the same answer to 0.001 mm with several times fewer evaluations — and the posted plunge feed words follow the machine's own printed precision. Coordinates are unchanged; the F words and the sheet's time follow.
+
+**The tray's edge and the verifier's footprint rule.**
+
+- **The ball finish cuts to the stock's own edge** ([#1234](https://github.com/SlyWombat/CaseMaker/issues/1234)): where a finishing region ends at the stock's edge, the passes may run past that edge by up to the cutter's radius — a ball touches a downhill surface on its downhill side, so the surface at the edge can only be cut with the cutter's centre over air. Each overrun point's height is the drop-cutter height against the real model (never an extrapolation), nothing changes where a region ends inside the stock, and nothing runs into a modelled fixture. On the tray bottom the two edge lines the build has left standing since v0.2 are now cut: the previous attempt's raw cut-into of 0.0241 mm went to 0 (adjudicated 0, the over-1-mm band unchanged), the two ball programs re-post with their overrun points on the posted grid, and the run's cycle moved 16,900 → 16,925 s.
+- **A cutting feed outside the stock's footprint is noticed** ([#1235](https://github.com/SlyWombat/CaseMaker/issues/1235)): the verifier's `cut-outside-footprint` rule measures how far a cutting feed ends outside the program's own footprint (the stock's outline plus any sacrificial strips the job states). The allowance is the cutter's radius plus the operation's own stated outside allowance plus one posted step — a freeing contour runs its centre one radius outside, a facing pass's lead-in states its own allowance, and the finishing overrun of #1234 is exactly one radius. One line states the worst move and its line number, and the diagnostic carries how many moves were outside; an operator-drawn item that hangs off the blank reports as a warning, because Generate cuts it as drawn. The CNC guide's row is the operator's copy of the rule.
+
+**The Cut screen and the rotary.**
+
+- **The Cut card's time left is the whole run's, from our own clock** ([#1145](https://github.com/SlyWombat/CaseMaker/issues/1145)): the time-left line, the status strip and the run-end runtime are derived from the app's own clock (started at the program's first progress reading) instead of the firmware's `P:` third field, whose unit is not established on real programs; a multi-program job states the whole run's remaining, not the current file's.
+- **The comparing card says what, so what and where** ([#1123](https://github.com/SlyWombat/CaseMaker/issues/1123) item 58): the background plan comparison no longer reads bare "comparing the plans…": it says what is compared (the owned plan against the catalogue ideal, with every bit the app knows), that Cut can go on meanwhile, and where the answer appears.
+- **The centre find obeys the rotary job's region** ([#1211](https://github.com/SlyWombat/CaseMaker/issues/1211) field 5 remainder): the centre find is placed against the job's stated hold — footprint, margin, band, body radius and the modelled obstacles — and the chuck's keep-out, refusing before it sends a line when the region leaves it nowhere to go.
+
+**Skipped — measurement, new code not yet called, or internal only** (listed so the sweep is auditable):
+
+- [#1225](https://github.com/SlyWombat/CaseMaker/issues/1225) — the estimate prices the contour and the trace holds estimate and real time per cutter; measurement only, no decision or output changes; [#1229](https://github.com/SlyWombat/CaseMaker/issues/1229) — the shared stock knows a rod and what turning removed (new code, not yet called); [#1236](https://github.com/SlyWombat/CaseMaker/issues/1236) — the rod chart's guaranteed upper tip value (new code, not yet called); [#1233](https://github.com/SlyWombat/CaseMaker/issues/1233) — the v0.2 baseline's re-run, comparison and vendor-clock tools (measurement); [#1123](https://github.com/SlyWombat/CaseMaker/issues/1123) item 46 — the unreachable bracket arm removed from the registration summary (internal cleanup).
+
 ### Milestone 1.5 — land18: the wizard set, the bench's safety rules and planner v3 (2026-11-11)
 
 The 2026-11-11 landings: the Start wizard rebuilt around the question a person actually asks —
