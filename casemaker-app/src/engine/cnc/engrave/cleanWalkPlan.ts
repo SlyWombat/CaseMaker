@@ -29,6 +29,7 @@ import { programHash } from '../programHash';
 import { flatEndMill, type Tool } from '../tool';
 import { verifyProgram, type VerifyReport } from '../verify';
 import { jobFootprint } from '../footprint';
+import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '../setups/setupRecord';
 import { cleanWalkFile, type CleanWalkMode, type CleanWalkSettings, type CleanWalkStep } from './cleanWalk';
 import { jobMountObstacles, jobTool, toSetup } from './jobSetup';
 import { releaseStem } from './runSheet';
@@ -138,7 +139,9 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
       plan.notes.push(`The ${what} was not planned: the post refused it (${posted.errors.join('; ')}).`);
       continue;
     }
-    const verify = verifyProgram(posted.text, {
+    // #1246 slice 1 — the walk's verifier context from the setup record. The defaults group 11
+    // threaded through (#1244) stay on the setup call.
+    const facts: SetupRecordDeps & VerifyPerProgram = {
       setup: toSetup(job, machine, undefined, undefined, undefined, args.defaults),
       machine,
       tool,
@@ -150,7 +153,8 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
       // #1235 stage 2 — the walk never cuts, but the job's own footprint is what it travels over
       // and stating it costs nothing; no cutting feed exists for the rule to judge.
       footprint: jobFootprint(job),
-    });
+    };
+    const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, 0, facts), facts));
     if (!verify.ok) {
       const first = verify.findings.find((f) => f.severity === 'error');
       plan.notes.push(`The ${what} was not planned: the verifier refused its own text (${first?.message ?? 'an error'}).`);
