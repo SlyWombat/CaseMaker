@@ -5627,6 +5627,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             maskCells: floorFace.mask,
             materialTopAt: designTopAt,
             stockTopZMm: 0,
+            // #1234 (the fix) — a floor-stage row point outside the stock takes its height at the
+            // posted XY (the ruling's rule; inside points untouched).
+            ...(opts.stockMm === undefined ? {} : { stockRectMm: opts.stockMm }),
             stepDownMm: depth,
             feeds: feedsOf(paramsFor(floorFace.flat)),
             safeZMm: opts.safeZMm,
@@ -5784,6 +5787,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         // −stockTop) the stock top is 0.
         materialTopAt: designTopAt,
         stockTopZMm: 0,
+        // #1234 (the fix) — the overrun points' height is taken at the posted XY.
+        ...(opts.stockMm === undefined ? {} : { stockRectMm: opts.stockMm }),
         stepDownMm: depth,
         feeds: feedsOf(paramsFor(finishCutter)),
         safeZMm: opts.safeZMm,
@@ -5911,6 +5916,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             maskCells: (x, y) => maskCellsExact(afterBallLeftover, restRing, x, y),
             materialTopAt: designTopAt,
             stockTopZMm: 0,
+            // #1234 (the fix) — the ball rest's overrun points take their height at the posted XY.
+            ...(opts.stockMm === undefined ? {} : { stockRectMm: opts.stockMm }),
             stepDownMm: depth,
             feeds: feedsOf(paramsFor(restBallTool)),
             safeZMm: opts.safeZMm,
