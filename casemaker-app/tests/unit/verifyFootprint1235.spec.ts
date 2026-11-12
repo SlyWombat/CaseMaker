@@ -41,9 +41,20 @@ function ctxFor(over: Partial<VerifyContext> = {}): VerifyContext {
 
 const HEAD = ['G90 G21', 'T1 M6', 'M331', 'G53 G0 Z-3', 'S12000 M3'];
 const program = (body: string[]): string => [...HEAD, ...body, 'M5', 'M02'].join('\n');
+/** A program whose moves are attributable to numbered operations, as the post's markers make them. */
+const programWithToolpaths = (toolpaths: { number: number; body: string[] }[]): string =>
+  [
+    ...HEAD,
+    ...toolpaths.flatMap((t) => [`;@MKR|TOOLPATH_START|toolpath_number=${t.number}`, ...t.body]),
+    'M5',
+    'M02',
+  ].join('\n');
 
 const footprints = (body: string[], over: Partial<VerifyContext> = {}): VerifyFinding[] =>
   verifyProgram(program(body), ctxFor(over)).findings.filter((f) => f.code === 'cut-outside-footprint');
+
+const footprintsIn = (text: string, over: Partial<VerifyContext> = {}): VerifyFinding[] =>
+  verifyProgram(text, ctxFor(over)).findings.filter((f) => f.code === 'cut-outside-footprint');
 
 /** The 1-based source line of the first program line containing `needle`. */
 function lineOf(body: string[], needle: string): number {
@@ -159,4 +170,43 @@ describe('#1235 cut-outside-footprint', () => {
     expect(found).toHaveLength(1);
     expect(found[0]!.aggregate?.largestMm).toBeCloseTo(10, 6);
   });
+
+  // ---- #1235's SECOND ruling: each OPERATION states how far outside it means to go, and that
+  // allowance covers only its own toolpath. Limit = cutter radius + the op's allowance + one
+  // posted step.
+
+  it('13 — an operation’s stated allowance joins only that operation’s moves', () => {
+    // d = 1.5935 = radius 1.5875 + allowance 0.005 + one step 0.001: clean under toolpath 1,
+    // the error under toolpath 2 (which states nothing — no blanket cover).
+    const text = programWithToolpaths([
+      { number: 1, body: ['G0 X50 Y0', 'G1 Z-2 F100', 'G1 Y-1.5935'] },
+      { number: 2, body: ['G1 Y0', 'G1 Y-1.5935'] },
+    ]);
+    const found = footprintsIn(text, { outsideAllowancesMm: new Map([[1, 0.005]]) });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.line).toBe(text.split('\n').lastIndexOf('G1 Y-1.5935') + 1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(1.5935, 6);
+  });
+
+  it('14 — a contour 0.1 mm beyond its stated guard is still the error', () => {
+    const text = programWithToolpaths([
+      { number: 1, body: to('G1 Y-1.6925') }, // radius 1.5875 + guard 0.005 + 0.1
+    ]);
+    const found = footprintsIn(text, { outsideAllowancesMm: new Map([[1, 0.005]]) });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(1.6925, 6);
+  });
+
+  it('15 — a thread 1.0 mm beyond the rod is still the error; its 0.5 clearance is not', () => {
+    const circle: FootprintShape[] = [{ kind: 'circle', cx: 20, cy: 20, radius: 20 }];
+    const radial = (x: string): string[] => ['G0 X20 Y20', 'G1 Z-2 F100', `G1 ${x} Y20`];
+    // The circle is the rod, radius 20 at (20, 20); the cutter is 1.5875 mm, the op states 0.5.
+    const clean = programWithToolpaths([{ number: 1, body: radial('X42.0885') }]); // 20 + 1.5875 + 0.5 + step
+    expect(footprintsIn(clean, { footprint: circle, outsideAllowancesMm: new Map([[1, 0.5]]) })).toEqual([]);
+    const beyond = programWithToolpaths([{ number: 1, body: radial('X43.0875') }]); // ... + 1.0 mm
+    const found = footprintsIn(beyond, { footprint: circle, outsideAllowancesMm: new Map([[1, 0.5]]) });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(3.0875, 6);
+  });
+
 });

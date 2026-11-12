@@ -140,7 +140,7 @@ import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
-import { jobFootprint, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
 import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
@@ -5850,6 +5850,9 @@ export async function postModelPlan(
       if (!posted.ok) {
         return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`, null, output);
       }
+      // #1235 (second ruling) — each op's stated outside allowance, by toolpath number, so the
+      // contour's guard covers the contour's moves and not the rest of the program.
+      const outsideAllowancesMm = outsideAllowancesOf(ir);
       const verify = verifyProgram(posted.text, {
         setup,
         machine: mill,
@@ -5861,6 +5864,7 @@ export async function postModelPlan(
         // limit above is built from. An operator item is not the model engine's case: no
         // `itemProgram`.
         footprint: setupFootprint(job, plan.setupIndex),
+        ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
         ...mountCtx(shop.mount, job.jawClearance),
       });
       const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
@@ -9014,6 +9018,7 @@ async function generateOneProgram(
     // #240 slice 2 — a rotary file is verified in its OWN frame: the frame's refusals (the axis,
     // the jaws' and tailstock's bands, a turn in the cut, the module's envelope) replace the flat
     // depth/structure rules, and the mount's obstacles do not apply (a chuck is not a bracket).
+    const outsideAllowancesMm = outsideAllowancesOf(ir);
     const verify = verifyProgram(nc, {
       setup,
       machine: mill,
@@ -9026,6 +9031,8 @@ async function generateOneProgram(
       // drawn past the blank's inset (the `item-outside-stock` warning `engraveRegions` measured
       // above — such a program keeps a warning, not an error).
       footprint: jobFootprint(job),
+      // #1235 (second ruling) — each op's own stated outside allowance, by toolpath number.
+      ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
       itemProgram: findings.some((f) => f.code === 'item-outside-stock'),
       ...(limitReasonAt ? { limitReasonAt } : {}),
       ...(rotaryMap === null
@@ -9059,6 +9066,7 @@ async function generateOneProgram(
     if (neckIr !== null && typeof withNeck === 'object') {
       const postedNeck = postFor(mill)(neckIr, ctx, { vacuum: withNeck.apart, thumbnail: null });
       if (!postedNeck.ok) return stop('post', { feeds, message: `the neck file: ${postedNeck.errors.join('; ')}`, facing });
+      const neckAllowances = outsideAllowancesOf(neckIr);
       const neckVerify = verifyProgram(postedNeck.text, {
         setup,
         machine: mill,
@@ -9066,8 +9074,10 @@ async function generateOneProgram(
         dialect: postKey(mill),
         depthLimit: limit,
         minRapidZ: neckIr.hopZ,
-        // #1235 stage 2 — the neck is cut in the same job frame as the program above.
+        // #1235 stage 2 — the neck is cut in the same job frame as the program above, and its
+        // own IR states its own per-op allowances.
         ...(rotaryMap === null ? { footprint: jobFootprint(job) } : {}),
+        ...(rotaryMap === null && neckAllowances !== undefined ? { outsideAllowancesMm: neckAllowances } : {}),
         ...(limitReasonAt ? { limitReasonAt } : {}),
         ...(rotaryMap === null
           ? mountCtx(shop.mount, job.jawClearance, liftOverStock)

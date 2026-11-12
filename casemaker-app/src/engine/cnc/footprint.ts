@@ -12,6 +12,7 @@
  * guesses: absent means no footprint was stated, and the rule does not run.
  */
 import type { EngraveJob, Sacrificial } from '@/types/engraveJob';
+import type { ToolpathIR } from './cam/ir';
 import { sacrificialBoxes } from './sacrificial';
 
 /** One shape of the cuttable region, in the program's frame, mm. */
@@ -84,6 +85,27 @@ export function setupFootprint(job: EngraveJob, setupIndex: number): FootprintSh
   const own = job.setups?.[setupIndex]?.stock;
   if (own !== undefined) return supportedFootprintShapes(own, undefined);
   return jobFootprint(job);
+}
+
+/**
+ * THE OUTSIDE ALLOWANCES a posted IR's operations state, by toolpath number (#1235's second
+ * ruling). Each operation states how far outside the footprint it means to cut, from the same
+ * constant it placed its moves with; the verifier adds that operation's number to the cutter
+ * radius plus one posted step. Operations that state none (and programs whose moves are not
+ * attributable to an operation) get 0. Undefined when no operation states one, so the caller can
+ * omit the field entirely.
+ */
+export function outsideAllowancesOf(ir: ToolpathIR): ReadonlyMap<number, number> | undefined {
+  const allowances = new Map<number, number>();
+  // KEYED BY THE POSTED TOOLPATH NUMBER. `postZ1` writes `toolpath_number = index + 1` over the
+  // IR's operation array, so the array position — not `op.number` — is what the verifier's
+  // `currentToolpath` reads back.
+  ir.operations.forEach((op, index) => {
+    if (op.outsideAllowanceMm !== undefined && op.outsideAllowanceMm > 0) {
+      allowances.set(index + 1, op.outsideAllowanceMm);
+    }
+  });
+  return allowances.size === 0 ? undefined : allowances;
 }
 
 /**

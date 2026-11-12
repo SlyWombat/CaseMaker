@@ -816,6 +816,12 @@ export function pocket(opts: PocketOpOptions): OpOutcome {
         depth: opts.node.mouthZ - opts.node.floorZ,
         depthPasses: levels.length,
         passStepMm: opts.stepDownMm,
+        // #1235 — the pocket STATES the offset its first ring was placed with: `pocketRingInsetMm`
+        // is `toolRadius − FACING_EDGE_CLEARANCE_MM`, so on an OPEN edge (the region extended out
+        // past the stock) the centre runs one posted step outside the true edge — deliberately,
+        // so the grid rounding cannot leave a standing strip against the wall. A centre-space
+        // region is not inset and states 0.
+        outsideAllowanceMm: opts.centreSpace === true ? 0 : FACING_EDGE_CLEARANCE_MM,
         moves,
         estimatedSeconds: estimateCycleSeconds(moves, opts.rapid),
       },

@@ -91,6 +91,14 @@ export interface VerifyContext {
    */
   footprint?: readonly FootprintShape[];
   /**
+   * #1235 (second ruling) — HOW FAR OUTSIDE THE FOOTPRINT EACH OPERATION MEANS TO CUT, by
+   * toolpath number, mm. The rule's limit for a move is `toolRadius + this + one posted step`.
+   * The context builder reads it from the IR ops' own `outsideAllowanceMm` (`outsideAllowancesOf`);
+   * an operation not in the map (or a program whose moves cannot be attributed) gets 0. OPTIONAL:
+   * absent means no operation stated an allowance.
+   */
+  outsideAllowancesMm?: ReadonlyMap<number, number>;
+  /**
    * #1235 stage 2 — THIS PROGRAM'S MOVES ARE AN OPERATOR-PLACED ITEM'S. An engrave item the
    * operator drew partly off the blank is legitimate (`item-outside-stock`, a warning, and
    * Generate cuts it as drawn), so `cut-outside-footprint` reports at WARNING for such a program
@@ -596,7 +604,7 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     // #1235 stage 2 — the footprint rule reports ONCE for the program: how many offending moves,
     // and the worst of them (its distance, the radius that judged it, and where it ended).
     let footprintCount = 0;
-    let footprintWorst: { d: number; radius: number; x: number; y: number; line: number } | null = null;
+    let footprintWorst: { d: number; radius: number; allowance: number; x: number; y: number; line: number } | null = null;
     const toolNumbers = new Set<number>();
     // #396 follow-up — A MACRO THE RUNNER COULD NOT RULE OUT IS NOT Z EVIDENCE. `T1 M6` with an
     // unstated starting tool is expanded because it cannot be ruled out; if the tool is already
@@ -791,10 +799,15 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         if (rotary === null && ctx.footprint !== undefined && known3(toW) && toW[2] < 0) {
           const d = distanceOutsideFootprint(toW[0], toW[1], ctx.footprint);
           const radius = toolRadiusOf(ctx.tool, Math.max(0, -toW[2]));
-          if (d > radius + FACING_EDGE_CLEARANCE_MM + 1e-9) {
+          // #1235 (second ruling) — the OPERATION's own stated outside allowance joins this
+          // move's limit, and only this move's operation's: a contour's guard does not cover a
+          // pocket beside it, and a thread's approach clearance covers only the thread's own
+          // toolpath. The verifier already knows the toolpath in force, so no per-program blanket.
+          const allowance = currentToolpath === null ? 0 : (ctx.outsideAllowancesMm?.get(currentToolpath) ?? 0);
+          if (d > radius + allowance + FACING_EDGE_CLEARANCE_MM + 1e-9) {
             footprintCount += 1;
             if (footprintWorst === null || d > footprintWorst.d) {
-              footprintWorst = { d, radius, x: toW[0], y: toW[1], line: m.line };
+              footprintWorst = { d, radius, allowance, x: toW[0], y: toW[1], line: m.line };
             }
           }
         }
@@ -1097,12 +1110,17 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
     // aggregate carries how many moves there were and where the furthest one is. An operator-drawn
     // item program keeps its warning (Generate cuts the item as drawn); anything else is an error.
     if (footprintWorst !== null) {
-      const { d, radius, x, y, line } = footprintWorst;
+      const { d, radius, allowance, x, y, line } = footprintWorst;
+      const permitted =
+        allowance > 0
+          ? `A pass may run past the blank's edge by the cutter's own radius (${radius.toFixed(2)} mm) ` +
+            `plus the operation's stated allowance (${allowance.toFixed(2)} mm) and no further. `
+          : `A pass may run past the blank's edge by the cutter's own radius (${radius.toFixed(2)} mm) and no further. `;
       push(
         'cut-outside-footprint',
         line,
         `The cutter travels ${d.toFixed(2)} mm outside the blank while cutting, on line ${line}. ` +
-          `A pass may run past the blank's edge by the cutter's own radius (${radius.toFixed(2)} mm) and no further. ` +
+          permitted +
           'This is a planning fault, not something to fix on the machine: report it with this file.',
         ctx.itemProgram === true ? 'warning' : 'error',
         { count: footprintCount, largestMm: d, x, y },
