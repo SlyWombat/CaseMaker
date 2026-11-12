@@ -205,7 +205,7 @@ describe('#737 — the neck setting and its geometry', () => {
   });
 
   it('reads the neck the RUN leaves from its programs, not from the job', () => {
-    const facts = rotaryNeckFacts(dowel())!;
+    const facts = rotaryNeckFacts(dowel(), null)!;
     expect(neckCarriedBy(undefined)).toBeNull();
     expect(neckCarriedBy([])).toBeNull();
     expect(neckCarriedBy([{ neck: null }, { neck: null }])).toBeNull();
@@ -236,7 +236,7 @@ describe('#737 — the neck setting and its geometry', () => {
     // The default's root is X 3, 82 mm from the free end. The tailstock shares the bending, so the
     // check counts 41 mm; PLA asks ⌀5.18 mm, softwood ⌀6.53 mm and metal ⌀3.47 mm, and the ⌀7 mm
     // default clears all three. This is why the default is 7 mm and not the 4 mm of a shorter end.
-    const facts = rotaryNeckFacts(dowel())!;
+    const facts = rotaryNeckFacts(dowel(), null)!;
     expect(facts).toMatchObject({ end: 'chuck', fromMm: 3, toMm: 8, sawAtMm: 5.5, diameterMm: 7 });
     expect(facts.carriedMm).toBe(82);
     expect(facts.effectiveMm).toBe(41);
@@ -322,7 +322,7 @@ describe('#737 — the neck is the program’s last operation, all the way round
     expect(facts).not.toBeNull();
     expect(facts).toMatchObject({ end: 'tailstock', diameterMm: 4, lengthMm: 5, fromMm: 70, toMm: 75, sawAtMm: 72.5 });
     // The generator's facts and the job's are the same object shape, from one span.
-    expect(rotaryNeckFacts(job)).toMatchObject(facts!);
+    expect(rotaryNeckFacts(job, null)).toMatchObject(facts!);
   });
 
   it('cuts nothing extra when the neck is off', async () => {
@@ -587,7 +587,7 @@ describe('#737 — a neck that cannot hold the part is refused in words', () => 
     const job = dowel(neck, {
       workholding: { kind: 'rotary-chuck', rotary: { ...CHUCK, tailstock: false, neck } },
     });
-    const facts = rotaryNeckFacts(job)!;
+    const facts = rotaryNeckFacts(job, null)!;
     expect([facts.fromMm, facts.toMm, facts.sawAtMm]).toEqual([65, 85, 75]);
     expect(facts.carriedMm).toBe(20);
     expect(facts.effectiveMm).toBe(20);

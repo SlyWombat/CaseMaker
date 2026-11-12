@@ -2089,7 +2089,7 @@ export function engraveRegions(
   // #737 — the neck for parting, as the plan places it. Null when the job is not rotary or has no
   // neck. The bands it must clear are the map's own, so the REFUSALS read this exact span
   // (`rotaryJobFindings`), the CAM cuts this exact span and the run sheet states it.
-  const neck = rotaryNeckFacts(job);
+  const neck = rotaryNeckFacts(job, shop.defaults ?? null);
   const wrapFor =
     rotaryMap === null
       ? undefined
@@ -7657,7 +7657,7 @@ export async function engraveGenerate(
         }
       : null;
     const faceTool = faceRef === null ? null : toolForProgram(faceRef, job, tool, shop);
-    const neckLast = mixedFaces && rotaryNeckOf(job) !== null;
+    const neckLast = mixedFaces && rotaryNeckOf(job, shop.defaults ?? null) !== null;
     if (neckLast) {
       const into = faceIntoNeckFinding(job, faceTool, shop.defaults ?? null);
       if (into !== null) return neckRefusal(into);
@@ -7787,7 +7787,7 @@ export async function engraveGenerate(
   // setup), so the neck is posted apart from the last wrapped program and played after the faces.
   // The run then has one file more than it has refs, and the face file is no longer its last word.
   const faceLastRef = refs.at(-1)?.faces === true ? refs.at(-1)! : null;
-  const neckApart = faceLastRef !== null && rotaryNeckOf(job) !== null;
+  const neckApart = faceLastRef !== null && rotaryNeckOf(job, shop.defaults ?? null) !== null;
   if (neckApart) {
     const into = faceIntoNeckFinding(job, toolForProgram(faceLastRef, job, tool, shop), shop.defaults ?? null);
     if (into !== null) return neckRefusal(into);
@@ -7964,7 +7964,7 @@ export async function engraveGenerate(
   // panels' "the part stays on a neck" sentence is never shown for a neck nothing cut.
   if (
     stopped === undefined &&
-    rotaryNeckOf(job) !== null &&
+    rotaryNeckOf(job, shop.defaults ?? null) !== null &&
     !posted.some((p) => p.one.neck != null || p.one.neckApart?.neck != null)
   ) {
     restFindings.push({
@@ -8058,7 +8058,7 @@ function neckAfterFacesFinding(): JobFinding {
  */
 function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null, defaults: ShopDefaults | null): JobFinding | null {
   const map = rotaryMapOf(job, defaults);
-  const neck = rotaryNeckFacts(job);
+  const neck = rotaryNeckFacts(job, defaults);
   if (map === null || neck === null) return null;
   const cutter = faceTool === null ? null : cuttingRadiusForSweep(faceTool);
   return faceCutIntoNeck(job, map, neck, cutter !== null && cutter.ok ? cutter.radius : 0);

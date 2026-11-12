@@ -196,7 +196,7 @@ export function rotaryJobFindings(
   // on, and refused with the same sentences: the neck is the operator's chosen cut, so a neck that
   // cannot sit clear of the jaws or the tailstock is refused before any toolpath exists. The safe
   // minimum is a labelled default (neck.ts), refused in words with every number and its unit.
-  const neck = rotaryNeckFacts(job);
+  const neck = rotaryNeckFacts(job, defaults);
   if (neck !== null) {
     // Every neck carries this, whatever else is wrong with it: the clearance beside the cut is NOT
     // checked. The keep-out is Case Maker's guess and the sweep models no body for the fixture that

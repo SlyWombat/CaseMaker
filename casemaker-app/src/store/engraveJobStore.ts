@@ -1846,7 +1846,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // A NECK NARROWS THE LAYOUT: the operator has reserved a parting band at one end, and a line
       // laid through it is refused by name. The line takes whatever span is left, read from the
       // neck's own span (one reader for the placement and the finding).
-      const neck = rotaryNeckOf(job);
+      const neck = rotaryNeckOf(job, useShopDefaultsStore.getState().defaults);
       const neckSpan = map !== null && neck !== null ? rotaryNeckSpan(map, neck) : null;
       const span =
         free === null
