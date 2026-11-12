@@ -1063,6 +1063,11 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     const stepForChord = 10 ** -opts.axisPrecision;
     const chordTol = Math.min(opts.clSurface.toleranceMm, stepForChord);
     const holdChord =(from: (typeof moves)[number], to: (typeof moves)[number], at: (typeof moves)[number][]): void => {
+      // #1239 (the analyst's narrow fix) — A FEED ONE POSTED STEP OR LESS IN XY IS NEVER
+      // DENSIFIED. There is no grid position between its ends to add; beside a wall the height
+      // figure along such a feed is the wall's cliff, not a gouge, and subdividing it only adds
+      // points and time.
+      if (Math.hypot(to.x - from.x, to.y - from.y) <= stepForChord + 1e-9) return;
       const mx = postedZ((from.x + to.x) / 2, opts.axisPrecision);
       const my = postedZ((from.y + to.y) / 2, opts.axisPrecision);
       if ((mx === from.x && my === from.y) || (mx === to.x && my === to.y)) return;
