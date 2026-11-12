@@ -1817,6 +1817,31 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
     expect(cut).toContain('2 tabs to cut by hand');
   });
 
+  it('names a tight tab on the tab line with its distances (#1206 step 2)', () => {
+    const job = dj();
+    const facts = {
+      ...throughFacts(),
+      cutouts: [
+        {
+          id: 'cut-1',
+          name: 'Badge',
+          tabs: { count: 4, widthMm: 6, heightMm: 1 },
+          spans: 3,
+          unplaceable: 0,
+          added: 1,
+          tight: [{ at: { x: 10.5, y: 4.25 }, stretchMm: 124, cornerMm: 6.1 }],
+        },
+      ],
+    };
+    const cut = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: facts }, NO_SIM, NOW), 'cut');
+    // Holding comes before the corner margin: the tab placed inside it is NAMED, with distances.
+    expect(cut).toMatch(/tight tab/i);
+    expect(cut).toContain('X 10.5');
+    expect(cut).toContain('Y 4.25');
+    expect(cut).toContain('124 mm stretch');
+    expect(cut).toContain('6.1 mm from the nearest corner');
+  });
+
   it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
     const job = dj();
     const noTabs: RunSheetGenerated['through'] = {

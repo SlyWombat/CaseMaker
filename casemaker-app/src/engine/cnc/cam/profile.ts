@@ -112,6 +112,24 @@ export interface TabPlacement {
    * the long edges evenly and the run sheet says how many it added.
    */
   added: number;
+  /**
+   * #1206 (the analyst's step 2) — TIGHT TABS: when a stretch between tabs is still longer than
+   * `tabs.maxSpanMm` after every margin-respecting place, ONE centred tab is placed on the longest
+   * edge inside that stretch even where the corner margin would have refused it, provided the
+   * tab's width fits centred. Holding the part comes before the margin; each entry names the tab's
+   * centre and the distances the sheet states.
+   */
+  tight: readonly TightTab[];
+}
+
+/** #1206 — one step-2 tab: where it sits and what it closes. */
+export interface TightTab {
+  /** The tab's centre in work XY. */
+  at: [number, number];
+  /** The unsupported stretch this tab closes, mm (measured before it was placed). */
+  stretchMm: number;
+  /** The centre's distance to the nearer end of its edge, mm — inside the usual corner margin. */
+  cornerMm: number;
 }
 
 /** #1206 — how the default placement is shaped; the release pass (#1073) states its own targets. */
@@ -141,6 +159,8 @@ export interface ProfileTabReport {
   unplaceable: number;
   /** #1206 — tabs the span limit added beyond the request, across every contour. */
   added: number;
+  /** #1206 step 2 — the tight tabs placed inside the corner margin, across every contour. */
+  tight: TightTab[];
 }
 
 export interface ProfileResult {
@@ -564,7 +584,7 @@ export function placeTabs(
   const { segments, perimeter } = segmentsOf(contour);
   const spanLength = widthMm + 2 * toolRadius;
   if (count <= 0 || perimeter <= 0 || !(spanLength > 0) || segments.length === 0) {
-    return { spans: [], unplaceable: count > 0 ? count : 0, added: 0 };
+    return { spans: [], unplaceable: count > 0 ? count : 0, added: 0, tight: [] };
   }
   const targets = options?.targets;
   // #1206's single-segment straight edge is for the DEFAULT placement: the release pass (#1073)
@@ -630,6 +650,7 @@ function placeOnEdges(
     }),
     unplaceable,
     added: 0,
+    tight: [],
   };
 }
 
@@ -796,6 +817,68 @@ function placeMidSide(
     if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
     spans.push({ startArc, endArc });
   }
+  // #1206 (the analyst's step 2) — HOLDING COMES BEFORE THE MARGIN. A stretch still longer than
+  // the limit after every margin-respecting place gets ONE centred tab on the longest edge inside
+  // it, even where the corner margin would have refused it, provided the tab's WIDTH fits centred.
+  const tight: TightTab[] = [];
+  if (maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0) {
+    for (let guard = 0; guard < 512; guard++) {
+      spans.sort((a, b) => a.startArc - b.startArc);
+      if (spans.length === 0) break;
+      let worst = 0;
+      let worstIndex = -1;
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]!;
+        const next = spans[(i + 1) % spans.length]!;
+        let gap: number;
+        let to: number;
+        if (spans.length === 1) {
+          gap = perimeter - spanLength;
+          to = span.startArc + perimeter;
+        } else {
+          to = next.startArc;
+          if (next.startArc < span.endArc) to += perimeter;
+          gap = to - span.endArc;
+        }
+        if (gap > worst) {
+          worst = gap;
+          worstIndex = i;
+        }
+      }
+      if (worstIndex < 0 || worst <= maxSpanMm + 1e-9) break;
+      const span = spans[worstIndex]!;
+      const next = spans[(worstIndex + 1) % spans.length]!;
+      const from = span.endArc;
+      let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
+      if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
+      // The longest edge that lies inside this stretch, can hold the tab's width centred, and is
+      // not already carrying a tab.
+      let pick: { start: number; end: number } | null = null;
+      for (const edge of edges) {
+        const length = edge.end - edge.start;
+        if (length < widthMm - 1e-9) continue;
+        const candStart = edge.start + Math.round((from - edge.start) / perimeter) * perimeter;
+        const candEnd = candStart + length;
+        if (candStart < from - 1e-9 || candEnd > to + 1e-9) continue;
+        const centre = candStart + length / 2;
+        const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+        const endArc = startArc + spanLength;
+        if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
+        if (pick === null || length > pick.end - pick.start) pick = { start: candStart, end: candEnd };
+      }
+      if (pick === null) break;
+      const centre = pick.start + (pick.end - pick.start) / 2;
+      const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+      const endArc = startArc + spanLength;
+      if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) break;
+      spans.push({ startArc, endArc });
+      tight.push({
+        at: pointAt(segments, perimeter, centre),
+        stretchMm: worst,
+        cornerMm: Math.min(centre - pick.start, pick.end - centre),
+      });
+    }
+  }
   spans.sort((a, b) => a.startArc - b.startArc);
   return {
     spans: spans.map((span) => {
@@ -810,6 +893,7 @@ function placeMidSide(
     }),
     unplaceable: Math.max(0, count - spans.length),
     added: Math.max(0, spans.length - count),
+    tight,
   };
 }
 
@@ -943,6 +1027,7 @@ export function generateProfile(
     let placed = 0;
     let unplaceable = 0;
     let added = 0;
+    const tight: TightTab[] = [];
     for (const z of passes) {
       for (const contour of cut.path) {
         const placement = placeTabs(contour, cut.tabs.count, cut.tabs.width, toolRadius, {
@@ -953,6 +1038,7 @@ export function generateProfile(
           placed += placement.spans.length;
           unplaceable += placement.unplaceable;
           added += placement.added;
+          tight.push(...placement.tight);
         }
         const one = contourMoves(contour, z, tabTopZ, placement, params);
         moves.push(...one.moves);
@@ -972,7 +1058,7 @@ export function generateProfile(
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
       passKind: 'through',
     });
-    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable, added });
+    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable, added, tight });
   }
 
   return {

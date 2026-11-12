@@ -12,6 +12,7 @@ import { roundedDiamondPoints } from './fixtures/roundedDiamond';
 import {
   generateProfile,
   kerfPolygons,
+  longestTabGap,
   placeTabs,
   profilePath,
   signedArea,
@@ -381,6 +382,35 @@ describe('placeTabs mid-side (#1206)', () => {
         `a span is centred at (${mx}, ${my})`,
       ).toBe(true);
     }
+  });
+
+  it('a stretch no margin-respecting place can close takes one tight centred tab (step 2)', () => {
+    // Two margin-respecting edges (27 and 15) and a wall of 7 mm teeth — each too short for a
+    // margin tab but wide enough for the 6 mm tab's width. The margin places two tabs; the stretch
+    // they leave is ~170 mm, so step 2 puts centred tabs on the longest edges inside it until no
+    // stretch is longer than the 80 mm limit.
+    const outline: [number, number][] = [
+      [0, 0],
+      [27, 0],
+      [27, 15],
+    ];
+    for (let k = 1; k <= 18; k++) outline.push([27 - 2 * k, k % 2 === 1 ? 21.7 : 15]);
+    outline.push([-3, 12], [0, 9], [-3, 6], [0, 3], [0, 0]);
+    let perimeter = 0;
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i]!;
+      const b = outline[(i + 1) % outline.length]!;
+      perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+    const placement = placeTabs(outline, 4, 6, R, { maxSpanMm: 80 });
+    expect(placement.tight.length).toBeGreaterThan(0);
+    expect(longestTabGap(placement.spans, perimeter)).toBeLessThanOrEqual(80 + 1e-6);
+    for (const tight of placement.tight) {
+      expect(tight.stretchMm).toBeGreaterThan(80);
+      // The tab sits inside the usual 2 x width corner margin — that is what makes it "tight".
+      expect(tight.cornerMm).toBeLessThan(12);
+    }
+    expect(placement.added).toBe(placement.spans.length - 4);
   });
 
   it('a limit the corner margins cannot meet still fills every edge, and the margin wins', () => {

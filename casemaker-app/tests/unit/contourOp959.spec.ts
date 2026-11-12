@@ -201,6 +201,38 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
     expect(notes).toContain('too short for another tab clear of the corners');
   });
 
+  it('steps down to a tight centred tab and names it with its distances', () => {
+    // 7 mm teeth: too short for the corner margin, wide enough for the 6 mm tab's width — step 2
+    // places tight tabs until the stretches are within the 80 mm limit, and the note names each
+    // with the stretch it closes and its distance from the edge's end.
+    const outline: [number, number][] = [
+      [0, 0],
+      [27, 0],
+      [27, 15],
+    ];
+    for (let k = 1; k <= 18; k++) outline.push([27 - 2 * k, k % 2 === 1 ? 21.7 : 15]);
+    outline.push([-3, 12], [0, 9], [-3, 6], [0, 3], [0, 0]);
+    const area = outline.reduce((sum, p, i) => {
+      const q = outline[(i + 1) % outline.length]!;
+      return sum + p[0] * q[1] - q[0] * p[1];
+    }, 0) / 2;
+    const c = contourOf({ outline: [outline], area, zTo: -6, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: flat6,
+      contour: c,
+      region: region(),
+      depthMm: 6,
+      tabs: { count: 4, width: 6, height: 1, maxSpanMm: 80 },
+      offset: identityOffset,
+      params,
+      rapid,
+    });
+    const notes = (out.notes ?? []).join('\n');
+    expect(notes).toMatch(/tight tab/i);
+    expect(notes).toMatch(/stretch/i);
+    expect(notes).toMatch(/mm from the nearest corner/i);
+  });
+
   it('refuses when the tabs as placed leave a stretch past the span limit', () => {
     const outline = toothedOutline();
     const area = outline.reduce((sum, p, i) => {

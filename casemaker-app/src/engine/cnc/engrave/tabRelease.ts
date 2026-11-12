@@ -526,7 +526,7 @@ export function planTabRelease(input: TabReleaseInput): TabReleaseResult {
     const target = i === levels.length - 1 ? finalMoves : bulkMoves;
     for (const r of rings) {
       // The spans were placed on the largest ring; a second ring (an island) is cut untabbed.
-      const on: TabPlacement = r === ring ? placement : { spans: [], unplaceable: 0, added: 0 };
+      const on: TabPlacement = r === ring ? placement : { spans: [], unplaceable: 0, added: 0, tight: [] };
       target.push(...contourMoves(r, z, tabTopZ, on, input.params).moves);
     }
   });

@@ -197,6 +197,16 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           `release tabs: ${asked} asked, ${placed} placed — the remaining edges are too short for another tab clear of the corners`,
         ]
       : [];
+  // #1206 (the analyst's step 2) — A TIGHT TAB IS NAMED, with its distances: it sits inside the
+  // corner margin on purpose, closing a stretch the margin-respecting tabs could not.
+  const tight = placements.flatMap((placement) => placement.tight);
+  for (const tab of tight) {
+    const mm = (v: number): string => String(Number(v.toFixed(1)));
+    tabNotes.push(
+      `a tight tab at X ${mm(tab.at[0])} Y ${mm(tab.at[1])} closes a ${mm(tab.stretchMm)} mm stretch, ` +
+        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)`,
+    );
+  }
 
   const clampedTabHeightMm =
     tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;

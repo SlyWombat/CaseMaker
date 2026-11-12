@@ -418,6 +418,8 @@ export interface RunSheetThroughFacts {
     unplaceable: number;
     /** #1206 — tabs the span limit added beyond the requested count (absent on a pre-#1206 run). */
     added?: number;
+    /** #1206 step 2 — tight tabs placed inside the corner margin, named with their distances. */
+    tight?: readonly { at: { x: number; y: number }; stretchMm: number; cornerMm: number }[];
   }[];
 }
 
@@ -3855,9 +3857,21 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
           `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`;
         // #1206 (the analyst's condition 2) — a job that places fewer tabs than asked says so:
         // how many were asked, how many are placed, and why. Never silent.
-        return c.spans < c.tabs.count
-          ? `${placedWords} (${c.tabs.count} asked, ${c.spans} placed — the remaining edges are too short for another tab clear of the corners)`
-          : placedWords;
+        const askedWords =
+          c.spans < c.tabs.count
+            ? `${placedWords} (${c.tabs.count} asked, ${c.spans} placed — the remaining edges are too short for another tab clear of the corners)`
+            : placedWords;
+        // #1206 (step 2) — a tab placed INSIDE the corner margin to close a long stretch is named
+        // with its distances: the operator must know why it is where it is.
+        const tightWords = (c.tight ?? [])
+          .map(
+            (tab) =>
+              `a tight tab at X ${fmtNum(tab.at.x)} Y ${fmtNum(tab.at.y)} closes a ` +
+              `${fmtNum(tab.stretchMm)} mm stretch, ${fmtNum(tab.cornerMm)} mm from the nearest corner ` +
+              '(inside the usual corner margin — holding the part comes first)',
+          )
+          .join('; ');
+        return tightWords === '' ? askedWords : `${askedWords}; ${tightWords}`;
       })
       .join('; ');
     const addedWords =

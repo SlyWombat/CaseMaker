@@ -686,6 +686,8 @@ export interface ThroughCutFacts {
     unplaceable: number;
     /** #1206 — tabs the span limit added beyond the request. */
     added: number;
+    /** #1206 step 2 — tight tabs placed inside the corner margin, named on the sheet. */
+    tight?: { at: { x: number; y: number }; stretchMm: number; cornerMm: number }[];
   }[];
 }
 
@@ -8716,6 +8718,15 @@ async function generateOneProgram(
               spans: report.spans,
               unplaceable: report.unplaceable,
               added: report.added,
+              ...(report.tight.length === 0
+                ? {}
+                : {
+                    tight: report.tight.map((tab) => ({
+                      at: { x: tab.at[0], y: tab.at[1] },
+                      stretchMm: tab.stretchMm,
+                      cornerMm: tab.cornerMm,
+                    })),
+                  }),
             };
           }),
         };
