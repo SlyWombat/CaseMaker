@@ -1,4 +1,3 @@
-import { liveShopDefaults } from '@/platform/defaultsClient';
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
 import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
@@ -1612,8 +1611,16 @@ export function validateGoalObject(
  *   - a solid rod past the centre: how far past it the tip would go;
  *   - a tube: the bore its wall holds back — the sentence says the wall is broken, not the axis.
  */
-function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, floorAllowed: number): string {
-  const map = rotaryMapOf(job, liveShopDefaults());
+function overDepthClause(
+  job: EngraveJob,
+  depth: number,
+  facingDepth: number,
+  floorAllowed: number,
+  // #1244 — the map comes from the caller's edge (validateJob's / the goal path's defaults);
+  // null is a caller with no location, the recommendations.
+  defaults: ShopDefaults | null,
+): string {
+  const map = rotaryMapOf(job, defaults);
   if (map !== null) {
     const wall = job.stock.wall;
     if (wall !== undefined && wall > 0 && wall < map.radius) {
@@ -1968,7 +1975,7 @@ export function validateJob(
         code: 'depth-exceeds-stock',
         labelId: item.id,
         message:
-          `${itemLabel(item)} cuts ${fmt3(item.depth)} mm deep; ${overDepthClause(job, item.depth, facingDepth, floorAllowed)}. ` +
+          `${itemLabel(item)} cuts ${fmt3(item.depth)} mm deep; ${overDepthClause(job, item.depth, facingDepth, floorAllowed, options.defaults ?? null)}. ` +
           `Generate cuts it as it is — the board and fixture checks judge what lies beneath.`,
       });
     }
@@ -1981,7 +1988,7 @@ export function validateJob(
         code: 'depth-exceeds-stock',
         labelId: trace.id,
         message:
-          `${traceOperationName(trace)} cuts ${fmt3(trace.depth)} mm deep; ${overDepthClause(job, trace.depth, facingDepth, floorAllowed)}. ` +
+          `${traceOperationName(trace)} cuts ${fmt3(trace.depth)} mm deep; ${overDepthClause(job, trace.depth, facingDepth, floorAllowed, options.defaults ?? null)}. ` +
           `Generate cuts it as it is — the board and fixture checks judge what lies beneath.`,
       });
     }
@@ -2001,7 +2008,7 @@ export function validateJob(
         code: 'depth-exceeds-stock',
         labelId: primitive.id,
         message:
-          `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; ${overDepthClause(job, primitive.depth, facingDepth, floorAllowed)}. ` +
+          `${primitiveLabel(primitive)} cuts ${primitive.depth} mm deep; ${overDepthClause(job, primitive.depth, facingDepth, floorAllowed, options.defaults ?? null)}. ` +
           'Generate cuts it as it is — the board and fixture checks judge what lies beneath.',
       });
     }
@@ -2415,8 +2422,8 @@ export function validateJob(
         message:
           (drillIsBit
             ? `${who}'s tip reaches ${fmt3(tipDepth)} mm (${fmt3(drill.depth)} mm of full diameter ` +
-              `plus the ${fmt3(drillPointLength)} mm point); ${overDepthClause(job, tipDepth, facingDepth, floorAllowed)}.`
-            : `${who} drills ${drill.depth} mm deep; ${overDepthClause(job, drill.depth, facingDepth, floorAllowed)}.`) +
+              `plus the ${fmt3(drillPointLength)} mm point); ${overDepthClause(job, tipDepth, facingDepth, floorAllowed, options.defaults ?? null)}.`
+            : `${who} drills ${drill.depth} mm deep; ${overDepthClause(job, drill.depth, facingDepth, floorAllowed, options.defaults ?? null)}.`) +
           ' Generate cuts it as it is — the board and fixture checks judge what lies beneath.',
       });
     }
