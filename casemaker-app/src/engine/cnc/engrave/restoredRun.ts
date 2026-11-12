@@ -21,6 +21,7 @@ import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { buildThroughMask } from '@/engine/cnc/engrave/throughMask';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
 import { verifyProgram, type VerifyFinding, type VerifyReport } from '@/engine/cnc/verify';
 import type { Setup } from '@/engine/cnc/setup';
@@ -110,6 +111,9 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       tool,
       depthLimit: depthLimits[program.setupIndex - 1] ?? jobDepthLimit(job),
       minRapidZ: irs[index]?.hopZ ?? HOP_Z,
+      // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
+      // above describes (#1082): a flipped setup's stated box, else the job's blank.
+      footprint: setupFootprint(job, program.setupIndex - 1),
     };
     const verify = verifyProgram(program.nc, ctx);
     for (const finding of verify.findings) {

@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { stockDepthLimit, verifyProgram, type VerifyContext, type VerifyFinding } from '@/engine/cnc/verify';
+import type { FootprintShape } from '@/engine/cnc/footprint';
 import { stubSetup } from '@/engine/cnc/setup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
@@ -17,6 +18,8 @@ import { rectProfile } from '@/engine/compiler/profile';
 const STOCK = { length: 100, width: 60, thickness: 10 };
 /** ⌀3.175: the cutting radius the limit is built from. + the facing's 0.001 mm = 1.5885. */
 const TOOL = flatEndMill(3.175);
+/** The blank as one rectangle, the shape every pre-#1235-ruling case states. */
+const BLANK_FOOTPRINT: FootprintShape[] = [{ kind: 'rect', x: 0, y: 0, length: STOCK.length, width: STOCK.width }];
 
 function ctxFor(over: Partial<VerifyContext> = {}): VerifyContext {
   const setup = stubSetup(
@@ -31,7 +34,7 @@ function ctxFor(over: Partial<VerifyContext> = {}): VerifyContext {
     tool: TOOL,
     depthLimit: stockDepthLimit(STOCK, 1),
     minRapidZ: 1,
-    stock: { length: STOCK.length, width: STOCK.width },
+    footprint: BLANK_FOOTPRINT,
     ...over,
   };
 }
@@ -103,7 +106,7 @@ describe('#1235 cut-outside-footprint', () => {
   });
 
   it('7 — a context with no footprint does not run the rule', () => {
-    expect(footprints(to('G1 Y-1.6'), { stock: undefined })).toEqual([]);
+    expect(footprints(to('G1 Y-1.6'), { footprint: undefined })).toEqual([]);
   });
 
   it('8 — an operator-placed item program gets the same code at warning severity', () => {
@@ -111,5 +114,49 @@ describe('#1235 cut-outside-footprint', () => {
     expect(found).toHaveLength(1);
     expect(found[0]!.severity).toBe('warning');
     expect(found[0]!.aggregate?.count).toBe(1);
+  });
+
+  // ---- #1235's ruling (the stage-2 stop): the footprint is a LIST OF SHAPES, and the verifier
+  // measures the distance outside their UNION. The limit above is unchanged.
+
+  it('9 — a sacrificial strip on the left extends the footprint: 5 mm out is clean, 12 mm out is the error', () => {
+    const withStrip: FootprintShape[] = [
+      ...BLANK_FOOTPRINT,
+      { kind: 'rect', x: -10, y: 0, length: 10, width: STOCK.width },
+    ];
+    expect(footprints(to('G1 X-5 Y30'), { footprint: withStrip })).toEqual([]);
+    const found = footprints(to('G1 X-12 Y30'), { footprint: withStrip });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(2, 6);
+    expect(found[0]!.aggregate?.x).toBeCloseTo(-12, 6);
+  });
+
+  it('10 — two rectangles that touch meet with distance 0 over the seam', () => {
+    const two: FootprintShape[] = [
+      ...BLANK_FOOTPRINT,
+      { kind: 'rect', x: 100, y: 0, length: 10, width: STOCK.width },
+    ];
+    expect(footprints(to('G1 X100 Y30'), { footprint: two })).toEqual([]);
+    expect(footprints(to('G1 X105 Y30'), { footprint: two })).toEqual([]);
+  });
+
+  it('11 — a circle of radius 20 at (20, 20): 1.5 mm outside is clean, 1.7 mm is the error', () => {
+    const circle: FootprintShape[] = [{ kind: 'circle', cx: 20, cy: 20, radius: 20 }];
+    // Plunge at the circle's centre, then feed radially to the test point (the shared `to` helper
+    // plunges at (50, 0), which is outside this circle).
+    const radial = (x: string): string[] => ['G0 X20 Y20', 'G1 Z-2 F100', `G1 ${x} Y20`];
+    expect(footprints(radial('X41.5'), { footprint: circle })).toEqual([]);
+    const found = footprints(radial('X41.7'), { footprint: circle });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(1.7, 6);
+  });
+
+  it('12 — a second setup is judged against 60 × 40 in its own frame, not setup 1’s 100 × 60', () => {
+    const secondSetup: FootprintShape[] = [{ kind: 'rect', x: 0, y: 0, length: 60, width: 40 }];
+    // The same point is inside setup 1's rectangle, but 10 mm outside setup 2's.
+    expect(footprints(to('G1 X70 Y20'))).toEqual([]);
+    const found = footprints(to('G1 X70 Y20'), { footprint: secondSetup });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(10, 6);
   });
 });

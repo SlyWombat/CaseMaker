@@ -39,6 +39,7 @@ import { applyEvent, buildTimeline, initialState, type MachineState } from './em
 import { holderOf, rotaryOf, type Mill } from './machine';
 import { FIRMWARE_A_MAX_DEG_PER_MIN, FIRMWARE_ROTARY_PERIMETER_EXTRA_MM, rotaryRate } from './rotaryClock';
 import { sacrificialBoxes, type SacrificialBox } from './sacrificial';
+import { distanceOutsideFootprint, type FootprintShape } from './footprint';
 import { FACING_EDGE_CLEARANCE_MM } from './cam/facing';
 import type { Setup } from './setup';
 // inPath only (types from bracket): the verifier runs in workers and must not pull in the defaults client.
@@ -82,11 +83,13 @@ export interface VerifyContext {
   /** Z at or above which XY rapids are allowed, work frame. The IR's hopZ. */
   minRapidZ: number;
   /**
-   * #1235 stage 2 — THE STOCK'S FOOTPRINT, work frame: the rectangle `[0, length] × [0, width]`.
-   * The `cut-outside-footprint` rule measures how far a cutting feed's end lies outside it.
+   * #1235 stage 2 — THE CUTTABLE FOOTPRINT, in this program's (setup's) own frame: a list of
+   * rectangles and circles whose union is the region a cut may travel over. The stock's own
+   * outline, plus any sacrificial side strips / board the job states. The
+   * `cut-outside-footprint` rule measures how far a cutting feed's end lies outside the union.
    * OPTIONAL: absent means the caller states no footprint, and the rule does not run.
    */
-  stock?: { length: number; width: number };
+  footprint?: readonly FootprintShape[];
   /**
    * #1235 stage 2 — THIS PROGRAM'S MOVES ARE AN OPERATOR-PLACED ITEM'S. An engrave item the
    * operator drew partly off the blank is legitimate (`item-outside-stock`, a warning, and
@@ -778,16 +781,15 @@ export function verifyProgram(text: string, ctx: VerifyContext): VerifyReport {
         }
 
         // ---- 6. cut-outside-footprint (#1235 stage 2). A cutting feed's END point, further
-        // outside the blank's own rectangle than the cutter's radius plus the facing's edge
+        // outside the CUTTABLE FOOTPRINT than the cutter's radius plus the facing's edge
         // clearance: one allowance admits today's legitimate overruns (a freeing contour round a
         // part whose outline is the stock's, a finishing pass's deliberate overrun) and nothing
-        // further. The footprint is the same stock the depth limit is built from; a caller that
-        // states none gets no rule. Rotary programs have no flat footprint and are not judged.
-        if (rotary === null && ctx.stock !== undefined && known3(toW) && toW[2] < 0) {
-          const { length, width } = ctx.stock;
-          const excessX = toW[0] < 0 ? -toW[0] : toW[0] > length ? toW[0] - length : 0;
-          const excessY = toW[1] < 0 ? -toW[1] : toW[1] > width ? toW[1] - width : 0;
-          const d = Math.hypot(excessX, excessY);
+        // further. The footprint is a LIST of shapes in this setup's frame (the blank's own
+        // outline, sacrificial strips, a disc's circle) supplied by the caller that builds the
+        // depth limit; a caller that states none gets no rule. Rotary programs have no flat
+        // footprint and are not judged.
+        if (rotary === null && ctx.footprint !== undefined && known3(toW) && toW[2] < 0) {
+          const d = distanceOutsideFootprint(toW[0], toW[1], ctx.footprint);
           const radius = toolRadiusOf(ctx.tool, Math.max(0, -toW[2]));
           if (d > radius + FACING_EDGE_CLEARANCE_MM + 1e-9) {
             footprintCount += 1;

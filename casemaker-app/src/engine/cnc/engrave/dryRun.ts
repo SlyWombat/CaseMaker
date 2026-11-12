@@ -33,6 +33,7 @@ import type { Diagnostic } from '../gcode/types';
 import { FINAL_RETRACT_Z } from '../post/z1';
 import { HOP_Z } from '../cam/ir';
 import { verifyProgram, type VerifyReport } from '../verify';
+import type { FootprintShape } from '../footprint';
 import type { Setup } from '../setup';
 import type { Mill } from '../machine';
 import { postKey } from '../post';
@@ -131,6 +132,12 @@ export interface DryRunVerifyDeps {
   setup: Setup;
   machine: Mill;
   tool: Tool;
+  /**
+   * #1235 stage 2 — the job's cuttable footprint. The lifted text has no spindle and no cutting
+   * moves, so the footprint rule cannot fire; it is passed for the context's completeness, and a
+   * caller that has only the lifted text may omit it.
+   */
+  footprint?: readonly FootprintShape[];
 }
 
 /**
@@ -151,6 +158,7 @@ export function verifyDryRun(nc: string, deps: DryRunVerifyDeps): VerifyReport {
     dialect: postKey(deps.machine),
     depthLimit: () => Number.POSITIVE_INFINITY,
     minRapidZ: HOP_Z,
+    ...(deps.footprint === undefined ? {} : { footprint: deps.footprint }),
   });
 }
 
