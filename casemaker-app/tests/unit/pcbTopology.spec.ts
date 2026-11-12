@@ -110,7 +110,7 @@ describe('the copper topology (#743 P-5)', () => {
   });
 
   it('is null on a job that is not a board', () => {
-    expect(pcbCopperTopologyInput({ ...emptyJob(), stock: { ...emptyJob().stock, material: 'pla', colour: undefined } })).toBeNull();
+    expect(pcbCopperTopologyInput({ ...emptyJob(), stock: { ...emptyJob().stock, material: 'pla', colour: undefined } }, null)).toBeNull();
   });
 });
 
@@ -140,7 +140,7 @@ describe('the copper topology through the real sweep (#743 P-5)', () => {
     job.toolKey = engraver.key;
     const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
     expect(gen.ok).toBe(true);
-    const pcb = pcbCopperTopologyInput(job);
+    const pcb = pcbCopperTopologyInput(job, null);
     expect(pcb).not.toBeNull();
     if (pcb === null) return;
     // The isolation program alone — the copper is separated by it, whatever the holes and outline
@@ -177,7 +177,7 @@ describe('the copper topology through the real sweep (#743 P-5)', () => {
     job.toolKey = engraver.key;
     const gen = await engraveGenerate(tl, job, engraver.tool, ROWS, null, undefined, { tools: [engraver, corn] });
     expect(gen.ok).toBe(true);
-    const pcb = pcbCopperTopologyInput(job);
+    const pcb = pcbCopperTopologyInput(job, null);
     expect(pcb).not.toBeNull();
     if (pcb === null) return;
     const session = createSimSession(tl);
