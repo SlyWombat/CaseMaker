@@ -29,7 +29,7 @@ import type { JobFinding } from './jobSetup';
 import { jobTargetObjects } from './jobSetup';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The clearance a top-band cut keeps between the cutter's stated reach and the stock top, mm —
@@ -247,13 +247,15 @@ export function jobReachFindings(
   chosen: Tool | null,
   owned: readonly Tool[],
   entries: readonly ToolLibraryEntry[],
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): JobFinding[] {
   // A ROTARY RELIEF IS NOT JUDGED BY THE FLAT FRAME'S REACH. On a rod the goal's local Z is
   // RADIAL, not "below the stock top" toward the bed, so this check's premise does not hold; the
   // relief's own checks (the axis crossing, the free span, the rod's radius and the sweep) judge
   // it. Without this, a 12 mm-flute cutter on an 18 mm-deep relief was refused before the rotary
   // path — the #723 R-4 e2e caught it.
-  if (rotaryMapOf(job, liveShopDefaults()) !== null) return [];
+  if (rotaryMapOf(job, defaults) !== null) return [];
   const out: JobFinding[] = [];
   for (const goal of jobTargetObjects(job)) out.push(...goalReachFindings(goal, chosen, owned, entries));
   return out;
@@ -265,6 +267,7 @@ export function jobReachRefusal(
   chosen: Tool | null,
   owned: readonly Tool[],
   entries: readonly ToolLibraryEntry[],
+  defaults: ShopDefaults | null,
 ): JobFinding | null {
-  return jobReachFindings(job, chosen, owned, entries).find((f) => f.severity === 'error') ?? null;
+  return jobReachFindings(job, chosen, owned, entries, defaults).find((f) => f.severity === 'error') ?? null;
 }

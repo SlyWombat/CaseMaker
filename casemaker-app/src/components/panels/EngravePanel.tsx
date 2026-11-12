@@ -1121,7 +1121,7 @@ export function EngravePanel(): JSX.Element {
     // #785 — the reach check joins the list at Generate's own sentence: a goal deeper than the
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
-    ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
+    ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools, shopDefaults),
     // #872 — WHAT THE TOP SETUP LEAVES UNREACHED, stated beside the reach check: the share the
     // sentence measures, the split, and the flip plan's one press when a side earns its setup.
     // #911 — the location's cutters travel with the finding: its hold sentence names the shop's

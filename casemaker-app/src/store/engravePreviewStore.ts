@@ -327,7 +327,7 @@ export const useEngravePreviewStore = create<EngravePreviewState>()((set, get) =
     // must not simulate candidate after candidate for a part that cannot be cut that way. An
     // UNRECORDED reach is only an info (the sweep's holder gate is the guard), so the search runs;
     // the operator's top-band choice (`cutWithinReach`) also lets it run — the band is makeable.
-    const reachRefusal = jobReachFindings(job, jobTool(job), inputs.tools.map((e) => e.tool), inputs.tools).find(
+    const reachRefusal = jobReachFindings(job, jobTool(job), inputs.tools.map((e) => e.tool), inputs.tools, inputs.shop.defaults ?? null).find(
       (f) => f.severity === 'error',
     );
     if (reachRefusal !== undefined) {
