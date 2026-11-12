@@ -1131,6 +1131,7 @@ export function EngravePanel(): JSX.Element {
     // a plan whose holes would post below the bed states its need instead of offering the press.
     ...jobFlipFindings(
       job,
+      shopDefaults,
       tools,
       job.sacrificial.under?.thickness ??
         (bedFacts?.surface === 'wasteboard' && bedFacts.wasteboardMm !== null ? bedFacts.wasteboardMm : 0),
