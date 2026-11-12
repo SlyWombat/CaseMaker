@@ -1730,7 +1730,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "cutter sets",
-      "note": "chosen, not measured. How many of the most promising sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."
+      "note": "chosen, not measured. How many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."
     },
     "adaptive.residualShare": {
       "value": 0.005,

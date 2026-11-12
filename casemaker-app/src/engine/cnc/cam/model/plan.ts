@@ -1045,8 +1045,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
-  // #1242 (planner v3 C3) — how many chains get a real plan (0 = every one, as before).
+  // #1242 (planner v3 C3) — how many chains get a real plan (0 = every one, as before), and the
+  // leftover tolerance in mm² for the shortlist's FAST list: the same quantity the rank's floor is
+  // built from (`plan.leftoverEquivalencePct` × the goal's covered area).
   const shortlistSize = readDefault(defaults, 'plan.shortlistSize').value;
+  let goalCoveredAreaMm2 = 0;
+  if (input.goal !== undefined) {
+    let covered = 0;
+    for (let k = 0; k < input.goal.covered.length; k++) if (input.goal.covered[k] === 1) covered++;
+    goalCoveredAreaMm2 = covered * input.goal.pitch * input.goal.pitch;
+  }
+  const shortlistToleranceMm2 = (leftoverEquivalencePct / 100) * goalCoveredAreaMm2;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -2450,8 +2459,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
         leftoverEquivalencePct,
-        // #1242 — how many chains get a real plan (0 = every one).
+        // #1242 — how many chains get a real plan (0 = every one), and list B's tolerance.
         shortlistSize,
+        shortlistToleranceMm2,
         // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
         leftoverTallMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
@@ -3476,6 +3486,11 @@ export interface PlanPocketsOptions {
    * get a real plan. Absent or 0 → every candidate, exactly as before.
    */
   shortlistSize?: number;
+  /**
+   * #1242's amended rule — the leftover tolerance in mm² for the shortlist's FAST list
+   * (`plan.leftoverEquivalencePct / 100` × the goal's covered area). Absent or 0 → no fast list.
+   */
+  shortlistToleranceMm2?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -4259,6 +4274,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   for (const node of throughNodes) shadowRegions.set(node.id, node.region);
   const shadowRule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds);
   const shortlistSize = Math.floor(opts.shortlistSize ?? 0);
+  const shortlistToleranceMm2 = opts.shortlistToleranceMm2 ?? 0;
   let estimatePass: CandidateEstimates | null = null;
   if (demand.features.length > 0 && shadowRegions.size > 0 && (shortlistSize > 0 || memTraceEnabled())) {
     try {
@@ -4296,7 +4312,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
             candidate,
             signature: candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
           }));
-          const kept = shortlistOf(wrapped, bySignature, shortlistSize);
+          const kept = shortlistOf(wrapped, bySignature, shortlistSize, shortlistToleranceMm2);
           shortlistRecord.counts = {
             candidates: list.length,
             kept: kept.length,
@@ -4367,6 +4383,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       kept: shortlistRecord.counts.kept,
       k: shortlistSize,
       unpricedKept: shortlistRecord.counts.unpricedKept,
+      toleranceMm2: Math.round(shortlistToleranceMm2 * 1000) / 1000,
     });
   }
 
@@ -4388,6 +4405,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
         considered: choice.considered,
         chosenSignature: choice.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
+        toleranceMm2: shortlistToleranceMm2,
         ...(estimatePass === null ? {} : { estimates: estimatePass }),
       });
     } catch (err) {

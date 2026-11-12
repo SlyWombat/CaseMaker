@@ -733,7 +733,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #1242 (planner v3 C3) — how many chains get a real plan. 0 is off: every chain is planned,
   // which is slower and picks the same on every job measured (the stop gate). Chosen, not measured.
   'plan.shortlistSize': {
-    label: 'How many of the most promising sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same.',
+    label: 'How many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same.',
     unit: 'cutter sets',
     rule: z.number().int().min(0).max(200),
     fallback: 8,
