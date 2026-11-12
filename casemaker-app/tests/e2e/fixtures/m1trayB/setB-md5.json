@@ -1,6 +1,6 @@
 {
-  "_note": "Set B, VERSIONED WITH THE RULES (12 files: top p1..p8, bottom p1..p4). tableVersion 1223-1 \u2014 the combined tray-top re-pin. TOP rows re-pin from 1214-1 (their bytes were still 1195-1's): the planner stack (#1217's leftover tolerance, #1224's ruling, #1219's feed-row step-over), #1227's 0.001 ring inset and #1223's lobe order changed p1..p6; p7 and p8 are byte-identical. BOTTOM rows re-pin from 1214-1: #1214's F words and TIME as before, then the planner stack splits out a NEW \u23000.9 flat program at p2, so the finish and rest keep their bytes as p3/p4 and p1's rough/pocket is re-planned (1 h 26 min). Per-file old\u2192new and the issue each movement belongs to are in changedSince1223. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1223-1",
+  "_note": "Set B, VERSIONED WITH THE RULES (12 files: top p1..p8, bottom p1..p4). tableVersion 1234-1 \u2014 the BOTTOM p3/p4 rows re-pin from 1223-1 for #1234 (an overrun point takes the height at the posted position): raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved, cycle 16,900 \u2192 16,925 s. TOP p1..p8 and BOTTOM p1/p2 are byte-identical to 1223-1. 1223-1's own note follows: the combined tray-top re-pin. TOP rows re-pin from 1214-1 (their bytes were still 1195-1's): the planner stack (#1217's leftover tolerance, #1224's ruling, #1219's feed-row step-over), #1227's 0.001 ring inset and #1223's lobe order changed p1..p6; p7 and p8 are byte-identical. BOTTOM rows re-pin from 1214-1: #1214's F words and TIME as before, then the planner stack splits out a NEW \u23000.9 flat program at p2, so the finish and rest keep their bytes as p3/p4 and p1's rough/pocket is re-planned (1 h 26 min). Per-file old\u2192new and the issue each movement belongs to are in changedSince1223. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1234-1",
   "rule": "(a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE (#1186 rule 1), ties to fewer bit changes then owned; (b) EVERY FLAT MAY PROPOSE AS A PRIMARY, shortlisted to the incumbent and the best own-row flat (#1192), and a cutter that can FREE the profile always joins when none shortlisted can (#1195); (c) THE FREEING CONTOUR IS A HARD CONSTRAINT (#1195, the analyst\u2019s field): no chain is a candidate without a cutter whose STATED flute reaches the profile\u2019s actual posted depth; the pick refuses only when nothing owned reaches or the operator pinned a cutter that does not, with a named sentence; (d) ONE CUTTER PER SHAPE AND DIAMETER, only on a job with a setup boundary (#1186 rule 6, gated by the setup count).",
   "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1195-freeing-reach @ 9338152b2 (1186-bench + the setup-boundary gate + #1195), k3, 2026-11-10; the CLI output is byte-identical to tableVersion 1114-1",
   "changedSince1129": [
@@ -133,14 +133,14 @@
         },
         {
           "name": "m1trayB-bottom-p3.nc",
-          "bytes": 1956914,
-          "md5": "80e050a8691c6b6f664423aa76a3bc2d",
+          "bytes": 2647540,
+          "md5": "ab947ee3cf3206a3305a6d2e6375d618",
           "note": "finish on the \u23003.175 ball \u00d7 22 \u2014 the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 11 s"
         },
         {
           "name": "m1trayB-bottom-p4.nc",
-          "bytes": 3145433,
-          "md5": "9113726b8fe3dbcd11204d47373f5673",
+          "bytes": 3736573,
+          "md5": "fa20496b218588e316622bc78ec6f313",
           "note": "rest/pencil on the \u23002 ball \u00d7 12 \u2014 the shortest sufficient rest ball; 1 h 28 min"
         }
       ]
@@ -330,6 +330,26 @@
       "new": "9113726b8fe3dbcd11204d47373f5673",
       "newBytes": 3145433,
       "why": "the rest, unchanged bytes, a new name: the \u23002 \u00d7 12 ball's program moved from p3 to p4"
+    }
+  ],
+  "changedSince1234": [
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p3.nc",
+      "old": "80e050a8691c6b6f664423aa76a3bc2d",
+      "oldBytes": 1956914,
+      "new": "ab947ee3cf3206a3305a6d2e6375d618",
+      "newBytes": 2647540,
+      "why": "#1234: points outside the stock on the posted grid with ceiled drop-cutter height; p3/p4 raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved (>0.1 mm band +3/+1), cycle 16,900 \u2192 16,925 s"
+    },
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p4.nc",
+      "old": "9113726b8fe3dbcd11204d47373f5673",
+      "oldBytes": 3145433,
+      "new": "fa20496b218588e316622bc78ec6f313",
+      "newBytes": 3736573,
+      "why": "#1234: points outside the stock on the posted grid with ceiled drop-cutter height; p3/p4 raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved (>0.1 mm band +3/+1), cycle 16,900 \u2192 16,925 s"
     }
   ]
 }
