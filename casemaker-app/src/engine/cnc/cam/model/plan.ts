@@ -170,6 +170,13 @@ export interface OpOutcome {
   passes: PassRef[];
   /** What the op removed, per depth — the material state's input. Absent for an op that removes nothing new. */
   cleared?: RegionAtZ[];
+  /**
+   * #1239 — THE ROW-POINT GRID PASS'S OWN COUNTS: how many row points took step 3 (the nearest
+   * grid position's height was more than the finish tolerance from the planned one, so the point
+   * moved to the four-position neighbour whose height is nearest), and the largest move that made,
+   * mm. Absent on an op with no rows (nothing to lay).
+   */
+  postedGrid?: { step3: number; largestMoveMm: number };
   /** #960 — statements the op makes about its own method (a skipped wall band, a stated slope
    *  threshold), carried into the plan's notes so the operator sees them. */
   notes?: string[];

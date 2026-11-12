@@ -92,6 +92,87 @@ export function layOutsideOnPostedGrid(
 }
 
 /**
+ * #1239 (the analyst's amended ruling) — EVERY FINISH/BALL-REST ROW POINT IS LAID ON THE POSTED
+ * GRID BEFORE ITS HEIGHT IS TAKEN. #1234's rule was gated to points outside the stock; the same
+ * mechanism applies inside it, where a row crossing a steep face has the same rounding problem.
+ *
+ * The amended rule, replacing the outside-only step 1:
+ *  1. round the planned (x, y) to the nearest posted-grid position and take the drop-cutter height
+ *     there;
+ *  2. if that height is within the finish tolerance (the CL surface's `toleranceMm`, 0.005) of the
+ *     planned height, use it, rounded UP onto the grid — every point on open surface and ordinary
+ *     slopes, at one extra query;
+ *  3. if not (the rounding crossed a wall's reach or a steep face), look at the FOUR grid positions
+ *     around the planned point and take the one whose drop-cutter height is NEAREST the planned
+ *     height; post that position with its own exact height, rounded up. The point moves by at most
+ *     one posted step.
+ *  4. Every emitted point's z is the drop-cutter height at its own posted position, rounded up:
+ *     nothing is ever posted below it.
+ *
+ * A point ON the grown footprint's edge is not emitted (the #1234 boundary rule: the reach test is
+ * knife-edge there), and a point with no CL anywhere among the four is dropped — the row continues
+ * between its neighbours.
+ */
+export interface PostedGridStats {
+  /** How many row points took step 3 (the nearest grid position crossed a wall/steep face). */
+  step3: number;
+  /** The largest move step 3 made, mm (≤ one posted step in each axis). */
+  largestMoveMm: number;
+}
+
+export function layRowOnPostedGrid(
+  points: readonly DroppedPoint[],
+  opts: Pick<FinishOpOptions, 'stockRectMm' | 'clSurface' | 'axisPrecision'>,
+  boundary: FootprintIndex | null,
+  stats?: PostedGridStats,
+): DroppedPoint[] {
+  const step = 10 ** -opts.axisPrecision;
+  const tolerance = opts.clSurface.toleranceMm;
+  const rect = opts.stockRectMm;
+  const outsideStock = (x: number, y: number): boolean =>
+    rect !== undefined && (x < 0 || x > rect.length || y < 0 || y > rect.width);
+  const out: DroppedPoint[] = [];
+  const emit = (x: number, y: number, z: number, plannedOutside: boolean): boolean => {
+    // #1234's boundary rule applies to OVERRUN points only: the grown footprint's edge is where
+    // the reach test is knife-edge. An inside row point at the stock's own edge is a real point
+    // and is emitted (its own CL is well-conditioned there).
+    if (plannedOutside && boundary !== null && boundary.within(x, y)) return false;
+    const prev = out[out.length - 1];
+    if (prev !== undefined && prev.x === x && prev.y === y) return false; // one move per grid point
+    out.push({ x, y, z: Math.ceil(z / step - 1e-9) * step });
+    return true;
+  };
+  for (const p of points) {
+    const plannedOutside = outsideStock(p.x, p.y);
+    const xn = postedZ(p.x, opts.axisPrecision);
+    const yn = postedZ(p.y, opts.axisPrecision);
+    const nearest = opts.clSurface.dropCutter(xn, yn);
+    if (nearest !== null && Math.abs(nearest - p.z) <= tolerance) {
+      emit(xn, yn, nearest, plannedOutside);
+      continue;
+    }
+    // STEP 3 — the rounding crossed a wall's reach or a steep face. The four grid positions around
+    // the planned point; the one whose own height is nearest the planned height wins.
+    const x0 = Math.floor(p.x / step) * step;
+    const y0 = Math.floor(p.y / step) * step;
+    let best: { x: number; y: number; drop: number; err: number } | null = null;
+    for (const x of [x0, x0 + step]) {
+      for (const y of [y0, y0 + step]) {
+        const drop = opts.clSurface.dropCutter(x, y);
+        if (drop === null) continue;
+        const err = Math.abs(drop - p.z);
+        if (best === null || err < best.err) best = { x, y, drop, err };
+      }
+    }
+    if (best !== null && emit(best.x, best.y, best.drop, plannedOutside) && stats !== undefined) {
+      stats.step3 += 1;
+      stats.largestMoveMm = Math.max(stats.largestMoveMm, Math.hypot(best.x - p.x, best.y - p.y));
+    }
+  }
+  return out;
+}
+
+/**
  * #960 — THE SCALLOP HEIGHT THE BALL'S STEP-OVER HOLDS, mm. 0.027 comes from the vendor's own
  * program, not a preference: Makera's ⌀6 ball raster runs at 0.8 mm step-over, and
  * R − √(R² − (0.8/2)²) = 3 − √(9 − 0.16) = 0.0268 mm on that ball — the same cusp on the same
@@ -688,7 +769,11 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const cap = opts.moveCap ?? FINISH_MOVE_CAP;
   // #1234 (the fix) — the grown footprint's boundary, for the overrun rule's "no point on or past
   // the edge" test. One index for the whole op, the same predicate the CL gate uses.
-  const boundaryIndex = opts.stockRectMm === undefined ? null : footprintIndex(opts.region.footprint);
+  // #1239 — the index is needed for EVERY row now, not only the overrun points.
+  const boundaryIndex = footprintIndex(opts.region.footprint);
+  // #1239 — the rule's own counts, for the proof table: how many row points took step 3 and the
+  // largest move it made.
+  const postedGrid: PostedGridStats = { step3: 0, largestMoveMm: 0 };
 
   // #1052 — THE ESTIMATE BEFORE THE BUILD, from the bins and pitches (not from moves already
   // built): above the cap the op refuses by name and the rank drops the candidate with its
@@ -763,7 +848,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
       const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
       if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
-      const row = layOutsideOnPostedGrid(dropRow(opts.clSurface, [x, insetY0], [x, insetY1]), opts, boundaryIndex);
+      const row = layRowOnPostedGrid(dropRow(opts.clSurface, [x, insetY0], [x, insetY1]), opts, boundaryIndex, postedGrid);
 
       // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
       // contiguous admitted run is its own cut, and the gaps between runs are links.
@@ -1051,11 +1136,22 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       `${joinTotal} run-to-run join(s): ${joinCounts.ride} ride the CL, ${joinCounts.follow} follow it, ${joinCounts.routed} routed inside the footprint, ${joinCounts.retract} retract`,
     );
   }
+  // #1239 — STATE THE RULE'S OWN EXCEPTIONS. Every row point is laid on the posted grid; the
+  // points whose nearest grid position crossed a wall or steep face moved to the neighbouring
+  // position whose height is nearest the planned one. The count and the largest move are the
+  // proof table's step-3 column, and an operator reading the sheet can see the row was not
+  // silently lifted.
+  if (postedGrid.step3 > 0) {
+    notes.push(
+      `${postedGrid.step3} row point(s) took the four-position grid rule; the largest moved ${postedGrid.largestMoveMm.toFixed(4)} mm`,
+    );
+  }
   return {
     ir,
     cutter: cutterKeyOf(opts.cutter),
     passes,
     cleared,
+    postedGrid,
     ...(notes.length === 0 ? {} : { notes }),
   };
 }
