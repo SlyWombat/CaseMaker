@@ -209,4 +209,19 @@ describe('#1235 cut-outside-footprint', () => {
     expect(found[0]!.aggregate?.largestMm).toBeCloseTo(3.0875, 6);
   });
 
+  it('16 — an open pocket’s 0.001 is its own step; a centre-space pocket states 0', () => {
+    // #1227/#1235 — the open pocket's first ring is placed at `toolRadius − FACING_EDGE_CLEARANCE_MM`
+    // by `pocketRingInsetMm`, so it states 0.001: radius + 0.001 + one posted step is clean, and a
+    // hair past it is the error. A CENTRE-SPACE pocket is not inset, states 0, and gets no step.
+    const openPocket = new Map([[1, 0.001]]);
+    const atLimit = programWithToolpaths([{ number: 1, body: to('G1 Y-1.5895') }]); // r + 0.001 + 0.001
+    expect(footprintsIn(atLimit, { outsideAllowancesMm: openPocket })).toEqual([]);
+    const past = programWithToolpaths([{ number: 1, body: to('G1 Y-1.5896') }]);
+    const found = footprintsIn(past, { outsideAllowancesMm: openPocket });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.aggregate?.largestMm).toBeCloseTo(1.5896, 6);
+    // The same move under a centre-space pocket's 0 is past radius + one posted step.
+    expect(footprintsIn(atLimit, { outsideAllowancesMm: new Map([[1, 0]]) })).toHaveLength(1);
+  });
+
 });
