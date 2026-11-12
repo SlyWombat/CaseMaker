@@ -2700,6 +2700,7 @@ describe('through-cuts and cut-outs (#218)', () => {
     expect(g.through).toEqual({
       breakthroughMm: 0.3,
       boardThicknessMm: 12,
+      maxSpanMm: 80,
       cutouts: [
         {
           id: 'cut-1',
@@ -2707,6 +2708,7 @@ describe('through-cuts and cut-outs (#218)', () => {
           tabs: { count: 4, widthMm: 4, heightMm: 1 },
           spans: 4,
           unplaceable: 0,
+          added: 0,
         },
       ],
     });
@@ -3013,9 +3015,13 @@ describe('through-cuts and cut-outs (#218)', () => {
       const loose = g.findings.filter((f) => f.code === 'loose-piece');
       expect(loose, JSON.stringify(loose)).toEqual([]);
       expect(g.ok, JSON.stringify(g.findings)).toBe(true);
-      // The fixtures really are the tabbed cut they describe: four asked for, four placed.
+      // The fixtures really are the tabbed cut they describe. #1206's span limit adds two more:
+      // the hexagon's 12 mm tabs leave one tab per edge (the corner margin is 24 mm), and four
+      // tabs would leave 145 mm stretches across the two bare edges against the 80 mm limit, so
+      // the planner fills them — six placed, none unplaceable.
       expect(g.through!.cutouts).toHaveLength(1);
-      expect(g.through!.cutouts[0]!.spans).toBe(4);
+      expect(g.through!.cutouts[0]!.spans).toBe(6);
+      expect(g.through!.cutouts[0]!.added).toBe(2);
       expect(g.through!.cutouts[0]!.unplaceable).toBe(0);
     });
   }
@@ -3046,13 +3052,12 @@ describe('through-cuts and cut-outs (#218)', () => {
    * `gap − 2r` apart and each kerf reaches `r`), so each pass crosses the facing edge of the
    * other.
    *
-   * Two shapes are needed because #736 changed where a lone tab lands: equidistant around the
-   * cut path, so the shape sets the side. The ORIGINAL 20 × 12 rectangle pair stays as the HOLD
-   * case: B's tab wraps a corner, and A's kerf cannot reach its arm across B's top edge, so B
-   * really does stay tied to the waste — asserted by geometry below, not only by the absence of
-   * a finding. The rectangle fixture moved to a trapezoid because arc placement changed where a
-   * lone tab lands: for the REFUSAL case B must take its tab on the facing left side, so B is a
-   * right trapezoid — 10 mm top, 30 mm bottom — of the same (10 + 30) / 2 × 12 = 240 mm² face.
+   * Which side a lone tab sits on is now #1206's rule (the LONGEST edge's midpoint), so the
+   * shapes are chosen around it. The 20 × 12 rectangle pair is the HOLD case: each part's tab
+   * goes to a 20 mm side's midpoint, away from the neighbour, so B stays tied to the waste —
+   * asserted by geometry below, not only by the absence of a finding. For the REFUSAL case B must
+   * take its tab on the facing left side, so B is a trapezoid whose FACING side is its longest:
+   * 30 mm facing, 24 far, 8 top, 10 bottom — a 216 mm² face.
    */
   function pairJob(contours: [number, number][][], width: number): EngraveJob {
     const vector: EngraveVectorShape = {
@@ -3106,12 +3111,16 @@ describe('through-cuts and cut-outs (#218)', () => {
       [left, -6],
       [right, -6],
     ];
-    /** CCW, the facing side vertical on the LEFT; the bottom runs 20 mm further than the top. */
+    /**
+     * CCW, the facing side vertical on the LEFT and the part's LONGEST edge (#1206: a lone tab
+     * goes to the longest edge first, so the facing side must be that edge for the tab to face
+     * the neighbour): facing 30, far side 24, top 8, bottom 10.
+     */
     const facingTrapezoid = (left: number): [number, number][] => [
-      [left + 10, 6],
-      [left, 6],
-      [left, -6],
-      [left + 30, -6],
+      [left + 8, 15],
+      [left, 15],
+      [left, -15],
+      [left + 8, -9],
     ];
     return pairJob([rectangle(aLeft, aRight), facingTrapezoid(bLeft)], 50 + gap);
   }
@@ -3126,8 +3135,8 @@ describe('through-cuts and cut-outs (#218)', () => {
       // The GEOMETRIC reason, not just the absent finding: B's lone tab is the bridge band
       // `tabBridgeRectangles` builds. With A's kerf subtracted from it, what remains must still
       // (a) be non-empty, (b) reach B's PART, and (c) reach the stock beyond B's OWN kerf — the
-      // waste across the cut. A's kerf only eats the corner's near arm; the arm over B's top
-      // edge survives and ties the part to the surrounding stock.
+      // waste across the cut. #1206 puts the tab on B's 20 mm side's midpoint, away from the
+      // facing edge, so A's kerf cannot reach it and the tab ties the part to the stock.
       const R = 3.175 / 2;
       const offset = makeClipperOffset(tl);
       const path = profilePath(rectanglePairContours(gap), 'outside', R, 0, offset);
@@ -3175,13 +3184,28 @@ describe('through-cuts and cut-outs (#218)', () => {
       const f = g.findings.find((x) => x.code === 'loose-piece');
       expect(f, JSON.stringify(g.findings)).toBeDefined();
       expect(f!.severity).toBe('error');
-      // What is free is B's 240 mm² face plus the sliver of its tab the neighbour's kerf spares:
-      // a tab may not be cancelled against a removal its own contour did not make.
+      // What is free is B's 216 mm² face plus the sliver of its facing tab the neighbour's kerf
+      // spares (1–5 mm², growing with the gap): a tab may not be cancelled against a removal its
+      // own contour did not make.
       const area = Number(/\((\d+) mm²\)/.exec(f!.message)?.[1]);
-      expect(area).toBeGreaterThan(240);
-      expect(area).toBeLessThan(260);
+      expect(area).toBeGreaterThan(216);
+      expect(area).toBeLessThan(230);
     });
   }
+
+  it('refuses tabs that leave a stretch past the span limit (#1206)', async () => {
+    // The j12 medallion's 60 mm round cut-out asked to hold the part by ONE 4 mm tab: the placed
+    // tab leaves ~181 mm of circumference unsupported, past the shop's 80 mm limit, so the job is
+    // REFUSED with the reason, not posted as a quiet program.
+    const job = j12Job('j12-alu-medallion-proxy.json');
+    job.cutouts = (job.cutouts ?? []).map((c) => ({ ...c, tabs: { count: 1, width: 4, height: 1 } }));
+    const g = await generate(tl, job);
+    expect(g.ok).toBe(false);
+    expect(g.stage).toBe('findings');
+    const f = g.findings.find((x) => x.code === 'tab-unplaceable' && x.severity === 'error');
+    expect(f, JSON.stringify(g.findings)).toBeDefined();
+    expect(f!.message).toMatch(/span limit/);
+  });
 
   it('refuses a cut-out whose inset leaves no path, instead of silently dropping it (#218)', async () => {
     // A 100 mm inset on the 100 × 60 blank shrinks the profile past the cutter radius: the old

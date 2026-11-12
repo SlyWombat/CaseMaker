@@ -2067,6 +2067,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         : input.freeingTabs === undefined
           ? undefined
           : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
+    // #1206 — the shop's span limit rides whichever spec the plan uses; a job that states its
+    // own tabs is not exempt from "no unsupported stretch longer than the limit", and a job that
+    // states none still gets the DEFAULT release tabs' span checked (condition 3 is on the tabs
+    // as placed, not on the plan before the contour's own fallback). #1237 — the value comes from
+    // the INPUT's defaults map, like the planner's other seven settings, never ambient state.
+    const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
+    const tabSpec =
+      tabs === undefined
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -2466,7 +2476,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // over-clip" / `pocketShadowNestedFloor966.spec.ts` cases. `curvedOpsProperty959` is back
         // at its own 95% line, unchanged.
         shadowMesh: curvedGeometry.triangles,
-        ...(tabs === undefined ? {} : { tabs }),
+        ...(tabSpec === undefined ? {} : { tabs: tabSpec }),
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
         facing: input.facing ?? 'off',
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
@@ -2856,6 +2866,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // The freeing contour's own depth IS now bounded against the opposite setup's finished
       // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
       // actual outcome (or why it could not be checked) on THIS plan.
+    }
+
+    // #1206 (the analyst's condition 2) — THE FREEING CONTOUR'S TAB STATEMENTS reach the
+    // sheet's statements section: how many were asked for and placed, and every tight tab with
+    // the stretch it closes and its distance from the nearest corner. Only the contour op's
+    // notes: the finish op's own notes (#960/#1033) are a separate sheet-text gap.
+    for (const op of ops) {
+      if (op.kind !== 'contour') continue;
+      for (const text of op.outcome.notes ?? []) {
+        statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
+      }
     }
 
     perSetup.push({
@@ -3466,7 +3487,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this

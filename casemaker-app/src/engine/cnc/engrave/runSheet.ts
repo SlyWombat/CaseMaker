@@ -407,6 +407,8 @@ export interface RunSheetThroughFacts {
   breakthroughMm: number;
   /** The board's thickness, or null when the job states none. */
   boardThicknessMm: number | null;
+  /** #1206 — the shop's `tabs.maxSpanMm` the placement ran with, mm. Absent on a pre-#1206 run. */
+  maxSpanMm?: number;
   cutouts: readonly {
     id: string;
     name: string;
@@ -415,6 +417,16 @@ export interface RunSheetThroughFacts {
     spans: number;
     /** Spans it could not place; a non-zero count is a finding, never a silent omission. */
     unplaceable: number;
+    /** #1206 — tabs the span limit added beyond the requested count (absent on a pre-#1206 run). */
+    added?: number;
+    /** #1206 step 2 — tight tabs placed inside the corner margin, named with their distances. */
+    tight?: readonly {
+      at: { x: number; y: number };
+      stretchMm: number;
+      cornerMm: number;
+      joins?: number;
+      sharpJoins?: number;
+    }[];
   }[];
 }
 
@@ -3844,20 +3856,50 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
   ];
   const tabbed = facts.cutouts.filter((c) => c.tabs.count > 0);
   if (tabbed.length > 0) {
-    const total = tabbed.reduce((sum, c) => sum + c.tabs.count, 0);
+    // #1206 — the count is what the CAM PLACED (`spans`), not what was requested: the span limit
+    // may add tabs, and an unplaceable one was never cut. The operator removes real tabs.
+    const total = tabbed.reduce((sum, c) => sum + c.spans, 0);
+    const added = tabbed.reduce((sum, c) => sum + (c.added ?? 0), 0);
     const detail = tabbed
-      .map(
-        (c) =>
-          `${c.name}: ${c.tabs.count} tab${c.tabs.count === 1 ? '' : 's'}, ` +
-          `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`,
-      )
+      .map((c) => {
+        const placedWords =
+          `${c.name}: ${c.spans} tab${c.spans === 1 ? '' : 's'}, ` +
+          `${fmtNum(c.tabs.widthMm)} mm wide and ${fmtNum(c.tabs.heightMm)} mm high`;
+        // #1206 (the analyst's condition 2) — a job that places fewer tabs than asked says so:
+        // how many were asked, how many are placed, and why. Never silent.
+        const askedWords =
+          c.spans < c.tabs.count
+            ? `${placedWords} (${c.tabs.count} asked, ${c.spans} placed — the remaining edges are too short for another tab clear of the corners)`
+            : placedWords;
+        // #1206 (step 2) — a tab placed INSIDE the corner margin to close a long stretch is named
+        // with its distances: the operator must know why it is where it is.
+        const tightWords = (c.tight ?? [])
+          .map((tab) => {
+            const joins = tab.joins ?? 0;
+            const sharp = tab.sharpJoins ?? 0;
+            return (
+              `a tight tab at X ${fmtNum(tab.at.x)} Y ${fmtNum(tab.at.y)} closes a ` +
+              `${fmtNum(tab.stretchMm)} mm stretch, ${fmtNum(tab.cornerMm)} mm from the nearest corner ` +
+              '(inside the usual corner margin — holding the part comes first)' +
+              (joins > 0 ? `; it spans ${joins} join${joins === 1 ? '' : 's'} of the outline` : '') +
+              (sharp > 0 ? `, ${sharp} of them sharper than the smooth-arc limit` : '')
+            );
+          })
+          .join('; ');
+        return tightWords === '' ? askedWords : `${askedWords}; ${tightWords}`;
+      })
       .join('; ');
+    const addedWords =
+      added === 0
+        ? ''
+        : ` The planner placed ${added} more than asked, so no stretch of the outline is left longer ` +
+          `than ${fmtNum(facts.maxSpanMm ?? 0)} mm.`;
     steps.push({
       // A DISTINCT step, not a sentence inside another: the program holds the part by these tabs,
       // and the operator must not free it before the file ends.
       text:
         `Only after the program ends, remove the cut-out ${count === 1 ? 'part' : 'parts'} and cut ` +
-        `the ${total === 1 ? 'holding tab' : 'holding tabs'} by hand — ${detail}. Cut each tab flush ` +
+        `the ${total === 1 ? 'holding tab' : 'holding tabs'} by hand — ${detail}.${addedWords} Cut each tab flush ` +
         'with the part and the blank; do not lever a part out by its tabs.',
       value: `${total} tab${total === 1 ? '' : 's'} to cut by hand`,
     });

@@ -552,6 +552,10 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("tabs.count", 4.0, "tabs", "chosen, not measured: holding tabs per cut-out. Four is provisional — the first part cut with tabs replaces it"),
     ("tabs.widthMm", 4.0, "mm", "chosen, not measured: holding-tab width in material. The cutter's centre path stops two tool radii further apart. Provisional until the first tabbed cut"),
     ("tabs.heightMm", 1.0, "mm", "chosen, not measured: material a holding tab leaves below the tab top. Provisional; on a 3.81 mm badge blank it leaves 1 mm under a 2.81 mm cut"),
+    // #1206 — the longest stretch of outline left between two holding tabs. The recommended value
+    // scales with the stock (80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between); the
+    // setting holds one number. Chosen, not measured.
+    ("tabs.maxSpanMm", 80.0, "mm", "chosen, not measured: the longest stretch of outline left between two holding tabs before the planner adds one; recommended 80 mm on stock 6 mm or thicker, 40 mm under 3 mm, linear between"),
     // ── #447 (begin) — the house depth margins (#345), out of browser storage. Chosen, not measured:
     // the numbers `depthBounds.ts`'s MARGIN_DEFAULTS shipped with, which a job copies or seeds from.
     ("margins.boundaryMarginMm", 0.2, "mm", "chosen, not measured: how far every floor stays clear of a plane it must not cross; 0.2 is one printed layer at the common layer height. While it is the seed, a blank that states its print uses its own layer height instead"),
@@ -849,6 +853,11 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tabs.heightMm" => Some(need(
             n.is_some_and(|v| (0.1..=20.0).contains(&v)),
             "0.1 to 20 mm",
+        )),
+        // #1206 — the same rule `defaultsClient.ts` restates for the span limit.
+        "tabs.maxSpanMm" => Some(need(
+            n.is_some_and(|v| (10.0..=400.0).contains(&v)),
+            "10 to 400 mm",
         )),
         "registration.tipDiameterMm" => Some(need(
             n.is_some_and(|v| (0.2..=10.0).contains(&v)),

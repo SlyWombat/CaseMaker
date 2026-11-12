@@ -56,7 +56,7 @@ export interface ProfileCut {
   /** The blank's thickness, mm. The tab top is `-(thickness - tabs.height)`. */
   thickness: number;
   /** The cut-out's tab spec. `count: 0` cuts the part free. */
-  tabs: { count: number; width: number; height: number };
+  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number };
 }
 
 /** A tab span on one contour, by work XY and by arc length along the contour. */
@@ -77,11 +77,80 @@ export interface ProfileSpan {
   points: [number, number][];
 }
 
+/**
+ * #1206 — the longest stretch of the contour's outline with NO tab on it, mm — the span limit's
+ * measure on the tabs AS PLACED (after any drop). A caller that states `tabs.maxSpanMm` refuses a
+ * job whose placed tabs leave a longer run unsupported; the check is on the placed spans, never on
+ * the plan before the drops.
+ */
+export function longestTabGap(spans: readonly ProfileSpan[], perimeter: number): number {
+  if (spans.length === 0) return perimeter;
+  let worst = 0;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    const next = spans[(i + 1) % spans.length]!;
+    let gap: number;
+    if (spans.length === 1) {
+      gap = perimeter - (span.endArc - span.startArc);
+    } else {
+      gap = (next.startArc - span.endArc) % perimeter;
+      if (gap < 0) gap += perimeter;
+    }
+    if (gap > worst) worst = gap;
+  }
+  return worst;
+}
+
 /** What tab placement did on one contour: spans placed and requested tabs it could not place. */
 export interface TabPlacement {
   spans: ProfileSpan[];
   /** Tabs requested but not placed: no edge (straight run or smooth arc) could hold one. */
   unplaceable: number;
+  /**
+   * #1206 — tabs placed BEYOND the requested count, because no stretch of the outline may be
+   * longer than `tabs.maxSpanMm`. The requested count is a minimum, not a cap: the planner divides
+   * the long edges evenly and the run sheet says how many it added.
+   */
+  added: number;
+  /**
+   * #1206 (the analyst's step 2) — TIGHT TABS: when a stretch between tabs is still longer than
+   * `tabs.maxSpanMm` after every margin-respecting place, ONE centred tab is placed on the longest
+   * edge inside that stretch even where the corner margin would have refused it, provided the
+   * tab's width fits centred. Holding the part comes before the margin; each entry names the tab's
+   * centre and the distances the sheet states.
+   */
+  tight: readonly TightTab[];
+}
+
+/** #1206 — one step-2 tab: where it sits and what it closes. */
+export interface TightTab {
+  /** The tab's centre in work XY. */
+  at: [number, number];
+  /** The unsupported stretch this tab closes, mm (measured before it was placed). */
+  stretchMm: number;
+  /** The centre's distance to the nearer end of its edge, mm — inside the usual corner margin. */
+  cornerMm: number;
+  /** How many joins of the outline the tab's span crosses (the sheet states the count). */
+  joins: number;
+  /** How many of those joins turn sharper than the placement's smooth-arc limit. */
+  sharpJoins: number;
+}
+
+/** #1206 — how the default placement is shaped; the release pass (#1073) states its own targets. */
+export interface TabPlacementOptions {
+  /**
+   * #1073 — EXPLICIT ARC POSITIONS for each tab's centre, instead of the placement rules. The flip
+   * release's bridges must satisfy the corner/bore rules, and equal spacing can put a short side's
+   * bridge too near a corner; the release computes each centre where the rules leave room and
+   * hands them in.
+   */
+  targets?: readonly number[];
+  /**
+   * #1206 — the longest stretch of outline allowed between two tabs, mm (the shop's
+   * `tabs.maxSpanMm`). When the requested count cannot meet it, tabs are added on the long edges'
+   * own even division. Absent: no span rule (the requested count is placed and that is all).
+   */
+  maxSpanMm?: number;
 }
 
 /** One cut's tab facts, for the run sheet and the `tab-unplaceable` finding. */
@@ -92,6 +161,10 @@ export interface ProfileTabReport {
   spans: number;
   /** Tabs requested but not placed. */
   unplaceable: number;
+  /** #1206 — tabs the span limit added beyond the request, across every contour. */
+  added: number;
+  /** #1206 step 2 — the tight tabs placed inside the corner margin, across every contour. */
+  tight: TightTab[];
 }
 
 export interface ProfileResult {
@@ -331,6 +404,13 @@ function segmentsOf(contour: readonly (readonly [number, number])[]): { segments
     const a = contour[i]! as [number, number];
     const b = contour[(i + 1) % contour.length]! as [number, number];
     const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    // #1206 — a Clipper offset emits coincident vertices (~1e-8 mm steps) where a ROUND join
+    // meets its neighbour. They carry no length and their direction is float noise, and a
+    // directionless step broke the collinear run between them — so an offset traced side (a #736
+    // straight run of 5 mm pieces) fragmented into 5–20 mm edges and the mid-side rule could not
+    // see the side. A micrometre is below every posted resolution (0.001 mm); they are not
+    // segments, and skipping them cannot move a coordinate the post writes.
+    if (!(length > 1e-6)) continue;
     segments.push({ a, b, length, start: at });
     at += length;
   }
@@ -368,8 +448,16 @@ const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
  * circle or a rounded corner is one arc edge). Sharp turns end an edge, so no span crosses a
  * corner. The intervals are in arc length from the contour's first vertex and may run past the
  * perimeter when the walk starts away from vertex 0; placement shifts them back onto the circle.
+ *
+ * #1206 — A SINGLE STRAIGHT SEGMENT CAN BE AN EDGE. A parametric shape's side is ONE segment
+ * between two tangent round joins (the offset of a rectangle is four single-segment sides joined
+ * by quarter arcs), and the "two collinear segments" rule left it inside an arc edge: the whole
+ * offset outline read as ONE smooth edge and every tab kept equal spacing. A lone segment this
+ * long is a side, not an arc chord: a single segment is a straight edge when it is at least
+ * `minStraightLengthMm` (the tab's centre-path span — shorter than that cannot hold a tab, and a
+ * polygonised circle's chords are far below it).
  */
-function edgesOf(segments: readonly Segment[], perimeter: number): Edge[] {
+function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLengthMm = 0): Edge[] {
   const n = segments.length;
   if (n === 0 || !(perimeter > 0)) return [];
   const dirs = segments.map((segment) => unitDirection(segment.a, segment.b));
@@ -406,15 +494,16 @@ function edgesOf(segments: readonly Segment[], perimeter: number): Edge[] {
   for (let k = 0; k < n; k++) {
     // Pieces end at the walk's end or at the joint AFTER walked segment k.
     if (k !== n - 1 && !sharp[(seq[k]! + 1) % n]!) continue;
-    // Inside a piece, maximal runs of at least TWO collinear segments are straight edges. Every
-    // other segment belongs to an arc edge, and consecutive ones share an arc edge — this is what
-    // turns a polygonised circle's many short segments into one placeable edge.
+    // Inside a piece, maximal runs of at least TWO collinear segments are straight edges — and so
+    // is a lone segment at least `minStraightLengthMm` long (#1206). Every other segment belongs
+    // to an arc edge, and consecutive ones share an arc edge — this is what turns a polygonised
+    // circle's many short segments into one placeable edge.
     const runOf = new Array<number>(n).fill(-1);
     let runId = 0;
     for (let p = pieceFrom; p <= k; ) {
       let q = p;
       while (q + 1 <= k && straight[seq[q + 1]!]!) q++;
-      if (q > p) {
+      if (q > p || segments[seq[p]!]!.length >= minStraightLengthMm - 1e-9) {
         for (let r = p; r <= q; r++) runOf[r] = runId;
         runId++;
       }
@@ -463,44 +552,75 @@ function arcRangesOverlap(a0: number, a1: number, b0: number, b1: number, perime
 }
 
 /**
- * Place `count` tabs at equal arc-length intervals around the contour (#736). Each span is
- * `width + 2 × toolRadius` long on the centre path and stays within ONE edge: a maximal straight
- * run (a traced side's short collinear segments are one edge) or a smooth arc between corners
- * (a polygonised circle is one edge). A span may cross the joints inside its edge — including
- * the small joints of an arc — so a round cut-out can hold tabs; it never crosses a corner.
+ * Place `count` tabs around the contour. Each span is `width + 2 × toolRadius` long on the centre
+ * path and stays within ONE edge: a maximal straight run (a traced side's short collinear segments
+ * are one edge) or a smooth arc between corners (a polygonised circle is one edge). A span may
+ * cross the joints inside its edge — including the small joints of an arc — so a round cut-out can
+ * hold tabs; it never crosses a corner.
  *
- * A requested tab with no edge long enough is not placed and is counted in `unplaceable`; the
- * CAM reports it as `tab-unplaceable` rather than silently cutting the part free. Overlapping
+ * #1206 — MID-SIDE, NOT EQUAL INTERVALS. Tabs go to the longest edges first, one at each edge's
+ * midpoint; on a rectangle the opposite sides are therefore paired (2 tabs = the two long sides,
+ * 4 = the midpoint of every side). An edge gets a second tab only once every edge has one, and
+ * then the edge is divided evenly (thirds, then quarters) — never pushed toward its ends. No tab's
+ * span comes within `max(2 × tab width, 10 % of the edge)` of a corner; an edge too short for that
+ * takes none. A ROUND outline (one edge around the whole contour) keeps equal spacing: there is no
+ * side to centre on.
+ *
+ * #1206 — THE SPAN LIMIT. With `tabs.maxSpanMm` stated, no stretch of the outline is left longer
+ * than it: the planner adds tabs on the same even division and reports how many in `added`. The
+ * user's count is a minimum, not a cap.
+ *
+ * A requested tab with no edge long enough is not placed and is counted in `unplaceable`; the CAM
+ * reports it as `tab-unplaceable` rather than silently cutting the part free. Overlapping
  * placements are also counted unplaceable: two tabs in one place are one tab, not two.
  *
- * #1073 — `targets` replaces the equal-interval targets with one arc position per tab (the
- * release pass computes its own, because its corner/bore clearances are not evenly spaced). The
- * edge choice, the span-on-one-edge rule and the overlap rule are the SAME as before.
+ * #1073 — `targets` replaces the placement rules with one arc position per tab (the release pass
+ * computes its own, because its corner/bore clearances are not evenly spaced). The edge choice,
+ * the span-on-one-edge rule and the overlap rule are the SAME as before.
  */
 export function placeTabs(
   contour: readonly (readonly [number, number])[],
   count: number,
   widthMm: number,
   toolRadius: number,
-  /**
-   * #1073 — EXPLICIT ARC POSITIONS for each tab's centre, instead of equal intervals. The flip
-   * release's bridges must satisfy the corner/bore rules, and equal spacing can put a short side's
-   * bridge too near a corner; the release computes each centre where the rules leave room and
-   * hands them in. `undefined` keeps the equal-arc default for every other caller unchanged.
-   */
-  targets?: readonly number[],
+  options?: TabPlacementOptions,
 ): TabPlacement {
   const { segments, perimeter } = segmentsOf(contour);
   const spanLength = widthMm + 2 * toolRadius;
   if (count <= 0 || perimeter <= 0 || !(spanLength > 0) || segments.length === 0) {
-    return { spans: [], unplaceable: count > 0 ? count : 0 };
+    return { spans: [], unplaceable: count > 0 ? count : 0, added: 0, tight: [] };
   }
-  const edges = edgesOf(segments, perimeter);
+  const targets = options?.targets;
+  // #1206's single-segment straight edge is for the DEFAULT placement: the release pass (#1073)
+  // hands explicit targets and keeps the edge structure it was tuned against.
+  const edges = edgesOf(segments, perimeter, targets === undefined ? spanLength : 0);
+  if (targets !== undefined) {
+    return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => targets[k] ?? ((k + 0.5) / count) * perimeter);
+  }
+  // A ROUND outline is one smooth edge around the whole contour: equal spacing is its own
+  // symmetry, and there is no side midpoint to prefer.
+  if (edges.length === 1 && edges[0]!.end - edges[0]!.start >= perimeter - 1e-6) {
+    return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => ((k + 0.5) / count) * perimeter);
+  }
+  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm);
+}
+
+/**
+ * The equal-interval (and #1073 explicit-target) placement: each tab at `targetOf(k)`, clamped
+ * into the edge nearest that target, never crossing an edge and never overlapping one placed.
+ */
+function placeOnEdges(
+  segments: readonly Segment[],
+  perimeter: number,
+  edges: readonly Edge[],
+  count: number,
+  spanLength: number,
+  targetOf: (k: number) => number,
+): TabPlacement {
   const chosen: { startArc: number; endArc: number; distance: number }[] = [];
   let unplaceable = 0;
   for (let k = 0; k < count; k++) {
-    // Mid-interval targets, so the first tab is not forced onto the contour's start vertex.
-    const target = targets?.[k] ?? ((k + 0.5) / count) * perimeter;
+    const target = targetOf(k);
     let best: { startArc: number; endArc: number; distance: number } | null = null;
     for (const edge of edges) {
       if (edge.end - edge.start < spanLength - 1e-9) continue;
@@ -533,6 +653,271 @@ export function placeTabs(
       };
     }),
     unplaceable,
+    added: 0,
+    tight: [],
+  };
+}
+
+/** #1206 — one placeable side: an edge, its corner margin, and how many evenly divided tabs fit. */
+interface SideEdge {
+  start: number;
+  end: number;
+  length: number;
+  /** The TAB's material comes no closer than this to either end: `max(2 × tab width, 10 % of the edge)`. */
+  margin: number;
+  /** Most tabs the edge can hold at its own even division. */
+  maxTabs: number;
+}
+
+/**
+ * #1206 — the edges that can hold a tab at all, LONGEST FIRST. `n` tabs sit at the edge's own
+ * `(i + 1)/(n + 1)` divisions; a tab is `width` of MATERIAL centred there, so its nearest kept
+ * edge is `L/(n + 1) − width/2` from a corner: `n` tabs fit while
+ * `L/(n + 1) ≥ margin + width/2`. (The cutter's centre-path span reaches a radius further, but
+ * that part is the cutter lifted over the tab — it is air, not the corner-cantilever risk the
+ * margin protects against.)
+ *
+ * THE MARGIN IS CAPPED SO IT CAN NEVER EMPTY AN EDGE THAT FITS A TAB. The rule's own sentence —
+ * "an edge too short for that takes none" — is about an edge too short to hold a tab at all. A
+ * real relief perimeter is made of 15–25 mm edges; `2 × tab width` (12 mm for the shop's 6 mm
+ * tabs) at each end would leave no room on every one of them and the part would be cut free with
+ * no tabs and no finding (the model plan's contour reports none). Capped at `(L − width)/2`, an
+ * edge that is at least one centre-path span long always keeps its centred tab, as far from the
+ * corners as the edge allows; long edges keep the full margin.
+ */
+function sideEdges(edges: readonly Edge[], widthMm: number, spanLength: number): SideEdge[] {
+  const out: SideEdge[] = [];
+  for (const edge of edges) {
+    const length = edge.end - edge.start;
+    if (!(length > 0)) continue;
+    const margin = Math.min(Math.max(2 * widthMm, 0.1 * length), (length - widthMm) / 2);
+    // `spanLength` still gates the edge: a span longer than the edge cannot sit on it at all.
+    if (length < spanLength - 1e-9) continue;
+    const maxTabs = Math.floor(length / (margin + widthMm / 2) + 1e-9) - 1;
+    if (maxTabs >= 1) out.push({ start: edge.start, end: edge.end, length, margin, maxTabs });
+  }
+  return out.sort((a, b) => b.length - a.length || a.start - b.start);
+}
+
+/** The spans an allocation makes, in the edges' own lifted arc space, sorted along the contour. */
+function spansOfSides(
+  sides: readonly SideEdge[],
+  counts: ReadonlyMap<SideEdge, number>,
+  spanLength: number,
+): { startArc: number; endArc: number }[] {
+  const out: { startArc: number; endArc: number }[] = [];
+  for (const side of sides) {
+    const n = counts.get(side) ?? 0;
+    for (let i = 1; i <= n; i++) {
+      const centre = side.start + (side.length * i) / (n + 1);
+      out.push({ startArc: centre - spanLength / 2, endArc: centre + spanLength / 2 });
+    }
+  }
+  return out.sort((a, b) => a.startArc - b.startArc);
+}
+
+/** The arc distance from each span's end to the next span's start, mm (the gap the limit bounds). */
+function spanGaps(spans: readonly { startArc: number; endArc: number }[], perimeter: number): number[] {
+  const gaps: number[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    const next = spans[(i + 1) % spans.length]!;
+    if (spans.length === 1) {
+      gaps.push(perimeter - (span.endArc - span.startArc));
+      continue;
+    }
+    let gap = (next.startArc - span.endArc) % perimeter;
+    if (gap < 0) gap += perimeter;
+    gaps.push(gap);
+  }
+  return gaps;
+}
+
+/** The circular distance from an arc position to an edge's interval (0 when it lies on the edge). */
+function arcDistanceToSide(side: SideEdge, at: number, perimeter: number): number {
+  let off = (at - side.start) % perimeter;
+  if (off < 0) off += perimeter;
+  const lifted = side.start + off;
+  if (lifted <= side.end + 1e-9) return 0;
+  return Math.min(lifted - side.end, perimeter - off);
+}
+
+/**
+ * #1206 — close the widest gap. One tab is added to the nearest edge that still has capacity, on
+ * that edge's own even division; adding a tab re-divides the edge, so every round re-reads the
+ * gaps. Stops when no gap is wider than the limit or no edge can take another tab.
+ */
+function meetSpanLimit(
+  sides: readonly SideEdge[],
+  counts: Map<SideEdge, number>,
+  spanLength: number,
+  perimeter: number,
+  maxSpanMm: number,
+): void {
+  for (let guard = 0; guard < 4096; guard++) {
+    const spans = spansOfSides(sides, counts, spanLength);
+    if (spans.length === 0) return;
+    const gaps = spanGaps(spans, perimeter);
+    let worst = 0;
+    for (let i = 1; i < gaps.length; i++) if (gaps[i]! > gaps[worst]!) worst = i;
+    if (gaps[worst]! <= maxSpanMm + 1e-9) return;
+    const from = spans[worst]!;
+    const at = (((from.endArc + gaps[worst]! / 2) % perimeter) + perimeter) % perimeter;
+    let pick: SideEdge | null = null;
+    let pickDistance = Infinity;
+    for (const side of sides) {
+      if (counts.get(side)! >= side.maxTabs) continue;
+      const distance = arcDistanceToSide(side, at, perimeter);
+      if (distance < pickDistance - 1e-12) {
+        pick = side;
+        pickDistance = distance;
+      }
+    }
+    if (pick === null) return;
+    counts.set(pick, counts.get(pick)! + 1);
+  }
+}
+
+/**
+ * #1206 — mid-side placement. Allocation: every usable edge gets one tab before any gets a second
+ * (longest first), then the remainder is dealt in further rounds, so an edge that holds two tabs is
+ * divided into thirds, three into quarters. The span limit then adds tabs where the outline is
+ * left unsupported.
+ */
+function placeMidSide(
+  segments: readonly Segment[],
+  perimeter: number,
+  edges: readonly Edge[],
+  count: number,
+  widthMm: number,
+  spanLength: number,
+  maxSpanMm: number | undefined,
+): TabPlacement {
+  const sides = sideEdges(edges, widthMm, spanLength);
+  const counts = new Map<SideEdge, number>(sides.map((side) => [side, 0] as const));
+  let remaining = count;
+  let progress = sides.length > 0;
+  while (remaining > 0 && progress) {
+    progress = false;
+    for (const side of sides) {
+      if (remaining === 0) break;
+      const n = counts.get(side)!;
+      if (n < side.maxTabs) {
+        counts.set(side, n + 1);
+        remaining -= 1;
+        progress = true;
+      }
+    }
+  }
+  if (maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0) {
+    meetSpanLimit(sides, counts, spanLength, perimeter, maxSpanMm);
+  }
+  const spans: { startArc: number; endArc: number }[] = [];
+  for (const span of spansOfSides(sides, counts, spanLength)) {
+    const startArc = ((span.startArc % perimeter) + perimeter) % perimeter;
+    const endArc = startArc + spanLength;
+    // A span beside the contour's seam is compared here, so a pathological contour still answers
+    // one tab, not two.
+    if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
+    spans.push({ startArc, endArc });
+  }
+  // #1206 (the analyst's step 2) — HOLDING COMES BEFORE THE MARGIN. A stretch still longer than
+  // the limit after every margin-respecting place gets ONE centred tab on the longest edge inside
+  // it, even where the corner margin would have refused it, provided the tab's WIDTH fits centred.
+  const tight: TightTab[] = [];
+  if (maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0) {
+    for (let guard = 0; guard < 512; guard++) {
+      spans.sort((a, b) => a.startArc - b.startArc);
+      if (spans.length === 0) break;
+      let worst = 0;
+      let worstIndex = -1;
+      for (let i = 0; i < spans.length; i++) {
+        const span = spans[i]!;
+        const next = spans[(i + 1) % spans.length]!;
+        let gap: number;
+        if (spans.length === 1) {
+          gap = perimeter - spanLength;
+        } else {
+          let gapEnd = next.startArc;
+          if (next.startArc < span.endArc) gapEnd += perimeter;
+          gap = gapEnd - span.endArc;
+        }
+        if (gap > worst) {
+          worst = gap;
+          worstIndex = i;
+        }
+      }
+      if (worstIndex < 0 || worst <= maxSpanMm + 1e-9) break;
+      const span = spans[worstIndex]!;
+      const next = spans[(worstIndex + 1) % spans.length]!;
+      const from = span.endArc;
+      let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
+      if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
+      // The longest edge that lies inside this stretch; the TAB'S WIDTH must fit centred within
+      // the STRETCH (the material may cross the short edges' corners — that is the price of
+      // holding), and the tab must not overlap one already placed.
+      let pick: { start: number; end: number } | null = null;
+      for (const edge of edges) {
+        const length = edge.end - edge.start;
+        if (!(length > 0)) continue;
+        const candStart = edge.start + Math.round((from - edge.start) / perimeter) * perimeter;
+        const candEnd = candStart + length;
+        if (candStart < from - 1e-9 || candEnd > to + 1e-9) continue;
+        const centre = candStart + length / 2;
+        if (centre - widthMm / 2 < from - 1e-9 || centre + widthMm / 2 > to + 1e-9) continue;
+        const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+        const endArc = startArc + spanLength;
+        if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
+        if (pick === null || length > pick.end - pick.start) pick = { start: candStart, end: candEnd };
+      }
+      if (pick === null) break;
+      const centre = pick.start + (pick.end - pick.start) / 2;
+      const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+      const endArc = startArc + spanLength;
+      if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) break;
+      spans.push({ startArc, endArc });
+      // The joins the tab's span crosses, and how many of them turn sharper than the placement's
+      // own smooth-arc limit (TAB_CORNER_RAD — a corner, not an arc joint).
+      const spanStart = centre - spanLength / 2;
+      let joins = 0;
+      let sharpJoins = 0;
+      for (let k = 0; k < segments.length; k++) {
+        let d = (segments[k]!.start - spanStart) % perimeter;
+        if (d < 0) d += perimeter;
+        if (d <= 1e-9 || d >= spanLength - 1e-9) continue;
+        joins += 1;
+        const u = segments[(k - 1 + segments.length) % segments.length]!;
+        const v = segments[k]!;
+        const ud = unitDirection(u.a, u.b);
+        const vd = unitDirection(v.a, v.b);
+        if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > TAB_CORNER_RAD) {
+          sharpJoins += 1;
+        }
+      }
+      tight.push({
+        at: pointAt(segments, perimeter, centre),
+        stretchMm: worst,
+        cornerMm: Math.min(centre - pick.start, pick.end - centre),
+        joins,
+        sharpJoins,
+      });
+    }
+  }
+  spans.sort((a, b) => a.startArc - b.startArc);
+  return {
+    spans: spans.map((span) => {
+      const points = runAlong(segments, perimeter, span.startArc, spanLength);
+      return {
+        startArc: span.startArc,
+        endArc: span.endArc,
+        start: points[0]!,
+        end: points[points.length - 1]!,
+        points,
+      };
+    }),
+    unplaceable: Math.max(0, count - spans.length),
+    added: Math.max(0, spans.length - count),
+    tight,
   };
 }
 
@@ -665,13 +1050,19 @@ export function generateProfile(
     const moves: CamMove[] = [];
     let placed = 0;
     let unplaceable = 0;
+    let added = 0;
+    const tight: TightTab[] = [];
     for (const z of passes) {
       for (const contour of cut.path) {
-        const placement = placeTabs(contour, cut.tabs.count, cut.tabs.width, toolRadius);
+        const placement = placeTabs(contour, cut.tabs.count, cut.tabs.width, toolRadius, {
+          ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
+        });
         // Count once per cut, not once per pass: the report is about the tabs, not the Z levels.
         if (z === passes[0]) {
           placed += placement.spans.length;
           unplaceable += placement.unplaceable;
+          added += placement.added;
+          tight.push(...placement.tight);
         }
         const one = contourMoves(contour, z, tabTopZ, placement, params);
         moves.push(...one.moves);
@@ -691,7 +1082,7 @@ export function generateProfile(
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
       passKind: 'through',
     });
-    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable });
+    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable, added, tight });
   }
 
   return {

@@ -53,6 +53,8 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'setups.reregisterMinutes',
   'stock.defaultPlateThicknessMm',
   'tape.holdRatio',
+  // #1206 — the freeing contour's unsupported-span limit (read by planModelCam from its input).
+  'tabs.maxSpanMm',
   'toolChange.seconds',
   'vise.defaultStockProudMm',
   'vise.minCoverageFraction',

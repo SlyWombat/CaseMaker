@@ -158,6 +158,7 @@ import {
   enclosedPath,
   generateProfile,
   kerfPolygons,
+  longestTabGap,
   placeTabs,
   profilePath,
   signedArea,
@@ -673,6 +674,8 @@ export interface ThroughCutFacts {
   breakthroughMm: number;
   /** The under-board's thickness, mm, or null when the job has none (refused before CAM). */
   boardThicknessMm: number | null;
+  /** #1206 — the shop's `tabs.maxSpanMm` the placement ran with, mm. */
+  maxSpanMm: number;
   cutouts: {
     id: string;
     name: string;
@@ -681,6 +684,17 @@ export interface ThroughCutFacts {
     spans: number;
     /** Tabs asked for but not placed; 0 on a run that reached CAM. */
     unplaceable: number;
+    /** #1206 — tabs the span limit added beyond the request. */
+    added: number;
+    /** #1206 step 2 — tight tabs placed inside the corner margin, named on the sheet. */
+    tight?: {
+      at: { x: number; y: number };
+      stretchMm: number;
+      cornerMm: number;
+      /** Joins of the outline the tab's span crosses, and how many are sharper than the arc limit. */
+      joins?: number;
+      sharpJoins?: number;
+    }[];
   }[];
 }
 
@@ -2398,6 +2412,9 @@ export function engraveRegions(
   // offset the region CAM uses, so the path CAM cuts, the path the verifier's mask tests and the
   // region the oracle expects are one geometry rather than three derivations.
   const throughDepth = plan.stock.thickness + job.breakthrough;
+  // #1206 — the shop's span limit: no stretch of a freeing contour is left longer than this
+  // without a tab. Read once, so the mask, the cut and the sheet's words use one number.
+  const tabMaxSpanMm = readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value;
   const profiles: ProfileCut[] = [];
   const cutoutMask: MaskCutout[] = [];
   const cutoutCuts: CutRegion[] = [];
@@ -2479,10 +2496,41 @@ export function engraveRegions(
       let placed = 0;
       let unplaceable = 0;
       for (const contour of path) {
-        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius);
+        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm });
         spans.push(placement.spans);
         placed += placement.spans.length;
         unplaceable += placement.unplaceable;
+      }
+      // #1206 (the analyst's condition 3) — THE SPAN LIMIT ON THE TABS AS PLACED. A drop that
+      // leaves a stretch of the cut path longer than the shop's limit is a REFUSAL with its
+      // reason, not a quieter program.
+      if (c.tabs.count > 0) {
+        for (let i = 0; i < path.length; i++) {
+          const spansHere = spans[i]!;
+          if (spansHere.length === 0) continue;
+          const ring = path[i]!;
+          let perimeter = 0;
+          for (let k = 0; k < ring.length; k++) {
+            const a = ring[k]!;
+            const b = ring[(k + 1) % ring.length]!;
+            perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+          }
+          const gap = longestTabGap(spansHere, perimeter);
+          if (gap > tabMaxSpanMm + 1e-9) {
+            tabFindings.push({
+              severity: 'error',
+              code: 'tab-unplaceable',
+              labelId: c.id,
+              message:
+                `Cut-out "${c.name}" asks for ${c.tabs.count} holding tabs ${c.tabs.width} mm wide: ` +
+                `${placed} are placed, and the stretch they leave without one is ${mm3(gap)} mm — past ` +
+                `the shop's ${mm3(tabMaxSpanMm)} mm span limit. The edges' corners leave no room for ` +
+                'the tabs that stretch asks for. Use more tabs of a smaller width, a larger outline, ' +
+                'or a holding method that suits a freed part.',
+            });
+            break;
+          }
+        }
       }
       profiles.push({
         id: c.id,
@@ -2490,7 +2538,7 @@ export function engraveRegions(
         path,
         depth: c.depth,
         thickness: c.thickness,
-        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height },
+        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm },
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
@@ -8669,6 +8717,7 @@ async function generateOneProgram(
         cutoutFacts = {
           breakthroughMm: job.breakthrough,
           boardThicknessMm: job.sacrificial.under?.thickness ?? null,
+          maxSpanMm: readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value,
           cutouts: profileResult.tabs.map((report) => {
             const cut = byId.get(report.id);
             return {
@@ -8681,6 +8730,18 @@ async function generateOneProgram(
               },
               spans: report.spans,
               unplaceable: report.unplaceable,
+              added: report.added,
+              ...(report.tight.length === 0
+                ? {}
+                : {
+                    tight: report.tight.map((tab) => ({
+                      at: { x: tab.at[0], y: tab.at[1] },
+                      stretchMm: tab.stretchMm,
+                      cornerMm: tab.cornerMm,
+                      joins: tab.joins,
+                      sharpJoins: tab.sharpJoins,
+                    })),
+                  }),
             };
           }),
         };

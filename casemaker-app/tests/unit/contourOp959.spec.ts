@@ -126,7 +126,9 @@ describe('#1160 the release tab cannot rise above the stock top', () => {
   const shallow = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' });
 
   it('a 1 mm tab on a 0.81 mm part is clamped: no feed is posted above the stock top', () => {
-    const c = contourOf({ outline: rect(20, 10), area: 200, zTo: -0.81, frees: true, shoulders: [] });
+    // #1206 — a 60 x 40 part, so the 6 mm tabs have the corner margin the mid-side rule asks for
+    // (on the old 20 x 10 fixture, max(2 x 6, 10 %) = 12 mm a side leaves a 20 mm edge nothing).
+    const c = contourOf({ outline: rect(60, 40), area: 2400, zTo: -0.81, frees: true, shoulders: [] });
     const out = contour({
       cutter: shallow, contour: c, region: region(),
       depthMm: 0.81, tabs: { count: 4, width: 6, height: 1 },
@@ -152,5 +154,95 @@ describe('#1160 the release tab cannot rise above the stock top', () => {
     const moves = out.ir.operations[0]!.moves;
     expect(moves.filter((m) => m.kind === 'feed' && m.z > 1e-9)).toEqual([]);
     expect(out.throughKerf!.tabHeight).toBeCloseTo(0.5, 9);
+  });
+});
+
+// #1206 (analyst's conditions 2 and 3) — a job that places fewer tabs than asked SAYS so, and a
+// drop that leaves a stretch of outline longer than the shop's span limit is a REFUSAL.
+describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
+  /** The path is the outline itself: these cases need shapes a bbox rectangle cannot express. */
+  const identityOffset: OffsetFn = (region) => region.map((c) => [...c]);
+
+  it('says how many tabs were asked for and placed when some do not fit', () => {
+    // A 27 x 10 rectangle with 6 mm tabs and the ⌀6 cutter: the 10 mm sides are shorter than the
+    // 12 mm span, and each 27 mm side takes one tab — two placed, two more asked for.
+    const c = contourOf({ outline: rect(27, 10), area: 270, zTo: -6, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: flat6,
+      contour: c,
+      region: region(),
+      depthMm: 6,
+      tabs: { count: 4, width: 6, height: 1 },
+      offset: identityOffset,
+      params,
+      rapid,
+    });
+    const notes = (out.notes ?? []).join('\n');
+    expect(notes).toContain('4 asked');
+    expect(notes).toContain('2 placed');
+    expect(notes).toContain('too short for another tab clear of the corners');
+  });
+
+  it('steps down to a tight centred tab and names it with its distances', () => {
+    // 7 mm teeth: too short for the corner margin, wide enough for the 6 mm tab's width — step 2
+    // places tight tabs until the stretches are within the 80 mm limit, and the note names each
+    // with the stretch it closes and its distance from the edge's end.
+    const outline: [number, number][] = [
+      [0, 0],
+      [27, 0],
+      [27, 15],
+    ];
+    for (let k = 1; k <= 18; k++) outline.push([27 - 2 * k, k % 2 === 1 ? 21.7 : 15]);
+    outline.push([-3, 12], [0, 9], [-3, 6], [0, 3], [0, 0]);
+    const area = outline.reduce((sum, p, i) => {
+      const q = outline[(i + 1) % outline.length]!;
+      return sum + p[0] * q[1] - q[0] * p[1];
+    }, 0) / 2;
+    const c = contourOf({ outline: [outline], area, zTo: -6, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: flat6,
+      contour: c,
+      region: region(),
+      depthMm: 6,
+      tabs: { count: 4, width: 6, height: 1, maxSpanMm: 80 },
+      offset: identityOffset,
+      params,
+      rapid,
+    });
+    const notes = (out.notes ?? []).join('\n');
+    expect(notes).toMatch(/tight tab/i);
+    expect(notes).toMatch(/stretch/i);
+    expect(notes).toMatch(/mm from the nearest corner/i);
+    expect(notes).toMatch(/joins? of the outline/i);
+  });
+
+  it('refuses only when no edge can take a tight tab either', () => {
+    // A 64-gon circle is ONE smooth edge (a round outline keeps equal spacing); one tab leaves a
+    // ~66 mm stretch, and step 2 has no edge inside it to centre another tab on — so a 40 mm
+    // limit is the last-resort refusal.
+    const ROUND = 12;
+    const outline: [number, number][] = Array.from({ length: 64 }, (_, i) => [
+      ROUND * Math.cos((2 * Math.PI * i) / 64),
+      ROUND * Math.sin((2 * Math.PI * i) / 64),
+    ]);
+    const c = contourOf({
+      outline: [outline],
+      area: Math.PI * ROUND * ROUND,
+      zTo: -6,
+      frees: true,
+      shoulders: [],
+    });
+    expect(() =>
+      contour({
+        cutter: flat6,
+        contour: c,
+        region: region(),
+        depthMm: 6,
+        tabs: { count: 1, width: 6, height: 1, maxSpanMm: 40 },
+        offset: identityOffset,
+        params,
+        rapid,
+      }),
+    ).toThrow(/stretch|span limit/i);
   });
 });

@@ -20,7 +20,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
-import { generateProfile, placeTabs, profilePath, type ProfileCut } from '@/engine/cnc/cam/profile';
+import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabPlacement } from '@/engine/cnc/cam/profile';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import { cutterKeyOf } from '../sequence';
 import type { FeatureTree } from '../features';
@@ -34,8 +34,8 @@ export interface ContourOpOptions {
   depthMm: number;
   /** The blank's own thickness, mm (for the tab top: `-(thickness - tabs.height)`); absent → `depthMm` (no separate skin). */
   thicknessMm?: number;
-  /** `{count: 0}` cuts the part free with no tabs. */
-  tabs: { count: number; width: number; height: number };
+  /** `{count: 0}` cuts the part free with no tabs. `maxSpanMm` is the shop's `tabs.maxSpanMm` (#1206). */
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number };
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
@@ -142,15 +142,75 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   // SAME `placeTabs` call `generateProfile` makes one level down (same path, same count, width and
   // radius — a pure function), so the mask protects exactly the tabs the file keeps; nothing is
   // re-derived from moves.
+  const placements: TabPlacement[] =
+    cut.tabs.count > 0
+      ? path.map((ring) =>
+          placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
+            ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
+          }),
+        )
+      : [];
+
+  // #1206 (the analyst's condition 3) — THE SPAN LIMIT IS CHECKED ON THE TABS AS PLACED. A drop
+  // that leaves a stretch of outline longer than the shop's limit is a REFUSAL with its reason,
+  // never a quieter program. (The limit is what `placeTabs` tried to meet; it can fail when the
+  // edges' corner margins leave no room for the tabs the gaps ask for.)
+  if (cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
+    path.forEach((ring, i) => {
+      const spans = placements[i]!.spans;
+      if (spans.length === 0) return;
+      let perimeter = 0;
+      for (let k = 0; k < ring.length; k++) {
+        const a = ring[k]!;
+        const b = ring[(k + 1) % ring.length]!;
+        perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      }
+      const gap = longestTabGap(spans, perimeter);
+      if (gap > cut.tabs.maxSpanMm! + 1e-9) {
+        throw new Error(
+          `the freeing contour's tabs leave a ${gap.toFixed(1)} mm stretch of outline without one, ` +
+            `past the shop's ${cut.tabs.maxSpanMm} mm span limit — the edges' corners leave no room ` +
+            'for the tabs that stretch asks for',
+        );
+      }
+    });
+  }
+
   const throughKerf =
     opts.through === true
       ? {
           path,
-          spans: path.map((ring) => placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius).spans),
+          spans: placements.map((placement) => placement.spans),
           toolRadius,
           tabHeight: cut.tabs.height,
         }
       : undefined;
+
+  // #1206 (the analyst's condition 2) — A JOB THAT PLACES FEWER TABS THAN ASKED SAYS SO. The note
+  // travels with the plan's notes and the sheet prints every one; a count the operator asked for
+  // and did not get is never silent.
+  const asked = cut.tabs.count * path.length;
+  const placed = placements.reduce((sum, placement) => sum + placement.spans.length, 0);
+  const tabNotes =
+    cut.tabs.count > 0 && placed < asked
+      ? [
+          `release tabs: ${asked} asked, ${placed} placed — the remaining edges are too short for another tab clear of the corners`,
+        ]
+      : [];
+  // #1206 (the analyst's step 2) — A TIGHT TAB IS NAMED, with its distances: it sits inside the
+  // corner margin on purpose, closing a stretch the margin-respecting tabs could not.
+  const tight = placements.flatMap((placement) => placement.tight);
+  for (const tab of tight) {
+    const mm = (v: number): string => String(Number(v.toFixed(1)));
+    tabNotes.push(
+      `a tight tab at X ${mm(tab.at[0])} Y ${mm(tab.at[1])} closes a ${mm(tab.stretchMm)} mm stretch, ` +
+        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)` +
+        `; it spans ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline` +
+        (tab.sharpJoins > 0
+          ? `, ${tab.sharpJoins} of them sharper than the smooth-arc limit`
+          : ''),
+    );
+  }
 
   const clampedTabHeightMm =
     tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
@@ -162,6 +222,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+    ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
 }
 
