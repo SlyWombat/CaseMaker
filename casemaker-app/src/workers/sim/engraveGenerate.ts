@@ -286,6 +286,12 @@ export type EngraveStage = 'findings' | 'feeds' | 'cam' | 'post' | 'verify' | 'd
  * `engravePreviewStore` — the preview needs only the ratio; the run needs both.
  */
 export interface EngraveShopOpts {
+  /**
+   * #1237 — WHERE THE DEFAULTS CAME FROM (a location file or a label), or null when this run
+   * planned with no location. It rides into ModelPlanInput so the planner can refuse a location
+   * given without defaults; the app's own realm passes null.
+   */
+  defaultsFrom?: string | null;
   lostDetailWarnRatio?: number | null;
   /**
    * #1111 — THE REACH-MARGIN GATE, mm (`reach.marginMm`, recommended 1.0): a cutter's own flute must
@@ -5493,6 +5499,10 @@ export async function buildModelPlanInputForGoal(
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     cutters,
+    // #1237 — THE PLANNER'S SEVEN SETTINGS RIDE THE INPUT: the map the shop carries, and where it
+    // came from (null for a caller with no location; `defaults: null` is a location with none).
+    defaults: shop.defaults ?? null,
+    defaultsFrom: shop.defaultsFrom ?? null,
     // #1111 — the shop's reach-margin gate, for every pick among equals in the plan.
     ...(shop.reachMarginMm === undefined || shop.reachMarginMm === null ? {} : { reachMarginMm: shop.reachMarginMm }),
     ...(houseNote === undefined ? {} : { houseNote }),

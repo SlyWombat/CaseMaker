@@ -19,6 +19,7 @@
 import { parentPort, workerData } from 'node:worker_threads';
 
 import { setRegistry } from '@/engine/cnc/toolRegistry';
+import { installShopDefaults } from '@/platform/defaultsClient';
 import { seedBundledFontsFromDisk } from '@/platform/headless/bootstrap';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import { evaluatePlan } from '@/workers/sim/planEvaluate';
@@ -42,6 +43,11 @@ export type PickWorkerReply =
   | { id: number; ok: false; error: string };
 
 const inputs = workerData as PickWorkerInputs;
+// #1237 — THE SHOP'S SETTINGS, IN THIS REALM TOO: a full evaluation generates the cut's own
+// program, and the planner reads its shop settings through the live source. The pick's shop
+// carries the location's defaults (structured-cloned); without this install the worker would
+// plan with the recommendations while the parent planned with the shop's values.
+installShopDefaults(() => inputs.shop?.defaults ?? null);
 const port = parentPort;
 if (port === null) throw new Error('pickPoolWorker must run as a worker thread');
 
