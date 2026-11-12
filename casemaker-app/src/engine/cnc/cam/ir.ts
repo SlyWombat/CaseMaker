@@ -75,6 +75,15 @@ export interface CamOperation {
   /** Positive mm. */
   depth: number;
   /**
+   * #1235 — HOW FAR OUTSIDE THE CUTTABLE FOOTPRINT THIS OPERATION MEANS TO CUT, mm. The verifier's
+   * `cut-outside-footprint` limit is `toolRadius + this + one posted step`; an operation that
+   * states none gets 0. A contour/profile states `PROFILE_OFFSET_GUARD_MM` (the outward guard its
+   * centre path carries); an external thread states `thread.pilotTipClearanceMm` (its approach
+   * radius beside the boss). Set from the SAME constant the op placed its moves with — never a
+   * second, guessed number.
+   */
+  outsideAllowanceMm?: number;
+  /**
    * #250 — `rough` or `finish` when the item was split into a roughing and a finishing pass;
    * absent on every operation that is not part of such a pair (see {@link CamPassKind}).
    */

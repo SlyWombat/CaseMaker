@@ -17,10 +17,11 @@
  * than a silent pass from an older report.
  */
 
-import { HOP_Z } from '@/engine/cnc/cam/ir';
+import { HOP_Z, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { buildThroughMask } from '@/engine/cnc/engrave/throughMask';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { outsideAllowancesOf, setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
 import { verifyProgram, type VerifyFinding, type VerifyReport } from '@/engine/cnc/verify';
 import type { Setup } from '@/engine/cnc/setup';
@@ -68,7 +69,7 @@ function mountCtx(mount: MountObstacles | null, clearanceMm: number): {
 }
 
 /** The IRs in posting order — the plan's per-setup program lists, flattened as the worker posted them. */
-function planIrs(generated: EngraveGenerated): readonly { hopZ: number }[] {
+function planIrs(generated: EngraveGenerated): readonly ToolpathIR[] {
   return generated.plan?.perSetup.flatMap((setup) => setup.programs) ?? [];
 }
 
@@ -105,11 +106,18 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       unresolved.push({ programIndex: index, toolKey: program.toolKey });
       return program;
     }
+    // #1235 (second ruling) — the stored plan's own op records state the outside allowances; a
+    // stored plan that predates the field states none and every move gets 0.
+    const outsideAllowancesMm = irs[index] === undefined ? undefined : outsideAllowancesOf(irs[index]!);
     const ctx = {
       ...baseCtx,
       tool,
       depthLimit: depthLimits[program.setupIndex - 1] ?? jobDepthLimit(job),
       minRapidZ: irs[index]?.hopZ ?? HOP_Z,
+      // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
+      // above describes (#1082): a flipped setup's stated box, else the job's blank.
+      footprint: setupFootprint(job, program.setupIndex - 1),
+      ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
     };
     const verify = verifyProgram(program.nc, ctx);
     for (const finding of verify.findings) {

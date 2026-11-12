@@ -140,6 +140,7 @@ import { withPeriod } from '@/store/engraveRunGate';
 import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
+import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
 import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
@@ -3430,6 +3431,8 @@ function frameProgram(
   limit: DepthLimit,
   mount: MountObstacles | null | undefined,
   clearanceMm: number,
+  /** #1235 stage 2 — the job's cuttable footprint, stated for the trace's own verifier report. */
+  footprint: readonly FootprintShape[],
   /** #727 F2 — the fitted top's highest lift: the frame trace rides above the lifted clamps too. */
   topLiftMm = 0,
 ): { nc: string; verify: VerifyReport; z: Mm } | { error: string } {
@@ -3481,7 +3484,7 @@ function frameProgram(
   };
   const posted = postFor(machine)(frameIr, ctx, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, dialect: postKey(machine), depthLimit: limit, minRapidZ: frameIr.hopZ, ...mountCtx(mount, clearanceMm, topLiftMm) });
+  const verify = verifyProgram(posted.text, { setup, machine, tool, dialect: postKey(machine), depthLimit: limit, minRapidZ: frameIr.hopZ, footprint, ...mountCtx(mount, clearanceMm, topLiftMm) });
   return { nc: posted.text, verify, z };
 }
 
@@ -3610,6 +3613,9 @@ function facingProgram(
       dialect: postKey(machine),
       depthLimit: limit,
       minRapidZ: ir.hopZ,
+      // #1235 stage 2 — the same job footprint as the engraving file; a facing pass may overrun
+      // the edge by the cutter's radius (the limit's own allowance), never further.
+      footprint: jobFootprint(job),
       ...mountCtx(mount, job.jawClearance, topLiftMm),
     });
     const refused = verify.findings.filter((f) => f.severity === 'error');
@@ -5844,6 +5850,9 @@ export async function postModelPlan(
       if (!posted.ok) {
         return fail('post', `cam/model (#966): ${programLabel}: ${posted.errors.join('; ')}`, null, output);
       }
+      // #1235 (second ruling) — each op's stated outside allowance, by toolpath number, so the
+      // contour's guard covers the contour's moves and not the rest of the program.
+      const outsideAllowancesMm = outsideAllowancesOf(ir);
       const verify = verifyProgram(posted.text, {
         setup,
         machine: mill,
@@ -5851,6 +5860,11 @@ export async function postModelPlan(
         dialect: postKey(mill),
         depthLimit: depthLimits[plan.setupIndex] ?? limit,
         minRapidZ: ir.hopZ,
+        // #1235 stage 2 — THIS SETUP's footprint in its own frame, from the same stock the depth
+        // limit above is built from. An operator item is not the model engine's case: no
+        // `itemProgram`.
+        footprint: setupFootprint(job, plan.setupIndex),
+        ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
         ...mountCtx(shop.mount, job.jawClearance),
       });
       const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
@@ -9004,6 +9018,7 @@ async function generateOneProgram(
     // #240 slice 2 — a rotary file is verified in its OWN frame: the frame's refusals (the axis,
     // the jaws' and tailstock's bands, a turn in the cut, the module's envelope) replace the flat
     // depth/structure rules, and the mount's obstacles do not apply (a chuck is not a bracket).
+    const outsideAllowancesMm = outsideAllowancesOf(ir);
     const verify = verifyProgram(nc, {
       setup,
       machine: mill,
@@ -9011,6 +9026,14 @@ async function generateOneProgram(
       dialect: postKey(mill),
       depthLimit: limit,
       minRapidZ,
+      // #1235 stage 2 — the footprint rule's own facts: this sub-job's blank (its rectangle, or
+      // the circle of round stock) plus every sacrificial piece, and whether any of its items was
+      // drawn past the blank's inset (the `item-outside-stock` warning `engraveRegions` measured
+      // above — such a program keeps a warning, not an error).
+      footprint: jobFootprint(job),
+      // #1235 (second ruling) — each op's own stated outside allowance, by toolpath number.
+      ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
+      itemProgram: findings.some((f) => f.code === 'item-outside-stock'),
       ...(limitReasonAt ? { limitReasonAt } : {}),
       ...(rotaryMap === null
         ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
@@ -9043,6 +9066,7 @@ async function generateOneProgram(
     if (neckIr !== null && typeof withNeck === 'object') {
       const postedNeck = postFor(mill)(neckIr, ctx, { vacuum: withNeck.apart, thumbnail: null });
       if (!postedNeck.ok) return stop('post', { feeds, message: `the neck file: ${postedNeck.errors.join('; ')}`, facing });
+      const neckAllowances = outsideAllowancesOf(neckIr);
       const neckVerify = verifyProgram(postedNeck.text, {
         setup,
         machine: mill,
@@ -9050,6 +9074,10 @@ async function generateOneProgram(
         dialect: postKey(mill),
         depthLimit: limit,
         minRapidZ: neckIr.hopZ,
+        // #1235 stage 2 — the neck is cut in the same job frame as the program above, and its
+        // own IR states its own per-op allowances.
+        ...(rotaryMap === null ? { footprint: jobFootprint(job) } : {}),
+        ...(rotaryMap === null && neckAllowances !== undefined ? { outsideAllowancesMm: neckAllowances } : {}),
         ...(limitReasonAt ? { limitReasonAt } : {}),
         ...(rotaryMap === null
           ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
@@ -9082,7 +9110,7 @@ async function generateOneProgram(
     let frameZ: Mm | null = null;
     let frameError: string | null = null;
     if (rotaryMap === null) {
-      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, liftOverStock);
+      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, jobFootprint(job), liftOverStock);
       if ('error' in frame) {
         // `withPeriod` rather than `+ '.'` (review, 2026-10-28): a cause that already ends in a
         // full stop used to print "..".

@@ -45,6 +45,7 @@ import { formatFixed, sanitizeMkrValue } from './post/format';
 import type { Setup } from './setup';
 import type { Tool } from './tool';
 import { stockDepthLimit, verifyProgram, type VerifyReport } from './verify';
+import { blankFootprint } from './footprint';
 
 /**
  * The work-frame Z the head retracts to before repositioning. It is the post's own end-of-program
@@ -370,6 +371,9 @@ export function generateRestart(input: RestartInput): RestartResult {
       tool: input.tool,
       depthLimit: stockDepthLimit(input.stock, input.minFloor ?? 0),
       minRapidZ: input.minRapidZ ?? HOP_Z,
+      // #1235 stage 2 — the restart cuts the stock the input states, and a restart's input is a
+      // plain box (no shape is carried), so a rectangle is the honest outline here.
+      footprint: [blankFootprint(input.stock)],
     });
     if (verify.findings.some((f) => f.severity === 'error')) {
       const n = verify.findings.filter((f) => f.severity === 'error').length;
