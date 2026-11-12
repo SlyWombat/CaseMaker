@@ -60,6 +60,7 @@ import {
 import type { GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc/engrave/dryRun';
+import { jobFootprint } from '@/engine/cnc/footprint';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
@@ -958,7 +959,14 @@ export function EngraveCutSurface({
   const calibration = useSettingsStore((s) => s.machineCalibration) ?? null;
   const dryRunDeps = useMemo(() => {
     const mill = jobMachine(job, calibration);
-    return { setup: toSetup(job, mill), machine: mill, tool: jobTool(job) ?? flatEndMill(1) };
+    return {
+      setup: toSetup(job, mill),
+      machine: mill,
+      tool: jobTool(job) ?? flatEndMill(1),
+      // #1235 stage 2 — the lifted dry run has no cuts, but its verifier context still states the
+      // job's footprint (the same one the real program's check is measured from).
+      footprint: jobFootprint(job),
+    };
   }, [job, calibration]);
   /** The program list the run controls play: the frozen texts, or their lifted dry-run variants. */
   const runSources: ReleaseSource[] = useMemo(() => {

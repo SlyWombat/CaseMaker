@@ -57,6 +57,7 @@ import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial'
 import { DEFAULT_JAW_CLEARANCE_MM, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { HOP_Z } from '@/engine/cnc/cam/ir';
 import { stockDepthLimit, verifyProgram } from '@/engine/cnc/verify';
+import { jobFootprint, supportedFootprintShapes } from '@/engine/cnc/footprint';
 import { simErrors, simulationProblem } from '@/engine/cnc/simGate';
 import type { CouponSpec } from '@/engine/cnc/engrave/couponJob';
 import type { EngraveJob, EngraveRectShape } from '@/types/engraveJob';
@@ -930,6 +931,8 @@ function jobMaterialName(): string {
     // and this is the same limit the job's own `minFloor` implies (3.81 − 1.0 = 2.81 mm).
     depthLimit: stockDepthLimit(ctxJob.stock, ctxJob.minFloor),
     minRapidZ: HOP_Z,
+    // #1235 stage 2 — the blank the file is checked against, and any sacrificial material.
+    footprint: jobFootprint(ctxJob),
   });
   console.log('\n#185 V-groove file (hand-written, checked by the app\'s verifier)');
   console.log(`  file      185-v-groove.nc  (${nc.length} bytes, ${nc.split('\n').length} lines)`);
@@ -1091,7 +1094,19 @@ function isRaiseBreach(message: string): boolean {
   };
   /** One program text, verified as the bench would have it: the blank `drop` mm lower. */
   const verifyAt = (text: string, drop: number) =>
-    verifyProgram(text, { setup: setupAt(drop), machine: Z1, tool: airTool, depthLimit: airLimit, minRapidZ: HOP_Z });
+    verifyProgram(text, {
+      setup: setupAt(drop),
+      machine: Z1,
+      tool: airTool,
+      depthLimit: airLimit,
+      minRapidZ: HOP_Z,
+      // #1235 stage 2 — the air file's stock is the header's own box; the moves run above the
+      // top, so no cutting feed exists for the rule to judge.
+      footprint: supportedFootprintShapes(
+        { length: airPart.outline.size[0], width: airPart.outline.size[1], thickness: airPart.thickness },
+        undefined,
+      ),
+    });
 
   // THE HEADROOM, MEASURED (#395 follow-up 2). How far below the tool-change height the blank's top
   // face has to sit before every move is inside the machine's Z travel — and only that clause: the

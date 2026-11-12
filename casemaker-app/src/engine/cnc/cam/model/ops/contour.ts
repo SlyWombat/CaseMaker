@@ -120,6 +120,13 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   };
 
   const result = generateProfile([cut], opts.cutter, opts.params, opts.rapid);
+  // #1235 — the contour STATES its outward guard: `profilePath` placed the centre path at
+  // `toolRadius + PROFILE_OFFSET_GUARD_MM`, so the verifier's footprint rule allows exactly that
+  // much beyond its own radius and no more. Every operation from this cut carries it.
+  const ir = {
+    ...result.ir,
+    operations: result.ir.operations.map((op) => ({ ...op, outsideAllowanceMm: PROFILE_OFFSET_GUARD_MM })),
+  };
 
   const levels = zPasses(depthMm, opts.params.stepDown);
   const passes: PassRef[] = levels.flatMap((z) =>
@@ -149,7 +156,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
 
   return {
-    ir: result.ir,
+    ir,
     cutter: cutterKeyOf(opts.cutter),
     passes,
     cleared,
