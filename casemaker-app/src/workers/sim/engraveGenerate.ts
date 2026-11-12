@@ -7029,7 +7029,7 @@ async function generateFaceProgram(
     // #407/#834 — Makera's "for Metal" line is refused by name on a blank that is not metal, in
     // this program as in every other: the pair is the finding, whatever the cutter's shape.
     ...metalLineFindings(job, tool, catalogue),
-    ...(faceJobRefusal(job) === null ? [] : [faceJobRefusal(job)!]),
+    ...(faceJobRefusal(job, shop.defaults ?? null) === null ? [] : [faceJobRefusal(job, shop.defaults ?? null)!]),
   ]);
   if (documentFindings.some((f) => f.severity === 'error')) {
     return fail('findings', 'the job has a refusal that stops Generate', { findings: documentFindings });

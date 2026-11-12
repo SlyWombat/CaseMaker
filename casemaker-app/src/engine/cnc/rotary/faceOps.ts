@@ -34,7 +34,7 @@ import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { cuttingDiameter, cuttingRadiusForSweep, type Tool } from '@/engine/cnc/tool';
 import { rotaryFreeSpan, rotaryMapOf, sectionRadiusAt, sectionWords, type RotaryCutFace, type RotaryMap, type RotarySection } from './wrap';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /** The width of a face at a depth below the surface, mm: the chord of the turned circle. */
 export function faceChordMm(radiusMm: Mm, depthMm: Mm): Mm {
@@ -520,13 +520,13 @@ export function planFaceCuts(
  * stock held in the chuck. Null when the job is one this module's CAM can cut. A job that ALSO
  * carries map items is not refused — it cuts two programs in cut order (#836).
  */
-export function faceJobRefusal(job: EngraveJob): JobFinding | null {
+export function faceJobRefusal(job: EngraveJob, defaults: ShopDefaults | null): JobFinding | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
   // #1059 — the gate is "the chuck holds this stock", read by the same classifier the map uses:
   // a ROD or a BLOCK (#777) in the chuck, and never a disc. A block's faces are indexed cuts on
   // its section exactly as a rod's are on its cylinder.
-  if (rotaryMapOf(job, liveShopDefaults()) === null) {
+  if (rotaryMapOf(job, defaults) === null) {
     return {
       severity: 'error',
       code: 'face-needs-chuck',
