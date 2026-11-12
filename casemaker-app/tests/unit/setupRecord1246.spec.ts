@@ -155,6 +155,23 @@ describe('#1246 slice 1 — setupRecordFor', () => {
     expect(record.priorCuts).toBeNull(); // slice 5 — the stock as it now stands (#1221's Stock)
     expect(record.verifierSetup).toBeNull(); // #1247 — the body built from `stock`
   });
+
+  it('6. a job-less call MUST state the stock and the depth limit — the builder throws without either', () => {
+    const job = boxJob();
+    const setup = toSetup(job, Z1);
+    const limit = (): number => 0;
+    const stock = { length: 100, width: 60, thickness: 12 };
+    // Neither stated.
+    expect(() => setupRecordFor(null, 0, { setup })).toThrow(/deps\.stock/);
+    // A stated limit does not excuse the missing stock.
+    expect(() => setupRecordFor(null, 0, { setup, depthLimit: limit })).toThrow(/deps\.stock/);
+    // A stated stock does not excuse the missing limit.
+    expect(() => setupRecordFor(null, 0, { setup, stock })).toThrow(/deps\.depthLimit/);
+    // Both stated: the record is built, and its stock is the stated box (not derived).
+    const record = setupRecordFor(null, 0, { setup, depthLimit: limit, stock });
+    expect(record.stock).toEqual({ kind: 'box', ...stock });
+    expect(record.sacrificial).toEqual({ underThicknessMm: null, sides: [] });
+  });
 });
 
 describe('#1246 slice 1 — verifyContextFrom equals the inline builders', () => {

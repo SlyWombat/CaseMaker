@@ -121,9 +121,10 @@ export interface SetupRecordDeps {
   /** The rotary map the site already built, when its context states the rotary frame. */
   rotary?: RotaryMap | null;
   /**
-   * The stock's box when the caller has NO `EngraveJob` — a restart states the blank it cuts, and
-   * a dry run / restart has no job document to ask. Ignored when a job is given (there
-   * `stockForSetup` is the fact).
+   * The stock's box when the caller has NO `EngraveJob` — REQUIRED there (the builder throws
+   * without it): a restart states the blank it cuts, and a dry run states the box its `Setup`
+   * describes (`stockFromSetupPart`). Ignored when a job is given (there `stockForSetup` is the
+   * fact).
    */
   stock?: { length: number; width: number; thickness: number };
 }
@@ -144,8 +145,13 @@ export interface VerifyPerProgram {
   limitReasonAt?: (x: number, y: number) => string;
 }
 
-/** The box a `Setup`'s own part states — the same derivation `stockFromSetup` makes for a restart. */
-function stockFromPart(part: Setup['part']): { length: number; width: number; thickness: number } | null {
+/**
+ * The box a `Setup`'s own part states, for a job-less caller that has no stock document — the
+ * same derivation `stockFromSetup` makes for a restart. Exported so the caller can STATE it in
+ * `deps.stock`; the builder itself requires the stated box (see `setupRecordFor`).
+ */
+export function stockFromSetupPart(setup: Setup): { length: number; width: number; thickness: number } | null {
+  const part = setup.part;
   if (part.kind === 'cylinder') return { length: part.length, width: part.diameter, thickness: part.diameter };
   if (part.kind !== 'prism') return null;
   const box = aabbOfProfile(part.outline);
@@ -155,14 +161,15 @@ function stockFromPart(part: Setup['part']): { length: number; width: number; th
 /**
  * The one builder: a setup's twelve facts, from the job and the caller's surroundings.
  *
- * `job` is null for the two verifier paths that have no job document (the dry run and the restart):
- * their stock is the setup's own part (`deps.stock` when the caller states one), their sacrificial
- * model is empty, and their depth limit must be the caller's (there is no job to compose it from).
+ * `job` is null for the two verifier paths that have no job document (the dry run and the restart).
+ * A job-less call MUST state the stock AND the depth limit: the builder throws rather than derive
+ * either from a document that does not exist. (`stockFromSetupPart` is the helper a caller uses to
+ * state the box its own `Setup` describes.) The sacrificial model is then empty.
  */
 export function setupRecordFor(job: EngraveJob | null, setupIndex: number, deps: SetupRecordDeps): SetupRecord {
-  const own = job === null ? (deps.stock ?? stockFromPart(deps.setup.part)) : stockForSetup(job, setupIndex);
-  if (own === null) {
-    throw new Error('setupRecordFor needs a stock for a job-less call: pass deps.stock or a prism/cylinder setup');
+  const own = job === null ? deps.stock : stockForSetup(job, setupIndex);
+  if (own === undefined || own === null) {
+    throw new Error('setupRecordFor needs deps.stock for a job-less call');
   }
   const part = deps.setup.part;
   const stock: SetupRecord['stock'] =
