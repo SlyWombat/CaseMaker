@@ -8,7 +8,7 @@ import {
   type ConfigReadSummary,
   type MachineProbeClient,
 } from '@/platform/machineProbe';
-import { KNOWN_DEFAULTS, setLiveDefaultsSource, type ShopDefaults } from '@/platform/defaultsClient';
+import { KNOWN_DEFAULTS, installShopDefaults, type ShopDefaults } from '@/platform/defaultsClient';
 import { COMMAND_TCP_PORT } from '@/platform/desktop/protocol';
 import { CALIBRATION_KEYS } from '@/engine/cnc/calibration';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
@@ -24,7 +24,7 @@ import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 
 afterEach(() => {
   setMachineProbeLoader(null);
-  setLiveDefaultsSource(() => null);
+  installShopDefaults(() => null);
 });
 
 /**
@@ -305,7 +305,7 @@ describe('#449 the discovery window comes from the shop defaults', () => {
   });
 
   it('a stored window reaches the search', async () => {
-    setLiveDefaultsSource(() => chosenWindow(7500));
+    installShopDefaults(() => chosenWindow(7500));
     let seen: number | undefined;
     use(
       fakeClient({
@@ -320,7 +320,7 @@ describe('#449 the discovery window comes from the shop defaults', () => {
   });
 
   it('an explicit windowMs still outranks the shop’s', async () => {
-    setLiveDefaultsSource(() => chosenWindow(7500));
+    installShopDefaults(() => chosenWindow(7500));
     let seen: number | undefined;
     use(
       fakeClient({

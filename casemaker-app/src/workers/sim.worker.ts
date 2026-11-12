@@ -41,6 +41,7 @@ import { readDesign } from '@/engine/import/design3mf';
 import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
 import { sha256Hex } from '@/engine/import/meshStock';
 import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
+import { installShopDefaults } from '@/platform/defaultsClient';
 
 let session: SimSession | null = null;
 async function getSession(): Promise<SimSession> {
@@ -177,6 +178,7 @@ const api = {
     shop?: EngraveShopOpts,
     residuals?: ProbeResiduals,
   ): Promise<EngravePreview | null> {
+    installShopDefaults(() => shop?.defaults ?? null);
     // #766 D — an edit's generation, seen before the build: a measured search running in this
     // worker stops at its next step (see `latestEditGen`).
     if (gen > latestEditGen) latestEditGen = gen;
@@ -230,6 +232,7 @@ const api = {
     // #785 — the search's candidate counts, its own argument for the Comlink.proxy rule.
     onProgress?: (p: { level: 'coarse' | 'full'; done: number; total: number }) => void,
   ): Promise<EngravePickSummary | null> {
+    installShopDefaults(() => shop?.defaults ?? null);
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     const tl = await getToplevel();
     // #922 — the context and the search's arguments are built in `smartPickRun.ts`, which the CLI
@@ -290,6 +293,7 @@ const api = {
      */
     catalogue: readonly FeedCatalogueRow[] = [],
   ): Promise<{ tradeoff: PlanTradeoff | null; owned: PlanOutcome | null; ideal: PlanOutcome | null }> {
+    installShopDefaults(() => shop?.defaults ?? null);
     const input = await buildModelPlanInputForGoal(job, goal, tool, shop, undefined, catalogueTools, catalogue);
     if (ownedOutcome !== undefined && ownedOutcome !== null) {
       const { tradeoff, ideal } = await planIdealAgainst(input, ownedOutcome);
@@ -326,6 +330,7 @@ const api = {
     /** #1046 — the virtual ladder, on demand (the run-sheet press). Off/absent: unchanged bytes. */
     restLadder?: boolean,
   ): Promise<EngraveGenerated> {
+    installShopDefaults(() => shop?.defaults ?? null);
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =

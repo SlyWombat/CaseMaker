@@ -31,7 +31,7 @@ import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { dialectOf, Z1 } from '@/engine/cnc/machine';
-import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engine/cnc/cam/engraveJob';
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
@@ -272,6 +272,21 @@ export function setupStockOf(
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
+  /**
+   * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its seven settings from
+   * (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm` and the four
+   * bit-change keys). The planner's settings are part of its input, not ambient state, so every
+   * realm that plans — the app's worker, the CLI, the pick and rank pools — carries them here and
+   * a future realm cannot forget an install. `null`/absent = the recommendations.
+   */
+  defaults?: ShopDefaults | null;
+  /**
+   * #1237 — WHERE THOSE DEFAULTS CAME FROM, or null for a caller that planned with no location.
+   * A caller that states one must also set {@link defaults}: `planModelCam` throws — naming this —
+   * when a location is stated and the input carries none, rather than planning on the fallbacks.
+   * A location WITH NO defaults section passes `defaults: null` (the recommendations, stated).
+   */
+  defaultsFrom?: string | null;
   /**
    * #1129 — THE JOB'S STATED SAMPLING FLOOR (`surface.minSpacingMm`), mm. Absent → each CL surface
    * derives it as `min(its step-over / 10, 0.05 mm)`, never below the chord tolerance; the floor
@@ -990,6 +1005,16 @@ function formatSpan(seconds: number): string {
  * house flats only) — the plan says that too when a caller supplies one.
  */
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
+  // #1237 — A LOCATION GIVEN IS DEFAULTS GIVEN. The planner's settings travel in the input; a
+  // caller that planned from a location and did not pass them (undefined — null is a location
+  // with no defaults section, the recommendations) is refused by name rather than planned on the
+  // fallbacks. This is the one guard: no realm can silently regress to the recommendations.
+  if (input.defaultsFrom !== undefined && input.defaultsFrom !== null && input.defaults === undefined) {
+    throw new Error(
+      `planModelCam was given the location ${input.defaultsFrom} but no shop defaults: ` +
+        'pass the location\'s defaults map as ModelPlanInput.defaults (null when the location states none)',
+    );
+  }
   // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
   memTrace('plan:start', { plan: opts.planKind ?? 'owned', setups: input.setups.length, house: input.cutters.house.length });
   // #1214's ruling (b) — the printed precision every feed word is decided on. The Z1's only when
@@ -1000,7 +1025,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const tl = await getToplevel();
   const offset = makeClipperOffset(tl);
   const boolean = { union: makeClipperUnion(tl), subtract: makeClipperSubtract(tl) };
-  const defaults = liveShopDefaults();
+  const defaults = input.defaults ?? null;
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;

@@ -874,15 +874,19 @@ export function readDefault(map: ShopDefaults | null, key: string): ReadDefault 
 
 // ── The live section, for platform modules that cannot import the store ────────────────────────
 type DefaultsSource = () => ShopDefaults | null;
-let liveSource: DefaultsSource = () => null;
+/** `null` = nothing installed. A function answers null when its own section is not read yet. */
+let liveSource: DefaultsSource | null = null;
 
 /**
- * Point the platform modules at the section the store currently holds (#449). The store calls this
- * once; `machineProbe`, `machineUpload` and the console read {@link liveShopDefaults} rather than
+ * #1237 — THE ONE INSTALL. The app's store, the CLI and every worker install the location's shop
+ * defaults through this function; no caller keeps its own wiring. The source is a getter, because
+ * the app's store refreshes and the value must be read at each use.
+ *
+ * `machineProbe`, `machineUpload` and the console read {@link liveShopDefaults} rather than
  * importing the zustand store, which would drag React and the whole store graph into modules the
  * protocol specs and the desktop boundary load on their own.
  */
-export function setLiveDefaultsSource(source: DefaultsSource): void {
+export function installShopDefaults(source: DefaultsSource): void {
   liveSource = source;
 }
 
@@ -891,12 +895,18 @@ export function setLiveDefaultsSource(source: DefaultsSource): void {
  * labelled fallback, which is the no-service behaviour the hosted build wants anyway.
  */
 export function liveShopDefaults(): ShopDefaults | null {
+  if (liveSource === null) return null;
   try {
     return liveSource();
   } catch {
     // A source that throws (a store torn down mid-request) is no service, not a crash.
     return null;
   }
+}
+
+/** Test seam: the installed source is cleared (the no-service state). */
+export function resetLiveShopDefaults(): void {
+  liveSource = null;
 }
 
 /** The desktop machine transport's four windows, ms (#449, "smaller timings"). */
