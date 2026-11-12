@@ -139,7 +139,7 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
       continue;
     }
     const verify = verifyProgram(posted.text, {
-      setup: toSetup(job, machine),
+      setup: toSetup(job, machine, undefined, undefined, undefined, args.defaults),
       machine,
       tool,
       // The pass never cuts: no depth to judge, and every XY rapid runs at or above the sweep Z the

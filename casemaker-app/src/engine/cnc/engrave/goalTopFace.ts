@@ -21,6 +21,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
 import { jobSetups, jobTargetObjects, jobTool } from './jobSetup';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The grid the question is asked on, mm. Coarser than any cut grid the planner settles on
@@ -119,7 +120,7 @@ export function goalTopFace(
  * reach and coverage checks state).
  */
 export function jobTopFace(job: EngraveJob, opts: { tool?: Tool | null } = {}): TopFaceFacts | null {
-  if (rotaryMapOf(job) !== null) return null;
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return null;
   const first = jobSetups(job)[0]?.id;
   let best: TopFaceFacts | null = null;
   for (const goal of jobTargetObjects(job)) {

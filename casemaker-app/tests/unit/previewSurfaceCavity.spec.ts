@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { createEngravePreviewer, type EngravePreview } from '@/workers/sim/engravePreview';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
@@ -39,7 +40,7 @@ const pv = createEngravePreviewer(tl);
 let gen = 0;
 
 function build(job: EngraveJob): EngravePreview {
-  const p = pv.engravePreview(job, ENTRIES, [], ++gen, effectiveMargins(job, MARGIN_DEFAULTS), new Map());
+  const p = pv.engravePreview(job, ENTRIES, [], ++gen, effectiveMargins(job, MARGIN_DEFAULTS), new Map(), undefined, probeResiduals(null));
   if (!p) throw new Error('the previewer refused a fresh generation');
   return p;
 }

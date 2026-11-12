@@ -30,7 +30,9 @@ import {
   type ProbeResult,
   type ProbeSpec,
   type ProbeTouch,
+  probeResiduals,
 } from '@/engine/cnc/probePlan';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 import { workholdingFor } from './jobSetup';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mount } from '@/engine/cnc/setups/types';
@@ -83,7 +85,9 @@ export function probePartFor(job: EngraveJob): JobProbePart {
  * a refusal when no reachable edge can resolve an open axis.
  */
 export function registrationFor(job: EngraveJob, probe: ProbeSpec = PROBE_SPEC): ProbeResult {
-  return planProbing(probePartFor(job), workholdingFor(job), probe);
+  // #1241 — the residuals are stated, not defaulted: this caller reads the realm's installed
+  // source explicitly (the main-thread store or a worker's install), the audit's remaining seam.
+  return planProbing(probePartFor(job), workholdingFor(job), probe, probeResiduals(liveShopDefaults()));
 }
 
 /** A touch, in the words someone standing at the machine can act on. */

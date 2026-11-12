@@ -31,7 +31,7 @@ import type { CamMove, CamOperation, ToolpathIR } from '@/engine/cnc/cam/ir';
 import { SAFE_Z, estimateCycleSeconds, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { liveShopDefaults, readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { rotaryLimits, type RotaryLimits } from './limits';
 
 /**
@@ -154,8 +154,12 @@ export interface RotaryMap {
  * (`width × thickness`) turned about the axis (holding writes the axis frame `L × W × T`); the
  * map is authored on the turned envelope, the circle that circumscribes the section. A cylinder
  * is the round section it always was.
+ *
+ * #1241 — THE DEFAULTS ARE AN ARGUMENT, not ambient state: the map is read from the caller's
+ * shop data, so a realm that forgets it fails to compile rather than silently using the
+ * recommendations. `null` = a caller with no location (the recommendations, stated).
  */
-export function rotaryMapOf(job: EngraveJob, defaults: ShopDefaults | null = liveShopDefaults()): RotaryMap | null {
+export function rotaryMapOf(job: EngraveJob, defaults: ShopDefaults | null): RotaryMap | null {
   if (job.workholding.kind !== 'rotary-chuck') return null;
   // #777 — ONE classifier for the chuck's stock: a round rod (a cylinder, a rod/tube form, or a
   // legacy square standing box with no form) or a block's own section. A disc is null.
@@ -180,8 +184,8 @@ export function rotaryMapOf(job: EngraveJob, defaults: ShopDefaults | null = liv
 }
 
 /** Is this job a rotary cut? The one predicate every stage branches on. */
-export function isRotaryJob(job: EngraveJob): boolean {
-  return rotaryMapOf(job) !== null;
+export function isRotaryJob(job: EngraveJob, defaults: ShopDefaults | null): boolean {
+  return rotaryMapOf(job, defaults) !== null;
 }
 
 /**

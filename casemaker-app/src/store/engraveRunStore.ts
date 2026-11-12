@@ -35,7 +35,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
-import { goalPassCoverage } from '@/platform/defaultsClient';
+import { goalPassCoverage, liveShopDefaults } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -1100,7 +1100,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // two realms cannot disagree). This adapter supplies what is THIS realm's: the worker load,
     // the setup, the machine and the package's frame and floor, and the oracle while the first
     // engraving program is still the session's live one.
-    const setup = toSetup(job, jobMachine(job, calibration), mount?.fixture, bed);
+    const setup = toSetup(job, jobMachine(job, calibration), mount?.fixture, bed, undefined, shop.defaults ?? null);
     // #723 P2-2b-ii — each program's own setup work frame, for carrying the remaining stock
     // between sides. A saved setup's rotation is the planner's own (`orient`), over the stock's
     // bounds; a setup the mount cannot hold has no frame, and the carry then refuses by name
@@ -1383,7 +1383,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           // comparison for it), and the old early return skipped the oracle — so the run judged
           // the finish program's sweep alone, and the run's one goal field (the page stamps every
           // program onto it) never received the rest pass's cuts.
-          const rotaryGoalMap = rotaryMapOf(job);
+          const rotaryGoalMap = rotaryMapOf(job, liveShopDefaults());
           const goal = goalCheckForProgram(
             job,
             pureGoalObject(job) !== null,
@@ -1618,7 +1618,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         generated,
         machine,
         mount,
-        setup: toSetup(job, machine, mount?.fixture, bed),
+        setup: toSetup(job, machine, mount?.fixture, bed, undefined, shopDefaults),
       });
       set({ generated: check.generated });
       if (check.errors.length > 0) {

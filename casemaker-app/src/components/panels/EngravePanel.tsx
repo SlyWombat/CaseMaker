@@ -69,7 +69,7 @@ import { tierOf } from '@/engine/cnc/toolTiers';
 import { slotFacts, type SlotCutterOption } from '@/engine/cnc/engrave/slot';
 import { drillSettings } from '@/engine/cnc/cam/drillBit';
 import { borePitchMm, boreRampAngleFrom } from '@/engine/cnc/cam/drill';
-import { efficiencyThresholds, readDefault } from '@/platform/defaultsClient';
+import { efficiencyThresholds, readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { caseWordsForKey } from '@/engine/cnc/toolCondition';
 import { dedupeFindings, withTargetBlobState, goalSides, itemKindWord, itemRowName, jobHasItems, jobMount, jobSetups, jobTargetObjects, jobTool, pureGoalObject, setupTools, toolItemsFor, validateJob, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import { partSilhouetteOf } from '@/engine/cnc/engrave/flipSilhouette';
@@ -107,6 +107,7 @@ import {
 } from '@/engine/cnc/engrave/partPlan';
 import { ensureLabelFontsLoaded, ensureSeedFontsLoaded, facesLoadedEpoch, labelFontsLoaded, subscribeFacesLoaded } from '@/engine/fonts/registry';
 import { planComparisonStatement, type PlanComparisonStatement } from '@/engine/cnc/cam/model/tradeoff';
+import { colletMatchToleranceMm } from '@/engine/cnc/probeFitWords';
 import { buildRunSheet, type RunSheet, type RunSheetFile } from '@/engine/cnc/engrave/runSheet';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 import {
@@ -1410,7 +1411,7 @@ export function EngravePanel(): JSX.Element {
   // tube's is its wall. The sentence says which number made it, so 9 never reads as a thickness.
   const maxDepth = blankDepthCeiling(job);
   const maxDepthWhy = (() => {
-    const map = rotaryMapOf(job);
+    const map = rotaryMapOf(job, liveShopDefaults());
     if (map === null) return 'the stock thickness less the minimum floor';
     const wall = job.stock.wall;
     if (wall !== undefined && wall > 0 && wall < map.radius) {
@@ -1772,7 +1773,7 @@ export function EngravePanel(): JSX.Element {
   /** #241 slice 2 — add a face operation at the shipped defaults (§5); its row edits the numbers. */
   function addFace(kind: 'flat' | 'faces-all-round' | 'cross-hole'): void {
     const store = useEngraveJobStore.getState();
-    const map = rotaryMapOf(store.job);
+    const map = rotaryMapOf(store.job, liveShopDefaults());
     const jobCutter = jobTool(store.job);
     const cutter = jobCutter === null ? null : cuttingDiameter(jobCutter);
     const seed = defaultFaceOperation(kind, map?.radius ?? faceRadiusMm, cutter ?? 3.175);
@@ -2579,8 +2580,16 @@ export function EngravePanel(): JSX.Element {
           dialectName,
           statedOrigin,
           ...(sheetProbe === null ? {} : { probeInstrument: probeInstrumentOf(sheetProbe) }),
-          // #1203 — the fitted post's shank, so the probe steps name the collet.
-          ...(sheetProbe === null ? {} : { probeShankMm: sheetProbe.shankMm ?? null }),
+          // #1203/#1241 — the fitted post's shank and the shop's collet match tolerance, so the
+          // probe steps name the collet. Both from this panel's own records and defaults.
+          ...(sheetProbe === null
+            ? {}
+            : {
+                probeShank: {
+                  shankMm: sheetProbe.shankMm ?? null,
+                  colletMatchMm: colletMatchToleranceMm(shopDefaults),
+                },
+              }),
           // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
           // profile it was planned on; "not measured" when the datums are absent.
           rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }),
@@ -3085,7 +3094,7 @@ export function EngravePanel(): JSX.Element {
   // this slice's flat preview uses (`jobVise`), and the chuck's own facts when the rotary is the
   // holding. `setVise` does not write a rotary job, so its fields are not offered there.
   const vise = jobVise(job);
-  const rotaryMap = rotaryMapOf(job);
+  const rotaryMap = rotaryMapOf(job, liveShopDefaults());
   const rotaryRod =
     job.workholding.kind === 'rotary-chuck'
       ? { diameter: job.stock.diameter ?? job.stock.width, length: job.stock.length }
@@ -3313,7 +3322,7 @@ export function EngravePanel(): JSX.Element {
   // against), and whether this job can carry one at all.
   // #1059 — a BLOCK in the chuck carries them too (#777): the map exists for any stock the chuck
   // holds, so the Faces step is offered whenever `rotaryMapOf` reads one, not only on a rod.
-  const rotaryFaceMap = rotaryMapOf(job);
+  const rotaryFaceMap = rotaryMapOf(job, liveShopDefaults());
   const rotaryChuck = rotaryFaceMap !== null;
   const faceRadiusMm = rotaryFaceMap?.radius ?? Math.max(job.stock.width, job.stock.thickness) / 2;
   // #833 — the face frame's two measures: the cuttable span (one cutter radius clear of each

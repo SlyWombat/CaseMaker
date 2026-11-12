@@ -45,6 +45,7 @@ import {
 // From the shared type module, not `store/simStore`: the store statically imports the browser-only
 // sim client and worker, so this keeps them out of the headless graph (#544, same class as #534).
 import type { SimStatus } from '../../../src/types/simStatus';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /** A program generated from a job, with every gate's answer attached. */
 export interface PreparedProgram {
@@ -195,7 +196,7 @@ export async function prepareVerifiedProgram(
     try {
       // #734 — the generator posted this program against the job's floor, so the sweep judges it
       // against the same floor (`thickness + breakthrough`), not the blank's bottom face.
-      const sim = session.load(programNc, toSetup(job, mill), tool, mill.id, {
+      const sim = session.load(programNc, toSetup(job, mill, undefined, undefined, undefined, liveShopDefaults()), tool, mill.id, {
         calibration,
         breakthroughMm: job.breakthrough,
       });

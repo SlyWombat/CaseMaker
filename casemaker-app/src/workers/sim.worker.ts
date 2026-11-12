@@ -42,6 +42,7 @@ import { parsePrusaThreeMf } from '@/engine/import/prusa3mf';
 import { sha256Hex } from '@/engine/import/meshStock';
 import { designJobFor, type DesignJobPatch, type DesignReadingDirection } from '@/engine/cnc/engrave/fromDesign';
 import { installShopDefaults } from '@/platform/defaultsClient';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 
 let session: SimSession | null = null;
 async function getSession(): Promise<SimSession> {
@@ -186,7 +187,11 @@ const api = {
     // bundled faces are static assets now, so load the keys this job's enabled labels need
     // first. A shapes-only job (or one with every label disabled/empty) passes `[]`.
     await ensureFontsLoaded(fontKeysForLabels(job.labels, job.customFonts ?? []));
-    const p = (await getPreviewer()).engravePreview(job, tools, catalogue, gen, margins, conditions, shop, residuals);
+    const p = (await getPreviewer()).engravePreview(
+      job, tools, catalogue, gen, margins, conditions, shop,
+      // #1241 — the residuals are stated, never ambient: the preview's own caller names the map.
+      residuals ?? probeResiduals(shop?.defaults ?? null),
+    );
     if (!p) return null;
     return Comlink.transfer(
       p,

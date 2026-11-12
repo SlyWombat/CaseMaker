@@ -14,6 +14,7 @@
 
 import { rotaryMapOf } from './wrap';
 import type { EngraveJob } from '@/types/engraveJob';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /** The axis line, in machine terms: Z in `value`, the line's Y in `at[1]`, and the body radius. */
 export interface RotarySheetAxis {
@@ -63,7 +64,7 @@ export interface RotarySheetLocationLike {
 const NONE: RotarySheetDatum = { axis: null, faceAngle: null };
 
 export function rotarySheetDatumFor(job: EngraveJob, location: RotarySheetLocationLike | null | undefined): RotarySheetDatum {
-  const section = rotaryMapOf(job)?.section;
+  const section = rotaryMapOf(job, liveShopDefaults())?.section;
   if (section === undefined || section.kind !== 'rect') return NONE;
   const bound = job.bed?.profileId;
   // The job's own machine first; the rest keep their order as the fallback.

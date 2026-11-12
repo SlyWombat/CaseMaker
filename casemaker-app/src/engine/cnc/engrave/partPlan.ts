@@ -54,6 +54,7 @@ import { printedLayerGridOf, voidCeilingFor } from '@/engine/cnc/layerStack';
 import { rotaryMapOf, type RotaryMap } from '@/engine/cnc/rotary/wrap';
 import type { DepthLimit, ThroughMask } from '@/engine/cnc/verify';
 import { sacrificialDepthLimit } from '@/engine/cnc/verify';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * `PartPlan` is the seam #172 specified (`/Fabrication.md` §5.2): profiles and a target Z,
@@ -2157,7 +2158,7 @@ export function toPartPlan(job: EngraveJob, options: PartPlanOptions = {}): Part
   // surface arc at the design radius, over the stick-out the jaws leave free. The same document
   // items, the same funnels; only the stock those coordinates are measured against changes. A
   // flat job reads its blank exactly as before.
-  const rotary = rotaryMapOf(job);
+  const rotary = rotaryMapOf(job, liveShopDefaults());
   // #743 D6 — A DISC'S STOCK OUTLINE IS ITS RIM. The box the job plans in is still `D × D`, but
   // the stock inside it is the circle, so every rule stated as "the stock's edge" follows the rim
   // with no code of its own: a border at an inset, a `stock-inset` cut-out, a chamfer of the

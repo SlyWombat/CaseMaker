@@ -29,6 +29,7 @@ import type { Profile } from '@/engine/compiler/profile';
 import type { EngraveAnyItem, EngraveFrameShape, EngraveJob } from '@/types/engraveJob';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { ORACLE_AREA_FLOOR, ORACLE_SLICE_LIFT_MM, type OracleSliceAt } from '@/engine/cnc/engrave/oracle';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 type CrossSectionInstance = InstanceType<ManifoldToplevel['CrossSection']>;
 
@@ -85,7 +86,7 @@ export function pcbCopperTopologyInputs(
   const colour = job.stock.colour;
   const capMm = colour !== undefined && colour.kind === 'laminate' ? colour.capMm : null;
   if (capMm === null || !(capMm > 0)) return [];
-  if (rotaryMapOf(job) !== null) return [];
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return [];
   const frames = (job.combined ?? []).filter(
     (item): item is EngraveFrameShape => item.kind === 'frame' && item.isolation === true && item.enabled,
   );

@@ -65,8 +65,8 @@ const DATUM = { value: 1.25, measuredAt: '2026-11-08T01:00:00.000Z', by: 'wired-
 
 describe('#1059 the receipt carries a square chuck job’s face angle', () => {
   it('the fixture is a SQUARE chuck job (a rect section), so the premise holds', () => {
-    expect(rotaryMapOf(squareChuckJob())?.section.kind).toBe('rect');
-    expect(rotaryMapOf(rodJob())?.section.kind).toBe('round');
+    expect(rotaryMapOf(squareChuckJob(), null)?.section.kind).toBe('rect');
+    expect(rotaryMapOf(rodJob(), null)?.section.kind).toBe('round');
   });
 
   it('a square job with a datum carries degrees and the residual', () => {

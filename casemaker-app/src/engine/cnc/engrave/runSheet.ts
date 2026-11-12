@@ -118,6 +118,7 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -2759,10 +2760,13 @@ export interface RunSheetOptions {
    */
   probeInstrument?: ProbeFitInstrument;
   /**
-   * #1203 — the fitted post's shank, mm. The wired probe's shank is a swappable threaded post
-   * (1/8" = 6.35, 6 mm), so a step that asks for the probe names the collet; absent says to check.
+   * #1203 — the fitted post's shank, mm, AND the shop's collet match tolerance (#1241,
+   * `probe.colletMatchMm`). The wired probe's shank is a swappable threaded post (1/8" = 6.35,
+   * 6 mm), so a step that asks for the probe names the collet; the pair travels together, so a
+   * caller that names a shank must state the tolerance its words were chosen by. Absent says to
+   * check the collet — this sheet is pure data and reads no defaults source.
    */
-  probeShankMm?: number | null;
+  probeShank?: { shankMm: number | null; colletMatchMm: number };
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
   /** #513 — the bed line the header prints (`bedLine`), resolved by the caller from the machine's
@@ -4589,7 +4593,7 @@ export function buildRunSheet(
   const vise = jobVise(job);
   // #1059 — a job in the 4th-axis chuck. Its mount, load and origin sections are the CHUCK's, not
   // the vise's: the module, the jaws and stick-out, and an origin on the measured axis.
-  const rotary = rotaryMapOf(job);
+  const rotary = rotaryMapOf(job, liveShopDefaults());
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
@@ -5341,7 +5345,7 @@ export function buildRunSheet(
           {
             text:
               // #1203 — the collet the fitted post needs, when the record states its shank.
-              `Fit the wired probe (${probeColletWords(options.probeShankMm)}), not a cutter. Run tool-length calibration from the app’s console ` +
+              `Fit the wired probe (${options.probeShank === undefined ? probeColletWords(null, 0) : probeColletWords(options.probeShank.shankMm, options.probeShank.colletMatchMm)}), not a cutter. Run tool-length calibration from the app’s console ` +
               'or Studio (M491) and record the PROBE’s PRB: this job is skimmed before it is ' +
               'cut, so the probe sets Z0 and its reading is the reference each cutter’s Z0 is ' +
               'worked out against — the facing cutter’s below, and the engraving cutter’s after the ' +

@@ -2213,6 +2213,9 @@ const registrationSettingsSchema = z.object({
       bracketFitMm: z.number().finite().optional().describe('The bracket hold’s own fit (#1199 field 7).'),
       mountTapFloorMm: z.number().finite().optional().describe('Bed-setup jaw tap: how far below the stored jaw top its search may go.'),
       mountTapSlackMm: z.number().finite().optional().describe('Bed-setup jaw tap: how far a reading may sit from the stored jaw top before the run says so.'),
+      // #1241 — absent in a plan frozen before this key existed (its fit-probe words then use the
+      // recommendation); every new plan carries the tolerance its collet words were chosen by.
+      colletMatchMm: z.number().finite().optional().describe('The collet match tolerance the plan’s fit-probe words were chosen by.'),
       cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.

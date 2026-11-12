@@ -162,7 +162,7 @@ describe('the holding write (#240 §2)', () => {
     // The axis frame is the block's own box (its longest dimension along X), with no `shape`:
     // the map reads the section from width × thickness.
     expect(job.stock).toEqual({ ...plate.stock, length: 100, width: 60, thickness: 12 });
-    expect(rotaryMapOf(job)!.section).toEqual({ kind: 'rect', width: 60, height: 12 });
+    expect(rotaryMapOf(job, null)!.section).toEqual({ kind: 'rect', width: 60, height: 12 });
   });
 
   it('applyHoldAnswers never clobbers a rotary workholding', () => {
@@ -215,7 +215,7 @@ describe('#724 B3 — entering the chuck lands the layout on the free span', () 
 
     const job = useEngraveJobStore.getState().job;
     // The free span is 3–75 (jaws' keep-out to the tailstock's band); its centre is 39.
-    const map = rotaryMapOf(job);
+    const map = rotaryMapOf(job, null);
     expect(map).not.toBeNull();
     expect(rotaryFreeSpan(map!)).toEqual({ from: 3, to: 75, centre: 39 });
     expect(job.labels.map((l) => l.position.x)).toEqual([39, 39, 39]);

@@ -2930,6 +2930,10 @@
                                 "description": "Coarse search step, in millimetres.",
                                 "type": "number"
                               },
+                              "colletMatchMm": {
+                                "description": "The collet match tolerance the plan’s fit-probe words were chosen by.",
+                                "type": "number"
+                              },
                               "cornerClearanceMm": {
                                 "description": "Clearance kept from corners, in millimetres.",
                                 "type": "number"
@@ -5053,6 +5057,10 @@
                           },
                           "coarseStepMm": {
                             "description": "Coarse search step, in millimetres.",
+                            "type": "number"
+                          },
+                          "colletMatchMm": {
+                            "description": "The collet match tolerance the plan’s fit-probe words were chosen by.",
                             "type": "number"
                           },
                           "cornerClearanceMm": {

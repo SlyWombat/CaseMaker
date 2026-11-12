@@ -19,7 +19,7 @@ import {
   type StockProposal,
   type WorkShape,
 } from '@/engine/cnc/stockProposal';
-import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults, liveShopDefaults } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { OperationChoice } from './OperationStep';
@@ -87,7 +87,7 @@ export function proposedStockFor(
   ) {
     return proposed;
   }
-  if (rotaryMapOf(job) !== null) return proposed;
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return proposed;
   return houseStockProposal();
 }
 
@@ -149,7 +149,7 @@ export function partFootprintFor(work: WorkShape): PartFootprint | null {
 export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): WorkShape {
   if (choice === null) return { kind: 'none' };
   // A ROD in the chuck is sized by its own start (the dowel/template flow), not by its goal's box.
-  if (rotaryMapOf(job) !== null) return { kind: 'none' };
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return { kind: 'none' };
   // #1107 — a ROD INTENT on a flat run: the blank the question asks for is the rod. A relief's
   // diameter is the mesh's own section (the smaller side), not an invented 20 mm.
   if ('frame' in choice && choice.frame === 'rotary') {

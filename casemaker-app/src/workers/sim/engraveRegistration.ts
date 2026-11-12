@@ -25,7 +25,7 @@
 
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Edge, Mount, RegistrationPlan } from '@/engine/cnc/registration/plan';
-import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
+import type { ProbeResiduals } from '@/engine/cnc/probePlan';
 import { jobMount } from '@/engine/cnc/engrave/jobSetup';
 import { SIDE_WORDS } from '@/engine/cnc/engrave/registration';
 
@@ -226,7 +226,7 @@ function planBands(plan: RegistrationPlan, residuals: ProbeResiduals): EngravePr
  */
 export function registrationBandsFor(
   job: EngraveJob,
-  residuals: ProbeResiduals = probeResiduals(),
+  residuals: ProbeResiduals,
 ): EngravePreviewRegistrationBand[] {
   const setup = job.setups?.[0];
   const plan = setup?.registration?.plan;

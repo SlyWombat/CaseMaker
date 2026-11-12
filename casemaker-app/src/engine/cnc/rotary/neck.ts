@@ -29,6 +29,7 @@ import {
   freeEndSentence,
   type RotaryMap,
 } from './wrap';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The neck's diameter Case Maker offers first, mm. Labelled default, not a bench result (#238).
@@ -188,7 +189,7 @@ export function defaultRotaryNeck(stockDiameterMm?: number | null): RotaryNeck {
  * the cut round — and an absent field is OFF (the document rule: absent, never defaulted on).
  */
 export function rotaryNeckOf(job: EngraveJob): RotaryNeck | null {
-  if (rotaryMapOf(job) === null) return null;
+  if (rotaryMapOf(job, liveShopDefaults()) === null) return null;
   return job.workholding.kind === 'rotary-chuck' && job.workholding.rotary.neck !== undefined
     ? job.workholding.rotary.neck
     : null;
@@ -223,7 +224,7 @@ export function rotaryNeckSpan(map: RotaryMap, neck: RotaryNeck): RotaryNeckSpan
 
 /** The job's neck facts, or null when it has no neck (or one that cannot be placed yet). */
 export function rotaryNeckFacts(job: EngraveJob): RotaryNeckFacts | null {
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   const neck = rotaryNeckOf(job);
   if (map === null || neck === null) return null;
   const span = rotaryNeckSpan(map, neck);

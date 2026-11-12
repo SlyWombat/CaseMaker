@@ -1,3 +1,4 @@
+import { liveShopDefaults } from '@/platform/defaultsClient';
 import { profileReachFrom, rectProfile } from '@/engine/compiler/profile';
 import { labelFontsLoaded } from '@/engine/fonts/registry';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
@@ -1369,7 +1370,7 @@ export function toSetup(
   // sacrificial board under it, and the work origin is the axis (`stubSetup` places a cylinder's
   // WCS there — the slice-1 fix). The chuck's facts are the job's own; the jaw diameter is the
   // stock's unless the job states the capacity it closes on.
-  const rotary = defaults === undefined ? rotaryMapOf(job) : rotaryMapOf(job, defaults);
+  const rotary = rotaryMapOf(job, defaults ?? null);
   if (rotary !== null) {
     const chuck = job.workholding.kind === 'rotary-chuck' ? job.workholding.rotary : null;
     return stubSetup(
@@ -1612,7 +1613,7 @@ export function validateGoalObject(
  *   - a tube: the bore its wall holds back — the sentence says the wall is broken, not the axis.
  */
 function overDepthClause(job: EngraveJob, depth: number, facingDepth: number, floorAllowed: number): string {
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   if (map !== null) {
     const wall = job.stock.wall;
     if (wall !== undefined && wall > 0 && wall < map.radius) {

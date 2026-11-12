@@ -535,6 +535,8 @@ describe('the live preview and a multi-cutter board (#743 P-8)', () => {
       1,
       effectiveMargins(job, MARGIN_DEFAULTS),
       new Map(),
+      undefined,
+      (await import('@/engine/cnc/probePlan')).probeResiduals(null),
     );
     expect(pv).not.toBeNull();
     // The preview holds the job's cutter (the engraver). The cut-out belongs to the flat, so

@@ -253,7 +253,7 @@ function previewInputs(job: EngraveJob): PreviewInputs {
     // margins: the worker cannot see the location, and the band must draw the tolerance the
     // location would use. `probeResiduals` answers the labelled fallbacks when no location is
     // readable, so a web build still draws a band and says where its number came from.
-    residuals: probeResiduals(),
+    residuals: probeResiduals(useShopDefaultsStore.getState().defaults),
   };
 }
 
