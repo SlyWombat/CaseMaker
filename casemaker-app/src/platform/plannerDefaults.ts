@@ -30,6 +30,7 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'goal.passCoverage',
   'plan.leftoverEquivalencePct',
   'plan.leftoverTallMm',
+  'plan.shortlistSize',
   'probe.colletMatchMm',
   'reach.marginMm',
   'registration.chuckAxisResidualMm',

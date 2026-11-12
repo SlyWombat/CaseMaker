@@ -121,7 +121,7 @@ const lines = [
   `pick: runs ${counts.pick.runs} coarse ${counts.pick.coarse} full ${counts.pick.full} wall s ${seconds(counts.pick.wallMs)}`,
   `plans: owned ${counts.plans.owned} ideal ${counts.plans.ideal} wall s ${seconds(counts.plans.wallMs)}`,
   `rank: runs ${counts.rank.runs} candidates ${counts.rank.candidates} inline ${counts.rank.inline} wall s ${seconds(counts.rank.wallMs)}`,
-  `chain: runs ${counts.chain.runs} step plans ${counts.chain.stepPlans} candidates considered ${counts.chain.candidatesConsidered} wall s ${seconds(counts.chain.wallMs)}`,
+  `chain: runs ${counts.chain.runs} step plans ${counts.chain.stepPlans} candidates considered ${counts.chain.candidatesConsidered} shortlisted ${counts.chain.shortlisted} wall s ${seconds(counts.chain.wallMs)}`,
   `ops: planned ${counts.ops.planned} reused ${counts.ops.reused}`,
   `stamps: computed ${counts.stamps.computed} cached ${counts.stamps.cached} failed ${counts.stamps.failed}`,
   `sweeps ${counts.sweeps}`,

@@ -1725,6 +1725,13 @@
       "unit": "mm",
       "note": "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."
     },
+    "plan.shortlistSize": {
+      "value": 8,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cutter sets",
+      "note": "chosen, not measured. How many of the most promising sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."
+    },
     "adaptive.residualShare": {
       "value": 0.005,
       "source": "seeded",

@@ -6,6 +6,11 @@
  * planner chose. It changes NO decision: the caller runs it after the real choice is made, and it
  * reads that result only to compare. With no trace sink every row is discarded inside `memTrace`.
  *
+ * #1242 — THE ESTIMATE IS ITS OWN FUNCTION. `estimateCandidates` is pure (no trace, no dependence
+ * on the real choice) and is what the shortlist reads before any chain is planned for real; the
+ * tracing wrapper below calls it (or reuses the caller's copy) and writes the same rows as before,
+ * #1231's `shadow:shortlist` rows included.
+ *
  * The imports outside `cam/` are the three the issue allows (tool, feeds, memTrace); everything
  * else is `cam/`'s own, so #1215's import gate stays green.
  */
@@ -14,11 +19,11 @@ import type { Tool } from '@/engine/cnc/tool';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import { memTrace } from '@/engine/cnc/memTrace';
-import { candidateSequences, type CutterCandidates, type ConsideredSequence, type SequenceDemand, type SequenceOptions } from '../model/sequence';
+import { candidateSequences, type CandidateSequence, type CutterCandidates, type ConsideredSequence, type SequenceDemand, type SequenceOptions } from '../model/sequence';
 import { flatReach, polygonsArea } from './flatReach';
 import { estimateChain, type ChainEstimate, type CutterRates, type EstimateStep, type PocketArea } from './chainEstimate';
 
-export interface ShadowInput {
+export interface EstimateInput {
   demand: SequenceDemand;
   cutters: CutterCandidates;
   candidateOpts: Pick<SequenceOptions, 'feedsKind' | 'maxCutters' | 'allowPrimary'>;
@@ -27,11 +32,37 @@ export interface ShadowInput {
   offset: OffsetFn;
   paramsFor: ((tool: Tool) => CutParams) | undefined;
   changePrice: (precedingSeconds: number) => number;
+  /** The length of the outline the contour step follows, mm; 0 when the job has no contour. */
+  contourPerimeterMm: number;
+}
+
+export interface ShadowInput extends EstimateInput {
   considered: readonly ConsideredSequence[];
   /** The signature of the chain the real planner chose. */
   chosenSignature: string;
-  /** The length of the outline the contour step follows, mm; 0 when the job has no contour. */
-  contourPerimeterMm: number;
+  /**
+   * #1242 — estimates the caller already computed (the shortlist reads them before the real
+   * choice, so a traced plan need not pay for them twice). Absent → computed here.
+   */
+  estimates?: CandidateEstimates;
+}
+
+/** One candidate's cheap estimate, by its signature (the candidate list's own order kept below). */
+export interface CandidateEstimate {
+  signature: string;
+  est: ChainEstimate;
+}
+
+/** What one estimate pass produces: the candidates, their estimates, and the costs of the pass. */
+export interface CandidateEstimates {
+  candidates: CandidateSequence[];
+  estimates: CandidateEstimate[];
+  /** How many pocket regions the estimate had a reach field for. */
+  pockets: number;
+  /** Milliseconds spent building the pocket fields (diameters, reach, areas). */
+  fieldMs: number;
+  /** Milliseconds spent estimating the candidates. */
+  estimateMs: number;
 }
 
 /** Every number a trace row carries is rounded to three decimals (milliseconds stay integers). */
@@ -91,8 +122,13 @@ export function shortlistReport(rows: readonly ShortlistRow[], sizes: readonly n
   return out;
 }
 
-/** Writes 'shadow:candidate' rows and one 'shadow:choice' row to the trace. Returns nothing. */
-export function traceShadowSelection(input: ShadowInput): void {
+/**
+ * #1242 — THE CHEAP ESTIMATE OF EVERY CANDIDATE CHAIN, as a pure function: estimated leftover in
+ * mm², estimated seconds and the count of steps it could not price, per signature. No trace and no
+ * knowledge of the real choice: the shortlist reads this before any chain is planned for real, and
+ * the shadow wrapper below writes it beside the real planner's result.
+ */
+export function estimateCandidates(input: EstimateInput): CandidateEstimates {
   const t0 = performance.now();
 
   const candidates = candidateSequences(input.demand, input.cutters, input.candidateOpts);
@@ -143,8 +179,7 @@ export function traceShadowSelection(input: ShadowInput): void {
     return rates;
   };
 
-  const estimates: { signature: string; est: ChainEstimate }[] = [];
-  const shortlistRows: ShortlistRow[] = [];
+  const estimates: CandidateEstimate[] = [];
   for (const candidate of candidates) {
     const signature = candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     const steps: EstimateStep[] = candidate.steps.map((s) => ({
@@ -157,7 +192,25 @@ export function traceShadowSelection(input: ShadowInput): void {
         ? { contour: { perimeterMm: input.contourPerimeterMm, depthMm: contourDepthMm } }
         : {}),
     }));
-    const est = estimateChain(steps, pockets, input.changePrice);
+    estimates.push({ signature, est: estimateChain(steps, pockets, input.changePrice) });
+  }
+
+  return {
+    candidates,
+    estimates,
+    pockets: pockets.length,
+    fieldMs,
+    estimateMs: performance.now() - t0 - fieldMs,
+  };
+}
+
+/** Writes 'shadow:candidate', one 'shadow:choice' and #1231's 'shadow:shortlist' rows. Returns nothing. */
+export function traceShadowSelection(input: ShadowInput): void {
+  const computed = input.estimates ?? estimateCandidates(input);
+  const { candidates, estimates, pockets, fieldMs, estimateMs } = computed;
+
+  const shortlistRows: ShortlistRow[] = [];
+  for (const { signature, est } of estimates) {
     const real = input.considered.find(
       (row) => row.steps.map((s) => `${s.kind}:${s.cutterKey}`).join('+') === signature,
     );
@@ -174,7 +227,6 @@ export function traceShadowSelection(input: ShadowInput): void {
       realRank: real?.rank ?? -1,
       estEntries: JSON.stringify(est.perCutter.map((e) => [e.cutterKey, Math.round(e.cutSeconds * 1000) / 1000])),
     });
-    estimates.push({ signature, est });
     shortlistRows.push({
       signature,
       estLeftoverMm2: est.leftoverMm2,
@@ -199,9 +251,9 @@ export function traceShadowSelection(input: ShadowInput): void {
     real: input.chosenSignature,
     agree: shadowSignature === input.chosenSignature ? 1 : 0,
     candidates: candidates.length,
-    pockets: pockets.length,
+    pockets,
     fieldMs: Math.round(fieldMs),
-    estimateMs: Math.round(performance.now() - t0 - fieldMs),
+    estimateMs: Math.round(estimateMs),
   });
 
   // #1231 — what a shortlist of each measured size would have held, beside the candidates' count.

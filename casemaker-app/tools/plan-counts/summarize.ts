@@ -20,7 +20,7 @@ export interface PlanCounts {
   pick: { runs: number; coarse: number; full: number; wallMs: number };
   plans: { owned: number; ideal: number; wallMs: number };
   rank: { runs: number; candidates: number; inline: number; wallMs: number };
-  chain: { runs: number; stepPlans: number; candidatesConsidered: number; wallMs: number };
+  chain: { runs: number; stepPlans: number; candidatesConsidered: number; shortlisted: number; wallMs: number };
   ops: { planned: number; reused: number };
   stamps: { computed: number; cached: number; failed: number };
   sweeps: number;
@@ -60,6 +60,7 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
   let chainRuns = 0;
   let stepPlans = 0;
   let candidatesConsidered = 0;
+  let shortlisted = 0;
   let opsPlanned = 0;
   let opsReused = 0;
   let stampsComputed = 0;
@@ -132,6 +133,10 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
       case 'chain:step':
         stepPlans += 1;
         break;
+      // #1242 — what the shortlist kept, per choice: the chains that got a real plan.
+      case 'shortlist':
+        if (typeof row.kept === 'number') shortlisted += row.kept;
+        break;
       case 'op':
         if (row.reused === 1) opsReused += 1;
         else opsPlanned += 1;
@@ -193,7 +198,7 @@ export function summarizeTrace(rows: readonly TraceRow[]): PlanCounts {
     pick: { runs: pickRuns, coarse: pickCoarse, full: pickFull, wallMs: Math.round(familyWallMs.pick) },
     plans: { owned, ideal, wallMs: Math.round(familyWallMs.plan) },
     rank: { runs: rankRuns, candidates: rankCandidates, inline: rankInline, wallMs: Math.round(familyWallMs.rank) },
-    chain: { runs: chainRuns, stepPlans, candidatesConsidered, wallMs: Math.round(familyWallMs.chain) },
+    chain: { runs: chainRuns, stepPlans, candidatesConsidered, shortlisted, wallMs: Math.round(familyWallMs.chain) },
     ops: { planned: opsPlanned, reused: opsReused },
     stamps: { computed: stampsComputed, cached: stampsCached, failed: stampsFailed },
     sweeps,
