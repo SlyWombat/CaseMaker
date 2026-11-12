@@ -2591,6 +2591,8 @@ export function EngravePanel(): JSX.Element {
                   colletMatchMm: colletMatchToleranceMm(shopDefaults),
                 },
               }),
+          // #1244 — the sheet's own rotary checks read this map, never an ambient source.
+          defaults: shopDefaults,
           // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
           // profile it was planned on; "not measured" when the datums are absent.
           rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }, shopDefaults),

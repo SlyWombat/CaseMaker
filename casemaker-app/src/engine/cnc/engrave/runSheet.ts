@@ -118,7 +118,7 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -2767,6 +2767,12 @@ export interface RunSheetOptions {
    * check the collet — this sheet is pure data and reads no defaults source.
    */
   probeShank?: { shankMm: number | null; colletMatchMm: number };
+  /**
+   * #1244 — the shop's defaults, from the caller's edge (the panel's store, the CLI's boot
+   * location). This sheet is pure data and never reads a defaults source; absent: no location,
+   * the recommendations.
+   */
+  defaults?: ShopDefaults | null;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
   /** #513 — the bed line the header prints (`bedLine`), resolved by the caller from the machine's
@@ -4593,7 +4599,7 @@ export function buildRunSheet(
   const vise = jobVise(job);
   // #1059 — a job in the 4th-axis chuck. Its mount, load and origin sections are the CHUCK's, not
   // the vise's: the module, the jaws and stick-out, and an origin on the measured axis.
-  const rotary = rotaryMapOf(job, liveShopDefaults());
+  const rotary = rotaryMapOf(job, options.defaults ?? null);
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
