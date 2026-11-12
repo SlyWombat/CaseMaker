@@ -1521,7 +1521,7 @@ export function EngravePanel(): JSX.Element {
   // when the blank was chosen, before the goal existed. When the plan cuts the whole stock top
   // away there is nothing to skim, so the seeded ON is drawn OFF and the line states why; a
   // person's press (`'user'`, and every document written before the key) always stands.
-  const topFaceFacts = jobTopFaceCached(job);
+  const topFaceFacts = jobTopFaceCached(job, shopDefaults);
   const facingYieldsToPlan = facing?.source === 'seed' && topFaceFacts !== null && !topFaceFacts.keeps;
   const facingOn = (facing?.enabled ?? false) && !facingYieldsToPlan;
   // #432 review R9 — the aimed-for default is the MEASURED top's high-to-low spread plus the

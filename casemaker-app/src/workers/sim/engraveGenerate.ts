@@ -8421,7 +8421,7 @@ async function generateOneProgram(
   // written when the blank was chosen, before the goal existed. If the plan cuts the whole stock
   // top away, there is nothing to skim: no file is built, and the result says why. A person's own
   // press (`'user'`, and every document written before the key) is always honoured.
-  const facingTopFace = plan.facing === null ? null : jobTopFace(job, { tool });
+  const facingTopFace = plan.facing === null ? null : jobTopFace(job, shop.defaults ?? null, { tool });
   const facingYieldsToPlan = job.facing?.source === 'seed' && facingTopFace !== null && !facingTopFace.keeps;
   const facingDepth = plan.facing !== null && !facingYieldsToPlan ? plan.facing.depth : 0;
   if (tool.shape === 'drill') {
