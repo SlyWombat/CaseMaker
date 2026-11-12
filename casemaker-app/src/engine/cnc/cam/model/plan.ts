@@ -2594,11 +2594,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ...(input.houseNote === undefined ? [] : [input.houseNote]),
       ...earlyNotes,
       ...result.notes,
-      // #1206 — THE FREEING CONTOUR'S notes reach the plan's notes (the field existed, nothing
-      // collected it): asked/placed and each tight tab are what the operator reads on the sheet.
-      // Deliberately ONLY the contour: the finish op's own notes (#960/#1033 wall-row and join
-      // lines) are a separate sheet-text gap, left for its own issue.
-      ...ops.filter((op) => op.kind === 'contour').flatMap((op) => op.outcome.notes ?? []),
       ...emptyStages,
       ...freeingNotes,
       ...freshSameDiameterNotes,
@@ -2880,6 +2875,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // The freeing contour's own depth IS now bounded against the opposite setup's finished
       // surface (above, `freeingNotes`) — this is no longer a stated gap; see that note for the
       // actual outcome (or why it could not be checked) on THIS plan.
+    }
+
+    // #1206 (the analyst's condition 2) — THE FREEING CONTOUR'S TAB STATEMENTS reach the
+    // sheet's statements section: how many were asked for and placed, and every tight tab with
+    // the stretch it closes and its distance from the nearest corner. Only the contour op's
+    // notes: the finish op's own notes (#960/#1033) are a separate sheet-text gap.
+    for (const op of ops) {
+      if (op.kind !== 'contour') continue;
+      for (const text of op.outcome.notes ?? []) {
+        statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
+      }
     }
 
     perSetup.push({
