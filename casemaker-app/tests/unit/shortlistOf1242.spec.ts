@@ -22,35 +22,37 @@ const EST = new Map([
 const signs = (list: readonly { signature: string }[]): string[] => list.map((c) => c.signature);
 
 describe('#1242 shortlistOf', () => {
-  it('k = 2 keeps E and C by the estimate’s order and F because it is unpriced, in input order', () => {
-    expect(signs(shortlistOf(C, EST, 2))).toEqual(['C', 'E', 'F']);
+  it('k = 2, tolerance 0: list A only, plus the unpriced candidate', () => {
+    expect(signs(shortlistOf(C, EST, 2, 0))).toEqual(['C', 'E', 'F']);
   });
 
-  it('k = 3 adds B', () => {
-    expect(signs(shortlistOf(C, EST, 3))).toEqual(['B', 'C', 'E', 'F']);
+  it('k = 1, tolerance 6: A = E; B’s floor 11 admits A, B, C, E; the fastest is C', () => {
+    expect(signs(shortlistOf(C, EST, 1, 6))).toEqual(['C', 'E', 'F']);
   });
 
-  it('k = 0 keeps all six; k = 6 and k = 50 keep all six too', () => {
-    expect(signs(shortlistOf(C, EST, 0))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
-    expect(signs(shortlistOf(C, EST, 6))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
-    expect(signs(shortlistOf(C, EST, 50))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+  it('k = 2, tolerance 6: A = E, C; B = C, B', () => {
+    expect(signs(shortlistOf(C, EST, 2, 6))).toEqual(['B', 'C', 'E', 'F']);
+  });
+
+  it('k = 1, tolerance 20: floor 25 admits all; the fastest is D', () => {
+    expect(signs(shortlistOf(C, EST, 1, 20))).toEqual(['D', 'E', 'F']);
+  });
+
+  it('k = 3 at tolerance 0; k = 0 and k = 6 keep all six', () => {
+    expect(signs(shortlistOf(C, EST, 3, 0))).toEqual(['B', 'C', 'E', 'F']);
+    expect(signs(shortlistOf(C, EST, 0, 6))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+    expect(signs(shortlistOf(C, EST, 6, 6))).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
   });
 
   it('a candidate with no estimate is kept', () => {
     const withoutD = new Map([...EST].filter(([key]) => key !== 'D'));
-    expect(signs(shortlistOf(C, withoutD, 1))).toEqual(['D', 'E', 'F']);
+    expect(signs(shortlistOf(C, withoutD, 1, 0))).toEqual(['D', 'E', 'F']);
   });
 
   it('the input array is not reordered', () => {
     const before = signs(C);
-    shortlistOf(C, EST, 2);
+    shortlistOf(C, EST, 2, 6);
     expect(signs(C)).toEqual(before);
-  });
-
-  it('equal rounded leftovers are ordered by seconds, then signature', () => {
-    // A, B and C round to the same hundredth; E is the least leftover, so the first four are
-    // E, C (50 s), B (90 s), A (100 s) — and D, the last by leftover, is the one dropped.
-    expect(signs(shortlistOf(C, EST, 4))).toEqual(['A', 'B', 'C', 'E', 'F']);
   });
 });
 
@@ -165,5 +167,61 @@ describe('#1242 shortlistNote', () => {
 
   it('the module still exports the selection', () => {
     expect(typeof shortlistAgain).toBe('function');
+  });
+});
+
+import { shortlistReportB } from '@/engine/cnc/cam/fields/shadowSelector';
+import type { ShortlistRow } from '@/engine/cnc/cam/fields/shadowSelector';
+
+const B_ROWS: ShortlistRow[] = [
+  { signature: 'A', estLeftoverMm2: 10, estSeconds: 100, realRank: 3, realSeconds: 130 },
+  { signature: 'B', estLeftoverMm2: 10, estSeconds: 90, realRank: 2, realSeconds: 120 },
+  { signature: 'C', estLeftoverMm2: 10.004, estSeconds: 50, realRank: 4, realSeconds: 80 },
+  { signature: 'D', estLeftoverMm2: 20, estSeconds: 10, realRank: 1, realSeconds: 60 },
+  { signature: 'E', estLeftoverMm2: 5, estSeconds: 500, realRank: -1, realSeconds: -1 },
+];
+
+describe('#1242 shortlistReportB — list B, the fast ones', () => {
+  it('is empty at tolerance 0', () => {
+    expect(shortlistReportB(B_ROWS, [1, 3], 0)).toEqual([
+      { k: 1, holdsRealPickB: 0, bestRealRankB: -1 },
+      { k: 3, holdsRealPickB: 0, bestRealRankB: -1 },
+    ]);
+  });
+
+  it('with tolerance 6 the floor 11 admits A, B, C, E; D (the real pick) is out', () => {
+    expect(shortlistReportB(B_ROWS, [1, 3, 5], 6)).toEqual([
+      { k: 1, holdsRealPickB: 0, bestRealRankB: 4 },
+      { k: 3, holdsRealPickB: 0, bestRealRankB: 2 },
+      { k: 5, holdsRealPickB: 0, bestRealRankB: 2 },
+    ]);
+  });
+
+  it('with tolerance 20 the floor 25 admits all and the fastest is the real pick D', () => {
+    expect(shortlistReportB(B_ROWS, [1, 2], 20)).toEqual([
+      { k: 1, holdsRealPickB: 1, bestRealRankB: 1 },
+      { k: 2, holdsRealPickB: 1, bestRealRankB: 1 },
+    ]);
+  });
+
+  it('the input is not reordered', () => {
+    const before = B_ROWS.map((r) => r.signature);
+    shortlistReportB(B_ROWS, [5], 6);
+    expect(B_ROWS.map((r) => r.signature)).toEqual(before);
+  });
+});
+
+describe('#1242 the trace row carries list B’s pair', () => {
+  it('every shadow:shortlist row carries bestRealRankB and holdsRealPickB (empty at tolerance 0)', () => {
+    const rows = captureRows(() => traceShadowSelection(fixture({ toleranceMm2: 0 })));
+    const bRows = rows.filter((r) => r.stage === 'shadow:shortlist');
+    expect(bRows.length).toBeGreaterThan(0);
+    for (const r of bRows) {
+      expect(r.bestRealRankB).toBe(-1);
+      expect(r.holdsRealPickB).toBe(0);
+      // #1231's own fields are still there.
+      expect(typeof r.bestRealRank).toBe('number');
+      expect(typeof r.holdsRealPick).toBe('number');
+    }
   });
 });

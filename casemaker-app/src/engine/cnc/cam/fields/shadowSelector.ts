@@ -45,6 +45,12 @@ export interface ShadowInput extends EstimateInput {
    * choice, so a traced plan need not pay for them twice). Absent → computed here.
    */
   estimates?: CandidateEstimates;
+  /**
+   * #1242's amended rule — the leftover tolerance in mm² (`plan.leftoverEquivalencePct / 100 ×`
+   * the goal's covered area), for LIST B: the fastest chains whose estimated leftover is within it
+   * of the smallest. Absent or 0 → list B is empty and its fields report -1/0.
+   */
+  toleranceMm2?: number;
 }
 
 /** One candidate's cheap estimate, by its signature (the candidate list's own order kept below). */
@@ -118,6 +124,47 @@ export function shortlistReport(rows: readonly ShortlistRow[], sizes: readonly n
       bestRealRank: best.realRank,
       bestRealSeconds: best.realSeconds,
     });
+  }
+  return out;
+}
+
+export interface ShortlistResultB {
+  k: number;
+  /** 1 when the real planner's choice (rank 1) is among the first k of list B. */
+  holdsRealPickB: 0 | 1;
+  /** The best real rank among list B's first k; -1 when none of them was ranked or the list is empty. */
+  bestRealRankB: number;
+}
+
+/** #1242 (the amended rule) — LIST B, THE FAST ONES: among the rows whose estimated leftover is no
+ * more than the smallest plus `toleranceMm2`, the first k by (estimated seconds, signature), and
+ * the best real rank among them. Pure: the input is never reordered. `toleranceMm2 <= 0` (or no
+ * rows) makes every list empty. */
+export function shortlistReportB(rows: readonly ShortlistRow[], sizes: readonly number[], toleranceMm2: number): ShortlistResultB[] {
+  const out: ShortlistResultB[] = [];
+  let eligible: ShortlistRow[] = [];
+  if (toleranceMm2 > 0 && rows.length > 0) {
+    const smallest = Math.min(...rows.map((r) => r.estLeftoverMm2));
+    const floor = smallest + toleranceMm2;
+    eligible = rows
+      .filter((r) => r.estLeftoverMm2 <= floor)
+      .slice()
+      .sort((a, b) => {
+        if (a.estSeconds !== b.estSeconds) return a.estSeconds - b.estSeconds;
+        return a.signature < b.signature ? -1 : a.signature > b.signature ? 1 : 0;
+      });
+  }
+  for (const k of sizes) {
+    const top = eligible.slice(0, k).filter((r) => r.realRank >= 1);
+    if (top.length === 0) {
+      out.push({ k, holdsRealPickB: 0, bestRealRankB: -1 });
+      continue;
+    }
+    let best = top[0]!;
+    for (const r of top) {
+      if (r.realRank < best.realRank) best = r;
+    }
+    out.push({ k, holdsRealPickB: best.realRank === 1 ? 1 : 0, bestRealRankB: best.realRank });
   }
   return out;
 }
@@ -257,12 +304,17 @@ export function traceShadowSelection(input: ShadowInput): void {
   });
 
   // #1231 — what a shortlist of each measured size would have held, beside the candidates' count.
+  // #1242's amended rule adds list B's pair to the same row; #1231's fields are untouched.
+  const bByK = new Map(shortlistReportB(shortlistRows, SHORTLIST_SIZES, input.toleranceMm2 ?? 0).map((r) => [r.k, r]));
   for (const r of shortlistReport(shortlistRows, SHORTLIST_SIZES)) {
+    const b = bByK.get(r.k);
     memTrace('shadow:shortlist', {
       k: r.k,
       holdsRealPick: r.holdsRealPick,
       bestRealRank: r.bestRealRank,
       bestRealSeconds: round3(r.bestRealSeconds),
+      bestRealRankB: b?.bestRealRankB ?? -1,
+      holdsRealPickB: b?.holdsRealPickB ?? 0,
       candidates: candidates.length,
     });
   }

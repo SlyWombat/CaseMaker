@@ -378,7 +378,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."),
     // #1242 (planner v3 C3) — how many chains get a real plan; 0 is off (every chain, slower,
     // the same pick). Chosen, not measured.
-    ("plan.shortlistSize", 8.0, "cutter sets", "chosen, not measured. How many of the most promising sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."),
+    ("plan.shortlistSize", 8.0, "cutter sets", "chosen, not measured. How many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same."),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
     // ── #451 adaptive settings (end)
