@@ -122,7 +122,7 @@ describe('the depth a stock kind recommends (#492 J19)', () => {
       voidLimit: null,
       jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false },
       boundaryMargin: 0.2,
-    })!;
+    }, null)!;
     expect(rec.depth).toBe(0.1);
     // `basis[0]` is the sentence the panel's row and the run sheet's `depthSourceWords` both print.
     expect(rec.basis[0]).toBe(recommendedEngraveDepth(laminate.stock).reason);
@@ -166,13 +166,13 @@ describe('the ceiling a rotary blank allows (#724 W4)', () => {
   }
 
   it('a plate keeps thickness − floor; a rod is radius − floor; a tube the smaller of radius and wall', () => {
-    expect(blankDepthCeiling(defaultEngraveJob())).toBe(11); // 12 − 1
+    expect(blankDepthCeiling(defaultEngraveJob(), null)).toBe(11); // 12 − 1
     // ⌀20: 19 was the box's answer and 19 is past the axis; the radius gives 9.
-    expect(blankDepthCeiling(rod())).toBe(9);
+    expect(blankDepthCeiling(rod(), null)).toBe(9);
     // A ⌀25 tube with a 3 mm wall: the bore is 3 mm under the surface, so 3 − 1 = 2.
-    expect(blankDepthCeiling(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }))).toBe(2);
+    expect(blankDepthCeiling(rod({ diameter: 25, width: 25, thickness: 25, wall: 3 }), null)).toBe(2);
     // A wall past the radius cannot be cut to; the radius still caps it.
-    expect(blankDepthCeiling(rod({ diameter: 4, width: 4, thickness: 4, wall: 10 }))).toBe(1);
+    expect(blankDepthCeiling(rod({ diameter: 4, width: 4, thickness: 4, wall: 10 }), null)).toBe(1);
   });
 
   it('the recommendation quotes the rod’s ceiling, not the box’s', () => {
@@ -181,7 +181,7 @@ describe('the ceiling a rotary blank allows (#724 W4)', () => {
       voidLimit: null,
       jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false },
       boundaryMargin: 0.2,
-    })!;
+    }, null)!;
     expect(rec.basis[0]).toContain("the blank's 1 mm minimum floor allows 9 mm");
     expect(rec.basis[0]).not.toContain('19');
   });

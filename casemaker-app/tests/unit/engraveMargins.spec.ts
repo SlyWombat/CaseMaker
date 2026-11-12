@@ -538,7 +538,7 @@ describe('the label depth a blank allows (#362)', () => {
     // lets `checkBounds` accept exactly `at + m` against the plane the checker computes for itself.
     const job = printedJob({ kind: 'printed', capMm: 1.4, layerHeight: 0.2, firstLayerHeight: 0.2 });
     expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);
-    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()))!;
+    const rec = recommendLabelDepth(job, label(), inputsFor(job, label()), null)!;
     expect(rec.depth).toBe(1.6);
     expect(rec.depthIntent).toBe('reveal');
     // The recommendation CANNOT fail the bound it is aiming at: the same plane, the same margin.
@@ -559,7 +559,7 @@ describe('the label depth a blank allows (#362)', () => {
     // gets a fresh answer rather than a floor frozen against this one.
     const badge = badgeJob();
     const job: EngraveJob = { ...badge, stock: { ...badge.stock, colour: { kind: 'printed', capMm: 0.81, layerHeight: 0.2, firstLayerHeight: 0.2 } }, keepOuts: [] };
-    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()), null)!;
     expect(rec.depth).toBe(0.6);
     expect(rec.depthIntent).toBe('surface');
     expect(rec.basis[0]).toContain('which lands inside the colour split');
@@ -604,7 +604,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(margin).toBe(0.28);
     expect(splitDepthOf(job)).toBe(1.2);
 
-    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw(), { boundaryMargin: margin }))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw(), { boundaryMargin: margin }), null)!;
     expect(rec.depthIntent).toBe('surface');
     expect(rec.depth).toBe(0.92);
     expect(rec.basis[0]).toContain('stops in the top colour at 0.92 mm');
@@ -636,7 +636,7 @@ describe('the label depth a blank allows (#362)', () => {
       keepOuts: [],
     };
     expect(splitDepthOf(job)).toBeCloseTo(1.4, 9);
-    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()), null)!;
     expect(rec.depth).toBe(0.905);
     expect(rec.depthIntent).toBeUndefined();
     expect(rec.basis[0]).toContain('above the jaw tops');
@@ -655,7 +655,7 @@ describe('the label depth a blank allows (#362)', () => {
     const bound = voidLimitForItem(job, over, undefined, measure)!;
     expect(bound.name).toBe('Magnet pocket');
     expect(bound.limit).toBe(0.5100000000000002);
-    const rec = recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: bound }))!;
+    const rec = recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: bound }), null)!;
     expect(rec.depth).toBe(0.51);
     expect(rec.basis[0]).toBe('"Magnet pocket" leaves 0.51 mm of material');
 
@@ -670,7 +670,7 @@ describe('the label depth a blank allows (#362)', () => {
     // staying silent about them.
     const beside = label({ text: 'Name', size: 8, position: { x: 31.325, y: 38.1 }, rotation: 90 });
     expect(voidLimitForItem(job, beside, undefined, measure)).toBeNull();
-    const besideRec = recommendLabelDepth(job, beside, inputsFor(job, beside))!;
+    const besideRec = recommendLabelDepth(job, beside, inputsFor(job, beside), null)!;
     expect(besideRec.depth).toBe(2);
     expect(besideRec.basis[0]).toBe(
       "the blank's 1 mm minimum floor allows 2.81 mm, and the label's own 2 mm depth is within it",
@@ -693,7 +693,7 @@ describe('the label depth a blank allows (#362)', () => {
     // The estimate is the TIMID box, so a number worked out with it can only move deeper later.
     const estimated = voidLimitForItem(job, over)!;
     expect(estimated.estimated).toBe(true);
-    expect(recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: estimated }))!.basis[0]).toContain(
+    expect(recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: estimated }), null)!.basis[0]).toContain(
       'its face is not parsed yet',
     );
 
@@ -702,7 +702,7 @@ describe('the label depth a blank allows (#362)', () => {
     const measured = voidLimitForItem(job, over, undefined, labelGlyphMeasure([]))!;
     expect(measured.estimated).toBe(false);
     expect(measured.name).toBe('Magnet pocket');
-    expect(recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: measured }))!.basis[0]).toBe(
+    expect(recommendLabelDepth(job, over, inputsFor(job, over, { voidLimit: measured }), null)!.basis[0]).toBe(
       '"Magnet pocket" leaves 0.51 mm of material',
     );
   });
@@ -750,7 +750,7 @@ describe('the label depth a blank allows (#362)', () => {
     // 1.905 mm proud less the job's own 1 mm clearance. The blank's underside (3.81 − 1 = 2.81)
     // is nowhere near binding: this is the jaw check's own budget, said before the wizard opens.
     // `stockProud < deepest + jawClearance` is strict, so a floor landing exactly on it is inside.
-    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()))!;
+    const rec = recommendLabelDepth(job, nearJaw(), inputsFor(job, nearJaw()), null)!;
     expect(rec.depth).toBe(0.905);
     expect(1.905 < rec.depth + job.jawClearance).toBe(false);
     // NOT a reveal: there is no split on this blank, and stamping one would make the item fail the
@@ -761,7 +761,7 @@ describe('the label depth a blank allows (#362)', () => {
     // 0.5 mm boundary margin over the jaws, not the house 1 mm... which is the looser of the two.
     const loose = await badgeJob({ keepOuts: [], jawClearance: 0.1 });
     expect(
-      recommendLabelDepth(loose, nearJaw(), inputsFor(loose, nearJaw(), { boundaryMargin: 0.5 }))!.depth,
+      recommendLabelDepth(loose, nearJaw(), inputsFor(loose, nearJaw(), { boundaryMargin: 0.5 }), null)!.depth,
     ).toBe(1.405);
   });
 
@@ -772,13 +772,13 @@ describe('the label depth a blank allows (#362)', () => {
     const inputs = inputsFor(job, label(), {
       voidLimit: voidLimitForItem(job, label({ position: { x: 19.05, y: 38.1 } })),
     });
-    expect(recommendLabelDepth(job, label({ depthIntent: 'surface' }), inputs)).toBeNull();
-    expect(recommendLabelDepth(job, label({ depthIntent: 'custom' }), inputs)).toBeNull();
-    expect(recommendLabelDepth(job, label({ construction: true }), inputs)).toBeNull();
+    expect(recommendLabelDepth(job, label({ depthIntent: 'surface' }), inputs, null)).toBeNull();
+    expect(recommendLabelDepth(job, label({ depthIntent: 'custom' }), inputs, null)).toBeNull();
+    expect(recommendLabelDepth(job, label({ construction: true }), inputs, null)).toBeNull();
     // …and a blank with no room for any cut gives NO depth rather than a made-up one: the jaw
     // check goes on saying what is wrong with the setup, which is a thing to fix, not to cut.
     const tight = badgeJob({ keepOuts: [], jawClearance: 3 });
-    expect(recommendLabelDepth(tight, nearJaw(), inputsFor(tight, nearJaw()))).toBeNull();
+    expect(recommendLabelDepth(tight, nearJaw(), inputsFor(tight, nearJaw()), null)).toBeNull();
   });
 
   it('bounds the label’s own depth by the blank’s underside — never answers with the ceiling (#440)', () => {
@@ -795,7 +795,7 @@ describe('the label depth a blank allows (#362)', () => {
 
     // The fixture's own 2 mm is within the ceiling, so it stands — not the 2 mm ceiling by
     // coincidence, but because the label asked for it.
-    const within = recommendLabelDepth(job, label(), clear(label()))!;
+    const within = recommendLabelDepth(job, label(), clear(label()), null)!;
     expect(within.depth).toBe(2);
     expect(within.basis[0]).toBe(
       "the blank's 10 mm minimum floor allows 2 mm, and the label's own 2 mm depth is within it",
@@ -803,12 +803,12 @@ describe('the label depth a blank allows (#362)', () => {
 
     // A shallower design stands too, untouched: the blank does not talk a label into a deeper cut.
     const shallow = label({ depth: 1.5 });
-    expect(recommendLabelDepth(job, shallow, clear(shallow))!.depth).toBe(1.5);
+    expect(recommendLabelDepth(job, shallow, clear(shallow), null)!.depth).toBe(1.5);
 
     // Deeper than the ceiling: the ceiling BOUNDS the design rather than replacing it, and the
     // clause says which is which.
     const deep = label({ depth: 2.5 });
-    const capped = recommendLabelDepth(job, deep, clear(deep))!;
+    const capped = recommendLabelDepth(job, deep, clear(deep), null)!;
     expect(capped.depth).toBe(2);
     expect(capped.basis[0]).toBe(
       "the blank's 10 mm minimum floor allows 2 mm, but the label's own 2.5 mm depth asks for more — " +
@@ -826,7 +826,7 @@ describe('the label depth a blank allows (#362)', () => {
     const faceClear = inputsFor(thick, face, {
       jawReach: { jaw: 'fixed', gap: 20, reaches: false, overJaw: false },
     });
-    expect(recommendLabelDepth(thick, face, faceClear)!.depth).toBe(0.5);
+    expect(recommendLabelDepth(thick, face, faceClear, null)!.depth).toBe(0.5);
   });
 
   it('revises its OWN past intent, and declines every other stated one (#362 review)', () => {
@@ -844,18 +844,18 @@ describe('the label depth a blank allows (#362)', () => {
       voidLimit: voidLimitForItem(job, label({ position: { x: 19.05, y: 38.1 } })),
     });
     const stated = label({ depthIntent: 'surface' });
-    expect(recommendLabelDepth(job, stated, inputs)).toBeNull();
-    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' })).not.toBeNull();
-    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' })!.depth).toBe(0.51);
+    expect(recommendLabelDepth(job, stated, inputs, null)).toBeNull();
+    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' }, null)).not.toBeNull();
+    expect(recommendLabelDepth(job, stated, { ...inputs, intent: 'computed' }, null)!.depth).toBe(0.51);
     for (const intent of ['user', 'catalogue', 'measured'] as const) {
-      expect(recommendLabelDepth(job, stated, { ...inputs, intent })).toBeNull();
+      expect(recommendLabelDepth(job, stated, { ...inputs, intent }, null)).toBeNull();
     }
     // A construction label cuts nothing, so no intent and no provenance can conjure a depth for it.
     expect(
       recommendLabelDepth(job, label({ construction: true, depthIntent: 'surface' }), {
         ...inputs,
         intent: 'computed',
-      }),
+      }, null),
     ).toBeNull();
   });
 
@@ -874,7 +874,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(clear.jaw).toBe('fixed');
     expect(clear.gap).toBeCloseTo(4.907, 3);
     expect(clear.reaches).toBe(false);
-    const clearRec = recommendLabelDepth(job, centred, inputsFor(job, centred))!;
+    const clearRec = recommendLabelDepth(job, centred, inputsFor(job, centred), null)!;
     // #440 — the line's own depth (the demo 'CASE' 2 mm), not the blank's 2.81 mm ceiling. The
     // ceiling is the upper bound the basis quotes, not the answer.
     expect(clearRec.depth).toBe(2);
@@ -899,7 +899,7 @@ describe('the label depth a blank allows (#362)', () => {
     expect(at.gap).toBeCloseTo(0.75, 3);
     expect(at.reaches).toBe(true);
     expect(at.overJaw).toBe(false);
-    const rec = recommendLabelDepth(job, nearFixed, inputsFor(job, nearFixed))!;
+    const rec = recommendLabelDepth(job, nearFixed, inputsFor(job, nearFixed), null)!;
     expect(rec.depth).toBe(0.905);
     expect(rec.basis[0]).toContain('within 0.75 mm of the fixed jaw');
     expect(rec.basis[0]).toContain('stands 1.905 mm above the jaw tops');

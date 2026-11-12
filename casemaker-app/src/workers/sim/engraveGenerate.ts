@@ -4448,7 +4448,7 @@ async function generateRestPair(
     // design never gave up. The CLI route drops the same regions for the same reason.
     let kept = rest1.regions;
     if (kept.length > 0) {
-      const probe = { ...restJobFor(job, kept, restRef.toolKey), tool: restTool };
+      const probe = { ...restJobFor(job, kept, restRef.toolKey, shop.defaults ?? null), tool: restTool };
       const open = new Set(
         engraveRegions(tl, probe, restTool, margins, shop, mill, catalogue, undefined, floors)
           .measured.filter((m) => m.openedArea > 0)
@@ -4470,7 +4470,7 @@ async function generateRestPair(
       // first empty rest.)
       continue;
     }
-    const restJobBase = restJobFor(job, kept, restRef.toolKey);
+    const restJobBase = restJobFor(job, kept, restRef.toolKey, shop.defaults ?? null);
     // The generator's readers (`validateJob` inside `engraveRegions`, the verifier) resolve the
     // cutter through `job.tool` or the WORKER's registry, which is empty. The rest job names a key
     // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.

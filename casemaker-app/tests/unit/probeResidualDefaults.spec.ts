@@ -145,7 +145,11 @@ describe('the probe residuals as shop defaults (#451)', () => {
 
   it('recommendMargins builds its probe term from registration.wiredProbeZResidualMm', () => {
     choose({ 'registration.wiredProbeZResidualMm': 0.01 });
-    const rec = recommendMargins(defaultEngraveJob(), MARGIN_DEFAULTS);
+    // #1244 — the figure is the EDGE's read of the map (as the panel and the sheet pass it), not
+    // an ambient default inside the engine.
+    const rec = recommendMargins(defaultEngraveJob(), MARGIN_DEFAULTS, {
+      probeUncertainty: probeResiduals(liveShopDefaults()).wiredProbeZ,
+    });
     expect(rec.zTolerance).toBeCloseTo(0.01, 12);
     expect(rec.basis.join(' ')).toContain('the wired probe adds 0.01 mm');
   });

@@ -203,7 +203,7 @@ describe('#865 a later program’s own findings', () => {
       { ...job, vectors: [userVector] },
       [{ id: 'r1', depth: 2, polygons: [[[10, 10], [20, 10], [20, 20], [10, 20]]] }],
       FLAT_KEY,
-    );
+    null);
     expect(restJob.vectors?.[0]?.restRegion).toBe(true);
     const parsed = parseEngraveJob(restJob);
     expect(parsed.ok, parsed.ok ? '' : parsed.errors.join('; ')).toBe(true);

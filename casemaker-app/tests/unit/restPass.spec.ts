@@ -334,7 +334,7 @@ describe('restJobFor (#410)', () => {
 
   it('turns measured regions into items of the SAME blank, named so the operator can tell them apart', () => {
     const job = fullJob();
-    const rest = restJobFor(job, [{ id: 'shp-1', name: 'Single Barrel', depth: 0.985, polygons: [ring] }], 'fine');
+    const rest = restJobFor(job, [{ id: 'shp-1', name: 'Single Barrel', depth: 0.985, polygons: [ring] }], 'fine', null);
     expect(rest.vectors).toHaveLength(1);
     const v = rest.vectors![0]!;
     // The name has to say where the region CAME FROM: a person reading the program back must be
@@ -375,7 +375,7 @@ describe('restJobFor (#410)', () => {
         },
       ],
       'fine',
-    );
+    null);
     const v = rest.vectors![0]!;
     // The descriptor's quoted item name, not the descriptor itself: the header quotes the name
     // again, so carrying the whole sentence made nested quotes (#437).
@@ -386,13 +386,13 @@ describe('restJobFor (#410)', () => {
     expect(v.height).toBe(2.765);
 
     // An unnamed item has no quoted part; the descriptor's trailing size clause is dropped instead.
-    const unnamed = restJobFor(job, [{ id: 'shp-2', name: 'Pocket rect (1 contour, 8×2mm)', depth: 1, polygons: [ring] }], 'fine');
+    const unnamed = restJobFor(job, [{ id: 'shp-2', name: 'Pocket rect (1 contour, 8×2mm)', depth: 1, polygons: [ring] }], 'fine', null);
     expect(unnamed.vectors![0]!.name).toBe('rest of Pocket rect');
   });
 
   it('empties every design item list and keeps the BLANK’s own facts', () => {
     const job = fullJob();
-    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');
+    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine', null);
     // A design item left here would re-cut the whole design at the fine bit's pace — an hour of
     // air-cutting in the middle of the part.
     expect(rest.labels).toEqual([]);
@@ -439,7 +439,7 @@ describe('restJobFor (#410)', () => {
       { kind: 'box', id: 'pr-1', position: { x: 10, y: 10 }, rotation: 0, enabled: true, depth: 1, width: 2, height: 2 },
     ];
 
-    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');
+    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine', null);
     // A rest-only cutter owns no items, so none of the job's cutting items may ride into its
     // program. The cut-out is the sharpest case: its owner posts it in a final program (#746
     // cut-out-last), so a copy here would be cut TWICE and would release the part before its
@@ -452,7 +452,7 @@ describe('restJobFor (#410)', () => {
 
   it('clears the first cutter’s identity — key, materialised tool AND its typed feed', () => {
     const job = fullJob();
-    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');
+    const rest = restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine', null);
     expect(rest.toolKey).toBe('fine');
     // Left in place the first program's materialised cutter is read back AHEAD of `toolKey`
     // (`jobTool`), so the rest program would be generated, verified and simulated for the wrong bit.
@@ -470,7 +470,7 @@ describe('restJobFor (#410)', () => {
     const job = fullJob();
     const vectors = job.vectors;
     const toolKey = job.toolKey;
-    restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine');
+    restJobFor(job, [{ id: 'shp-1', depth: 0.985, polygons: [ring] }], 'fine', null);
     expect(job.vectors).toBe(vectors);
     expect(job.toolKey).toBe(toolKey);
     expect(job.tool).not.toBeNull();

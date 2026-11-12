@@ -119,6 +119,7 @@ import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart'
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
 import type { ShopDefaults } from '@/platform/defaultsClient';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -1173,11 +1174,13 @@ function marginsStep(
   plan: PartPlan,
   margins: EngraveMargins,
   settings: MarginSettings,
+  // #1244 — the map from the sheet's caller; its wired-probe figure is the margin's probe term.
+  defaults: ShopDefaults | null,
 ): RunSheetStep {
   // The recommendation is `max(setting, zTolerance)` — the house number, never the margin the job
   // happens to be running on, and the SAME inputs the panel resolves (`zBudgetInputsFor`), so the
   // printout and the panel cannot offer two different numbers for one blank (#345 review).
-  const rec = recommendMargins(job, settings, zBudgetInputsFor(job));
+  const rec = recommendMargins(job, settings, { ...zBudgetInputsFor(job), probeUncertainty: probeResiduals(defaults).wiredProbeZ });
   // #345 decision A — a blank that states NO print and has a void runs its void's ceiling on
   // `max(boundaryMargin, minFloor)`, so the boundary margin printed on this line is NOT the number
   // that void keeps. The only place the operator can read which rule applied is here; saying it only
@@ -1255,6 +1258,8 @@ function depthSourceWords(
   item: { id: string; depth: Mm },
   boundaryMargin: Mm,
   measure: InkMeasure,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): string {
   const label = job.labels.find((l) => l.id === item.id);
   if (!label) return '';
@@ -1272,7 +1277,7 @@ function depthSourceWords(
     jawReach: labelJawReach(job, label),
     boundaryMargin,
     ...(claim.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
-  });
+  }, defaults);
   if (rec !== null && Math.abs(rec.depth - item.depth) < 1e-9) return ` — ${rec.basis[0]}`;
   return (
     ' — the app recommended this depth for the blank it was taken on' +
@@ -4972,7 +4977,7 @@ export function buildRunSheet(
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
   // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
   // app recommends for this blank. Only when a bound exists: see `usesBoundaryMargin`.
-  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, plan, margins, settings));
+  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, plan, margins, settings, options.defaults ?? null));
   // #492 — the colour plane's own fact, and where its number came from. A laminate says "cap";
   // a printed blank says "colour change"; a one-colour job says nothing.
   const colour = colourStep(job);
@@ -5663,7 +5668,7 @@ export function buildRunSheet(
       if (finishFacts.mode !== 'finish-only') {
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             `roughing pass: leaves ${fmtNum(leave)} mm of stock on the walls and the floor.`,
           value: `rough to ${fmtNum(item.depth - leave)} mm deep · ${fmtNum(leave)} mm stock left`,
         });
@@ -5671,7 +5676,7 @@ export function buildRunSheet(
       if (finishFacts.mode !== 'rough-only') {
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             `finishing pass: full depth along the walls and the floor, ${fmtNum(leave)} mm below the ` +
             'roughing cut.',
           value: `${fmtNum(item.depth)} mm deep · full depth`,
@@ -5712,7 +5717,7 @@ export function buildRunSheet(
           clearance === undefined ? null : programNumberIn(runPrograms, clearance.program.nc);
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             'VARIABLE depth: the V follows the design’s width, its flank on the edge, from the ' +
             'outside in' +
             (levels === null
@@ -5753,7 +5758,7 @@ export function buildRunSheet(
               : '');
       cutSteps.push({
         text:
-          `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+          `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
           (floor > 0 ? `on the ${fmtNum(floor)} mm floor it sits on, ` : '') +
           (film === null
             ? 'with no film the colour plane is the floor, and the cone reaches '
@@ -5767,7 +5772,7 @@ export function buildRunSheet(
       });
     } else {
       cutSteps.push({
-        text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)}`,
+        text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)}`,
         value: `${fmtNum(item.depth)} mm deep`,
       });
     }

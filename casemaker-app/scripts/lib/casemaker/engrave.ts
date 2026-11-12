@@ -2730,7 +2730,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       let kept = rest1.regions;
       if (kept.length > 0) {
         const open = new Set(
-          engraveRegions(tl, restJobFor(job, kept, restChosen.key), restTool)
+          engraveRegions(tl, restJobFor(job, kept, restChosen.key, shopDefaults), restTool)
             .measured.filter((m) => m.openedArea > 0)
             .map((m) => m.labelId),
         );
@@ -2749,7 +2749,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       let facts: RestPassFacts | null = null;
       if (kept.length > 0) {
         // ---- PROGRAM 2: the clean-up pass ------------------------------------------------------
-        const restJob = restJobFor(job, kept, restChosen.key);
+        const restJob = restJobFor(job, kept, restChosen.key, shopDefaults);
         roundTrips(restJob, 'rest program');
         // Seeded with program 1's removal: the sweep of the second file starts from the blank program
         // 1 leaves behind, so the prediction, the coverage and the gouge checks are all made against

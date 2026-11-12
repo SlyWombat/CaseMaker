@@ -2847,7 +2847,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             // `'reveal'` on this label is a previous call's, so a thicker badge or a different split
             // gets a fresh answer instead of a stale depth the checker would refuse.
             ...(claim?.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
-          });
+          }, useShopDefaultsStore.getState().defaults);
           if (rec === null) return label;
           changed = true;
           // The depth is written as `computed`, the honest member of `FieldSource` for a number the

@@ -1410,7 +1410,7 @@ export function EngravePanel(): JSX.Element {
   // #724 W4 — the ceiling is the BLANK's own: the stock thickness on a plate, but a rotary cut's
   // floor is a radius above the axis (9 mm on a ⌀20 rod, not 19 — 19 is past the centre), and a
   // tube's is its wall. The sentence says which number made it, so 9 never reads as a thickness.
-  const maxDepth = blankDepthCeiling(job);
+  const maxDepth = blankDepthCeiling(job, shopDefaults);
   const maxDepthWhy = (() => {
     const map = rotaryMapOf(job, liveShopDefaults());
     if (map === null) return 'the stock thickness less the minimum floor';
@@ -1584,7 +1584,7 @@ export function EngravePanel(): JSX.Element {
       jawReach: labelJawReach(job, label),
       boundaryMargin: margins.boundaryMargin,
       ...(intent === undefined ? {} : { intent }),
-    });
+    }, shopDefaults);
   };
 
   // #271 route 1 and #280's twin used to hang a "use the project's badge / blank" button under the

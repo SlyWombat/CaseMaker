@@ -1960,7 +1960,7 @@ export function validateJob(
   // less the floor, on a rotary job the RADIUS (or a tube's wall) less the floor — a ⌀20 rod's
   // limit is 9 mm, and 19 has no stock under it at all. The same number the row's field, its
   // sentence and the recommendation use.
-  const floorAllowed = blankDepthCeiling(job) - facingDepth;
+  const floorAllowed = blankDepthCeiling(job, options.defaults ?? null) - facingDepth;
 
   for (const item of enabled) {
     // A through region has no typed depth (#218): its floor is the board, and the through gate
