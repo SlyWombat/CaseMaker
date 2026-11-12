@@ -2592,7 +2592,7 @@ export function EngravePanel(): JSX.Element {
               }),
           // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
           // profile it was planned on; "not measured" when the datums are absent.
-          rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }),
+          rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }, shopDefaults),
           mountName,
           bedName,
           found:

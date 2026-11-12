@@ -1718,7 +1718,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(comparison === null ? {} : { comparison }),
         // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
         // profile it was planned on (absent: the sheet says what is not measured).
-        rotaryDatum: rotarySheetDatumFor(job, boot.location),
+        rotaryDatum: rotarySheetDatumFor(job, boot.location, shopDefaults),
         // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
         // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
         // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
