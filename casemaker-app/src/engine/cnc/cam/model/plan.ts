@@ -1019,6 +1019,32 @@ function formatSpan(seconds: number): string {
  * envelope); `input.cutters.catalogue` is not in the pocket chain yet (`planPocketsForTree` takes
  * house flats only) — the plan says that too when a caller supplies one.
  */
+/**
+ * #1243 — ONE COLLECTION PATH: every op's own notes (`OpOutcome.notes`) reach the plan's
+ * statements in the order the ops run, as the sheet's own class (`severity: 'sheet'`, the filter
+ * runSheet.ts applies). A note two ops both write is folded once with its count — the statements'
+ * own rule for a repeated cause — and the folded line's `ids` name every writing op's program.
+ * Nothing is invented here: only notes an op already writes reach it.
+ */
+export function collectOpNotes(ops: readonly PlannedOp[], statements: PlanStatement[]): void {
+  const noteStatement = new Map<string, { statement: PlanStatement; writers: string[] }>();
+  for (const op of ops) {
+    const opName = op.outcome.ir.operations[0]?.name ?? op.region.id;
+    for (const text of op.outcome.notes ?? []) {
+      const seen = noteStatement.get(text);
+      if (seen === undefined) {
+        const statement: PlanStatement = { severity: 'sheet', code: 'plan-run', count: 1, text };
+        noteStatement.set(text, { statement, writers: [opName] });
+        statements.push(statement);
+      } else {
+        seen.statement.count = (seen.statement.count ?? 0) + 1;
+        if (!seen.writers.includes(opName)) seen.writers.push(opName);
+        seen.statement.ids = [...seen.writers];
+      }
+    }
+  }
+}
+
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
   // #1237 — A LOCATION GIVEN IS DEFAULTS GIVEN. The planner's settings travel in the input; a
   // caller that planned from a location and did not pass them (undefined — null is a location
@@ -2868,16 +2894,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       // actual outcome (or why it could not be checked) on THIS plan.
     }
 
-    // #1206 (the analyst's condition 2) — THE FREEING CONTOUR'S TAB STATEMENTS reach the
-    // sheet's statements section: how many were asked for and placed, and every tight tab with
-    // the stretch it closes and its distance from the nearest corner. Only the contour op's
-    // notes: the finish op's own notes (#960/#1033) are a separate sheet-text gap.
-    for (const op of ops) {
-      if (op.kind !== 'contour') continue;
-      for (const text of op.outcome.notes ?? []) {
-        statements.push({ severity: 'sheet', code: 'plan-run', count: 1, text });
-      }
-    }
+    // #1243 — ONE COLLECTION PATH: every op's own notes reach the sheet's statements (op order,
+    // repeats folded). See `collectOpNotes`.
+    collectOpNotes(ops, statements);
 
     perSetup.push({
       setupIndex,
