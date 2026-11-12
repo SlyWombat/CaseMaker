@@ -170,11 +170,11 @@ for (const face of faces) {
   for (const word of WORDS) {
     for (const size of SIZES) {
       const job = jobs.get(`${face.key}|${word}|${size}`)!;
-      const plan = toPartPlan(job);
+      const plan = toPartPlan(job, { defaults: null });
       const perChar = perCharFor(job);
       // The 2× probe is its own job, one per size, reused across every cutter in this cell.
       const job2 = probeJob(face.def.id, face.weight, word, size * 2);
-      const plan2 = toPartPlan(job2);
+      const plan2 = toPartPlan(job2, { defaults: null });
       for (const cutter of cutters) {
         const m = measureLabels(tl, plan, cutter.r, job.edgeMargin, perChar)[0];
         const m2 = measureLabels(tl, plan2, cutter.r * 2, job2.edgeMargin, perCharFor(job2))[0];
@@ -416,7 +416,7 @@ push('');
  */
 function rAtThreshold(faceKey: string, word: string, size: number): number | null {
   const job = jobs.get(`${faceKey}|${word}|${size}`)!;
-  const plan = toPartPlan(job);
+  const plan = toPartPlan(job, { defaults: null });
   const perChar = perCharFor(job);
   const ratioAt = (r: number): number => measureLabels(tl, plan, r, job.edgeMargin, perChar)[0]?.ratio ?? 0;
   if (ratioAt(2) >= LOST_DETAIL_RATIO) return null; // even a ⌀4 mm cutter would do

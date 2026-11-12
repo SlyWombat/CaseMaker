@@ -1143,7 +1143,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // and different work frames, so each side is read on the LAST program of ITS setup (the sweep
     // then holds every cut that side took), against that side's own copper. The run report carries
     // the per-face verdicts and the sum, so the gate and the sheet state both.
-    const pcbSides = pcbCopperTopologyInputs(job);
+    const pcbSides = pcbCopperTopologyInputs(job, shop.defaults ?? null);
     const lastIndexOfSetup = new Map<number, number>();
     generated.programs.forEach((program, index) => lastIndexOfSetup.set(program.setupIndex, index));
     // #743 P-8 — THE CHECK READS THE PROGRAM THAT DREW THE SEPARATION. The design's last-program

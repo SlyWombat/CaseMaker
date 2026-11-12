@@ -118,7 +118,8 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
 // #243 — the blind-spot sentence is the Simulate panel's OWN builder, imported rather than
@@ -1185,11 +1186,13 @@ function marginsStep(
   plan: PartPlan,
   margins: EngraveMargins,
   settings: MarginSettings,
+  // #1244 — the map from the sheet's caller; its wired-probe figure is the margin's probe term.
+  defaults: ShopDefaults | null,
 ): RunSheetStep {
   // The recommendation is `max(setting, zTolerance)` — the house number, never the margin the job
   // happens to be running on, and the SAME inputs the panel resolves (`zBudgetInputsFor`), so the
   // printout and the panel cannot offer two different numbers for one blank (#345 review).
-  const rec = recommendMargins(job, settings, zBudgetInputsFor(job));
+  const rec = recommendMargins(job, settings, { ...zBudgetInputsFor(job), probeUncertainty: probeResiduals(defaults).wiredProbeZ });
   // #345 decision A — a blank that states NO print and has a void runs its void's ceiling on
   // `max(boundaryMargin, minFloor)`, so the boundary margin printed on this line is NOT the number
   // that void keeps. The only place the operator can read which rule applied is here; saying it only
@@ -1267,6 +1270,8 @@ function depthSourceWords(
   item: { id: string; depth: Mm },
   boundaryMargin: Mm,
   measure: InkMeasure,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): string {
   const label = job.labels.find((l) => l.id === item.id);
   if (!label) return '';
@@ -1284,7 +1289,7 @@ function depthSourceWords(
     jawReach: labelJawReach(job, label),
     boundaryMargin,
     ...(claim.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
-  });
+  }, defaults);
   if (rec !== null && Math.abs(rec.depth - item.depth) < 1e-9) return ` — ${rec.basis[0]}`;
   return (
     ' — the app recommended this depth for the blank it was taken on' +
@@ -1943,6 +1948,8 @@ function registrationSteps(
   footprint?: FootprintPlan,
   /** #1070 — the seat seek that must run first, when the seat has never been measured. */
   seatSeek?: SeatSeek,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null = null,
 ): RunSheetStep[] {
   if (footprint === undefined && seatSeek !== undefined) return seatRegistrationSteps(onBoard, facingRun, seatSeek);
   // #1070 — A BED-HELD JOB IS REGISTERED ON ITS CUT REGION, not the blank's edges: the six scans
@@ -1963,7 +1970,7 @@ function registrationSteps(
   const judged = judgedAgainstWords(job);
   // #449 — the tip is the shop's measured `registration.tipDiameterMm` when the caller passed the scan
   // settings; `PROBE_SPEC` (the same 2.0 mm, its labelled fallback) otherwise.
-  const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm });
+  const plan = registrationFor(job, tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: tipDiameterMm }, defaults);
 
   if ('refuse' in plan) {
     return [
@@ -2330,13 +2337,15 @@ function materialPositionSteps(
   probeInstrument?: ProbeFitInstrument,
   /** #1053 — the checked-out probe's name, so the fit step names the instrument it means. */
   probeName?: string,
+  // #1244 — the map from the sheet's caller; null: no location, the recommendations.
+  defaults: ShopDefaults | null = null,
 ): RunSheetStep[] {
   const part = onBoard ? 'part' : 'blank';
   // Nothing to check the blank against when the origin itself could not be resolved: §5 is then one
   // refusal step, and a scan printed under it would be a sequence the sheet has just declined to
   // stand behind. (`registrationFor` is pure point maths on the stock rectangle, so asking it twice
   // costs nothing and keeps this function's own contract — never a scan for an unresolvable origin.)
-  if ('refuse' in registrationFor(job, { ...PROBE_SPEC, tipDiameter: scan.tipDiameterMm })) return [];
+  if ('refuse' in registrationFor(job, { ...PROBE_SPEC, tipDiameter: scan.tipDiameterMm }, defaults)) return [];
   // #449/#452 — the scan steps, lifts and caps by the SAME shop defaults the registration planner
   // reads (`RunSheetOptions.scan`); with none passed, their labelled fallbacks, which are the seeds.
   const plan = planMaterialScan(job, scan);
@@ -2779,6 +2788,12 @@ export interface RunSheetOptions {
    * check the collet — this sheet is pure data and reads no defaults source.
    */
   probeShank?: { shankMm: number | null; colletMatchMm: number };
+  /**
+   * #1244 — the shop's defaults, from the caller's edge (the panel's store, the CLI's boot
+   * location). This sheet is pure data and never reads a defaults source; absent: no location,
+   * the recommendations.
+   */
+  defaults?: ShopDefaults | null;
   /** #604 — the mount's name (the vise the job holds with), or absent. */
   mountName?: string;
   /** #513 — the bed line the header prints (`bedLine`), resolved by the caller from the machine's
@@ -4635,12 +4650,12 @@ export function buildRunSheet(
   const vise = jobVise(job);
   // #1059 — a job in the 4th-axis chuck. Its mount, load and origin sections are the CHUCK's, not
   // the vise's: the module, the jaws and stick-out, and an origin on the measured axis.
-  const rotary = rotaryMapOf(job, liveShopDefaults());
+  const rotary = rotaryMapOf(job, options.defaults ?? null);
   // The one funnel all three item lists go through (#214/#215), so a `border`/`frame`/`cutaway`
   // is here too while a `construction` item, a broken reference and a self-intersecting polygon
   // are absent: the sheet describes exactly the cuts the `.nc` makes. `keepOuts` comes off the
   // same plan, so the diagram and the depth notes cannot disagree about where the voids are.
-  const plan = toPartPlan(job);
+  const plan = toPartPlan(job, { defaults: options.defaults ?? null });
   const items = plan.engraves;
   const diagram = buildDiagram(job, plan);
   const stackUp = buildStackUp(job);
@@ -5008,7 +5023,7 @@ export function buildRunSheet(
   if (sac !== null) needSteps.push({ text: 'Sacrificial material:', value: sac });
   // #345 — the margin every bound in this job is drawn to, with its source and the arithmetic the
   // app recommends for this blank. Only when a bound exists: see `usesBoundaryMargin`.
-  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, plan, margins, settings));
+  if (usesBoundaryMargin(job, plan)) needSteps.push(marginsStep(job, plan, margins, settings, options.defaults ?? null));
   // #492 — the colour plane's own fact, and where its number came from. A laminate says "cap";
   // a printed blank says "colour change"; a one-colour job says nothing.
   const colour = colourStep(job);
@@ -5373,7 +5388,7 @@ export function buildRunSheet(
   // as `materialPositionSteps` (which also asks `registrationFor` rather than receive the answer).
   const registrationRefused =
     'refuse' in
-    registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm });
+    registrationFor(job, options.scan?.tipDiameterMm === undefined ? undefined : { ...PROBE_SPEC, tipDiameter: options.scan.tipDiameterMm }, options.defaults ?? null);
   const originSteps: RunSheetStep[] = statedOrigin !== undefined
     ? senderOriginSteps(statedOrigin, onBoard)
     : rotary !== null
@@ -5398,7 +5413,9 @@ export function buildRunSheet(
           },
         ]
       : []),
-    ...registrationSteps(job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek),
+    ...registrationSteps(
+      job, onBoard, options.scan?.tipDiameterMm, facingRun, options.footprint, options.seatSeek, options.defaults ?? null,
+    ),
     // #475 — Z0 is a spread, not a point: print the surface touches across the cut's extents, the
     // band they must land in, and (when the caller has readings) the measured verdict. Additive:
     // a caller that passes no `surfaceTouchCount`/`surfaceReadings` gets the plan and stop rule.
@@ -5406,7 +5423,7 @@ export function buildRunSheet(
       ? []
       : surfaceSpreadSteps(job, margins.boundaryMargin, options.surfaceTouchCount, options.surfaceReadings, options.surfaceLevel)),
     ...(options.materialScan === true && clearanceZ !== null
-      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument, options.probeName)
+      ? materialPositionSteps(job, onBoard, BENCH_ISSUE, clearanceZ, options.scan, options.probeInstrument, options.probeName, options.defaults ?? null)
       : []),
   ];
 
@@ -5699,7 +5716,7 @@ export function buildRunSheet(
       if (finishFacts.mode !== 'finish-only') {
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             `roughing pass: leaves ${fmtNum(leave)} mm of stock on the walls and the floor.`,
           value: `rough to ${fmtNum(item.depth - leave)} mm deep · ${fmtNum(leave)} mm stock left`,
         });
@@ -5707,7 +5724,7 @@ export function buildRunSheet(
       if (finishFacts.mode !== 'rough-only') {
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             `finishing pass: full depth along the walls and the floor, ${fmtNum(leave)} mm below the ` +
             'roughing cut.',
           value: `${fmtNum(item.depth)} mm deep · full depth`,
@@ -5748,7 +5765,7 @@ export function buildRunSheet(
           clearance === undefined ? null : programNumberIn(runPrograms, clearance.program.nc);
         cutSteps.push({
           text:
-            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+            `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
             'VARIABLE depth: the V follows the design’s width, its flank on the edge, from the ' +
             'outside in' +
             (levels === null
@@ -5789,7 +5806,7 @@ export function buildRunSheet(
               : '');
       cutSteps.push({
         text:
-          `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)} — ` +
+          `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)} — ` +
           (floor > 0 ? `on the ${fmtNum(floor)} mm floor it sits on, ` : '') +
           (film === null
             ? 'with no film the colour plane is the floor, and the cone reaches '
@@ -5803,7 +5820,7 @@ export function buildRunSheet(
       });
     } else {
       cutSteps.push({
-        text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure)}`,
+        text: `${item.name}${note}${depthSourceWords(job, item, margins.boundaryMargin, measure, options.defaults ?? null)}`,
         value: `${fmtNum(item.depth)} mm deep`,
       });
     }

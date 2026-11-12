@@ -244,7 +244,7 @@ const api = {
     // calls too; this handler only adds the worker's cancellation guard.
     // #940 — the document's supporting floors, computed here where the toplevel lives; the one
     // builder carries them into the candidate filter and the search.
-    const floors = supportingFloors(tl, toPartPlan(job));
+    const floors = supportingFloors(tl, toPartPlan(job, { defaults: shop?.defaults ?? null }));
     return runSmartPick(
       { tl, job, tools, catalogue, conditions, shop, table: shop.feeds ?? null, onProgress, floors },
       () => latestEditGen > gen,

@@ -11,13 +11,19 @@
  * Setups step and may override it; a stated box wins, and `provenance` says which it is.
  */
 import type { EngraveJob, JobSetup, SetupStock } from '@/types/engraveJob';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { cutRegionOf } from '@/engine/cnc/registration/footprintJob';
 
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
 
 /** The freed part's box, from side 1's cut extents; null when the job states no cut region. */
-export function derivedSetupStock(job: EngraveJob, measuredThicknessMm: number | null): SetupStock | null {
-  const region = cutRegionOf(job);
+export function derivedSetupStock(
+  job: EngraveJob,
+  measuredThicknessMm: number | null,
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
+): SetupStock | null {
+  const region = cutRegionOf(job, defaults);
   if (region === null) return null;
   return {
     length: r3(region.maxX - region.minX),
@@ -40,7 +46,7 @@ export function setupStockFor(
   if (setup === undefined) return null;
   if (setup.stock !== undefined) return setup.stock;
   if (setup.flip === undefined) return null;
-  return derivedSetupStock(job, measuredThicknessMm);
+  return derivedSetupStock(job, measuredThicknessMm, null);
 }
 
 /**

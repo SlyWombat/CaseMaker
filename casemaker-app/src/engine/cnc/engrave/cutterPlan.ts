@@ -67,7 +67,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { CutterReach, Reachability } from './reachability';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /** What an item asks of its cutter. One class per shape of work, not one per document list. */
 export type WorkKind = 'flat' | 'cone' | 'thread' | 'ball';
@@ -230,10 +230,12 @@ export interface FaceWorkFacts {
 }
 
 /** The face work the job states, or null when it has none (or is not round stock in the chuck). */
-export function faceWorkOf(job: EngraveJob): FaceWorkFacts | null {
+export function faceWorkOf(job: EngraveJob, defaults: ShopDefaults | null = null): FaceWorkFacts | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
-  const map = rotaryMapOf(job, liveShopDefaults());
+  // #1244 — the map is the caller's; the read is a PREDICATE (is this a chuck job?), which the
+  // job's own holding and section decide — the limits never enter it.
+  const map = rotaryMapOf(job, defaults);
   if (map === null) return null;
   let chordMm = Number.POSITIVE_INFINITY;
   let deepestMm = 0;
@@ -391,7 +393,12 @@ function sideGoalObject(job: EngraveJob): EngraveTargetObject | null {
  *     (`supportingFloors`); a caller that cannot compute it reads the old stock-top depth, and
  *     every app path passes it.
  */
-export function kindedWork(job: EngraveJob, floors?: ReadonlyMap<string, number> | null): KindedItem[] {
+export function kindedWork(
+  job: EngraveJob,
+  floors?: ReadonlyMap<string, number> | null,
+  // #1244 — the map from the caller's edge; the read is a job-decided predicate (see faceWorkOf).
+  defaults: ShopDefaults | null = null,
+): KindedItem[] {
   const through = r3(job.stock.thickness + job.breakthrough);
   const out: KindedItem[] = [];
   const push = (id: string, name: string, kind: WorkKind, reachMm: number, why: string) =>
@@ -408,7 +415,7 @@ export function kindedWork(job: EngraveJob, floors?: ReadonlyMap<string, number>
     // of a flip (`setupWorkJob`'s one-setup job) needs only that side's depth — its band, when the
     // goal is split over two mountings. A rotary relief's local Z is radial, so it keeps the
     // stock's number (the reach check skips it too).
-    const need = goal.format === 'png' || rotaryMapOf(job, liveShopDefaults()) !== null ? job.stock.thickness : goalSideNeedMm(goal);
+    const need = goal.format === 'png' || rotaryMapOf(job, defaults) !== null ? job.stock.thickness : goalSideNeedMm(goal);
     push(goal.id, goal.name, 'ball', need, 'a 3D goal is surfaced by a ball');
     return out;
   }
@@ -593,6 +600,8 @@ export function planCutters(
    * cut it makes below its item's floor rather than the stock-top depth. Absent: the old reading.
    */
   floors?: ReadonlyMap<string, number> | null,
+  // #1244 — the map from the caller's edge (a job-decided predicate; see faceWorkOf).
+  defaults: ShopDefaults | null = null,
 ): CutterPlan {
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
@@ -630,7 +639,7 @@ export function planCutters(
   // ball never cuts. PNG reliefs and rotary maps keep the reach rule (their engines have no
   // per-feature judge).
   const cutterLineGoal = pureGoalObject(job);
-  const meshGoal = cutterLineGoal !== null && cutterLineGoal.format !== 'png' && rotaryMapOf(job, liveShopDefaults()) === null;
+  const meshGoal = cutterLineGoal !== null && cutterLineGoal.format !== 'png' && rotaryMapOf(job, defaults) === null;
   const chosenCutterKey = job.toolKey === NO_TOOL_KEY ? null : job.toolKey;
   // The SHOP's records decide the fallback — the chosen tool is an exception that joins a shop's
   // own list, never a record that makes the registry fall back off (#1041's seam rule exactly).
@@ -641,7 +650,7 @@ export function planCutters(
       : tools;
   const registryStandsIn = meshGoal && ownedRecords.length === 0;
 
-  const work = kindedWork(job, floors);
+  const work = kindedWork(job, floors, defaults);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];
   const reachByKey = new Map(reach === null ? [] : reach.cutters.map((c) => [c.key, c]));

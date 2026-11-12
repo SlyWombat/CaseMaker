@@ -112,12 +112,12 @@ describe('#888 — the top-face measure', () => {
         { id: 'setup-2', orientation: { ...orientation }, mount: { kind: 'vise' }, itemIds: [later.id], tools: [base.toolKey] },
       ],
     };
-    const facts = jobTopFace(job);
+    const facts = jobTopFace(job, null);
     expect(facts?.targetId).toBe(goal.id);
     expect(facts?.keeps).toBe(true);
   });
 
   it('a job with no goal has no opinion (facing keeps its finish default)', () => {
-    expect(jobTopFace(jobWith(undefined, { length: 80, width: 50, thickness: 10 }))).toBeNull();
+    expect(jobTopFace(jobWith(undefined, { length: 80, width: 50, thickness: 10 }), null)).toBeNull();
   });
 });

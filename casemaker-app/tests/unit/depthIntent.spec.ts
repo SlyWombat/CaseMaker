@@ -221,7 +221,7 @@ describe('the two-state control against the checker (#170 review)', () => {
         jawReach: labelJawReach(job, label),
         boundaryMargin: MARGIN,
       },
-    )!;
+    null)!;
     expect(row.depthIntent).toBe('reveal');
     expect(reveal).toBe(row.depth);
   });

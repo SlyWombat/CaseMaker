@@ -1846,7 +1846,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // A NECK NARROWS THE LAYOUT: the operator has reserved a parting band at one end, and a line
       // laid through it is refused by name. The line takes whatever span is left, read from the
       // neck's own span (one reader for the placement and the finding).
-      const neck = rotaryNeckOf(job);
+      const neck = rotaryNeckOf(job, useShopDefaultsStore.getState().defaults);
       const neckSpan = map !== null && neck !== null ? rotaryNeckSpan(map, neck) : null;
       const span =
         free === null
@@ -2847,7 +2847,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             // `'reveal'` on this label is a previous call's, so a thicker badge or a different split
             // gets a fresh answer instead of a stale depth the checker would refuse.
             ...(claim?.depthIntent === undefined ? {} : { intent: claim.depthIntent }),
-          });
+          }, useShopDefaultsStore.getState().defaults);
           if (rec === null) return label;
           changed = true;
           // The depth is written as `computed`, the honest member of `FieldSource` for a number the

@@ -51,6 +51,7 @@ import {
 import type { EngraveJob, StockSurfaceTouch } from '@/types/engraveJob';
 import type { StockProbes } from '@/engine/cnc/cam/model/types';
 import type { Mm } from '@/types/units';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * #475 — where Z0 is referenced among the measured touches.
@@ -265,14 +266,14 @@ function clamp(v: number, lo: number, hi: number): number {
  * The box that contains every cut region the job will make — the union of the engraves' profile
  * boxes, the traces' paths, the drills' holes and the threads' axes. Null when there is no cut.
  */
-function cutExtents(job: EngraveJob): {
+function cutExtents(job: EngraveJob, defaults: ShopDefaults | null): {
   minX: Mm;
   minY: Mm;
   maxX: Mm;
   maxY: Mm;
   regions: { id: string; name: string; extent: { minX: Mm; minY: Mm; maxX: Mm; maxY: Mm } }[];
 } | null {
-  const plan = toPartPlan(job);
+  const plan = toPartPlan(job, { defaults });
   const regions: { id: string; name: string; extent: { minX: Mm; minY: Mm; maxX: Mm; maxY: Mm } }[] = [];
   let minX = Infinity;
   let minY = Infinity;
@@ -391,9 +392,15 @@ function footprintOf(extent: { minX: Mm; minY: Mm; maxX: Mm; maxY: Mm }): ItemFo
  */
 export function surfaceSpreadPlan(
   job: EngraveJob,
-  options: { touchCount?: number; margin?: Mm; level?: SurfaceLevelParameters | null } = {},
+  options: {
+    touchCount?: number;
+    margin?: Mm;
+    level?: SurfaceLevelParameters | null;
+    /** #1244 — the map from the caller's edge; null: no location, the recommendations. */
+    defaults?: ShopDefaults | null;
+  } = {},
 ): SurfaceSpreadPlan | null {
-  const extents = cutExtents(job);
+  const extents = cutExtents(job, options.defaults ?? null);
   if (extents === null) return null;
 
   const margin = options.margin ?? job.margins?.boundaryMargin ?? 0.2;

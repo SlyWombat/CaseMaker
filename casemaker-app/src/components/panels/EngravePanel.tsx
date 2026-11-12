@@ -1121,7 +1121,7 @@ export function EngravePanel(): JSX.Element {
     // #785 — the reach check joins the list at Generate's own sentence: a goal deeper than the
     // chosen cutter's known reach blocks here, with the numbers and the one-click top-band option;
     // an unrecorded reach is an info and blocks nothing.
-    ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools),
+    ...jobReachFindings(job, tool, tools.map((e) => e.tool), tools, shopDefaults),
     // #872 — WHAT THE TOP SETUP LEAVES UNREACHED, stated beside the reach check: the share the
     // sentence measures, the split, and the flip plan's one press when a side earns its setup.
     // #911 — the location's cutters travel with the finding: its hold sentence names the shop's
@@ -1131,6 +1131,7 @@ export function EngravePanel(): JSX.Element {
     // a plan whose holes would post below the bed states its need instead of offering the press.
     ...jobFlipFindings(
       job,
+      shopDefaults,
       tools,
       job.sacrificial.under?.thickness ??
         (bedFacts?.surface === 'wasteboard' && bedFacts.wasteboardMm !== null ? bedFacts.wasteboardMm : 0),
@@ -1409,7 +1410,7 @@ export function EngravePanel(): JSX.Element {
   // #724 W4 — the ceiling is the BLANK's own: the stock thickness on a plate, but a rotary cut's
   // floor is a radius above the axis (9 mm on a ⌀20 rod, not 19 — 19 is past the centre), and a
   // tube's is its wall. The sentence says which number made it, so 9 never reads as a thickness.
-  const maxDepth = blankDepthCeiling(job);
+  const maxDepth = blankDepthCeiling(job, shopDefaults);
   const maxDepthWhy = (() => {
     const map = rotaryMapOf(job, liveShopDefaults());
     if (map === null) return 'the stock thickness less the minimum floor';
@@ -1521,7 +1522,7 @@ export function EngravePanel(): JSX.Element {
   // when the blank was chosen, before the goal existed. When the plan cuts the whole stock top
   // away there is nothing to skim, so the seeded ON is drawn OFF and the line states why; a
   // person's press (`'user'`, and every document written before the key) always stands.
-  const topFaceFacts = jobTopFaceCached(job);
+  const topFaceFacts = jobTopFaceCached(job, shopDefaults);
   const facingYieldsToPlan = facing?.source === 'seed' && topFaceFacts !== null && !topFaceFacts.keeps;
   const facingOn = (facing?.enabled ?? false) && !facingYieldsToPlan;
   // #432 review R9 — the aimed-for default is the MEASURED top's high-to-low spread plus the
@@ -1583,7 +1584,7 @@ export function EngravePanel(): JSX.Element {
       jawReach: labelJawReach(job, label),
       boundaryMargin: margins.boundaryMargin,
       ...(intent === undefined ? {} : { intent }),
-    });
+    }, shopDefaults);
   };
 
   // #271 route 1 and #280's twin used to hang a "use the project's badge / blank" button under the
@@ -2590,9 +2591,11 @@ export function EngravePanel(): JSX.Element {
                   colletMatchMm: colletMatchToleranceMm(shopDefaults),
                 },
               }),
+          // #1244 — the sheet's own rotary checks read this map, never an ambient source.
+          defaults: shopDefaults,
           // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
           // profile it was planned on; "not measured" when the datums are absent.
-          rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }),
+          rotaryDatum: rotarySheetDatumFor(job, machineRecord === null ? null : { machines: [machineRecord] }, shopDefaults),
           mountName,
           bedName,
           found:

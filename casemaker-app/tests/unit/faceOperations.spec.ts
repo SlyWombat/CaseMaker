@@ -151,11 +151,11 @@ describe('#241 slice 2 — the face model', () => {
     const mixed = rod([flat('f', 0, 1)], {
       labels: [{ ...defaultEngraveJob().labels[0]!, text: 'X', id: 'l1' } as EngraveJob['labels'][number]],
     });
-    expect(faceJobRefusal(mixed)).toBeNull();
+    expect(faceJobRefusal(mixed, null)).toBeNull();
 
     const viseArm = defaultEngraveJob().workholding as Extract<EngraveJob['workholding'], { kind: 'vise' }>;
     const vise = rod([flat('f', 0, 1)], { workholding: viseArm });
-    expect(faceJobRefusal(vise)?.code).toBe('face-needs-chuck');
+    expect(faceJobRefusal(vise, null)?.code).toBe('face-needs-chuck');
   });
 
   it('a cross-hole whose diameter is not the cutter’s is a warning naming what comes out', () => {

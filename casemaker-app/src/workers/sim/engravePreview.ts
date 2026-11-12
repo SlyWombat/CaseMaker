@@ -405,6 +405,8 @@ function ratioAtFor(
   tl: ManifoldToplevel,
   job: EngraveJob,
   radius: number,
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): LabelRatioAt {
   return (labelId, size) => {
     const label = job.labels.find((l) => l.id === labelId);
@@ -414,7 +416,7 @@ function ratioAtFor(
     // (`[0]` is the label) but the work is not (#205 review).
     const probe: EngraveJob = { ...job, shapes: [], labels: [{ ...label, size }] };
     return (
-      measureLabels(tl, toPartPlan(probe), radius, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0
+      measureLabels(tl, toPartPlan(probe, { defaults }), radius, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0
     );
   };
 }
@@ -431,7 +433,8 @@ function completeCompromiseReason(
   job: EngraveJob,
   rec: ToolRecommendation,
   tools: readonly ToolLibraryEntry[],
-  lostDetailWarnRatio: number | null = null,
+  lostDetailWarnRatio: number | null,
+  defaults: ShopDefaults | null,
 ): string {
   if (!rec.compromise || rec.key === null) return rec.reason;
   const pick = rec.candidates.find((c) => c.key === rec.key);
@@ -442,7 +445,7 @@ function completeCompromiseReason(
   if (!label || !entry) return rec.reason;
   const r = cuttingRadiusForSweep(entry.tool);
   if (!r.ok) return rec.reason;
-  const ratioAt = ratioAtFor(tl, job, r.radius);
+  const ratioAt = ratioAtFor(tl, job, r.radius, defaults);
   const suggested = suggestCapHeight((size) => ratioAt(worst.labelId, size), label.size, lostDetailWarnRatio);
   const hint = suggested === null ? 'Choose a smaller cutter.' : `Try ${suggested} mm or more.`;
   return `${rec.reason} ${hint}`;
@@ -1020,7 +1023,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // for long lists" rule (measure in ascending diameter, stop after the first failure that
     // follows a pass) does not apply yet: until the list is long, measure them all.
     // #760 — one raised-text measurement, shared by every candidate the recommendation asks about.
-    const raisedText = raisedTextMeasure(tl, job, plan);
+    const raisedText = raisedTextMeasure(tl, job, shop.defaults ?? null, plan);
     const recommendation = recommendTool(
       job,
       // #786 slice 4c-2 — the candidates carry their catalogue values too: a cutter whose tip the
@@ -1104,7 +1107,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       surfaces: surfaceCavities.map((c) => c.preview),
       recommendation: {
         ...recommendation,
-        reason: completeCompromiseReason(tl, job, recommendation, catalogueEntries, shop.lostDetailWarnRatio ?? null),
+        reason: completeCompromiseReason(tl, job, recommendation, catalogueEntries, shop.lostDetailWarnRatio ?? null, shop.defaults ?? null),
       },
     };
   };

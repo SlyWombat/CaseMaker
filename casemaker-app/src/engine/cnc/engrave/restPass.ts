@@ -1,3 +1,4 @@
+import type { ShopDefaults } from '@/platform/defaultsClient';
 /**
  * The two-tool split of a design (#410, the issue's scope comment): which cutter takes the first
  * bite, and how the second program is written.
@@ -343,6 +344,8 @@ export function restJobFor(
   job: EngraveJob,
   regions: readonly RestRegionInput[],
   toolKey: string,
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): EngraveJob {
   // #762 — A REST REGION CANNOT BE DEEPER THAN THE BLANK. The regions are measured off the first
   // program's simulation, and a through feature's left-over region carries the through depth
@@ -351,7 +354,7 @@ export function restJobFor(
   // first cutter left ABOVE the blank's floor, so the depth is clamped to that floor: over a
   // through feature the first program has already cleared the region and this cuts air, and over
   // anything else the clamp can only stop the finer cutter at the material it can leave.
-  const floorAllowed = blankDepthCeiling(job);
+  const floorAllowed = blankDepthCeiling(job, defaults);
   const vectors: EngraveVectorShape[] = regions.map((r, i) => {
     const { width, height } = size(r.polygons);
     // The descriptor's own item name, not the operation sentence wrapped around it, and sizes at

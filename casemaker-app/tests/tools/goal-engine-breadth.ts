@@ -85,7 +85,7 @@ async function pickCutterFor(job: EngraveJob): Promise<EngraveJob | null> {
     catalogue: catalogueRows,
     conditions: inventoryConditions(),
     shop: pickShop,
-    floors: supportingFloors(tl, toPartPlan(job)),
+    floors: supportingFloors(tl, toPartPlan(job, { defaults: null })),
   });
   if (pick.refused === true || pick.runnable === null) return null;
   const first = pick.runnable.plan.cutters[0];

@@ -234,7 +234,7 @@ describe('#762 the reach filter is the generator’s own', () => {
     const job = base();
     job.stock.thickness = 3;
     job.minFloor = 1;
-    const rest = restJobFor(job, [{ id: 'pocket', name: 'Pocket', depth: 3.3, polygons: [] }], 'flat-2');
+    const rest = restJobFor(job, [{ id: 'pocket', name: 'Pocket', depth: 3.3, polygons: [] }], 'flat-2', null);
     expect(rest.vectors![0]!.depth).toBe(2);
   });
 });

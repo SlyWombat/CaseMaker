@@ -321,7 +321,7 @@ export function planRegistrationAttempt(args: {
       // THE TWO TOUCH POINTS, both INSIDE the stock footprint (the #1199 guard's rule): the
       // machining area's path-origin corner, inset by the edge margin + the probe tip, and the
       // area's centre. The area is the cut region when the job states one, else the blank.
-      const region = cutRegionOf(job);
+      const region = cutRegionOf(job, defaults);
       const area = region ?? { minX: 0, minY: 0, maxX: dims0.x, maxY: dims0.y };
       // #1199 field 7 — THIS GUARDED TOUCH'S INSET IS THE SHARED ONE, per axis: the tip radius, the
       // unit's lateral uncertainty and the HOLD's placement uncertainty, floored by the registry
@@ -410,7 +410,7 @@ export function planRegistrationAttempt(args: {
     // tap would re-measure it). #1070's footprint find was the vise's kind of plan.
     // #1133 review — the ONE touch is at the CUT AREA'S centre, not the blank's (the bench job's
     // is (77.34, 63)): the region's own centre, when the job states a region.
-    const region = cutRegionOf(job);
+    const region = cutRegionOf(job, defaults);
     // #1199 field 7 — this branch shares the bracket's hold figure.
     const bracketHold2 = holdUncertaintyFor({
       mount: 'bracket',
@@ -542,7 +542,7 @@ export function planRegistrationAttempt(args: {
         };
       }
       const dims = { x: job.stock.length, y: job.stock.width, z: job.stock.thickness };
-      const region = cutRegionOf(job);
+      const region = cutRegionOf(job, defaults);
       const area = region ?? { minX: 0, minY: 0, maxX: dims.x, maxY: dims.y };
       // #1199 field 7 — the SHARED inset, per axis: tip radius + the unit's lateral uncertainty +
       // the hold's placement uncertainty (the VISE's keys here), floored by the registry shrink.

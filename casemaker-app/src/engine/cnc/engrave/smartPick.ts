@@ -270,7 +270,7 @@ export function rulePlanOf(
   // #1172 item 5 — a bit whose "Use this bit in plans" is OFF is not asked for by any plan (the
   // flag rides on its inventory entry; absent is ON).
   tools = tools.filter((t) => t.useInPlans !== false);
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
+  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors, null);
   if (base.cutters.length === 0) return null;
   return planFrom(base.cutters, tools, ownedKeysOf(tools, conditions), base.faceToolKey, base.goalRoughKey);
 }
@@ -369,7 +369,7 @@ export function candidatePlans(
   // The kind plan: one cutter per kind, and — when the reach table is absent — no rest pair. It is
   // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
   // NAMED job does not take it: that plan would replace the cutter the operator named.
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors);
+  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors, null);
   const basePlan = planFrom(base.cutters, tools, owned, base.faceToolKey);
   // #842 — A MIXED JOB'S FACE CUTTER IS PART OF THE PLAN. The face rule names one; the search
   // also tries the other fitting face cutters, so a human finding a better one is a selector bug
@@ -787,7 +787,7 @@ export async function smartPick(
   const notes: string[] = [];
   const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
-  const exactWhenEmpty = faceWorkOf(job) !== null;
+  const exactWhenEmpty = faceWorkOf(job, null) !== null;
   const plans = candidatePlans(job, tools, catalogue, conditions, table, opts.floors).slice(0, maxCandidates);
   // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
   // plan). The count first, then one row per simulated candidate, then the end.

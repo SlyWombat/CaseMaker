@@ -40,12 +40,12 @@
 
 import { DEFAULT_BREAKTHROUGH } from '@/engine/cnc/sacrificial';
 import { colourBoundaryDepthOf, printedLayerGridOf } from '@/engine/cnc/layerStack';
-import { probeResiduals } from '@/engine/cnc/probePlan';
+import { WIRED_PROBE_Z_RESIDUAL_MM } from '@/engine/cnc/probePlan';
 import { jobVise } from '@/engine/cnc/fixture';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The house's thresholds (#345), persisted with the rest of the app settings.
@@ -568,8 +568,9 @@ export function recommendMargins(
 ): MarginRecommendation {
   const basis: string[] = [];
   // #451 — the wired probe's repeatability is the shop's `registration.wiredProbeZResidualMm`.
-  // A worker realm has no live defaults, so it gets `probePlan`'s labelled fallback (0.001).
-  const probe = inputs.probeUncertainty ?? probeResiduals(liveShopDefaults()).wiredProbeZ;
+  // #1244 — the caller's edge reads it (`probeResiduals(map).wiredProbeZ`) and passes it; absent
+  // is `probePlan`'s labelled no-service fallback (0.001), which is what an unlocated realm had.
+  const probe = inputs.probeUncertainty ?? WIRED_PROBE_Z_RESIDUAL_MM;
   let zTolerance = probe;
   basis.push(`the wired probe adds ${mm(probe)} mm`);
 
@@ -900,8 +901,8 @@ export interface LabelDepthRecommendation {
  * smaller of the radius and the wall, less the floor. One function, so the field's red state, the
  * row's sentence and the recommendation cannot state three different limits.
  */
-export function blankDepthCeiling(job: EngraveJob): number {
-  const map = rotaryMapOf(job, liveShopDefaults());
+export function blankDepthCeiling(job: EngraveJob, defaults: ShopDefaults | null): number {
+  const map = rotaryMapOf(job, defaults);
   if (map === null) return job.stock.thickness - job.minFloor;
   const wall = job.stock.wall;
   const reach = wall !== undefined && wall > 0 ? Math.min(map.radius, wall) : map.radius;
@@ -912,6 +913,8 @@ export function recommendLabelDepth(
   job: EngraveJob,
   item: EngraveAnyItem,
   inputs: LabelDepthInputs,
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
 ): LabelDepthRecommendation | null {
   if ('construction' in item && item.construction === true) return null;
   const stated = 'depthIntent' in item ? item.depthIntent : undefined;
@@ -979,7 +982,7 @@ export function recommendLabelDepth(
   // The BLANK'S ceiling, `thickness − minFloor` (#440). It is a limit, so it may only CAP an
   // answer — and it is only added to the field of candidates when there is something for it to
   // cap. With no item limit at all, the answer is the label's own depth below, not this number.
-  const ceiling = shallower(blankDepthCeiling(job));
+  const ceiling = shallower(blankDepthCeiling(job, defaults));
   if (candidates.length > 0) {
     candidates.push({
       depth: ceiling,

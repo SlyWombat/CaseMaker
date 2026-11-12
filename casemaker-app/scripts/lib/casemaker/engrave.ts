@@ -972,14 +972,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // #760 — the raised-text measurement rides the same scan: a cutter that joins a raised
     // label's letters is not one that "keeps every item intact", and the pick must see the gap
     // the finding will quote. One `PartPlan` build serves every candidate.
-    const raised = raisedTextMeasure(tl, job);
+    const raised = raisedTextMeasure(tl, job, shopDefaults);
     return reachabilityFor(
       job,
       getTools(),
       catalogueRows,
       (key) => {
         const entry = entryFor(key);
-        return entry === null ? [] : measureEngraving(tl, job, entry.tool);
+        return entry === null ? [] : measureEngraving(tl, job, entry.tool, shopDefaults);
       },
       undefined,
       null,
@@ -1713,12 +1713,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ...(seatSeek === undefined ? {} : { seatSeek }),
         efficiencyThresholds: efficiencyThresholds(shopDefaults),
         tapeStripCount: readDefault(shopDefaults, 'tape.stripCount').value,
+        // #1244 — the sheet's own rotary/registration checks read the booted location's map.
+        defaults: shopDefaults,
         // #1089 — THE IDEAL-VS-OWNED LINE beside the cutter: the same statement the receipt
         // carries, or none when this run had nothing to compare.
         ...(comparison === null ? {} : { comparison }),
         // #1059 — a chuck job's sheet prints the axis and the levelled face angle from the bed
         // profile it was planned on (absent: the sheet says what is not measured).
-        rotaryDatum: rotarySheetDatumFor(job, boot.location),
+        rotaryDatum: rotarySheetDatumFor(job, boot.location, shopDefaults),
         // #1068 — §8 names the fixture THIS job's sweep was handed: the bracket's arms and the
         // job's clamps (and its own obstacle boxes), never the vise's jaws. A vise job leaves it
         // absent (the sheet derives the vise's own envelope, as it always did); a tape job says
@@ -2047,7 +2049,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       conditions: inventoryConditions(),
       shop: pickShop,
       // #940 — the same floors rule; the candidate list is the one the search would measure.
-      floors: supportingFloors(tl, toPartPlan(job)),
+      floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
     }).some(
       (p) => p.cutters.length > 1 && p.cutters[0]?.key === job.toolKey,
     );
@@ -2102,7 +2104,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           // #1134 — the FULL evaluations plan the program the cut would post: the run shop, mount
           // included. The pick's own score keeps the picker's shop (the both-doors rule, #947).
           runShop: { ...shop, mount: mountFor(job) },
-          floors: supportingFloors(tl, toPartPlan(job)),
+          floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
         });
         const searchMs = Date.now() - searchStart;
         // #910 — every cutter refused before a plan existed: the reasons ARE the answer.
@@ -2265,7 +2267,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           catalogue: catalogueRows,
           conditions: inventoryConditions(),
           shop: pickShop,
-          floors: supportingFloors(tl, toPartPlan(sub)),
+          floors: supportingFloors(tl, toPartPlan(sub, { defaults: shopDefaults })),
         });
         if (pick.refused === true) {
           out.progress(`  setup ${setupIndex + 1}      ${pick.reason}`);
@@ -2730,7 +2732,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       let kept = rest1.regions;
       if (kept.length > 0) {
         const open = new Set(
-          engraveRegions(tl, restJobFor(job, kept, restChosen.key), restTool)
+          engraveRegions(tl, restJobFor(job, kept, restChosen.key, shopDefaults), restTool)
             .measured.filter((m) => m.openedArea > 0)
             .map((m) => m.labelId),
         );
@@ -2749,7 +2751,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       let facts: RestPassFacts | null = null;
       if (kept.length > 0) {
         // ---- PROGRAM 2: the clean-up pass ------------------------------------------------------
-        const restJob = restJobFor(job, kept, restChosen.key);
+        const restJob = restJobFor(job, kept, restChosen.key, shopDefaults);
         roundTrips(restJob, 'rest program');
         // Seeded with program 1's removal: the sweep of the second file starts from the blank program
         // 1 leaves behind, so the prediction, the coverage and the gouge checks are all made against
@@ -2793,7 +2795,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         // is derived here for each program's OWN job rather than assumed from the kind of program a
         // rest pass writes today: a trace-bearing second program must not print a step-over.
         const traceOnlyOf = (j: EngraveJob): boolean =>
-          toPartPlan(j).engraves.length === 0 &&
+          toPartPlan(j, { defaults: shopDefaults }).engraves.length === 0 &&
           (j.traces?.some((t) => t.enabled && !t.construction) ?? false);
         facts = {
           rough: {

@@ -66,10 +66,10 @@ const flat = (id: string, a: number, depth: number): EngraveFaceOp => ({ id, kin
 describe('#1059 a block in the chuck is a face job', () => {
   it('faceJobRefusal accepts it — the refusal is for a job not in the chuck, or a disc', () => {
     const job = block([flat('f0', 0, 1)]);
-    expect(faceJobRefusal(job)).toBeNull();
+    expect(faceJobRefusal(job, null)).toBeNull();
     // Still refused where the chuck cannot hold it: the same job in the vise.
     const vise = { ...job, workholding: defaultEngraveJob().workholding };
-    expect(faceJobRefusal(vise)?.code).toBe('face-needs-chuck');
+    expect(faceJobRefusal(vise, null)?.code).toBe('face-needs-chuck');
   });
 });
 /** The feeds row is not this slice's subject: the geometry is, so the passes are stated. */

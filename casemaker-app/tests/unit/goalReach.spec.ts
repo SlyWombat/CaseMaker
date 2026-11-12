@@ -121,12 +121,12 @@ describe('#1037 — jobReachFindings on the M1 tray shape and a picture goal', (
   it('a 26 mm mesh goal with a 22 mm ball yields no error; a PNG goal was never judged here', () => {
     const job = tallJob(goal(26));
     const ball = flat({ fluteLength: 22 });
-    const findings = jobReachFindings(job, ball, [ball], []);
+    const findings = jobReachFindings(job, ball, [ball], [], null);
     expect(findings.some((f) => f.severity === 'error')).toBe(false);
     expect(findings.some((f) => f.code === 'goal-reach-short')).toBe(false);
     // A picture is skipped before any depth judgement; its own refusal is the plan path's (#980).
     const pngJob = tallJob(goal(26, { format: 'png' }));
-    expect(jobReachFindings(pngJob, ball, [ball], [])).toEqual([]);
+    expect(jobReachFindings(pngJob, ball, [ball], [], null)).toEqual([]);
   });
 });
 
@@ -197,7 +197,7 @@ describe('#785 — a rotary relief keeps its own judges', () => {
       workholding: { kind: 'rotary-chuck', rotary: { stickout: 60, gripDiameter: null, jawMode: 'reverse-inner', tailstock: false, source: 'test' } },
       targetObject: goal(18),
     };
-    expect(jobReachFindings(rotary, flat({ fluteLength: 12 }), [flat({ fluteLength: 12 })], [])).toEqual([]);
+    expect(jobReachFindings(rotary, flat({ fluteLength: 12 }), [flat({ fluteLength: 12 })], [], null)).toEqual([]);
   });
 });
 

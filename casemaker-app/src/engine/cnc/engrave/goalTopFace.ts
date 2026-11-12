@@ -21,7 +21,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
 import { jobSetups, jobTargetObjects, jobTool } from './jobSetup';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The grid the question is asked on, mm. Coarser than any cut grid the planner settles on
@@ -119,8 +119,13 @@ export function goalTopFace(
  * A ROTARY job is not judged in the flat frame (its goal's local Z is radial, the same rule the
  * reach and coverage checks state).
  */
-export function jobTopFace(job: EngraveJob, opts: { tool?: Tool | null } = {}): TopFaceFacts | null {
-  if (rotaryMapOf(job, liveShopDefaults()) !== null) return null;
+export function jobTopFace(
+  job: EngraveJob,
+  // #1244 — the map from the caller's edge; null: no location, the recommendations.
+  defaults: ShopDefaults | null,
+  opts: { tool?: Tool | null } = {},
+): TopFaceFacts | null {
+  if (rotaryMapOf(job, defaults) !== null) return null;
   const first = jobSetups(job)[0]?.id;
   let best: TopFaceFacts | null = null;
   for (const goal of jobTargetObjects(job)) {
@@ -142,7 +147,12 @@ export function jobTopFace(job: EngraveJob, opts: { tool?: Tool | null } = {}): 
 const faceCache = new Map<string, TopFaceFacts | null>();
 const FACE_CACHE_MAX = 8;
 
-export function jobTopFaceCached(job: EngraveJob): TopFaceFacts | null {
+/**
+ * The memoized wrapper. #1244 — the map is a parameter like everywhere else; it is not in the
+ * cache key because the only setting-dependent branch here is `rotaryMapOf(...) === null`, which
+ * is decided by the JOB's holding and section, never by the limits.
+ */
+export function jobTopFaceCached(job: EngraveJob, defaults: ShopDefaults | null): TopFaceFacts | null {
   const tool = jobTool(job);
   const diameter = tool === null ? 0 : cuttingDiameter(tool) ?? 0;
   const key = [
@@ -164,7 +174,7 @@ export function jobTopFaceCached(job: EngraveJob): TopFaceFacts | null {
     diameter,
   ].join('|');
   if (faceCache.has(key)) return faceCache.get(key) as TopFaceFacts | null;
-  const computed = jobTopFace(job, { tool });
+  const computed = jobTopFace(job, defaults, { tool });
   faceCache.set(key, computed);
   if (faceCache.size > FACE_CACHE_MAX) {
     const first = faceCache.keys().next().value;

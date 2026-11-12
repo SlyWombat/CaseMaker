@@ -29,7 +29,7 @@ import {
   freeEndSentence,
   type RotaryMap,
 } from './wrap';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The neck's diameter Case Maker offers first, mm. Labelled default, not a bench result (#238).
@@ -188,8 +188,8 @@ export function defaultRotaryNeck(stockDiameterMm?: number | null): RotaryNeck {
  * The job's neck, or null. A neck only exists on a rotary map — a flat job has no surface to wrap
  * the cut round — and an absent field is OFF (the document rule: absent, never defaulted on).
  */
-export function rotaryNeckOf(job: EngraveJob): RotaryNeck | null {
-  if (rotaryMapOf(job, liveShopDefaults()) === null) return null;
+export function rotaryNeckOf(job: EngraveJob, defaults: ShopDefaults | null): RotaryNeck | null {
+  if (rotaryMapOf(job, defaults) === null) return null;
   return job.workholding.kind === 'rotary-chuck' && job.workholding.rotary.neck !== undefined
     ? job.workholding.rotary.neck
     : null;
@@ -223,9 +223,9 @@ export function rotaryNeckSpan(map: RotaryMap, neck: RotaryNeck): RotaryNeckSpan
 }
 
 /** The job's neck facts, or null when it has no neck (or one that cannot be placed yet). */
-export function rotaryNeckFacts(job: EngraveJob): RotaryNeckFacts | null {
-  const map = rotaryMapOf(job, liveShopDefaults());
-  const neck = rotaryNeckOf(job);
+export function rotaryNeckFacts(job: EngraveJob, defaults: ShopDefaults | null): RotaryNeckFacts | null {
+  const map = rotaryMapOf(job, defaults);
+  const neck = rotaryNeckOf(job, defaults);
   if (map === null || neck === null) return null;
   const span = rotaryNeckSpan(map, neck);
   if (span === null) return null;

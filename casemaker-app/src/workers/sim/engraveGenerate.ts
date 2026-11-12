@@ -1027,10 +1027,16 @@ export interface EngraveGenerated {
  * Returns `[]` for a cutter that cannot open a region at all: a non-flat, or a V-bit, whose groove
  * width is a function of depth (#405). Nothing was measured, so nothing is claimed.
  */
-export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: Tool): LabelEngravability[] {
+export function measureEngraving(
+  tl: ManifoldToplevel,
+  job: EngraveJob,
+  tool: Tool,
+  // #1244 — the caller's edge supplies the map the part plan's rotary branch reads.
+  defaults: ShopDefaults | null,
+): LabelEngravability[] {
   const usable = cuttingForTrace(tool);
   if (!usable.ok || usable.tool.shape !== 'flat') return [];
-  return measureLabels(tl, toPartPlan(job), usable.tool.radius, job.edgeMargin, perCharFor(job));
+  return measureLabels(tl, toPartPlan(job, { defaults }), usable.tool.radius, job.edgeMargin, perCharFor(job));
 }
 
 /**
@@ -1047,10 +1053,12 @@ export function measureEngraving(tl: ManifoldToplevel, job: EngraveJob, tool: To
 export function raisedTextMeasure(
   tl: ManifoldToplevel,
   job: EngraveJob,
-  plan: PartPlan = toPartPlan(job),
+  // #1244 — the map from the caller's edge (see measureEngraving).
+  defaults: ShopDefaults | null,
+  plan: PartPlan = toPartPlan(job, { defaults }),
 ): (tool: Tool) => RaisedTextMeasurement[] {
   if (plan.raisedTexts.length === 0) return () => [];
-  const radiusOf = raisedTextRadius(tl, job, plan);
+  const radiusOf = raisedTextRadius(tl, job, defaults, plan);
   // The scan asks about a hundred cutters, and most share their width with a dozen others: a flat
   // row is a function of its radius (a V's, of the plane radii it cuts at), so each distinct
   // measurement is made once. The rows carry their own `cutterRadius`, so the cache key is the
@@ -1077,7 +1085,8 @@ export function raisedTextMeasure(
 export function raisedTextRadius(
   tl: ManifoldToplevel,
   job: EngraveJob,
-  plan: PartPlan = toPartPlan(job),
+  defaults: ShopDefaults | null,
+  plan: PartPlan = toPartPlan(job, { defaults }),
 ): (tool: Tool) => ((cutawayId: string) => number | null) | null {
   if (plan.raisedTexts.length === 0) return () => null;
   const floors = supportingFloors(tl, plan);
@@ -1129,6 +1138,8 @@ function ratioAtFor(
   tl: ManifoldToplevel,
   job: EngraveJob,
   radius: number,
+  // #1244 — the map from the caller's edge (engraveRegions' shop); null: the recommendations.
+  defaults: ShopDefaults | null,
   radiusFor?: (labelId: string) => number,
 ): LabelRatioAt {
   return (labelId, size) => {
@@ -1137,7 +1148,7 @@ function ratioAtFor(
     const probe: EngraveJob = { ...job, shapes: [], labels: [{ ...label, size }] };
     const r = radiusFor?.(labelId) ?? radius;
     if (!(r > 0)) return 0;
-    return measureLabels(tl, toPartPlan(probe), r, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
+    return measureLabels(tl, toPartPlan(probe, { defaults }), r, job.edgeMargin, perCharFor(probe))[0]?.ratio ?? 0;
   };
 }
 
@@ -1991,8 +2002,10 @@ export function engraveRegions(
   const plan = toPartPlan(
     job,
     derivedCores === undefined || derivedCores.length === 0
-      ? {}
+      ? { defaults: shop.defaults ?? null }
       : {
+          // #1244 — the map from this worker's shop (the shop parameter above).
+          defaults: shop.defaults ?? null,
           derivedEngraves: derivedCores.map((core) => ({
             id: core.id,
             name: core.name,
@@ -2103,7 +2116,7 @@ export function engraveRegions(
   // #737 — the neck for parting, as the plan places it. Null when the job is not rotary or has no
   // neck. The bands it must clear are the map's own, so the REFUSALS read this exact span
   // (`rotaryJobFindings`), the CAM cuts this exact span and the run sheet states it.
-  const neck = rotaryNeckFacts(job);
+  const neck = rotaryNeckFacts(job, shop.defaults ?? null);
   const wrapFor =
     rotaryMap === null
       ? undefined
@@ -2126,8 +2139,8 @@ export function engraveRegions(
         );
   const ratioAt =
     cone === null
-      ? ratioAtFor(tl, job, radius ?? 0)
-      : ratioAtFor(tl, job, cone.tipRadius, planeRadiusFor);
+      ? ratioAtFor(tl, job, radius ?? 0, shop.defaults ?? null)
+      : ratioAtFor(tl, job, cone.tipRadius, shop.defaults ?? null, planeRadiusFor);
   // #665 — the engravability measurement judges a region against ONE cutter width at the plane;
   // a variable-depth item's width follows its own design at every point, so its `item-empty`
   // (a plane radius of 0 on a point-tip bit) would refuse a cut that is entirely sound. #677 — a
@@ -2672,7 +2685,7 @@ export function engraveRegions(
     // class the wrap does not cut yet, and an item opening that reaches into either end band (at
     // its row). `measured` carries each item's OPENED region in map millimetres. Empty for a flat
     // job.
-    ...rotaryJobFindings(job, plan, measured),
+    ...rotaryJobFindings(job, plan, measured, shop.defaults ?? null),
     // #740 — the tip the record does not state, in place of the plane sentences that would have
     // read the shank as the cutter.
     ...tipFindings,
@@ -3881,7 +3894,8 @@ function restProgramFact(
     params: one.feeds !== null && one.feeds.ok ? one.feeds.params : null,
     passes: cam?.passes ?? 1,
     traceOnly:
-      toPartPlan(job).engraves.length === 0 &&
+      // #1244 — item PRESENCE only; the map's rotary branch moves coordinates, never this count.
+      toPartPlan(job, { defaults: null }).engraves.length === 0 &&
       (job.traces?.some((t) => t.enabled && !t.construction) ?? false),
     moves: cam?.cuttingMoves ?? 0,
     seconds: Math.round(cam?.estimatedSeconds ?? 0),
@@ -4251,7 +4265,7 @@ async function generateRestPair(
   // cutter's bore as "rest of Bore", its through vector as a deep pocket and its cut-out as an
   // outline whose part had vanished.
   const measureJob = roughJob;
-  const measured = measureEngraving(tl, measureJob, roughTool);
+  const measured = measureEngraving(tl, measureJob, roughTool, shop.defaults ?? null);
   const glyphArea = measured.reduce((sum, m) => sum + m.glyphArea, 0);
   const openedArea = measured.reduce((sum, m) => sum + m.openedArea, 0);
   const roughShare = glyphArea > 0 ? openedArea / glyphArea : 0;
@@ -4496,7 +4510,7 @@ async function generateRestPair(
     // design never gave up. The CLI route drops the same regions for the same reason.
     let kept = rest1.regions;
     if (kept.length > 0) {
-      const probe = { ...restJobFor(job, kept, restRef.toolKey), tool: restTool };
+      const probe = { ...restJobFor(job, kept, restRef.toolKey, shop.defaults ?? null), tool: restTool };
       const open = new Set(
         engraveRegions(tl, probe, restTool, margins, shop, mill, catalogue, undefined, floors)
           .measured.filter((m) => m.openedArea > 0)
@@ -4518,7 +4532,7 @@ async function generateRestPair(
       // first empty rest.)
       continue;
     }
-    const restJobBase = restJobFor(job, kept, restRef.toolKey);
+    const restJobBase = restJobFor(job, kept, restRef.toolKey, shop.defaults ?? null);
     // The generator's readers (`validateJob` inside `engraveRegions`, the verifier) resolve the
     // cutter through `job.tool` or the WORKER's registry, which is empty. The rest job names a key
     // the route resolved on this realm's side, so it is materialised exactly as `jobForSetup` does.
@@ -7077,7 +7091,7 @@ async function generateFaceProgram(
     // #407/#834 — Makera's "for Metal" line is refused by name on a blank that is not metal, in
     // this program as in every other: the pair is the finding, whatever the cutter's shape.
     ...metalLineFindings(job, tool, catalogue),
-    ...(faceJobRefusal(job) === null ? [] : [faceJobRefusal(job)!]),
+    ...(faceJobRefusal(job, shop.defaults ?? null) === null ? [] : [faceJobRefusal(job, shop.defaults ?? null)!]),
   ]);
   if (documentFindings.some((f) => f.severity === 'error')) {
     return fail('findings', 'the job has a refusal that stops Generate', { findings: documentFindings });
@@ -7685,7 +7699,7 @@ export async function engraveGenerate(
   // sub-job holds only its own items, and the pocket a label is written into may be cut by another
   // setup's program. One plan, one map, handed to every program so every file judges the label
   // from the floor the run cuts under it.
-  const documentFloors = supportingFloors(tl, toPartPlan(job));
+  const documentFloors = supportingFloors(tl, toPartPlan(job, { defaults: shop.defaults ?? null }));
   onProgress?.({ stage: 'items', label: 'cutting the items' });
   if (job.setups === undefined) {
     // #836 — A LEGACY MIXED JOB (no `setups[]`, map items AND faces): the wrapped program is cut
@@ -7705,7 +7719,7 @@ export async function engraveGenerate(
         }
       : null;
     const faceTool = faceRef === null ? null : toolForProgram(faceRef, job, tool, shop);
-    const neckLast = mixedFaces && rotaryNeckOf(job) !== null;
+    const neckLast = mixedFaces && rotaryNeckOf(job, shop.defaults ?? null) !== null;
     if (neckLast) {
       const into = faceIntoNeckFinding(job, faceTool, shop.defaults ?? null);
       if (into !== null) return neckRefusal(into);
@@ -7835,7 +7849,7 @@ export async function engraveGenerate(
   // setup), so the neck is posted apart from the last wrapped program and played after the faces.
   // The run then has one file more than it has refs, and the face file is no longer its last word.
   const faceLastRef = refs.at(-1)?.faces === true ? refs.at(-1)! : null;
-  const neckApart = faceLastRef !== null && rotaryNeckOf(job) !== null;
+  const neckApart = faceLastRef !== null && rotaryNeckOf(job, shop.defaults ?? null) !== null;
   if (neckApart) {
     const into = faceIntoNeckFinding(job, toolForProgram(faceLastRef, job, tool, shop), shop.defaults ?? null);
     if (into !== null) return neckRefusal(into);
@@ -8012,7 +8026,7 @@ export async function engraveGenerate(
   // panels' "the part stays on a neck" sentence is never shown for a neck nothing cut.
   if (
     stopped === undefined &&
-    rotaryNeckOf(job) !== null &&
+    rotaryNeckOf(job, shop.defaults ?? null) !== null &&
     !posted.some((p) => p.one.neck != null || p.one.neckApart?.neck != null)
   ) {
     restFindings.push({
@@ -8106,7 +8120,7 @@ function neckAfterFacesFinding(): JobFinding {
  */
 function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null, defaults: ShopDefaults | null): JobFinding | null {
   const map = rotaryMapOf(job, defaults);
-  const neck = rotaryNeckFacts(job);
+  const neck = rotaryNeckFacts(job, defaults);
   if (map === null || neck === null) return null;
   const cutter = faceTool === null ? null : cuttingRadiusForSweep(faceTool);
   return faceCutIntoNeck(job, map, neck, cutter !== null && cutter.ok ? cutter.radius : 0);
@@ -8469,7 +8483,7 @@ async function generateOneProgram(
   // written when the blank was chosen, before the goal existed. If the plan cuts the whole stock
   // top away, there is nothing to skim: no file is built, and the result says why. A person's own
   // press (`'user'`, and every document written before the key) is always honoured.
-  const facingTopFace = plan.facing === null ? null : jobTopFace(job, { tool });
+  const facingTopFace = plan.facing === null ? null : jobTopFace(job, shop.defaults ?? null, { tool });
   const facingYieldsToPlan = job.facing?.source === 'seed' && facingTopFace !== null && !facingTopFace.keeps;
   const facingDepth = plan.facing !== null && !facingYieldsToPlan ? plan.facing.depth : 0;
   if (tool.shape === 'drill') {

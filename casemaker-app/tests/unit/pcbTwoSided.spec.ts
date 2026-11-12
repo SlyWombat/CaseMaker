@@ -375,7 +375,7 @@ describe('the copper oracle on both faces (#743 P-8)', () => {
     const { createSimSession } = await import('@/workers/sim/session');
     const { toSetup } = await import('@/engine/cnc/engrave/jobSetup');
     const { Z1 } = await import('@/engine/cnc/machine');
-    const sides = pcbCopperTopologyInputs(job);
+    const sides = pcbCopperTopologyInputs(job, null);
     expect(sides.map((s) => [s.setupIndex, s.faceUp])).toEqual([
       [1, 'top'],
       [2, 'bottom'],
