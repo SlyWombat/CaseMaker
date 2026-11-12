@@ -34,10 +34,11 @@ import { profileOf } from '../dropcutter';
 import { DEFAULT_SHORT_HOP_DIAMETERS, link, type LinkOptions, type LinkPoint, type MaterialField } from '../linking';
 import { followCutSurface, followShortJoin } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
+import { footprintIndex, type FootprintIndex } from '../footprintIndex';
 import { cutterKeyOf } from '../sequence';
 import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
 import { ballScallopStepOver } from '../../../ballScallop';
-import { isPlunge } from '../../printedZ';
+import { isPlunge, postedZ } from '../../printedZ';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
 
 export type FinishKind = 'flat-raster' | 'ball-scallop';
@@ -46,6 +47,49 @@ export type FinishKind = 'flat-raster' | 'ball-scallop';
 // smaller than any real raster step-over, so it costs nothing real, but keeps every `dropRow`
 // endpoint safely INSIDE the footprint, never exactly on an edge.
 const FOOTPRINT_EDGE_INSET_MM = 1e-4;
+
+/**
+ * #1234 (the fix, the analyst's ruling) — THE HEIGHT OF AN OVERRUN POINT IS THE HEIGHT AT THE
+ * POSITION THE MACHINE IS SENT TO. Outside the stock's rectangle the finishing rows reach past
+ * the edge by the cutter's radius, where the ball meets the edge nearly on its side and the CL
+ * changes tens of mm per mm; posting the XY to three decimals moves a point up to half a
+ * thousandth away, and the height taken there can sit well below the CL of the posted point (the
+ * tray's last row: planned y −1.5874 at CL −2.92446, posted y −1.587 where the CL is −2.90074 —
+ * 0.024 mm). So every finish/ball-rest point OUTSIDE the stock is laid on the posted grid first,
+ * its height is the drop-cutter height at that rounded position, and that height is rounded UP
+ * onto the same grid (#1214's principle — decide on the posted value — applied to XY). Points
+ * inside the rectangle are untouched, byte for byte. A rounded point the CL has no answer at is
+ * not emitted: the row ends at the last grid position inside the grown footprint.
+ */
+export function layOutsideOnPostedGrid(
+  points: readonly DroppedPoint[],
+  opts: Pick<FinishOpOptions, 'stockRectMm' | 'clSurface' | 'axisPrecision'>,
+  boundary: FootprintIndex | null,
+): DroppedPoint[] {
+  const rect = opts.stockRectMm;
+  if (rect === undefined) return [...points];
+  const step = 10 ** -opts.axisPrecision;
+  const out: DroppedPoint[] = [];
+  for (const p of points) {
+    if (p.x >= 0 && p.x <= rect.length && p.y >= 0 && p.y <= rect.width) {
+      out.push(p);
+      continue;
+    }
+    const x = postedZ(p.x, opts.axisPrecision);
+    const y = postedZ(p.y, opts.axisPrecision);
+    // RULE 4 — a rounded point ON the grown footprint's edge is not emitted: the row ends at the
+    // last grid position inside it. The edge is also where the drop-cutter's reach test is
+    // knife-edge (exactly one radius out, a contact can fall either side of the comparison), so a
+    // height taken there is ill-conditioned by construction — never send the ball to it.
+    if (boundary !== null && boundary.within(x, y)) continue;
+    const z = opts.clSurface.dropCutter(x, y);
+    if (z === null) continue; // no CL at the rounded position: no point past the footprint
+    const prev = out[out.length - 1];
+    if (prev !== undefined && prev.x === x && prev.y === y) continue; // one move per grid point
+    out.push({ x, y, z: Math.ceil(z / step - 1e-9) * step });
+  }
+  return out;
+}
 
 /**
  * #960 — THE SCALLOP HEIGHT THE BALL'S STEP-OVER HOLDS, mm. 0.027 comes from the vendor's own
@@ -212,6 +256,13 @@ export interface FinishOpOptions {
   materialTopAt?: (x: number, y: number) => number | null;
   /** The stock top in this op's datum — the last-resort bound past the footprint (see above). */
   stockTopZMm?: number;
+  /**
+   * #1234 (the fix) — THE STOCK'S RECTANGLE, mm in this op's frame. A finish or ball-rest point
+   * OUTSIDE it is an overrun point: its XY is laid on the posted grid first and its height is the
+   * drop-cutter height there, rounded up (`layOutsideOnPostedGrid`). Inside the rectangle nothing
+   * changes. Absent → no point is treated as an overrun point.
+   */
+  stockRectMm?: { length: number; width: number };
   /**
    * #1052 — the move cap for THIS op, default {@link FINISH_MOVE_CAP}. Tests inject a small one
    * to pin the refusal without building millions of moves; production never passes it.
@@ -635,6 +686,9 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
   const cap = opts.moveCap ?? FINISH_MOVE_CAP;
+  // #1234 (the fix) — the grown footprint's boundary, for the overrun rule's "no point on or past
+  // the edge" test. One index for the whole op, the same predicate the CL gate uses.
+  const boundaryIndex = opts.stockRectMm === undefined ? null : footprintIndex(opts.region.footprint);
 
   // #1052 — THE ESTIMATE BEFORE THE BUILD, from the bins and pitches (not from moves already
   // built): above the cap the op refuses by name and the rank drops the candidate with its
@@ -709,7 +763,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
       const insetY0 = rawY0 + Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
       const insetY1 = rawY1 - Math.sign(rawY1 - rawY0) * FOOTPRINT_EDGE_INSET_MM;
       if (Math.abs(insetY1 - insetY0) <= 1e-9 || (insetY1 - insetY0) * (rawY1 - rawY0) < 0) continue; // the interval is narrower than the inset: nothing to cut
-      const row = dropRow(opts.clSurface, [x, insetY0], [x, insetY1]);
+      const row = layOutsideOnPostedGrid(dropRow(opts.clSurface, [x, insetY0], [x, insetY1]), opts, boundaryIndex);
 
       // ITEM 4a — the row's points are cut only where the plan's mask admits them; each
       // contiguous admitted run is its own cut, and the gaps between runs are links.
@@ -871,6 +925,88 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   for (let k = 0; k < levels.length; k++) {
     emitLevelRuns(levels[k]!, rasterRuns[k]!);
     cleared.push({ z: levels[k]!, boundary: rasterCleared[k]! });
+  }
+
+  // #1234 (the fix, the analyst's ruling) — THE JOIN AND DIP-FOLLOW POINTS OUTSIDE THE STOCK TAKE
+  // THE SAME RULE. The joins between runs sample the CL at their own XY too, and the machine goes
+  // where the post writes: a feed point outside the rectangle has its XY laid on the posted grid,
+  // its height taken at that rounded XY and rounded UP onto the grid — a join a level floor held
+  // above its own CL included (that floor is a planning bound, not the surface the machine will
+  // meet at the posted position). Points inside the rectangle are untouched, byte for byte. A
+  // rounded point the CL has no answer at is dropped (the path continues between its neighbours).
+  if (opts.stockRectMm !== undefined) {
+    const rect = opts.stockRectMm;
+    const step = 10 ** -opts.axisPrecision;
+    const outsideStock = (m: { x: number; y: number }): boolean =>
+      m.x < 0 || m.x > rect.length || m.y < 0 || m.y > rect.width;
+    for (let i = 0; i < moves.length; i++) {
+      const m = moves[i]!;
+      if (m.kind !== 'feed') continue;
+      if (m.x >= 0 && m.x <= rect.length && m.y >= 0 && m.y <= rect.width) continue;
+      const x = postedZ(m.x, opts.axisPrecision);
+      const y = postedZ(m.y, opts.axisPrecision);
+      if (boundaryIndex !== null && boundaryIndex.within(x, y)) {
+        moves.splice(i, 1);
+        i--;
+        continue;
+      }
+      const z = opts.clSurface.dropCutter(x, y);
+      if (z === null) {
+        moves.splice(i, 1);
+        i--;
+        continue;
+      }
+      moves[i] = { ...m, x, y, z: Math.ceil(z / step - 1e-9) * step };
+    }
+    // Two grid points can collapse onto one (the rows and their joins): keep one feed per OUTSIDE
+    // point. Inside points are the pre-fix stream, byte for byte — the ruling's parity.
+    for (let i = 1; i < moves.length; i++) {
+      const a = moves[i - 1]!;
+      const b = moves[i]!;
+      if (a.kind === 'feed' && b.kind === 'feed' && outsideStock(a) && outsideStock(b) && a.x === b.x && a.y === b.y && a.z === b.z) {
+        moves.splice(i, 1);
+        i--;
+      }
+    }
+    // #1234 (the fix, the analyst's acceptance) — AND THE CHORDS BETWEEN OVERRUN POINTS. A chord
+    // between two grid points on a steep, curved CL dips below it: out where the ball meets the
+    // edge nearly on its side the curvature is ~200 mm⁻², so a 0.06 mm chord bows ~0.09 mm under
+    // the CL even though both its ends sit on it. Every chart between two overrun FEED points is
+    // therefore subdivided ON THE POSTED LATTICE until its highest departure from the CL at the
+    // lattice point is within one posted step (never more than the surface's own sampling
+    // tolerance) — the inserted points are exact grid points at the ceiling of their own CL.
+    const stepForChord = 10 ** -opts.axisPrecision;
+    const chordTol = Math.min(opts.clSurface.toleranceMm, stepForChord);
+    const holdChord =(from: (typeof moves)[number], to: (typeof moves)[number], at: (typeof moves)[number][]): void => {
+      const mx = postedZ((from.x + to.x) / 2, opts.axisPrecision);
+      const my = postedZ((from.y + to.y) / 2, opts.axisPrecision);
+      if ((mx === from.x && my === from.y) || (mx === to.x && my === to.y)) return;
+      if (boundaryIndex !== null && boundaryIndex.within(mx, my)) return;
+      const cl = opts.clSurface.dropCutter(mx, my);
+      if (cl === null) return;
+      const target = Math.ceil(cl / stepForChord - 1e-9) * stepForChord;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const t = Math.abs(dx) >= Math.abs(dy) ? (dx === 0 ? 0.5 : (mx - from.x) / dx) : (dy === 0 ? 0.5 : (my - from.y) / dy);
+      const chord = from.z + (to.z - from.z) * Math.min(1, Math.max(0, t));
+      if (chord >= target - chordTol) return;
+      const mid = { ...from, x: mx, y: my, z: target };
+      holdChord(from, mid, at);
+      at.push(mid);
+      holdChord(mid, to, at);
+    };
+    const densified: (typeof moves)[number][] = [];
+    for (const m of moves) {
+      const prev = densified[densified.length - 1];
+      if (prev !== undefined && m.kind === 'feed' && prev.kind === 'feed' && outsideStock(prev) && outsideStock(m)) {
+        holdChord(prev, m, densified);
+      }
+      densified.push(m);
+    }
+    moves.length = 0;
+    // NOT `moves.push(...densified)`: these are 100k+ moves and the spread would exceed V8's
+    // argument limit (RangeError), aborting the whole finish/rest stage.
+    for (const m of densified) moves.push(m);
   }
 
   if (moves.length > 0) {
