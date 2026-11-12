@@ -1,7 +1,10 @@
 /**
  * #1233 — compare two baseline folders (the layout #1212 saved) and write COMPARISON.md.
  *
- *   npx tsx --tsconfig tsconfig.scripts.json tools/baseline/compare.mts <before-dir> <after-dir> --out <dir>
+ *   npx tsx --tsconfig tsconfig.scripts.json tools/baseline/compare.mts <before-dir> <after-dir> --out <dir> [--makerables <dir>]
+ *
+ * --makerables (or $CM_MAKERABLES, or ~/makerables) is where the vendor's posted programs live: each is put on OUR clock
+ * (vendorClock.ts) so every ratio in section 3 is taken on one clock; without it those columns read "not recorded".
  *
  * READ-ONLY on both folders. Writes <out>/COMPARISON.md and <out>/pictures/. Every figure is read
  * from a saved file (`tray/<run>/{facts,timing}.json`, `references/<part>/card.json` or the demo's
@@ -12,6 +15,7 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { vendorClock, type VendorClock } from './vendorClock';
 import {
   TRAY_RUNS,
   buildComparison,
@@ -184,8 +188,41 @@ function refCards(cards: Map<string, { card: Json; path: string }>): Map<string,
   return out;
 }
 
-function loadRefs(cards: Map<string, { card: Json; path: string }>): RefFacts[] {
-  return [...refCards(cards)].map(([part, { card }]) => {
+/** The vendor's program on our clock, found by name under the makerables folder and checked by sha256 (the saved card names both). */
+const clockCache = new Map<string, VendorClock | null>();
+function clockOfVendor(card: Json, makerables: string | null): VendorClock | null {
+  const ref = (card.vendor?.ref?.nc ?? []) as string[];
+  const [name, sha] = ref;
+  if (!name || makerables === null) return null;
+  const key = `${name}:${sha}`;
+  if (clockCache.has(key)) return clockCache.get(key)!;
+  let out: VendorClock | null = null;
+  const find = (root: string): string | null => {
+    for (const e of readdirSync(root, { withFileTypes: true })) {
+      const p = join(root, e.name);
+      if (e.isDirectory()) { const r = find(p); if (r) return r; } else if (e.name === name) return p;
+    }
+    return null;
+  };
+  try {
+    const file = find(makerables);
+    if (file) {
+      const raw = readFileSync(file);
+      // the card names the program by sha256; another download is not the one that was judged
+      if (sha === undefined || createHash('sha256').update(raw).digest('hex') === sha) out = vendorClock(raw.toString('utf8'));
+    }
+  } catch {
+    out = null;
+  }
+  clockCache.set(key, out);
+  return out;
+}
+
+function loadRefs(cards: Map<string, { card: Json; path: string }>, makerables: string | null): RefFacts[] {
+  return [...refCards(cards)].map(([part, { card, path }]) => {
+    const clock = clockOfVendor(card, makerables);
+    const receipt = readJson(join(path, 'receipt.json'));
+    const oursTotal = num((receipt?.details?.runCycle as Json | undefined)?.totalSeconds);
     const vendor = (card.vendor ?? {}) as Json;
     const vn = (vendor.numbers ?? {}) as Json;
     const tools = Array.isArray(vn.programs) && vn.programs[0] && Array.isArray((vn.programs[0] as Json).tools) ? ((vn.programs[0] as Json).tools as unknown[]).length : null;
@@ -197,6 +234,9 @@ function loadRefs(cards: Map<string, { card: Json; path: string }>): RefFacts[] 
       reason: card.verdict === 'refused' ? String(card.sentence ?? '').replace(/\s+/g, ' ').slice(0, 220) : null,
       makeraCutters: tools === null ? null : String(tools),
       makeraCycle: vsec === null ? null : `${(vsec / 60).toFixed(1)} min`,
+      makeraHeaderS: vsec,
+      makeraClockS: clock === null ? null : clock.totalSeconds,
+      oursTotalS: card.verdict === 'refused' ? null : oursTotal,
       cutters: card.verdict === 'refused' ? null : num(ours.cutters),
       cycleSeconds: num(ours.cycleSeconds),
       wall: num(card.computeSeconds),
@@ -274,9 +314,11 @@ function main(): void {
   const args = process.argv.slice(2);
   const o = args.indexOf('--out');
   const outDir = o >= 0 ? resolve(args[o + 1] ?? '') : '';
-  const pos = args.filter((_, i) => o < 0 || (i !== o && i !== o + 1));
+  const mk = args.indexOf('--makerables');
+  const makerables = mk >= 0 ? resolve(args[mk + 1] ?? '') : process.env.CM_MAKERABLES ? resolve(process.env.CM_MAKERABLES) : existsSync(join(process.env.HOME ?? '', 'makerables')) ? join(process.env.HOME ?? '', 'makerables') : null;
+  const pos = args.filter((_, i) => (o < 0 || (i !== o && i !== o + 1)) && (mk < 0 || (i !== mk && i !== mk + 1)));
   if (pos.length !== 2 || outDir === '') {
-    process.stderr.write('usage: compare.mts <before-dir> <after-dir> --out <dir>\n');
+    process.stderr.write('usage: compare.mts <before-dir> <after-dir> --out <dir> [--makerables <dir>]\n');
     process.exit(2);
   }
   const [beforeDir, afterDir] = [resolve(pos[0]!), resolve(pos[1]!)];
@@ -334,7 +376,7 @@ function main(): void {
     before: bh,
     after: ah,
     headline,
-    references: { before: loadRefs(bCards), after: loadRefs(aCards) },
+    references: { before: loadRefs(bCards, makerables), after: loadRefs(aCards, makerables) },
     cutInto,
     samples: { before: loadSamples(beforeDir), after: loadSamples(afterDir) },
     cards: { before: toStatus(bCards), after: toStatus(aCards) },
