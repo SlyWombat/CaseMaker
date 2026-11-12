@@ -2624,7 +2624,7 @@ export function engraveRegions(
     // class the wrap does not cut yet, and an item opening that reaches into either end band (at
     // its row). `measured` carries each item's OPENED region in map millimetres. Empty for a flat
     // job.
-    ...rotaryJobFindings(job, plan, measured),
+    ...rotaryJobFindings(job, plan, measured, shop.defaults ?? null),
     // #740 — the tip the record does not state, in place of the plane sentences that would have
     // read the shank as the cutter.
     ...tipFindings,

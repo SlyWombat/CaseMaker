@@ -56,7 +56,7 @@ import {
   tailstockSentence,
   throughCentreSentence,
 } from './wrap';
-import { liveShopDefaults } from '@/platform/defaultsClient';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * One item's OPENED region, in map millimetres — the shape `engraveRegions` measured and the CAM
@@ -89,8 +89,10 @@ export function rotaryJobFindings(
   job: EngraveJob,
   plan: PartPlan,
   opened: readonly RotaryOpenedRegion[] = [],
+  // #1244 — the map from the caller's edge (the generator's shop.defaults); null: no location.
+  defaults: ShopDefaults | null,
 ): JobFinding[] {
-  const map = rotaryMapOf(job, liveShopDefaults());
+  const map = rotaryMapOf(job, defaults);
   if (map === null) return [];
   const findings: JobFinding[] = [];
 
