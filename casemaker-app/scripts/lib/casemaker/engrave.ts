@@ -502,7 +502,7 @@ export function faceAngleReceiptFor(
   job: EngraveJob,
   where: LoadedLocation | null,
 ): { degrees: number; residualMm?: number } | undefined {
-  const section = rotaryMapOf(job)?.section;
+  const section = rotaryMapOf(job, where?.defaults ?? null)?.section;
   if (section === undefined || section.kind !== 'rect') return undefined;
   const wantedProfile = job.bed?.profileId;
   const machines = [...(where?.machines ?? [])];
@@ -1426,7 +1426,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // #1083 — a rotary goal is judged on the map: the map's own radius and section ride along
       // (goalCheckInput must not value-import the CAM, so the caller that has the job supplies it).
       (() => {
-        const map = rotaryMapOf(job);
+        const map = rotaryMapOf(job, shopDefaults);
         return map === null ? null : { radius: map.radius, section: map.section };
       })(),
     );
@@ -1456,7 +1456,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           // `toSetup(job, machine, mount?.fixture, bed)`). Without it a bracket job's program was
           // swept against no fixture at all, so a cutter through the bracket's arm — or through a
           // hole the job states — was never seen.
-          return session.load(program.nc, toSetup(job, Z1, mountFor(job)?.fixture), cutter, Z1.id, {
+          return session.load(program.nc, toSetup(job, Z1, mountFor(job)?.fixture, undefined, undefined, shopDefaults), cutter, Z1.id, {
             // #734 — the CAM posts a through move to `thickness + breakthrough`, so the sweep's floor
             // must be the same: without it a correct through cut's retract reads as a rapid through
             // material (j17 reproduced the bench's `rapid-through-stock` on 7 vertical retracts).

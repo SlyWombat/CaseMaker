@@ -56,6 +56,12 @@ export interface RegistrationSettings {
    * SAYS it moved (the datum is still refreshed; the words this far apart are worth reading).
    */
   mountTapSlackMm?: number;
+  /**
+   * #1241 — the collet match tolerance (`probe.colletMatchMm`), for the fit-probe prompts' collet
+   * words. OPTIONAL on a plan stored before the key existed; the prompts then use the labelled
+   * recommendation (`colletMatchToleranceMm(null)`), never an ambient read.
+   */
+  colletMatchMm?: number;
   /** A scan point stays this far beyond a rounded corner's radius from the corner. */
   cornerClearanceMm: number;
   /** A hit within this of the surface reads as "on the stock"; lower is off it (a jaw, the roll-off). */
@@ -148,6 +154,7 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   bracketFitMm: 'bracket.fitMm',
   mountTapFloorMm: 'registration.mountTapFloorMm',
   mountTapSlackMm: 'registration.mountTapSlackMm',
+  colletMatchMm: 'probe.colletMatchMm',
   cornerClearanceMm: 'registration.cornerClearanceMm',
   surfaceBandMm: 'registration.surfaceBandMm',
   tipRadiusMm: 'registration.tipRadiusMm',

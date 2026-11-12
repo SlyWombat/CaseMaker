@@ -66,7 +66,7 @@ import { targetObjectMesh } from '@/engine/import/targetObject';
 import { rotationMatrix, targetPlacement } from '@/engine/cnc/engrave/targetScale';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveTargetObject } from '@/types/engraveJob';
-import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
+import { type ProbeResiduals } from '@/engine/cnc/probePlan';
 import { grooveRadiusAt, vCone } from '@/engine/cnc/vProfile';
 import { chamferBandFor, type ChamferBand } from '@/engine/cnc/engrave/targetRim';
 import { vGrooveSolid } from './engraveGroove';
@@ -81,6 +81,7 @@ import {
   type LabelRatioAt,
   type PerCharGlyph,
 } from './engraveGeometry';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import { engraveRegions, raisedTextMeasure, type EngraveShopOpts } from './engraveGenerate';
 
 type ManifoldInstance = InstanceType<ManifoldToplevel['Manifold']>;
@@ -368,7 +369,8 @@ export interface EngravePreviewer {
    *
    * `residuals` is the shop's five registration residuals (#451), handed in for the same reason:
    * the registration band must draw the tolerance the location would use, and this realm can only
-   * read the labelled no-service fallbacks. Omitted, those fallbacks are what it draws.
+   * read the labelled no-service fallbacks. #1241 — REQUIRED: the caller names the map it read
+   * (`probeResiduals(shop.defaults)` on the main thread), so a realm that forgets fails to compile.
    */
   engravePreview(
     job: EngraveJob,
@@ -377,8 +379,8 @@ export interface EngravePreviewer {
     gen: number,
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
-    shop?: EngraveShopOpts,
-    residuals?: ProbeResiduals,
+    shop: EngraveShopOpts | undefined,
+    residuals: ProbeResiduals,
   ): EngravePreview | null;
 }
 
@@ -521,14 +523,14 @@ function goalDrawingBody(
  * job (a label's text, the cutter) rebuild the preview but must not re-run the boolean, and the
  * goal's own row is what changes this string.
  */
-function goalDrawingKey(job: EngraveJob, facingDepth: number): string | null {
+function goalDrawingKey(job: EngraveJob, facingDepth: number, defaults: ShopDefaults | null): string | null {
   const target = job.targetObject;
   if (target === undefined || !target.enabled) return null;
   if ((target.role ?? 'reference') !== 'goal') return null;
   if (target.format === 'png' || target.data === undefined) return null;
   // The rotary view draws its own radial relief (#723 R-3); a flat goal drawing here would be a
   // volume the rod's CAM never removes.
-  if (rotaryMapOf(job) !== null) return null;
+  if (rotaryMapOf(job, defaults) !== null) return null;
   const s = target.scale;
   return [
     target.sha256,
@@ -575,7 +577,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     margins: EngraveMargins,
     conditions: ReadonlyMap<string, ConditionSummary>,
     shop: EngraveShopOpts = {},
-    residuals: ProbeResiduals = probeResiduals(),
+    residuals: ProbeResiduals,
   ): EngravePreview | null => {
     if (gen < latestGen) return null;
     latestGen = gen;
@@ -710,7 +712,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
     // previews its own row did not change. `placedStock` is the faced blank, the same body the
     // cuts below are subtracted from; the drawing never consumes it (the boolean is lazy but its
     // result is materialised inside `goalDrawingBody`).
-    const goalKey = goalDrawingKey(job, facingDepth);
+    const goalKey = goalDrawingKey(job, facingDepth, shop.defaults ?? null);
     const goalTarget = job.targetObject;
     if (goalKey === null || goalTarget === undefined) {
       goalCache = null;

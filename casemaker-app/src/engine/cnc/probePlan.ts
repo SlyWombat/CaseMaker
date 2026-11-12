@@ -32,7 +32,7 @@
  */
 
 import type { Profile } from '@/engine/compiler/profile';
-import { liveShopDefaults, readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { Mm, Vec2 } from '@/types/units';
 import type { Polygons } from './cam/pocket';
 import type { DatumSource, Workholding } from './setup';
@@ -117,8 +117,11 @@ export const VISE_JAW_RESIDUAL_MM = 0.05;
  * The five residuals from the shop's defaults (#451), or every labelled fallback when there is no
  * location to read. A worker realm has no live defaults source, so it gets the fallbacks — the same
  * numbers a fresh location is seeded with, and the reason no value is invented here.
+ *
+ * #1241 — THE DEFAULTS ARE AN ARGUMENT: the caller states the map it holds (null = no location,
+ * the recommendations). A realm that forgets it fails to compile rather than reading ambient state.
  */
-export function probeResiduals(defaults: ShopDefaults | null = liveShopDefaults()): ProbeResiduals {
+export function probeResiduals(defaults: ShopDefaults | null): ProbeResiduals {
   return {
     probe: readDefault(defaults, 'registration.probeResidualMm').value,
     wiredProbeZ: readDefault(defaults, 'registration.wiredProbeZResidualMm').value,
@@ -540,7 +543,7 @@ export function planProbing(
   part: ProbePart,
   workholding: Workholding,
   probe: ProbeSpec,
-  residuals: ProbeResiduals = probeResiduals(),
+  residuals: ProbeResiduals,
 ): ProbeResult {
   const notes: string[] = [];
   const tipR = Math.max(probe.tipDiameter, 0) / 2;

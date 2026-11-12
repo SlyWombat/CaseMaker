@@ -319,7 +319,7 @@ describe('#724 B3 — the shipped layout lands on the free span', () => {
     expect(job.workholding.kind).toBe('rotary-chuck');
     expect(job.labels[0]!.position.x).toBe(39);
     // The span's ends, from the one definition the findings judge: 3–75 for stick-out 85.
-    const map = rotaryMapOf(job);
+    const map = rotaryMapOf(job, null);
     expect(map).not.toBeNull();
     expect(rotaryFreeSpan(map!)).toEqual({ from: 3, to: 75, centre: 39 });
 
@@ -800,13 +800,13 @@ describe('⌀6 rod under the 3.175 mm flat — the oracle passes because the fac
 
 describe('the pipeline reads the same map the fixtures are written on', () => {
   it('finds a ⌀20 × 100 rod in the chuck, and the thin rod’s shorter stick-out', () => {
-    const map = rotaryMapOf(dowel()) as RotaryMap;
+    const map = rotaryMapOf(dowel(), null) as RotaryMap;
     expect(map.radius).toBe(10);
     expect(map.circumference).toBeCloseTo(62.83185307179586, 10);
     expect(map.stickout).toBe(85);
     expect(map.grip).toBe(15);
 
-    const thin = rotaryMapOf(thinRod()) as RotaryMap;
+    const thin = rotaryMapOf(thinRod(), null) as RotaryMap;
     expect(thin.radius).toBe(3);
     expect(thin.stickout).toBe(50);
     expect(thin.tailstock).toBe(false);

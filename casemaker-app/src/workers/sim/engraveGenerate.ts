@@ -6485,7 +6485,11 @@ export async function generateGoalProgram(
   // final; the caller owes the ideal half and a tradeoff update.
   // #1193 — ONE SIDE'S PROGRAMS: the run total over what THIS result posts. A multi-side run
   // overrides it in `generateGoalPrograms` with the whole posted list.
-  return attachRunCycle(idealDeferred ? { ...posted, idealDeferred: true } : posted, { setupCount: 1, flip: false });
+  return attachRunCycle(
+    idealDeferred ? { ...posted, idealDeferred: true } : posted,
+    { setupCount: 1, flip: false },
+    shop.defaults ?? null,
+  );
 }
 
 /**
@@ -6493,14 +6497,18 @@ export async function generateGoalProgram(
  * side's posts; the multi-side seam sees every side plus the locating program and calls this again
  * with the completed list. The result carries the total, or none when no program states a cycle.
  */
-function attachRunCycle(result: EngraveGenerated, facts: { setupCount: number; flip: boolean }): EngraveGenerated {
+function attachRunCycle(
+  result: EngraveGenerated,
+  facts: { setupCount: number; flip: boolean },
+  defaults: ShopDefaults | null,
+): EngraveGenerated {
   const cycle = runCycleOf(
     result.programs.map((program) => ({
       seconds: program.cam?.estimatedSeconds ?? 0,
       cutterKey: program.toolKey,
       setupIndex: program.setupIndex,
     })),
-    runBitChangeRule(),
+    runBitChangeRule(defaults),
     facts,
   );
   return cycle === null ? result : { ...result, runCycle: cycle };
@@ -6646,6 +6654,7 @@ async function generateGoalPrograms(
   return attachRunCycle(
     { ...first, programs },
     { setupCount: sides.length, flip: sides.some((side) => side.setup.flip !== undefined) },
+    shop.defaults ?? null,
   );
 }
 
@@ -7650,7 +7659,7 @@ export async function engraveGenerate(
     const faceTool = faceRef === null ? null : toolForProgram(faceRef, job, tool, shop);
     const neckLast = mixedFaces && rotaryNeckOf(job) !== null;
     if (neckLast) {
-      const into = faceIntoNeckFinding(job, faceTool);
+      const into = faceIntoNeckFinding(job, faceTool, shop.defaults ?? null);
       if (into !== null) return neckRefusal(into);
     }
     const one = await generateOneProgram(
@@ -7780,7 +7789,7 @@ export async function engraveGenerate(
   const faceLastRef = refs.at(-1)?.faces === true ? refs.at(-1)! : null;
   const neckApart = faceLastRef !== null && rotaryNeckOf(job) !== null;
   if (neckApart) {
-    const into = faceIntoNeckFinding(job, toolForProgram(faceLastRef, job, tool, shop));
+    const into = faceIntoNeckFinding(job, toolForProgram(faceLastRef, job, tool, shop), shop.defaults ?? null);
     if (into !== null) return neckRefusal(into);
   }
   const runLength = refs.length + (neckApart ? 1 : 0);
@@ -8047,8 +8056,8 @@ function neckAfterFacesFinding(): JobFinding {
  * #849 — a face cut that reaches into the neck's section (`faceCutIntoNeck`), judged with the face
  * program's own cutter, or null. Null too when the job has no neck that can be placed.
  */
-function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null): JobFinding | null {
-  const map = rotaryMapOf(job);
+function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null, defaults: ShopDefaults | null): JobFinding | null {
+  const map = rotaryMapOf(job, defaults);
   const neck = rotaryNeckFacts(job);
   if (map === null || neck === null) return null;
   const cutter = faceTool === null ? null : cuttingRadiusForSweep(faceTool);

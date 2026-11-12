@@ -31,6 +31,7 @@ import {
 import { goalFlipPlan, sideWords, type FlipPlan } from './goalFlipPlan';
 import { dowelHold } from './goalFlipSetups';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /** The measure the finding is built from, kept as data so a caller can assert on it. */
 export interface GoalSurfaceOffer {
@@ -222,7 +223,7 @@ export function jobFlipFindings(
   /** #1068 — the material under the stock the flip's holes would enter, mm (see `goalFlipFindings`). */
   underMm?: number,
 ): JobFinding[] {
-  if (rotaryMapOf(job) !== null) return [];
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return [];
   const out: JobFinding[] = [];
   for (const goal of jobTargetObjects(job)) out.push(...cachedFlipFindings(job, goal, tools, underMm));
   return out;

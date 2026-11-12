@@ -5,7 +5,7 @@
 
 import { probeInstrumentOf, topTouchTipRadiusMm, topTouchTipWords, type RegistrationPlan } from './plan';
 import { topTouchEdgeMarginsMm } from './cutBlank';
-import { probeColletWords } from '@/engine/cnc/probeFitWords';
+import { colletMatchToleranceMm, probeColletWords } from '@/engine/cnc/probeFitWords';
 import type { RegistrationOutcome } from './outcome';
 
 const n = (v: number) => String(Math.round(v * 100) / 100);
@@ -28,6 +28,9 @@ function tipSentence(plan: RegistrationPlan): string {
 
 export function summarizePlan(plan: RegistrationPlan): string {
   const s = plan.settings;
+  // #1241 — the collet words' tolerance is the plan's own recorded setting; a plan stored before
+  // the key existed states the recommendation rather than reading an ambient source here.
+  const colletMm = s.colletMatchMm ?? colletMatchToleranceMm(null);
   // #640 — the probe the plan will actually use: the 3D probe touches edges sideways, so the
   // narration must not send the operator to fit the wired one.
   const probeWords = probeInstrumentOf(plan.probe) === 'xyz' ? 'the 3D probe' : 'the wired probe';
@@ -53,7 +56,7 @@ export function summarizePlan(plan: RegistrationPlan): string {
   if (plan.references) {
     // #429 review: the walls by their labels, and the surface touch where it really is.
     return (
-      `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
+      `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm, colletMm)}) and measure it (M491); touch the surface at (${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)}), ` +
       `on solid stock clear of every opening; then scan ${plan.scans.map((sc) => sc.label ?? `the ${sc.edge} edge`).join(', ')} — bracketing each wall ` +
       `and bisecting to ${n(s.fineStepMm)} mm, stopping at the first touch that falls into the opening, every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm; home when finished.` +
       tipSentence(plan)
@@ -102,7 +105,7 @@ export function summarizePlan(plan: RegistrationPlan): string {
         `each kept within ±${n(s.edgeBandMm)} mm of where its edge is expected, stopping at the first touch off the stock, ` +
         `every touch capped at the surface − ${n(s.capBelowSurfaceMm)} mm`;
   return (
-    `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm)}) and measure it (M491);${tap}` +
+    `Home, fit ${probeWords} (${probeColletWords(plan.probe?.shankMm, colletMm)}) and measure it (M491);${tap}` +
     ` touch the surface at the cut area's centre ` +
     `(${n(plan.surfacePoint.x)}, ${n(plan.surfacePoint.y)})${scanClause}; home when finished.${assumes}` +
     tipSentence(plan)

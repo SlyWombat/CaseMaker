@@ -12,33 +12,37 @@
  * — the same honesty `probeFor` keeps about an unmeasured tip.
  */
 
-import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * How close a recorded shank must be to a post's nominal diameter for it to be that post's collet.
- * #1207 — a CHOSEN tolerance, so it is a shop default (`probe.colletMatchMm`), read here with the
- * house's own reader; a caller may pass one (a spec) instead.
+ * #1207 — a CHOSEN tolerance, so it is a shop default (`probe.colletMatchMm`). #1241 — the map is
+ * an EXPLICIT argument: a caller that forgets it does not compile, rather than silently reading
+ * whatever the ambient source holds (a realm with no location would read the recommendation).
  */
-export function colletMatchToleranceMm(toleranceMm?: number): number {
-  if (toleranceMm !== undefined && Number.isFinite(toleranceMm)) return toleranceMm;
-  return readDefault(liveShopDefaults(), 'probe.colletMatchMm').value;
+export function colletMatchToleranceMm(defaults: ShopDefaults | null): number {
+  return readDefault(defaults, 'probe.colletMatchMm').value;
 }
 
-/** Whether a recorded shank is the post whose nominal diameter is `nominalMm`. */
-export function shankIsPost(shankMm: number | null | undefined, nominalMm: number, toleranceMm?: number): boolean {
+/**
+ * Whether a recorded shank is the post whose nominal diameter is `nominalMm`. #1241 — the tolerance
+ * is passed (from {@link colletMatchToleranceMm} by the caller that holds the shop's map), never
+ * read here.
+ */
+export function shankIsPost(shankMm: number | null | undefined, nominalMm: number, toleranceMm: number): boolean {
   return shankMm !== null && shankMm !== undefined && Number.isFinite(shankMm)
-    ? Math.abs(shankMm - nominalMm) <= colletMatchToleranceMm(toleranceMm)
+    ? Math.abs(shankMm - nominalMm) <= toleranceMm
     : false;
 }
 
 /** The collet a shank diameter needs, in the operator's words ("6 mm collet", `1/8" collet`). */
-export function probeColletWords(shankMm: number | null | undefined, toleranceMm?: number): string {
+export function probeColletWords(shankMm: number | null | undefined, toleranceMm: number): string {
   if (shankMm === null || shankMm === undefined || !Number.isFinite(shankMm)) return 'check the collet';
   if (shankIsPost(shankMm, 6.35, toleranceMm)) return '1/8" collet';
   return `${Number(shankMm.toFixed(2))} mm collet`;
 }
 
 /** The same clause as a sentence's aside: " — 6 mm collet", or " — check the collet". */
-export function probeColletClause(shankMm: number | null | undefined): string {
-  return ` — ${probeColletWords(shankMm)}`;
+export function probeColletClause(shankMm: number | null | undefined, toleranceMm: number): string {
+  return ` — ${probeColletWords(shankMm, toleranceMm)}`;
 }

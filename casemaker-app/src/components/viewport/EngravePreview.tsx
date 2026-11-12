@@ -71,6 +71,7 @@ import { RotaryMapDecorations } from './RotaryMapDecorations';
 import { ROTARY_MAP_NARROW_PX } from './rotaryMapView';
 import { wrapMapGeometry } from './rotaryStockView';
 import { RotaryGoalSurface } from './RotaryGoalSurface';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /** The same fixture grey the simulation's jaws use (#197, #204). */
 const JAW_COLOR = '#4b5563';
@@ -929,7 +930,7 @@ export function EngravePreview({ uncut = false }: { uncut?: boolean } = {}): JSX
   // CAM authors it; `stock` wraps the SAME meshes onto the cylinder. A flat job is always `null`
   // here and takes every branch as it did before this slice.
   const designView = useRotaryViewStore((s) => s.design);
-  const rotary = useMemo(() => rotaryMapOf(job), [job]);
+  const rotary = useMemo(() => rotaryMapOf(job, liveShopDefaults()), [job]);
   const wrapRadius = rotary !== null && designView === 'stock' ? rotary.radius : null;
   // #723 R-3 — a goal on a rod is drawn from its radial field (both views), and the flat-framed
   // mesh the primitives layer would draw at `position.z` is not this job's picture: on a rod the

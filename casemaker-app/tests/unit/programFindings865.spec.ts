@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
 import { generate } from './helpers/engravePipeline';
+import { probeResiduals } from '@/engine/cnc/probePlan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { createEngravePreviewer } from '@/workers/sim/engravePreview';
@@ -138,7 +139,7 @@ describe('#865 a later program’s own findings', () => {
   it('the panel’s preview carries the later program’s finding too', async () => {
     const job = raisedJob();
     const previewer = createEngravePreviewer(tl);
-    const preview = previewer.engravePreview(job, ENTRIES, [], 1, effectiveMargins(job, MARGIN_DEFAULTS), new Map());
+    const preview = previewer.engravePreview(job, ENTRIES, [], 1, effectiveMargins(job, MARGIN_DEFAULTS), new Map(), undefined, probeResiduals(null));
     expect(preview).not.toBeNull();
     const short = preview!.findings.find((f) => f.code === 'vcarve-depth-beyond-cone');
     expect(short?.message).toMatch(/^program 2 \(/);

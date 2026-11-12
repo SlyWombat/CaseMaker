@@ -78,7 +78,7 @@ describe('#241 slice 2 — the face model', () => {
 
   it('a Flat becomes one face pocket, cut by several Y passes when the cutter is narrower than the chord', () => {
     const job = rod([flat('f1', 0, 1)]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const feeds = feedsFor([], job.stock.material, TOOL, Z1);
     expect(feeds.ok).toBe(true);
     if (!feeds.ok) return;
@@ -103,7 +103,7 @@ describe('#241 slice 2 — the face model', () => {
   it('Faces all round is n faces at a + k·360/n, each the chord at the across-flats depth', () => {
     const op: EngraveFaceOp = { id: 'hex', kind: 'faces-all-round', a: 10, count: 6, acrossFlats: 17.321 };
     const job = rod([op]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const feeds = feedsFor([], job.stock.material, TOOL, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
     const plan = planFaceCuts(job, map, TOOL, feeds.params);
@@ -120,7 +120,7 @@ describe('#241 slice 2 — the face model', () => {
   it('a cross-hole is one through plunge at the free span’s middle, and its prediction is the cutter’s disc', () => {
     const op: EngraveFaceOp = { id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 };
     const job = rod([op]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const feeds = feedsFor([], job.stock.material, TOOL, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
     const plan = planFaceCuts(job, map, TOOL, feeds.params);
@@ -137,13 +137,13 @@ describe('#241 slice 2 — the face model', () => {
     const feeds = feedsFor([], 'pla', TOOL, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
     const tooDeep = rod([flat('f', 0, 10)]);
-    const d = planFaceCuts(tooDeep, rotaryMapOf(tooDeep)!, TOOL, feeds.params);
+    const d = planFaceCuts(tooDeep, rotaryMapOf(tooDeep, null)!, TOOL, feeds.params);
     expect(d.ok).toBe(false);
     if (!d.ok) expect(d.findings.map((f) => f.code)).toContain('face-too-deep');
 
     const cylinder = rod([flat('f', 0, 1)]);
     const ball = { ...flatEndMill(3.175, { name: '3.175 mm ball', handleDiameter: 3.175 }), shape: 'ball' as const };
-    const b = planFaceCuts(cylinder, rotaryMapOf(cylinder)!, ball, feeds.params);
+    const b = planFaceCuts(cylinder, rotaryMapOf(cylinder, null)!, ball, feeds.params);
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.findings.map((f) => f.code)).toContain('face-needs-flat-tool');
 
@@ -163,7 +163,7 @@ describe('#241 slice 2 — the face model', () => {
     const job = rod([op]);
     const feeds = feedsFor([], job.stock.material, TOOL, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
-    const plan = planFaceCuts(job, rotaryMapOf(job)!, TOOL, feeds.params);
+    const plan = planFaceCuts(job, rotaryMapOf(job, null)!, TOOL, feeds.params);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     const warning = plan.findings.find((f) => f.code === 'cross-hole-cutter');
@@ -285,11 +285,11 @@ describe('#833 — cuts ON a face', () => {
     const feeds = feedsFor([], 'softwood', TOOL, Z1);
     if (!feeds.ok) throw new Error(feeds.reason);
     const off = faceWith([{ ...text, x: 1 }]);
-    const a = planFaceCuts(off, rotaryMapOf(off)!, TOOL, feeds.params);
+    const a = planFaceCuts(off, rotaryMapOf(off, null)!, TOOL, feeds.params);
     expect(a.ok).toBe(false);
     if (!a.ok) expect(a.findings.map((f) => f.code)).toContain('face-item-off-face');
     const deep = faceWith([{ ...text, depth: 9.5 }]);
-    const b = planFaceCuts(deep, rotaryMapOf(deep)!, TOOL, feeds.params);
+    const b = planFaceCuts(deep, rotaryMapOf(deep, null)!, TOOL, feeds.params);
     expect(b.ok).toBe(false);
     if (!b.ok) expect(b.findings.map((f) => f.code)).toContain('face-item-too-deep');
   });

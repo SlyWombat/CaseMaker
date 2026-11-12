@@ -59,6 +59,7 @@ import type { RotaryOperationId } from './rotaryOperations';
 import { operationType, type OperationTypeId } from '@/components/panels/operationTypes';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { TextFont } from '@/types/textLabel';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * #1098 — THE FILE DOOR'S KINDS. The question step accepts every file the app reads and lets the
@@ -318,7 +319,7 @@ export function OperationStep({
   //
   // #1107 — AND A NEW FLAT RUN CAN CHOOSE THE ROD: picking a rod intent turns the same step into
   // the rotary one, so the answer states its frame and the blank/Holding follow it.
-  const rotaryJob = rotaryMapOf(job) !== null;
+  const rotaryJob = rotaryMapOf(job, liveShopDefaults()) !== null;
   const [frameRotary, setFrameRotary] = useState(seed !== null && 'frame' in seed && seed.frame === 'rotary');
   /** #1107 — the named sentence a FRAME CHANGE leaves when the pick does not exist in the other. */
   const [droppedPick, setDroppedPick] = useState<string | null>(null);
@@ -484,7 +485,7 @@ export function OperationStep({
   // #241 slice 2 — THE FACE GROUP'S one field each, seeded by `defaultFaceOperation` (§5): a Flat
   // at 0° and 1 mm; a hex whose across-flats is the largest inside the stock; a cross-hole at 0°
   // on the job's own cutter. The angle is the FIRST face for a ring.
-  const faceRadiusMm = rotaryMapOf(job)?.radius ?? 0;
+  const faceRadiusMm = rotaryMapOf(job, liveShopDefaults())?.radius ?? 0;
   const faceDefaults = defaultFaceOperation('flat', faceRadiusMm, toolDiameterMm(job));
   const faceAngleOf = (choice: OperationChoice | null): number =>
     choice !== null && (choice.type === 'flat' || choice.type === 'faces-all-round' || choice.type === 'cross-hole')

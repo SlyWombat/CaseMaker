@@ -61,7 +61,7 @@ describe('#777 the stock’s section', () => {
 
 describe('#777 the map reads a block in the chuck', () => {
   it('names the section and the turned envelope, not a fake diameter', () => {
-    const map = rotaryMapOf(blockJob());
+    const map = rotaryMapOf(blockJob(), null);
     expect(map).not.toBeNull();
     expect(map!.section).toEqual({ kind: 'rect', width: 30, height: 20 });
     expect(map!.radius).toBeCloseTo(Math.hypot(30, 20) / 2, 9);
@@ -73,16 +73,16 @@ describe('#777 the map reads a block in the chuck', () => {
     const job = defaultEngraveJob();
     job.stock = { ...job.stock, length: 100, width: 20, thickness: 20, shape: 'cylinder', diameter: 20 };
     job.workholding = { kind: 'rotary-chuck', rotary: defaultRotaryChuck(job) };
-    expect(rotaryMapOf(job)!.section).toEqual({ kind: 'round', diameter: 20 });
+    expect(rotaryMapOf(job, null)!.section).toEqual({ kind: 'round', diameter: 20 });
 
     const disc = defaultEngraveJob();
     disc.stock = { ...disc.stock, length: 40, width: 40, thickness: 3, shape: 'disc', diameter: 40 };
     disc.workholding = { kind: 'rotary-chuck', rotary: defaultRotaryChuck(disc) };
-    expect(rotaryMapOf(disc)).toBeNull();
+    expect(rotaryMapOf(disc, null)).toBeNull();
 
     // A block in the vise is a flat job whichever way the box faces.
     const flat: EngraveJob = { ...blockJob(), workholding: defaultEngraveJob().workholding };
-    expect(rotaryMapOf(flat)).toBeNull();
+    expect(rotaryMapOf(flat, null)).toBeNull();
   });
 });
 

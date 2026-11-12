@@ -21,7 +21,7 @@
  */
 
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, type BitChangeRule } from '@/engine/cnc/cam/model/bitChange';
-import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 /** One posted program, as the run total needs it. */
 export interface RunProgramFact {
@@ -55,9 +55,11 @@ export interface RunCycle {
  * The shop's bit-change rule, resolved exactly as the plan resolves it (`planModelCam` reads the
  * same four keys from the same defaults): a second reading would let the run's changes and the
  * plans' changes be priced by different numbers.
+ *
+ * #1241 — the map is an EXPLICIT argument (the caller's `shop.defaults`), so a run priced in a
+ * realm that forgot its settings cannot silently fall back to another source.
  */
-export function runBitChangeRule(): BitChangeRule {
-  const defaults = liveShopDefaults();
+export function runBitChangeRule(defaults: ShopDefaults | null): BitChangeRule {
   return {
     attendedMinutes: readDefault(defaults, BIT_CHANGE_KEYS.attendedMinutes).value,
     attendedChangeSeconds: readDefault(defaults, BIT_CHANGE_KEYS.attendedChangeSeconds).value,

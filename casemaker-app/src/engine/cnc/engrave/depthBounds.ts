@@ -45,6 +45,7 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The house's thresholds (#345), persisted with the rest of the app settings.
@@ -568,7 +569,7 @@ export function recommendMargins(
   const basis: string[] = [];
   // #451 — the wired probe's repeatability is the shop's `registration.wiredProbeZResidualMm`.
   // A worker realm has no live defaults, so it gets `probePlan`'s labelled fallback (0.001).
-  const probe = inputs.probeUncertainty ?? probeResiduals().wiredProbeZ;
+  const probe = inputs.probeUncertainty ?? probeResiduals(liveShopDefaults()).wiredProbeZ;
   let zTolerance = probe;
   basis.push(`the wired probe adds ${mm(probe)} mm`);
 
@@ -900,7 +901,7 @@ export interface LabelDepthRecommendation {
  * row's sentence and the recommendation cannot state three different limits.
  */
 export function blankDepthCeiling(job: EngraveJob): number {
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   if (map === null) return job.stock.thickness - job.minFloor;
   const wall = job.stock.wall;
   const reach = wall !== undefined && wall > 0 ? Math.min(map.radius, wall) : map.radius;

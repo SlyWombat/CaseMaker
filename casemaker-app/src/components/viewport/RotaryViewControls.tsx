@@ -20,6 +20,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { useRotaryViewStore } from '@/store/rotaryViewStore';
 import { rotaryReadout } from './rotaryMapView';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 const BOX: CSSProperties = {
   position: 'absolute',
@@ -65,7 +66,7 @@ export function RotaryViewControls(): JSX.Element | null {
   const job = useEngraveJobStore((s) => s.job);
   const design = useRotaryViewStore((s) => s.design);
   const setDesign = useRotaryViewStore((s) => s.setDesign);
-  const map = useMemo(() => rotaryMapOf(job), [job]);
+  const map = useMemo(() => rotaryMapOf(job, liveShopDefaults()), [job]);
   const readout = map === null ? '' : rotaryReadout(map);
   // The Depth panel exists only once a preview does; its arrival is when the chip can measure it.
   const previewReady = useEngravePreviewStore((s) => s.preview !== null);

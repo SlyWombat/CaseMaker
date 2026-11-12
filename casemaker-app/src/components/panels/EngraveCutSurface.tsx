@@ -960,14 +960,15 @@ export function EngraveCutSurface({
   const dryRunDeps = useMemo(() => {
     const mill = jobMachine(job, calibration);
     return {
-      setup: toSetup(job, mill),
+      // #1241 — the setup's rotary limits come from this panel's store map, stated here.
+      setup: toSetup(job, mill, undefined, undefined, undefined, defaults),
       machine: mill,
       tool: jobTool(job) ?? flatEndMill(1),
       // #1235 stage 2 — the lifted dry run has no cuts, but its verifier context still states the
       // job's footprint (the same one the real program's check is measured from).
       footprint: jobFootprint(job),
     };
-  }, [job, calibration]);
+  }, [job, calibration, defaults]);
   /** The program list the run controls play: the frozen texts, or their lifted dry-run variants. */
   const runSources: ReleaseSource[] = useMemo(() => {
     if (dryRunLevel === 'off') return sources;

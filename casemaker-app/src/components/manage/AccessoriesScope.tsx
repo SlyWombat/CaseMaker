@@ -25,7 +25,8 @@
 import { useState } from 'react';
 import type { FixtureRecord, MachineRecord } from '@/platform/locationClient';
 import { useLocationStore } from '@/store/locationStore';
-import { probeColletWords, shankIsPost } from '@/engine/cnc/probeFitWords';
+import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { colletMatchToleranceMm, probeColletWords, shankIsPost } from '@/engine/cnc/probeFitWords';
 import { accessoryNameFor, mountUnitReading, MOUNT_TAP_UNIT_KEY, MOUNT_TAP_WORD } from '@/engine/cnc/registration/mountContext';
 import { RotaryAxisTap } from './RotaryAxisTap';
 import { newId } from '@/utils/id';
@@ -584,7 +585,7 @@ interface ProbePost {
 }
 
 /** The posts recorded on the unit, or the two stock Makera posts when the record states none. */
-function postsFor(item: FixtureRecord): ProbePost[] {
+function postsFor(item: FixtureRecord, colletMatchMm: number): ProbePost[] {
   const raw = item.unit.posts;
   if (Array.isArray(raw)) {
     const posts: ProbePost[] = [];
@@ -601,19 +602,19 @@ function postsFor(item: FixtureRecord): ProbePost[] {
   const shank = typeof item.unit.shankMm === 'number' && Number.isFinite(item.unit.shankMm) ? item.unit.shankMm : null;
   // #1207 — the match tolerance is the shop's (`probe.colletMatchMm`), read by `shankIsPost`.
   return [
-    { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: shankIsPost(shank, 6.35) ? 'fitted' : 'spare' },
-    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: shankIsPost(shank, 6) ? 'fitted' : 'spare' },
+    { id: 'post-1-8', label: '1/8" post', diameterMm: 6.35, condition: shankIsPost(shank, 6.35, colletMatchMm) ? 'fitted' : 'spare' },
+    { id: 'post-6', label: '6 mm post', diameterMm: 6, condition: shankIsPost(shank, 6, colletMatchMm) ? 'fitted' : 'spare' },
   ];
 }
 
 /** The fitted shank in words, for the rail and the fit-probe prompts' source of truth. */
-function shankLine(item: FixtureRecord): string {
+function shankLine(item: FixtureRecord, colletMatchMm: number): string {
   const shank = typeof item.unit.shankMm === 'number' && Number.isFinite(item.unit.shankMm) ? item.unit.shankMm : null;
   if (shank === null) return 'no shank recorded — the fit-probe prompts will say to check the collet';
-  const post = postsFor(item).find((p) => p.condition === 'fitted');
+  const post = postsFor(item, colletMatchMm).find((p) => p.condition === 'fitted');
   return post === undefined
-    ? `fitted shank ${mm(shank)} mm — ${probeColletWords(shank)}`
-    : `${post.label} fitted — ${mm(shank)} mm shank, ${probeColletWords(shank)}`;
+    ? `fitted shank ${mm(shank)} mm — ${probeColletWords(shank, colletMatchMm)}`
+    : `${post.label} fitted — ${mm(shank)} mm shank, ${probeColletWords(shank, colletMatchMm)}`;
 }
 
 function AccessoryDetail({
@@ -629,6 +630,9 @@ function AccessoryDetail({
 }) {
   const saveAccessory = useLocationStore((s) => s.saveAccessory);
   const removeAccessory = useLocationStore((s) => s.removeAccessory);
+  // #1241 — the collet words' tolerance is the shop's (`probe.colletMatchMm`), read HERE by the
+  // explicit reader and passed down: the helpers below read no defaults source of their own.
+  const colletMatchMm = colletMatchToleranceMm(useShopDefaultsStore((s) => s.defaults));
   const [product, setProduct] = useState(item.product ?? '');
   const [variant, setVariant] = useState(item.variant ?? '');
   const [checkoutTo, setCheckoutTo] = useState(machines[0]?.id ?? '');
@@ -724,7 +728,7 @@ function AccessoryDetail({
       unit: {
         ...item.unit,
         shankMm: post.diameterMm,
-        posts: postsFor(item).map((p) => ({
+        posts: postsFor(item, colletMatchMm).map((p) => ({
           id: p.id,
           label: p.label,
           diameterMm: p.diameterMm,
@@ -857,11 +861,11 @@ function AccessoryDetail({
               and a swap is a history line that never touches the sensor's tip values. */}
           <div className="panel-subhead">Shank</div>
           <p className="hint" data-testid="manage-acc-shank-line">
-            {shankLine(item)}
+            {shankLine(item, colletMatchMm)}
           </p>
-          {postsFor(item).length > 0 && (
+          {postsFor(item, colletMatchMm).length > 0 && (
             <ul className="hint" data-testid="manage-acc-posts">
-              {postsFor(item).map((post) => (
+              {postsFor(item, colletMatchMm).map((post) => (
                 <li key={post.id} data-testid={`manage-acc-post-${post.id}`}>
                   {post.label} ({mm(post.diameterMm)} mm shank) — {post.condition}
                 </li>
@@ -874,12 +878,12 @@ function AccessoryDetail({
               data-testid="manage-acc-post-select"
               defaultValue=""
               onChange={(e) => {
-                const picked = postsFor(item).find((post) => post.id === e.target.value);
+                const picked = postsFor(item, colletMatchMm).find((post) => post.id === e.target.value);
                 if (picked !== undefined) void swapPost(picked);
               }}
             >
               <option value="">Fit a post…</option>
-              {postsFor(item)
+              {postsFor(item, colletMatchMm)
                 .filter((post) => post.condition !== 'fitted' && post.condition !== 'broken')
                 .map((post) => (
                   <option key={post.id} value={post.id}>

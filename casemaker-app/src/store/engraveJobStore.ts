@@ -117,6 +117,7 @@ import type {
   CutterChecklist,
   CutterChecklistEntry,
 } from '@/types/engraveJob';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 import { pruneRunLog } from '@/engine/cnc/engrave/package';
 import {
   holdBox,
@@ -653,7 +654,7 @@ function rodSizeOf(stock: EngraveJob['stock']): { diameter: number; length: numb
  * only its X centre is re-stated, on the span the findings pass judges (`rotaryFreeSpan`).
  */
 function centredOnRotaryFreeSpan(job: EngraveJob): EngraveJob {
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   if (map === null) return job;
   const xs = [...job.labels, ...job.shapes].map((item) => item.position.x);
   if (xs.length === 0) return job;
@@ -1835,7 +1836,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       // #752 R-UI-4 — a ROTARY job's blank is its MAP: along is the stick-out, around is the
       // circumference. Laying a line out on the rod's diameter box put it in a 20 mm band; the map
       // is what the operator places text against (`rotary-flow.md` §3.7), so the seed reads it.
-      const map = rotaryMapOf(job);
+      const map = rotaryMapOf(job, liveShopDefaults());
       // #724 B3 — A ROTARY LAYOUT LIVES ON THE FREE SPAN, the keep-out bands at either end of the
       // stick-out, not the stock's own middle: a line fitted to the whole stick-out always reaches
       // into the jaws' 3 mm or the tailstock's 10 mm, and the findings refuse it. The frame change

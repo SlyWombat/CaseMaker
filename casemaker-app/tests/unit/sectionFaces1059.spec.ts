@@ -95,7 +95,7 @@ function dispose(s: SweepResult): void {
 describe('#1059 the face CAM reads the block’s own section', () => {
   it('a flat at A 0 is the section’s own side, cut from the block’s surface — not the envelope’s chord in air', () => {
     const job = block([flat('f0', 0, 2)]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     expect(map.section).toEqual(SECTION);
     expect(map.radius).toBeCloseTo(ENVELOPE_R, 9);
     const plan = planFaceCuts(job, map, TOOL, PARAMS);
@@ -114,7 +114,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
 
   it('a face at A 45 is the SECTION’s corner chord: 2 mm one millimetre below the corner', () => {
     const job = block([flat('c45', 45, 1)]);
-    const plan = planFaceCuts(job, rotaryMapOf(job)!, TOOL, PARAMS);
+    const plan = planFaceCuts(job, rotaryMapOf(job, null)!, TOOL, PARAMS);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     const face = plan.plan.faces[0]!;
@@ -131,7 +131,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
     // already (depth 0); only the four corners cut, each 9.217 mm down to the same plane.
     const op: EngraveFaceOp = { id: 'oct', kind: 'faces-all-round', a: 0, count: 8, acrossFlats: SIDE };
     const job = block([op]);
-    const plan = planFaceCuts(job, rotaryMapOf(job)!, TOOL, PARAMS);
+    const plan = planFaceCuts(job, rotaryMapOf(job, null)!, TOOL, PARAMS);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     expect(plan.plan.faces.map((f) => f.a)).toEqual([45, 135, 225, 315]);
@@ -156,7 +156,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
       items: [{ id: 'pkt', kind: 'pocket', x: 20, y: 0, depth: 1, width: 4, height: 3 }],
     };
     const job = block([op]);
-    const plan = planFaceCuts(job, rotaryMapOf(job)!, TOOL, PARAMS);
+    const plan = planFaceCuts(job, rotaryMapOf(job, null)!, TOOL, PARAMS);
     expect(plan.ok).toBe(false);
     if (!plan.ok) {
       expect(plan.findings.map((f) => f.code)).toContain('face-item-no-face');
@@ -166,7 +166,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
 
   it('the posted program cuts at 22.25 − depth and sweeps the whole side', () => {
     const job = block([flat('f0', 0, 2)]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const params = PARAMS;
     const plan = planFaceCuts(job, map, TOOL, params);
     expect(plan.ok).toBe(true);
@@ -195,7 +195,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
 
   it('the oracle judges the face at the block’s surface, not at the envelope', () => {
     const job = block([flat('f0', 0, 2)]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const params = { ...PARAMS, stepDown: 2, stepOver: 5 };
     const plan = planFaceCuts(job, map, TOOL, params);
     expect(plan.ok).toBe(true);
@@ -220,7 +220,7 @@ describe('#1059 the face CAM reads the block’s own section', () => {
 describe('#1059 the cross-hole and the neck read the section too', () => {
   it('a cross-hole at A 0 is 2 × the section’s surface deep and plunges to the block’s far side', () => {
     const job = block([{ id: 'h', kind: 'cross-hole', a: 0, diameter: 3.175 }]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const plan = planFaceCuts(job, map, TOOL, PARAMS);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
@@ -241,7 +241,7 @@ describe('#1059 the cross-hole and the neck read the section too', () => {
     // The section is 60 wide × 30 high. At A 0 the hole enters the 30 mm face (15 above the
     // axis); at A 90 it turns to the 60 mm one (30). The depth follows the index, not the stock.
     const job = block([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }], { width: 60, thickness: 30 });
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     expect(map.section).toEqual({ kind: 'rect', width: 60, height: 30 });
     const plan = planFaceCuts(job, map, TOOL, PARAMS);
     expect(plan.ok).toBe(true);
@@ -263,7 +263,7 @@ describe('#1059 the cross-hole and the neck read the section too', () => {
     // 22.25 − 13 = 9.25 mm — through the neck — although it is nowhere near the 21.47 mm the
     // envelope-based check compared against. One millimetre shallower is clear.
     const eating = block([flat('deep', 0, 13)]);
-    const eatingMap = rotaryMapOf(eating)!;
+    const eatingMap = rotaryMapOf(eating, null)!;
     const neck: FaceNeckSpan = { fromMm: 3, toMm: 9, depthMm: eatingMap.radius - 10, diameterMm: 20 };
     const f = faceCutIntoNeck(eating, eatingMap, neck, 5);
     expect(f?.code).toBe('face-cuts-neck');
@@ -273,12 +273,12 @@ describe('#1059 the cross-hole and the neck read the section too', () => {
     expect(f?.message).toContain('shallower than 12.25 mm');
 
     const clear = block([flat('shallow', 0, 12)]);
-    expect(faceCutIntoNeck(clear, rotaryMapOf(clear)!, neck, 5)).toBeNull();
+    expect(faceCutIntoNeck(clear, rotaryMapOf(clear, null)!, neck, 5)).toBeNull();
   });
 
   it('a cross-hole in the neck’s span states the block’s through depth, not the envelope’s', () => {
     const job = block([{ id: 'x', kind: 'cross-hole', a: 0, diameter: 3.175, atX: 6 }]);
-    const map = rotaryMapOf(job)!;
+    const map = rotaryMapOf(job, null)!;
     const neck: FaceNeckSpan = { fromMm: 3, toMm: 9, depthMm: map.radius - 10, diameterMm: 20 };
     const f = faceCutIntoNeck(job, map, neck, 5);
     expect(f?.code).toBe('face-cuts-neck');

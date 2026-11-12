@@ -184,7 +184,7 @@ describe('#737 — the neck setting and its geometry', () => {
   });
 
   it('places the neck at the free span’s ends, and its saw line at the neck’s middle', () => {
-    const map = rotaryMapOf(dowel())!;
+    const map = rotaryMapOf(dowel(), null)!;
     expect(rotaryFreeSpan(map)).toEqual({ from: 3, to: 75, centre: 39 });
     const tail = rotaryNeckSpan(map, { end: 'tailstock', diameter: 4, length: 5 })!;
     expect(tail.fromMm).toBe(70);

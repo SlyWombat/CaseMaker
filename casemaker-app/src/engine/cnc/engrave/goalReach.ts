@@ -29,6 +29,7 @@ import type { JobFinding } from './jobSetup';
 import { jobTargetObjects } from './jobSetup';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The clearance a top-band cut keeps between the cutter's stated reach and the stock top, mm —
@@ -252,7 +253,7 @@ export function jobReachFindings(
   // relief's own checks (the axis crossing, the free span, the rod's radius and the sweep) judge
   // it. Without this, a 12 mm-flute cutter on an 18 mm-deep relief was refused before the rotary
   // path — the #723 R-4 e2e caught it.
-  if (rotaryMapOf(job) !== null) return [];
+  if (rotaryMapOf(job, liveShopDefaults()) !== null) return [];
   const out: JobFinding[] = [];
   for (const goal of jobTargetObjects(job)) out.push(...goalReachFindings(goal, chosen, owned, entries));
   return out;

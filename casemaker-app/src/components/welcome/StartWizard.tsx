@@ -550,7 +550,7 @@ export function StartWizard(): JSX.Element {
     // #1107 — a ROD answer pre-selects the chuck: the frame the question chose is the hold the
     // job needs, and the operator sees it already selected (the chuck must be the house's).
     const store = useEngraveJobStore.getState();
-    if (operationChoice !== null && 'frame' in operationChoice && operationChoice.frame === 'rotary' && rotaryMapOf(store.job) === null) {
+    if (operationChoice !== null && 'frame' in operationChoice && operationChoice.frame === 'rotary' && rotaryMapOf(store.job, liveShopDefaults()) === null) {
       const grip = readDefault(liveShopDefaults(), 'rotary.gripMm').value;
       store.setRotaryHolding(defaultRotaryChuck(store.job, grip), jobVise(store.job));
     }

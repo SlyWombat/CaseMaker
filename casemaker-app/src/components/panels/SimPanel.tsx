@@ -26,6 +26,7 @@ import {
   type DescribedCandidate,
 } from '@/components/panels/simMatchSentence';
 import { TIER_TAG, tierOf } from '@/engine/cnc/toolTiers';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The Simulate panel (#196): open a `.nc`, confirm the stock and the tool, run the sweep, and
@@ -297,7 +298,7 @@ export function SimPanel() {
   // chuck, not an envelope), so its workholding facts are the map's two keep-out bands and the
   // coverage sentence says so instead of naming a vise whose envelope is not on the machine. The
   // sacrificial board is dropped with it: the rotary setup carries none into the sweep.
-  const rotary = rotaryMapOf(job);
+  const rotary = rotaryMapOf(job, liveShopDefaults());
   const jobCoverage =
     run.simStatus === null
       ? []

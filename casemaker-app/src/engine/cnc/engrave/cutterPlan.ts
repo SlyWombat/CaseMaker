@@ -67,6 +67,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { CutterReach, Reachability } from './reachability';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /** What an item asks of its cutter. One class per shape of work, not one per document list. */
 export type WorkKind = 'flat' | 'cone' | 'thread' | 'ball';
@@ -232,7 +233,7 @@ export interface FaceWorkFacts {
 export function faceWorkOf(job: EngraveJob): FaceWorkFacts | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   if (map === null) return null;
   let chordMm = Number.POSITIVE_INFINITY;
   let deepestMm = 0;
@@ -407,7 +408,7 @@ export function kindedWork(job: EngraveJob, floors?: ReadonlyMap<string, number>
     // of a flip (`setupWorkJob`'s one-setup job) needs only that side's depth — its band, when the
     // goal is split over two mountings. A rotary relief's local Z is radial, so it keeps the
     // stock's number (the reach check skips it too).
-    const need = goal.format === 'png' || rotaryMapOf(job) !== null ? job.stock.thickness : goalSideNeedMm(goal);
+    const need = goal.format === 'png' || rotaryMapOf(job, liveShopDefaults()) !== null ? job.stock.thickness : goalSideNeedMm(goal);
     push(goal.id, goal.name, 'ball', need, 'a 3D goal is surfaced by a ball');
     return out;
   }
@@ -629,7 +630,7 @@ export function planCutters(
   // ball never cuts. PNG reliefs and rotary maps keep the reach rule (their engines have no
   // per-feature judge).
   const cutterLineGoal = pureGoalObject(job);
-  const meshGoal = cutterLineGoal !== null && cutterLineGoal.format !== 'png' && rotaryMapOf(job) === null;
+  const meshGoal = cutterLineGoal !== null && cutterLineGoal.format !== 'png' && rotaryMapOf(job, liveShopDefaults()) === null;
   const chosenCutterKey = job.toolKey === NO_TOOL_KEY ? null : job.toolKey;
   // The SHOP's records decide the fallback — the chosen tool is an exception that joins a shop's
   // own list, never a record that makes the registry fall back off (#1041's seam rule exactly).

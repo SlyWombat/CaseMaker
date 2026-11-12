@@ -16,6 +16,7 @@ import { dispatchViewportCamera } from './viewportCamera';
 // the drawn line can never drift apart (the toggles ARE the legend).
 import { FIXTURE_COLOR, PATH_COLOR, RAPID_COLOR, REMOVED_COLOR, SACRIFICIAL_COLOR, TOOL_COLOR } from './simGeometry';
 import { TOUCH_VERDICT_COLORS } from './touchPalette';
+import { liveShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * Issue #197 §8 — a CNC section is one whose id starts `cnc-` (`cnc-sim` today, the engrave
@@ -144,7 +145,7 @@ export function ViewportToolbar({ ref }: ViewportToolbarProps) {
   const job = useEngraveJobStore((s) => s.job);
   const rotaryDesign = useRotaryViewStore((s) => s.design);
   const mapLocked = useMemo(
-    () => engraveActive && rotaryDesign === 'map' && rotaryMapOf(job) !== null,
+    () => engraveActive && rotaryDesign === 'map' && rotaryMapOf(job, liveShopDefaults()) !== null,
     [engraveActive, rotaryDesign, job],
   );
 

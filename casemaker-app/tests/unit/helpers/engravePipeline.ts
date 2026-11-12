@@ -24,6 +24,7 @@ import {
 } from '@/workers/sim/engraveGenerate';
 import { engravabilityFindings, type LabelEngravability, type LabelRatioAt } from '@/workers/sim/engraveGeometry';
 import type { EngravePreview, EngravePreviewer } from '@/workers/sim/engravePreview';
+import { probeResiduals, type ProbeResiduals } from '@/engine/cnc/probePlan';
 
 /**
  * `engraveGenerate` for a job, with the cutter that job names.
@@ -70,6 +71,9 @@ export function preview(
   catalogue: readonly FeedCatalogueRow[] = [],
   margins: EngraveMargins = effectiveMargins(job, MARGIN_DEFAULTS),
   conditions: ReadonlyMap<string, ConditionSummary> = new Map(),
+  // #1241 — the residuals are REQUIRED at the boundary; this helper has no location, so it states
+  // the recommendations (`probeResiduals(null)`), never an ambient read.
+  residuals: ProbeResiduals = probeResiduals(null),
 ): EngravePreview | null {
-  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen, margins, conditions);
+  return previewer.engravePreview(job, TOOL_LIBRARY, catalogue, gen, margins, conditions, undefined, residuals);
 }

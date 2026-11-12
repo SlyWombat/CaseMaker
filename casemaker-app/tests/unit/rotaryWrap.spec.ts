@@ -71,7 +71,7 @@ function dowelJob(over: Partial<EngraveJob> = {}): EngraveJob {
 
 describe('the map a rotary job is authored on (R6)', () => {
   it('reads the stock, its circumference and its two bands off the job', () => {
-    const map = rotaryMapOf(dowelJob()) as RotaryMap;
+    const map = rotaryMapOf(dowelJob(), null) as RotaryMap;
     expect(map).not.toBeNull();
     expect(map.radius).toBe(10);
     expect(map.circumference).toBeCloseTo(2 * Math.PI * 10, 12); // 62.83185307179586
@@ -79,36 +79,36 @@ describe('the map a rotary job is authored on (R6)', () => {
     expect(map.grip).toBe(15); // 100 mm of rod, 85 mm out of the jaws
     expect(map.length).toBe(100);
     expect(map.tailstock).toBe(true);
-    expect(isRotaryJob(dowelJob())).toBe(true);
+    expect(isRotaryJob(dowelJob(), null)).toBe(true);
   });
 
   it('never says a stick-out past the stock leaves a negative grip', () => {
     const job = dowelJob();
     job.workholding = { kind: 'rotary-chuck', rotary: { ...CHUCK, stickout: 120 } };
-    expect(rotaryMapOf(job)?.grip).toBe(0);
+    expect(rotaryMapOf(job, null)?.grip).toBe(0);
   });
 
   it('is null for a flat job — a rod in the VISE is engraved flat — and a block in the chuck turns (#777)', () => {
     const flat = defaultEngraveJob();
-    expect(rotaryMapOf(flat)).toBeNull();
-    expect(isRotaryJob(flat)).toBe(false);
+    expect(rotaryMapOf(flat, null)).toBeNull();
+    expect(isRotaryJob(flat, null)).toBe(false);
 
     const rodInVise = dowelJob();
     rodInVise.workholding = flat.workholding;
-    expect(rotaryMapOf(rodInVise)).toBeNull();
+    expect(rotaryMapOf(rodInVise, null)).toBeNull();
 
     // A shape-less SQUARE box STANDING on its end (D × D × L) with no form is the legacy rod:
     // the chuck reads it round. An axis-frame box (L × D × D) with no shape is a block.
     const legacy = dowelJob();
     legacy.stock = { length: 10, width: 10, thickness: 30, material: 'softwood' };
-    expect(rotaryMapOf(legacy)!.section.kind).toBe('round');
+    expect(rotaryMapOf(legacy, null)!.section.kind).toBe('round');
 
     // A BLOCK in the chuck is a rotary job on its own section (the form says it is a block).
     const block = {
       ...legacy,
       stockEntry: { kind: 'made' as const, shelfId: null, file: null, form: 'block' as const, finish: 'unknown' as const, conductive: false },
     };
-    expect(rotaryMapOf(block)!.section).toEqual({ kind: 'rect', width: 10, height: 10 });
+    expect(rotaryMapOf(block, null)!.section).toEqual({ kind: 'rect', width: 10, height: 10 });
   });
 });
 

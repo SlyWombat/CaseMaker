@@ -23,7 +23,7 @@ import { SAFE_Z } from '@/engine/cnc/cam/ir';
 import { rotaryFreeSpan, rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { FACE_ANGLE_D_MM } from '@/engine/cnc/registration/faceAngle';
 import { useMountTap, useMountTapBusyFlag } from '@/hooks/useMountTap';
-import { readDefault } from '@/platform/defaultsClient';
+import { readDefault, liveShopDefaults } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { MachineRecord } from '@/platform/locationClient';
@@ -52,7 +52,7 @@ export function RotaryFaceAngleTap({ machine, job, testIdPrefix = 'rotary-face-a
   const settings = registrationSettings(defaults, probe).settings;
   const bedProfile = machine.bedProfiles?.find((p) => p.id === machine.activeBedProfileId) ?? null;
   const axisDatum = bedProfile?.datums.rotaryAxis ?? null;
-  const map = rotaryMapOf(job);
+  const map = rotaryMapOf(job, liveShopDefaults());
   const seekZ = clearanceZOf(profile);
 
   const api = useMountTap({

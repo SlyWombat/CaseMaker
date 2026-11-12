@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planProbing,
   profilePolygons,
+  probeResiduals,
   PROBE_RESIDUAL_MM,
   CHUCK_AXIS_RESIDUAL_MM,
   type ProbePart,
@@ -51,7 +52,7 @@ const BADGE: ProbePart = { outline: roundedRectPolygon(38.1, 25.4, 3.175) };
 const PLATE: ProbePart = { outline: rectProfile(60, 30) };
 
 function plan(part: ProbePart, hold: Workholding, toleranceMm: number): ProbeResult {
-  return planProbing(part, hold, { tipDiameter: 3, toleranceMm });
+  return planProbing(part, hold, { tipDiameter: 3, toleranceMm }, probeResiduals(null));
 }
 
 /** Every touch sits a ball radius in from the edge's ends — never on a corner. */
@@ -215,7 +216,7 @@ describe('profilePolygons (the kernel-free subset)', () => {
     // 3 mm ("a common ball for a probe of this class") and EVERY figure below derives from it, which
     // is why the pin is here rather than only in `registration.ts`'s comment.
     expect(PROBE_SPEC.tipDiameter).toBe(2);
-    const r = planProbing(PLATE, { kind: 'tape-down', contact: rectProfile(60, 30) }, PROBE_SPEC);
+    const r = planProbing(PLATE, { kind: 'tape-down', contact: rectProfile(60, 30) }, PROBE_SPEC, probeResiduals(null));
     if ('refuse' in r) throw new Error('refused');
     // No touch comes within a tip radius of an edge's ends — 1.0 mm now, where the 3 mm tip kept
     // them 1.5 mm back.
@@ -225,7 +226,7 @@ describe('profilePolygons (the kernel-free subset)', () => {
     // usable span and each stands 1.0 mm off a corner — 1.5 with the old tip, and the edge itself
     // was one the old tip refused outright.
     const square = (w: number): Workholding => ({ kind: 'tape-down', contact: rectProfile(w, w) });
-    const four = planProbing({ outline: rectProfile(4, 4) }, square(4), PROBE_SPEC);
+    const four = planProbing({ outline: rectProfile(4, 4) }, square(4), PROBE_SPEC, probeResiduals(null));
     if ('refuse' in four) throw new Error('a 4 mm square is exactly `minEdgeLength` and must plan');
     const pair = four.touches.filter((t) => t.fixes.includes('rotation'));
     expect(pair).toHaveLength(2);
@@ -238,7 +239,7 @@ describe('profilePolygons (the kernel-free subset)', () => {
       );
       expect(off, `touch ${t.at}`).toBeCloseTo(1.0, 9);
     }
-    expect('refuse' in planProbing({ outline: rectProfile(3.5, 3.5) }, square(3.5), PROBE_SPEC)).toBe(true);
+    expect('refuse' in planProbing({ outline: rectProfile(3.5, 3.5) }, square(3.5), PROBE_SPEC, probeResiduals(null))).toBe(true);
   });
 
   it('returns null for a rounded rect, so the badge outline comes from the worker', () => {
@@ -248,6 +249,7 @@ describe('profilePolygons (the kernel-free subset)', () => {
       { outline: roundedRect(38.1, 25.4, 3.175) },
       { kind: 'tape-down', contact: rectProfile(1, 1) },
       { tipDiameter: 3 },
+      probeResiduals(null),
     );
     expect('refuse' in r && r.code).toBe('no-outline');
   });

@@ -97,7 +97,7 @@ describe('#1085 faces and a goal is two programs', () => {
   }, 240_000);
 
   it('the relief is planned from the octagon the faces leave, and the sheet says so', async () => {
-    const map = rotaryMapOf(blockJob())!;
+    const map = rotaryMapOf(blockJob(), null)!;
     expect(map.section).toEqual({ kind: 'rect', width: 44.5, height: 44.5 });
     // Before the faces: the square's corner stands at half the diagonal.
     expect(sectionRadiusAt(map.section, Math.PI / 4)).toBeCloseTo(31.466, 2);

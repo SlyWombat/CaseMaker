@@ -71,7 +71,7 @@ export function goalCheckForProgram(
   /**
    * #1083 — the job's rotary map, from the CALLER: this module is a #964 gate root and must not
    * value-import `rotary/wrap` (its chain reaches `cam/ir`). A caller with the CAM
-   * (`engraveRunStore`, `planEvaluate`) passes `rotaryMapOf(job)`'s radius and section.
+   * (`engraveRunStore`, `planEvaluate`) passes `rotaryMapOf(job, liveShopDefaults())`'s radius and section.
    */
   rotary?: { radius: number; section: RotarySection | null } | null,
 ): SimGoalCheck | undefined {

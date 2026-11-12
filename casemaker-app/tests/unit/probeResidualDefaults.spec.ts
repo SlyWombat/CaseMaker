@@ -9,7 +9,8 @@
 // Three things are pinned here, because each is a copy that could drift:
 //   1. the registry's fallbacks equal `probePlan.ts`'s compiled constants;
 //   2. the location fixture carries every seed with its provenance in words;
-//   3. the use sites actually read the location — `planProbing`'s datums and residual, and
+//   3. the use sites actually read the location — `planProbing`'s datums and residual (now
+//      through the explicitly passed `probeResiduals(liveShopDefaults())`, #1241), and
 //      `recommendMargins`' probe term.
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -17,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { KNOWN_DEFAULTS, ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
+import { KNOWN_DEFAULTS, liveShopDefaults, ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import {
   ANCHOR_BRACKET_RESIDUAL_MM,
@@ -123,21 +124,21 @@ describe('the probe residuals as shop defaults (#451)', () => {
     // A cylinder's outline as the planner sees it: an XY section, with rotation immaterial. The job
     // tolerates 0.3 mm, and the chuck's datum holds both axes within the located 0.2 — so no touch
     // is planned and the datum's own residual is what is left.
-    const r = planProbing({ outline: rectProfile(30, 15), axisymmetric: true }, chuck, { tipDiameter: 3, toleranceMm: 0.3 });
+    const r = planProbing({ outline: rectProfile(30, 15), axisymmetric: true }, chuck, { tipDiameter: 3, toleranceMm: 0.3 }, probeResiduals(liveShopDefaults()));
     if ('refuse' in r) throw new Error('refused');
     expect(r.datums[0]!.uncertainty).toBe(0.2);
     expect(r.touches).toEqual([]);
     expect(r.residual).toBeCloseTo(0.2, 12);
 
     // A taped plate needs two touches, so what is left is the probe's own 0.07, not the seed.
-    const taped = planProbing(plate, { kind: 'tape-down', contact: rectProfile(60, 30) }, { tipDiameter: 3, toleranceMm: 0.05 });
+    const taped = planProbing(plate, { kind: 'tape-down', contact: rectProfile(60, 30) }, { tipDiameter: 3, toleranceMm: 0.05 }, probeResiduals(liveShopDefaults()));
     if ('refuse' in taped) throw new Error('refused');
     expect(taped.residual).toBeCloseTo(0.07, 12);
   });
 
   it('the anchor bracket’s datum reads bracket.repeatMm', () => {
     choose({ 'bracket.repeatMm': 0.12 });
-    const r = planProbing(plate, bracket, { tipDiameter: 3, toleranceMm: 0.5 });
+    const r = planProbing(plate, bracket, { tipDiameter: 3, toleranceMm: 0.5 }, probeResiduals(liveShopDefaults()));
     if ('refuse' in r) throw new Error('refused');
     expect(r.datums[0]!.uncertainty).toBe(0.12);
   });
