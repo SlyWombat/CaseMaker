@@ -99,6 +99,10 @@ function offenders(file: string): string[] {
  * should take a parameter. It is listed here by name — a single edge, never a subtree (#964's rule)
  * — and the moment it is converted or exempted by the ruling, this list changes and the gate must
  * be updated with it. Every other engine file must be empty of the ambient source.
+ *
+ * THE EXEMPTION ENDS IF simClient EVER MOVES TO A WORKER (the analyst's ruling, 2026-11-12): its
+ * ambient read would then sit in a realm where a missing install silently falls back — the very
+ * failure #1237 and #1241 found — so it must be converted before such a move.
  */
 const REPORTED_SURVIVOR = 'src/engine/jobs/simClient.ts';
 
