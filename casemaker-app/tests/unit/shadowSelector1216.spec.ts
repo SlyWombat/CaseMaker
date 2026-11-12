@@ -21,7 +21,13 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { setMemTraceSink } from '@/engine/cnc/memTrace';
 import { Z1 } from '@/engine/cnc/machine';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { traceShadowSelection, type ShadowInput } from '@/engine/cnc/cam/fields/shadowSelector';
+import {
+  SHORTLIST_SIZES,
+  shortlistReport,
+  traceShadowSelection,
+  type ShadowInput,
+  type ShortlistRow,
+} from '@/engine/cnc/cam/fields/shadowSelector';
 import type { TraceRow } from '../../tools/plan-counts/summarize';
 import { tl } from './helpers/manifoldExec';
 
@@ -95,6 +101,11 @@ describe('#1216 traceShadowSelection', () => {
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed.length).toBeGreaterThanOrEqual(1);
     }
+    // #1231 — one shadow:shortlist row per size, in SHORTLIST_SIZES order, after the choice row.
+    const choiceIndex = rows.findIndex((r) => r.stage === 'shadow:choice');
+    const shortlistRows = rows.slice(choiceIndex + 1).filter((r) => r.stage === 'shadow:shortlist');
+    expect(shortlistRows.map((r) => r.k)).toEqual([...SHORTLIST_SIZES]);
+    expect(rows.filter((r) => r.stage === 'shadow:shortlist')).toHaveLength(SHORTLIST_SIZES.length);
   });
 
   it('with no trace sink it writes nothing and does not throw', () => {
@@ -204,5 +215,37 @@ describe('#1216 the planner runs the shadow only with a trace on', () => {
     expect((entries[0] as unknown[]).length).toBe(3);
     const without = planFace();
     expect(JSON.stringify(without)).toBe(JSON.stringify(withTrace));
+  });
+});
+
+describe('shortlistReport (#1231)', () => {
+  const rows: ShortlistRow[] = [
+    { signature: 'A', estLeftoverMm2: 10, estSeconds: 100, realRank: 3, realSeconds: 130 },
+    { signature: 'B', estLeftoverMm2: 10, estSeconds: 90, realRank: 2, realSeconds: 120 },
+    { signature: 'C', estLeftoverMm2: 10.004, estSeconds: 50, realRank: 4, realSeconds: 80 },
+    { signature: 'D', estLeftoverMm2: 20, estSeconds: 10, realRank: 1, realSeconds: 60 },
+    { signature: 'E', estLeftoverMm2: 5, estSeconds: 500, realRank: -1, realSeconds: -1 },
+  ];
+
+  it('orders by leftover, then time', () => {
+    expect(shortlistReport(rows, [1, 2, 3, 5, 8])).toEqual([
+      { k: 1, holdsRealPick: 0, bestRealRank: -1, bestRealSeconds: -1 },
+      { k: 2, holdsRealPick: 0, bestRealRank: 4, bestRealSeconds: 80 },
+      { k: 3, holdsRealPick: 0, bestRealRank: 2, bestRealSeconds: 120 },
+      { k: 5, holdsRealPick: 1, bestRealRank: 1, bestRealSeconds: 60 },
+      { k: 8, holdsRealPick: 1, bestRealRank: 1, bestRealSeconds: 60 },
+    ]);
+  });
+
+  it('no rows', () => {
+    expect(shortlistReport([], [1, 3])).toEqual([
+      { k: 1, holdsRealPick: 0, bestRealRank: -1, bestRealSeconds: -1 },
+      { k: 3, holdsRealPick: 0, bestRealRank: -1, bestRealSeconds: -1 },
+    ]);
+  });
+
+  it('the input is not reordered', () => {
+    shortlistReport(rows, [1, 2, 3, 5, 8]);
+    expect(rows.map((r) => r.signature)).toEqual(['A', 'B', 'C', 'D', 'E']);
   });
 });

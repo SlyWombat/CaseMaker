@@ -37,6 +37,60 @@ export interface ShadowInput {
 /** Every number a trace row carries is rounded to three decimals (milliseconds stay integers). */
 const round3 = (value: number): number => Math.round(value * 1000) / 1000;
 
+/** The shortlist sizes the measurement reports. A measurement's own list, not a setting: C3 registers the one it uses. */
+export const SHORTLIST_SIZES: readonly number[] = [1, 3, 5, 8, 12];
+
+export interface ShortlistRow {
+  signature: string;
+  estLeftoverMm2: number;
+  estSeconds: number;
+  /** The real planner's rank for this chain, 1 = its choice; -1 when the real planner did not rank it. */
+  realRank: number;
+  realSeconds: number;
+}
+
+export interface ShortlistResult {
+  k: number;
+  /** 1 when the real planner's choice (rank 1) is among the first k by the estimate. */
+  holdsRealPick: 0 | 1;
+  /** The best real rank among the first k; -1 when none of them was ranked. */
+  bestRealRank: number;
+  /** That chain's real seconds; -1 when none. */
+  bestRealSeconds: number;
+}
+
+/** #1231 — WOULD THE K BEST-ESTIMATED CHAINS HAVE HELD THE REAL PICK? The same order the shadow's
+ * own choice uses (leftover to a hundredth, then seconds, then the signature), then per size the
+ * best real rank among the first k. Pure: the input is never reordered. */
+export function shortlistReport(rows: readonly ShortlistRow[], sizes: readonly number[]): ShortlistResult[] {
+  const ordered = [...rows].sort((a, b) => {
+    const leftoverA = Math.round(a.estLeftoverMm2 * 100);
+    const leftoverB = Math.round(b.estLeftoverMm2 * 100);
+    if (leftoverA !== leftoverB) return leftoverA - leftoverB;
+    if (a.estSeconds !== b.estSeconds) return a.estSeconds - b.estSeconds;
+    return a.signature < b.signature ? -1 : a.signature > b.signature ? 1 : 0;
+  });
+  const out: ShortlistResult[] = [];
+  for (const k of sizes) {
+    const top = ordered.slice(0, k).filter((r) => r.realRank >= 1);
+    if (top.length === 0) {
+      out.push({ k, holdsRealPick: 0, bestRealRank: -1, bestRealSeconds: -1 });
+      continue;
+    }
+    let best = top[0]!;
+    for (const r of top) {
+      if (r.realRank < best.realRank) best = r;
+    }
+    out.push({
+      k,
+      holdsRealPick: best.realRank === 1 ? 1 : 0,
+      bestRealRank: best.realRank,
+      bestRealSeconds: best.realSeconds,
+    });
+  }
+  return out;
+}
+
 /** Writes 'shadow:candidate' rows and one 'shadow:choice' row to the trace. Returns nothing. */
 export function traceShadowSelection(input: ShadowInput): void {
   const t0 = performance.now();
@@ -90,6 +144,7 @@ export function traceShadowSelection(input: ShadowInput): void {
   };
 
   const estimates: { signature: string; est: ChainEstimate }[] = [];
+  const shortlistRows: ShortlistRow[] = [];
   for (const candidate of candidates) {
     const signature = candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     const steps: EstimateStep[] = candidate.steps.map((s) => ({
@@ -120,6 +175,13 @@ export function traceShadowSelection(input: ShadowInput): void {
       estEntries: JSON.stringify(est.perCutter.map((e) => [e.cutterKey, Math.round(e.cutSeconds * 1000) / 1000])),
     });
     estimates.push({ signature, est });
+    shortlistRows.push({
+      signature,
+      estLeftoverMm2: est.leftoverMm2,
+      estSeconds: est.totalSeconds,
+      realRank: real?.rank ?? -1,
+      realSeconds: real?.cost ?? -1,
+    });
   }
 
   // The shadow's own choice: leftover to a hundredth of a mm², then seconds, then the signature.
@@ -141,4 +203,15 @@ export function traceShadowSelection(input: ShadowInput): void {
     fieldMs: Math.round(fieldMs),
     estimateMs: Math.round(performance.now() - t0 - fieldMs),
   });
+
+  // #1231 — what a shortlist of each measured size would have held, beside the candidates' count.
+  for (const r of shortlistReport(shortlistRows, SHORTLIST_SIZES)) {
+    memTrace('shadow:shortlist', {
+      k: r.k,
+      holdsRealPick: r.holdsRealPick,
+      bestRealRank: r.bestRealRank,
+      bestRealSeconds: round3(r.bestRealSeconds),
+      candidates: candidates.length,
+    });
+  }
 }
