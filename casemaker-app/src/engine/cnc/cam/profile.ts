@@ -130,6 +130,10 @@ export interface TightTab {
   stretchMm: number;
   /** The centre's distance to the nearer end of its edge, mm — inside the usual corner margin. */
   cornerMm: number;
+  /** How many joins of the outline the tab's span crosses (the sheet states the count). */
+  joins: number;
+  /** How many of those joins turn sharper than the placement's smooth-arc limit. */
+  sharpJoins: number;
 }
 
 /** #1206 — how the default placement is shaped; the release pass (#1073) states its own targets. */
@@ -872,10 +876,30 @@ function placeMidSide(
       const endArc = startArc + spanLength;
       if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) break;
       spans.push({ startArc, endArc });
+      // The joins the tab's span crosses, and how many of them turn sharper than the placement's
+      // own smooth-arc limit (TAB_CORNER_RAD — a corner, not an arc joint).
+      const spanStart = centre - spanLength / 2;
+      let joins = 0;
+      let sharpJoins = 0;
+      for (let k = 0; k < segments.length; k++) {
+        let d = (segments[k]!.start - spanStart) % perimeter;
+        if (d < 0) d += perimeter;
+        if (d <= 1e-9 || d >= spanLength - 1e-9) continue;
+        joins += 1;
+        const u = segments[(k - 1 + segments.length) % segments.length]!;
+        const v = segments[k]!;
+        const ud = unitDirection(u.a, u.b);
+        const vd = unitDirection(v.a, v.b);
+        if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > TAB_CORNER_RAD) {
+          sharpJoins += 1;
+        }
+      }
       tight.push({
         at: pointAt(segments, perimeter, centre),
         stretchMm: worst,
         cornerMm: Math.min(centre - pick.start, pick.end - centre),
+        joins,
+        sharpJoins,
       });
     }
   }

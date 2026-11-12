@@ -313,13 +313,6 @@ export interface ModelPlanInput {
    */
   freeingTabs?: { count: number; widthMm: number; heightMm: number };
   /**
-   * #1206 — THE SHOP'S `tabs.maxSpanMm`, mm: no stretch of the freeing contour is left longer
-   * than this without a tab. Applied to whichever tab spec the plan uses (the job's stated
-   * `freeingTabs`, or {@link DEFAULT_RELEASE_TABS} when it states none). Absent: no span rule,
-   * exactly the pre-#1206 placement.
-   */
-  tabMaxSpanMm?: number;
-  /**
    * #943 (10) — THE JOB'S OWN SETUP COUNT, when this input is one setup of a larger job re-planned
    * ALONE (the #1017 twin): the single-setup-only rules — the "outline is the stock, no freeing
    * contour" rule — must read the JOB, not the input that a twin or a caller narrowed. The plan
@@ -2077,15 +2070,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #1206 — the shop's span limit rides whichever spec the plan uses; a job that states its
     // own tabs is not exempt from "no unsupported stretch longer than the limit", and a job that
     // states none still gets the DEFAULT release tabs' span checked (condition 3 is on the tabs
-    // as placed, not on the plan before the contour's own fallback).
+    // as placed, not on the plan before the contour's own fallback). #1237 — the value comes from
+    // the INPUT's defaults map, like the planner's other seven settings, never ambient state.
+    const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
     const tabSpec =
       tabs === undefined
-        ? input.tabMaxSpanMm === undefined
-          ? undefined
-          : { ...DEFAULT_RELEASE_TABS, maxSpanMm: input.tabMaxSpanMm }
-        : input.tabMaxSpanMm === undefined
-          ? tabs
-          : { ...tabs, maxSpanMm: input.tabMaxSpanMm };
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole

@@ -419,7 +419,13 @@ export interface RunSheetThroughFacts {
     /** #1206 — tabs the span limit added beyond the requested count (absent on a pre-#1206 run). */
     added?: number;
     /** #1206 step 2 — tight tabs placed inside the corner margin, named with their distances. */
-    tight?: readonly { at: { x: number; y: number }; stretchMm: number; cornerMm: number }[];
+    tight?: readonly {
+      at: { x: number; y: number };
+      stretchMm: number;
+      cornerMm: number;
+      joins?: number;
+      sharpJoins?: number;
+    }[];
   }[];
 }
 
@@ -3864,12 +3870,17 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
         // #1206 (step 2) — a tab placed INSIDE the corner margin to close a long stretch is named
         // with its distances: the operator must know why it is where it is.
         const tightWords = (c.tight ?? [])
-          .map(
-            (tab) =>
+          .map((tab) => {
+            const joins = tab.joins ?? 0;
+            const sharp = tab.sharpJoins ?? 0;
+            return (
               `a tight tab at X ${fmtNum(tab.at.x)} Y ${fmtNum(tab.at.y)} closes a ` +
               `${fmtNum(tab.stretchMm)} mm stretch, ${fmtNum(tab.cornerMm)} mm from the nearest corner ` +
-              '(inside the usual corner margin — holding the part comes first)',
-          )
+              '(inside the usual corner margin — holding the part comes first)' +
+              (joins > 0 ? `; it spans ${joins} join${joins === 1 ? '' : 's'} of the outline` : '') +
+              (sharp > 0 ? `, ${sharp} of them sharper than the smooth-arc limit` : '')
+            );
+          })
           .join('; ');
         return tightWords === '' ? askedWords : `${askedWords}; ${tightWords}`;
       })

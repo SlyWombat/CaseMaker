@@ -213,6 +213,7 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
     expect(notes).toMatch(/tight tab/i);
     expect(notes).toMatch(/stretch/i);
     expect(notes).toMatch(/mm from the nearest corner/i);
+    expect(notes).toMatch(/joins? of the outline/i);
   });
 
   it('refuses only when no edge can take a tight tab either', () => {

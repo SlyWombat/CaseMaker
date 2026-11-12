@@ -409,6 +409,10 @@ describe('placeTabs mid-side (#1206)', () => {
       expect(tight.stretchMm).toBeGreaterThan(80);
       // The tab sits inside the usual 2 x width corner margin — that is what makes it "tight".
       expect(tight.cornerMm).toBeLessThan(12);
+      // On this outline the span crosses the teeth's joins; the sheet states the count.
+      expect(tight.joins).toBeGreaterThanOrEqual(1);
+      expect(tight.sharpJoins).toBeGreaterThanOrEqual(0);
+      expect(tight.sharpJoins).toBeLessThanOrEqual(tight.joins);
     }
     expect(placement.added).toBe(placement.spans.length - 4);
   });

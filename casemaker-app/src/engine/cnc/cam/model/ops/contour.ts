@@ -204,7 +204,11 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     const mm = (v: number): string => String(Number(v.toFixed(1)));
     tabNotes.push(
       `a tight tab at X ${mm(tab.at[0])} Y ${mm(tab.at[1])} closes a ${mm(tab.stretchMm)} mm stretch, ` +
-        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)`,
+        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)` +
+        `; it spans ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline` +
+        (tab.sharpJoins > 0
+          ? `, ${tab.sharpJoins} of them sharper than the smooth-arc limit`
+          : ''),
     );
   }
 

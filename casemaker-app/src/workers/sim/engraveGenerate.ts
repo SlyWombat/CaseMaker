@@ -687,7 +687,14 @@ export interface ThroughCutFacts {
     /** #1206 — tabs the span limit added beyond the request. */
     added: number;
     /** #1206 step 2 — tight tabs placed inside the corner margin, named on the sheet. */
-    tight?: { at: { x: number; y: number }; stretchMm: number; cornerMm: number }[];
+    tight?: {
+      at: { x: number; y: number };
+      stretchMm: number;
+      cornerMm: number;
+      /** Joins of the outline the tab's span crosses, and how many are sharper than the arc limit. */
+      joins?: number;
+      sharpJoins?: number;
+    }[];
   }[];
 }
 
@@ -5577,9 +5584,6 @@ export async function buildModelPlanInputForGoal(
               ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
               : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
         }),
-    // #1206 — the shop's span limit for the freeing contour's tabs: no stretch of the outline is
-    // left longer than this without a tab. The job's own tab spec does not override it.
-    tabMaxSpanMm: readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
     fixture: { mount, envelope },
     // #1234 — the fixture answer the finishing edge overrun reads (see `stockEdgeOpenAt`): the plan
@@ -8725,6 +8729,8 @@ async function generateOneProgram(
                       at: { x: tab.at[0], y: tab.at[1] },
                       stretchMm: tab.stretchMm,
                       cornerMm: tab.cornerMm,
+                      joins: tab.joins,
+                      sharpJoins: tab.sharpJoins,
                     })),
                   }),
             };

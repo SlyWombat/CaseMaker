@@ -1829,7 +1829,7 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
           spans: 3,
           unplaceable: 0,
           added: 1,
-          tight: [{ at: { x: 10.5, y: 4.25 }, stretchMm: 124, cornerMm: 6.1 }],
+          tight: [{ at: { x: 10.5, y: 4.25 }, stretchMm: 124, cornerMm: 6.1, joins: 3, sharpJoins: 1 }],
         },
       ],
     };
@@ -1840,6 +1840,8 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
     expect(cut).toContain('Y 4.25');
     expect(cut).toContain('124 mm stretch');
     expect(cut).toContain('6.1 mm from the nearest corner');
+    expect(cut).toContain('spans 3 joins of the outline');
+    expect(cut).toContain('1 of them sharper than the smooth-arc limit');
   });
 
   it('omits the tab step when no cut-out has tabs, and says nothing without through facts', () => {
