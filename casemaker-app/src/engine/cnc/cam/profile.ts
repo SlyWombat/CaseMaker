@@ -831,14 +831,12 @@ function placeMidSide(
         const span = spans[i]!;
         const next = spans[(i + 1) % spans.length]!;
         let gap: number;
-        let to: number;
         if (spans.length === 1) {
           gap = perimeter - spanLength;
-          to = span.startArc + perimeter;
         } else {
-          to = next.startArc;
-          if (next.startArc < span.endArc) to += perimeter;
-          gap = to - span.endArc;
+          let gapEnd = next.startArc;
+          if (next.startArc < span.endArc) gapEnd += perimeter;
+          gap = gapEnd - span.endArc;
         }
         if (gap > worst) {
           worst = gap;
@@ -851,16 +849,18 @@ function placeMidSide(
       const from = span.endArc;
       let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
       if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
-      // The longest edge that lies inside this stretch, can hold the tab's width centred, and is
-      // not already carrying a tab.
+      // The longest edge that lies inside this stretch; the TAB'S WIDTH must fit centred within
+      // the STRETCH (the material may cross the short edges' corners — that is the price of
+      // holding), and the tab must not overlap one already placed.
       let pick: { start: number; end: number } | null = null;
       for (const edge of edges) {
         const length = edge.end - edge.start;
-        if (length < widthMm - 1e-9) continue;
+        if (!(length > 0)) continue;
         const candStart = edge.start + Math.round((from - edge.start) / perimeter) * perimeter;
         const candEnd = candStart + length;
         if (candStart < from - 1e-9 || candEnd > to + 1e-9) continue;
         const centre = candStart + length / 2;
+        if (centre - widthMm / 2 < from - 1e-9 || centre + widthMm / 2 > to + 1e-9) continue;
         const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
         const endArc = startArc + spanLength;
         if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;

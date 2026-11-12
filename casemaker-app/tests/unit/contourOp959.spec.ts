@@ -162,24 +162,6 @@ describe('#1160 the release tab cannot rise above the stock top', () => {
 describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
   /** The path is the outline itself: these cases need shapes a bbox rectangle cannot express. */
   const identityOffset: OffsetFn = (region) => region.map((c) => [...c]);
-  /**
-   * A key-like outline with two placeable edges — 27 and 15 mm — and a wall of ~5 mm sawteeth
-   * (perimeter ~156 mm) that hold no tab. With a 6 mm tab and the ⌀6 cutter's 12 mm span, only
-   * one tab fits each long edge: two placed, two asked for and dropped, and a ~132 mm stretch
-   * left without one.
-   */
-  function toothedOutline(): [number, number][] {
-    const points: [number, number][] = [
-      [0, 0],
-      [27, 0],
-      [27, 15],
-    ];
-    // The top sawtooth, right to left: alternating 5 mm teeth, every piece ~5.2 mm.
-    for (let k = 1; k <= 18; k++) points.push([27 - 1.5 * k, k % 2 === 1 ? 20 : 15]);
-    // Down the left side in the same teeth, then a 3 mm closing edge.
-    points.push([-3, 12], [0, 9], [-3, 6], [0, 3], [0, 0]);
-    return points;
-  }
 
   it('says how many tabs were asked for and placed when some do not fit', () => {
     // A 27 x 10 rectangle with 6 mm tabs and the ⌀6 cutter: the 10 mm sides are shorter than the
@@ -233,20 +215,29 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
     expect(notes).toMatch(/mm from the nearest corner/i);
   });
 
-  it('refuses when the tabs as placed leave a stretch past the span limit', () => {
-    const outline = toothedOutline();
-    const area = outline.reduce((sum, p, i) => {
-      const q = outline[(i + 1) % outline.length]!;
-      return sum + p[0] * q[1] - q[0] * p[1];
-    }, 0) / 2;
-    const c = contourOf({ outline: [outline], area, zTo: -6, frees: true, shoulders: [] });
+  it('refuses only when no edge can take a tight tab either', () => {
+    // A 64-gon circle is ONE smooth edge (a round outline keeps equal spacing); one tab leaves a
+    // ~66 mm stretch, and step 2 has no edge inside it to centre another tab on — so a 40 mm
+    // limit is the last-resort refusal.
+    const ROUND = 12;
+    const outline: [number, number][] = Array.from({ length: 64 }, (_, i) => [
+      ROUND * Math.cos((2 * Math.PI * i) / 64),
+      ROUND * Math.sin((2 * Math.PI * i) / 64),
+    ]);
+    const c = contourOf({
+      outline: [outline],
+      area: Math.PI * ROUND * ROUND,
+      zTo: -6,
+      frees: true,
+      shoulders: [],
+    });
     expect(() =>
       contour({
         cutter: flat6,
         contour: c,
         region: region(),
         depthMm: 6,
-        tabs: { count: 4, width: 6, height: 1, maxSpanMm: 80 },
+        tabs: { count: 1, width: 6, height: 1, maxSpanMm: 40 },
         offset: identityOffset,
         params,
         rapid,
