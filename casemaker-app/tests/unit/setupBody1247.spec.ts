@@ -16,10 +16,13 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { jobForSetup, setupPrograms } from '@/engine/cnc/engrave/programs';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
+import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
+import { buildTimeline, parseGcode } from '@/engine/cnc';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
-import { Z1 } from '@/engine/cnc/machine';
+import { Z1, MILL_MODELS, type Mill } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
-import { verifyProgram } from '@/engine/cnc/verify';
+import { verifyProgram, type VerifyReport } from '@/engine/cnc/verify';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, JobSetup } from '@/types/engraveJob';
 
 const TOOL_KEY = 'flat-3';
@@ -65,6 +68,93 @@ function codesFor(job: EngraveJob): string[] {
     minRapidZ: 1,
   }).findings.map((f) => f.code);
 }
+
+const SHAPEOKO = MILL_MODELS['grbl:shapeoko-4']!;
+/** The runner's own diagnostic rides the verifier as `runner-error`, wording intact. */
+const envelopeMove = (findings: readonly { code: string; message: string }[]): boolean =>
+  findings.some((f) => f.code === 'runner-error' && f.message.includes('outside-envelope'));
+/** A stored program for SETUP 2 that reaches work Z −26 (or Z 75) in one move. */
+const storedProgram = (move: string, setupIndex = 2): EngraveProgram =>
+  ({
+    setupIndex,
+    setupId: 'setup-flip',
+    toolKey: 'flat-1.0',
+    nc: ['G90 G21', 'G0 Z0', move, 'G0 Z10', 'M5', 'M02'].join('\n'),
+    verify: null as unknown as VerifyReport,
+    frameNc: null,
+    frameVerify: null,
+    programHash: 'h-1247',
+    cam: null,
+  }) as unknown as EngraveProgram;
+
+function generatedWith(program: EngraveProgram): EngraveGenerated {
+  return {
+    ok: true,
+    stage: 'done',
+    findings: [],
+    feeds: null,
+    threads: null,
+    threadMachining: null,
+    cam: null,
+    nc: program.nc,
+    verify: null,
+    frameNc: null,
+    frameVerify: null,
+    facingNc: null,
+    facingVerify: null,
+    facingToolKey: null,
+    facingError: null,
+    facingCam: null,
+    predicted: [],
+    programs: [program],
+    errors: [],
+  } as unknown as EngraveGenerated;
+}
+
+/** The verifier's findings for a stored setup-2 program, through the RUN-STORE path (#1191). */
+function recheckFindings(job: EngraveJob, machine: Mill, move: string): readonly { code: string; message: string }[] {
+  const out = recheckStoredPrograms({
+    job,
+    generated: generatedWith(storedProgram(move)),
+    machine,
+    mount: null,
+    setup: toSetup(job, machine, undefined, null),
+  });
+  return out.generated.programs[0]!.verify!.findings;
+}
+
+describe('#1247 (body) — the verifier’s Setup is the setup’s own stock', () => {
+  it('Z1 (READ): nothing moves — the WCS origin and every verdict are identical', () => {
+    const job = flipJob();
+    job.toolKey = 'flat-1.0';
+    const own = stockForSetup(job, 1)!;
+    const today = toSetup(job, Z1);
+    const fixed = toSetup(job, Z1, undefined, null, own);
+    // The placement follows the part; the field the timeline reads does not.
+    expect(fixed.placement.origin[2] - today.placement.origin[2]).toBeCloseTo(3, 9);
+    // The Z is the field the envelope check reads and it does not move; the X/Y placement follows
+    // the smaller part (a correct consequence of the setup's own box), so only Z is compared.
+    expect(fixed.wcs.origin[2]).toBe(today.wcs.origin[2]);
+    const nc = storedProgram('G1 Z-26 F100').nc;
+    const diag = (setup: typeof today): string[] =>
+      buildTimeline(parseGcode(nc), setup, Z1).diagnostics.map((d) => d.code);
+    expect(diag(fixed)).toEqual(diag(today));
+    expect(envelopeMove(recheckFindings(job, Z1, 'G1 Z-26 F100'))).toBe(false);
+  });
+
+  it('Shapeoko 4 (STATED): both directions — −26 is refused, 75 passes', () => {
+    const job = flipJob();
+    job.toolKey = 'flat-1.0';
+    const own = stockForSetup(job, 1)!;
+    const today = toSetup(job, SHAPEOKO);
+    const fixed = toSetup(job, SHAPEOKO, undefined, null, own);
+    expect(fixed.wcs.origin[2] - today.wcs.origin[2]).toBeCloseTo(-3, 9);
+    // The unsafe direction: 1 mm below the machine floor under the real stock.
+    expect(envelopeMove(recheckFindings(job, SHAPEOKO, 'G1 Z-26 F100'))).toBe(true);
+    // The mirror: a move the real stock allows and the job-blank body refuses.
+    expect(envelopeMove(recheckFindings(job, SHAPEOKO, 'G0 Z75'))).toBe(false);
+  });
+});
 
 describe('#1247 (b) — the item sub-job cuts its own setup’s stock', () => {
   it('setup 2’s sub-job states the 25 mm stock, and a cut to Z −27 is refused', () => {

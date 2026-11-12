@@ -30,6 +30,7 @@ import { flatEndMill, type Tool } from '../tool';
 import { verifyProgram, type VerifyReport } from '../verify';
 import { jobFootprint } from '../footprint';
 import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '../setups/setupRecord';
+import { stockForSetup } from '../setups/perSetupStock';
 import { cleanWalkFile, type CleanWalkMode, type CleanWalkSettings, type CleanWalkStep } from './cleanWalk';
 import { jobMountObstacles, jobTool, toSetup } from './jobSetup';
 import { releaseStem } from './runSheet';
@@ -142,7 +143,7 @@ export function planCleanWalks(args: CleanWalkPlanArgs): CleanWalksPlan {
     // #1246 slice 1 — the walk's verifier context from the setup record. The defaults group 11
     // threaded through (#1244) stay on the setup call.
     const facts: SetupRecordDeps & VerifyPerProgram = {
-      setup: toSetup(job, machine, undefined, undefined, undefined, args.defaults),
+      setup: toSetup(job, machine, undefined, undefined, stockForSetup(job, 0), args.defaults),
       machine,
       tool,
       // The pass never cuts: no depth to judge, and every XY rapid runs at or above the sweep Z the

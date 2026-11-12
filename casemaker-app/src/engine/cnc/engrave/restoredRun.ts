@@ -27,7 +27,8 @@ import type { Setup } from '@/engine/cnc/setup';
 import type { Mill } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
-import { jobTool } from '@/engine/cnc/engrave/jobSetup';
+import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { EngraveJob } from '@/types/engraveJob';
 import { benchCutterFor } from '@/engine/cnc/toolRegistry';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
@@ -63,6 +64,11 @@ function planIrs(generated: EngraveGenerated): readonly ToolpathIR[] {
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
   const { job, generated, machine, mount, setup } = input;
   const irs = planIrs(generated);
+  // #1247 — THE VERIFIER'S BODY IS THE SETUP'S OWN (#1082). A job that states per-setup stocks
+  // gets a body per setup; a job with none keeps the caller's job-wide setup exactly. The bed is
+  // not re-read here: the verifier reads the body's part and work origin, not its sacrificial.
+  const setupFor = (setupIndex: number): Setup =>
+    job.setups === undefined ? setup : toSetup(job, machine, mount?.fixture ?? undefined, null, stockForSetup(job, setupIndex));
 
   const errors: StoredProgramRecheck['errors'] = [];
   const unresolved: StoredProgramRecheck['unresolved'] = [];
@@ -79,12 +85,13 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     // own (#1082/#943); a stored run with NO plan has no setup to state, so it keeps the plain
     // job limit the inline builder's fallback used.
     const setupIndex = program.setupIndex - 1;
+    const body = setupFor(setupIndex);
     const planSet = generated.plan?.perSetup[setupIndex];
     const throughKerf = planSet?.ops.flatMap((op) =>
       op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : [],
     );
     const facts: SetupRecordDeps & VerifyPerProgram = {
-      setup,
+      setup: body,
       machine,
       dialect: postKey(machine),
       tool,
