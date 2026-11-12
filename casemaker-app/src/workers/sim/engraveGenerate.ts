@@ -141,6 +141,7 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
 import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
@@ -267,7 +268,6 @@ import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement }
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
 import { buildSetupSpecs, frameForFace } from '@/engine/cnc/cam/model/setups';
 import type { Mount, MountSpec } from '@/engine/cnc/setups/types';
-import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
 import { placeTarget } from '@/engine/cnc/engrave/targetPlace';
@@ -3394,23 +3394,6 @@ export function frameCorners(ir: ToolpathIR, radius: number, z: number): CamMove
  * posted text plus its verify report, or the reason it could not be produced.
  */
 /**
- * The verifier's view of the mount (#442's #427 item): the obstacles and the fit, or nothing at all
- * when the job is held in the vise — and then `verify.ts` behaves exactly as it did before #427.
- */
-function mountCtx(
-  mount: MountObstacles | null | undefined,
-  clearanceMm: number,
-  /** #727 F2 — a fitted top's highest lift, which raises the clamps the verifier must clear. */
-  topLiftMm = 0,
-): { mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number; clearance: number; topLift: number } } {
-  // #710 — the fixture clearance (the job's jaw clearance) rides with the obstacles, so the verifier
-  // grows every clamp and arm by the tool, the fit AND it, in one place.
-  return mount
-    ? { mountObstacles: { obstacles: mount.obstacles, uncertainty: mount.uncertainty, clearance: clearanceMm, topLift: topLiftMm } }
-    : {};
-}
-
-/**
  * #747 — THE ONE PLACE THE FRAME'S TRACE HEIGHT IS COMPUTED, in WORK Z (the frame the document and
  * the sheet speak), and the reason it cannot be traced when there is none.
  *
@@ -3501,6 +3484,8 @@ function frameProgram(
   clearanceMm: number,
   /** #1235 stage 2 — the job's cuttable footprint, stated for the trace's own verifier report. */
   footprint: readonly FootprintShape[],
+  /** #1246 — the job whose setup record the trace's verifier context reads. */
+  job: EngraveJob,
   /** #727 F2 — the fitted top's highest lift: the frame trace rides above the lifted clamps too. */
   topLiftMm = 0,
 ): { nc: string; verify: VerifyReport; z: Mm } | { error: string } {
@@ -3552,7 +3537,21 @@ function frameProgram(
   };
   const posted = postFor(machine)(frameIr, ctx, { vacuum: 'none' });
   if (!posted.ok) return { error: posted.errors.join('; ') };
-  const verify = verifyProgram(posted.text, { setup, machine, tool, dialect: postKey(machine), depthLimit: limit, minRapidZ: frameIr.hopZ, footprint, ...mountCtx(mount, clearanceMm, topLiftMm) });
+  // #1246 slice 1 — the trace's verifier context comes from the setup record; the item path is
+  // single-setup, so the record's index is 0.
+  const facts: SetupRecordDeps & VerifyPerProgram = {
+    setup,
+    machine,
+    tool,
+    dialect: postKey(machine),
+    minRapidZ: frameIr.hopZ,
+    depthLimit: limit,
+    footprint,
+    mount,
+    clearanceMm,
+    topLiftMm,
+  };
+  const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, 0, facts), facts));
   return { nc: posted.text, verify, z };
 }
 
@@ -3674,18 +3673,23 @@ function facingProgram(
     if (!posted.ok) {
       return { nc: null, verify: null, toolKey, error: posted.errors.join('; '), cam: null };
     }
-    const verify = verifyProgram(posted.text, {
+    // #1246 slice 1 — the skim's verifier context comes from the setup record (the item path is
+    // single-setup, so the record's index is 0).
+    const facts: SetupRecordDeps & VerifyPerProgram = {
       setup,
       machine,
       tool,
       dialect: postKey(machine),
-      depthLimit: limit,
       minRapidZ: ir.hopZ,
+      depthLimit: limit,
       // #1235 stage 2 — the same job footprint as the engraving file; a facing pass may overrun
       // the edge by the cutter's radius (the limit's own allowance), never further.
       footprint: jobFootprint(job),
-      ...mountCtx(mount, job.jawClearance, topLiftMm),
-    });
+      mount,
+      clearanceMm: job.jawClearance,
+      topLiftMm,
+    };
+    const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, 0, facts), facts));
     const refused = verify.findings.filter((f) => f.severity === 'error');
     if (refused.length > 0) {
       // #432 decision 5 — the whole top is the raster and the verifier is its guard, so a skim that
@@ -5877,17 +5881,8 @@ export async function postModelPlan(
   // only there: the plan states that kerf (`OpOutcome.throughKerf`, path + tab spans + radius +
   // tab height), and the verifier's through mask is built from it — the same mask the item
   // pipeline builds from its cut-outs. Per SETUP, because a two-setup job's second frame is the
-  // flipped one; a setup with no through contour keeps the plain `jobDepthLimit(job)` it had.
-  const depthLimits: DepthLimit[] = output.perSetup.map((p, i) => {
-    // #1082 — the depth limit is the SETUP's: its own stock box (the freed part on side 2), else
-    // the blank. The through mask's thickness is the same box's.
-    const thickness = stockForSetup(job, i).thickness;
-    const cutouts = p.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
-    if (cutouts.length === 0) return jobDepthLimit(job, undefined, undefined, undefined, thickness);
-    const mask = buildThroughMask({ thickness, breakthrough: job.breakthrough, cutouts });
-    return mask === null ? jobDepthLimit(job, undefined, undefined, undefined, thickness) : jobDepthLimit(job, undefined, mask, undefined, thickness);
-  });
-  const limit: DepthLimit = depthLimits[0] ?? jobDepthLimit(job);
+  // flipped one. #1246 slice 1 — the record builds the per-setup limit from this kerf and the
+  // setup's own thickness (#1082), exactly as the inline builder did.
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -5931,6 +5926,8 @@ export async function postModelPlan(
     // real id when `job.setups` ever does carry one at this index (future wiring, not a guess
     // this entry makes), else synthesize a stable, readable one off the job's own implicit id.
     const setupId = jobSetupList[plan.setupIndex]?.id ?? `${jobSetupList[0]!.id}#${setupIndex}`;
+    // #943 — this setup's through kerfs, the record's depth-limit input.
+    const throughKerf = plan.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
     if (plan.programs.length === 0) {
       return fail(
         'cam',
@@ -5969,20 +5966,24 @@ export async function postModelPlan(
       // #1235 (second ruling) — each op's stated outside allowance, by toolpath number, so the
       // contour's guard covers the contour's moves and not the rest of the program.
       const outsideAllowancesMm = outsideAllowancesOf(ir);
-      const verify = verifyProgram(posted.text, {
+      // #1246 slice 1 — the context from the setup record. The record's limit is the setup's own
+      // (#1082/#943); its footprint is this setup's; the operator-item flag is absent on purpose.
+      const facts: SetupRecordDeps & VerifyPerProgram = {
         setup,
         machine: mill,
         tool: ir.tool,
         dialect: postKey(mill),
-        depthLimit: depthLimits[plan.setupIndex] ?? limit,
         minRapidZ: ir.hopZ,
+        throughKerf,
         // #1235 stage 2 — THIS SETUP's footprint in its own frame, from the same stock the depth
         // limit above is built from. An operator item is not the model engine's case: no
         // `itemProgram`.
         footprint: setupFootprint(job, plan.setupIndex),
-        ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
-        ...mountCtx(shop.mount, job.jawClearance),
-      });
+        outsideAllowancesMm,
+        mount: shop.mount,
+        clearanceMm: job.jawClearance,
+      };
+      const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, plan.setupIndex, facts), facts));
       const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
       if (verifyErrors.length > 0) {
         // #966 — a program the verifier refuses stops the run here: the programs already posted
@@ -7271,7 +7272,9 @@ async function generateFaceProgram(
         continue;
       }
       const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
-      const fineVerify = verifyProgram(postedFine.text, {
+      // #1246 slice 1 — the rest pass's context from the setup record (rotary face: no flat
+      // footprint, and the site's own job limit).
+      const fineFacts: SetupRecordDeps & VerifyPerProgram = {
         setup: fineSetup,
         machine: mill,
         tool: group.entry.tool,
@@ -7279,8 +7282,10 @@ async function generateFaceProgram(
         dialect: postKey(mill),
         depthLimit: jobDepthLimit(job, margins.boundaryMargin),
         minRapidZ: fineIr.hopZ,
-        rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock, limits: map.limits },
-      });
+        footprint: null,
+        rotary: map,
+      };
+      const fineVerify = verifyProgram(postedFine.text, verifyContextFrom(setupRecordFor(job, 0, fineFacts), fineFacts));
       if (fineVerify.findings.some((f) => f.severity === 'error')) {
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
@@ -7362,15 +7367,18 @@ async function generateFaceProgram(
 
   const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   const limit: DepthLimit = jobDepthLimit(job, margins.boundaryMargin);
-  const verify = verifyProgram(nc, {
+  // #1246 slice 1 — the face program's context from the setup record (rotary: no flat footprint).
+  const faceFacts: SetupRecordDeps & VerifyPerProgram = {
     setup,
     machine: mill,
     tool,
     dialect: postKey(mill),
     depthLimit: limit,
     minRapidZ: ir.hopZ,
-    rotary: { radius: map.radius, stickout: map.stickout, tailstock: map.tailstock, limits: map.limits },
-  });
+    footprint: null,
+    rotary: map,
+  };
+  const verify = verifyProgram(nc, verifyContextFrom(setupRecordFor(job, 0, faceFacts), faceFacts));
   if (verify.findings.some((f) => f.severity === 'error')) {
     return fail('verify', `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)`, {
       findings: allFindings,
@@ -9157,7 +9165,10 @@ async function generateOneProgram(
     // the jaws' and tailstock's bands, a turn in the cut, the module's envelope) replace the flat
     // depth/structure rules, and the mount's obstacles do not apply (a chuck is not a bracket).
     const outsideAllowancesMm = outsideAllowancesOf(ir);
-    const verify = verifyProgram(nc, {
+    // #1246 slice 1 — the items program's context from the setup record. This path is the item
+    // pipeline's single setup, so the record's index is 0. The mount and the rotary frame are
+    // mutually exclusive, exactly as the inline builder had them.
+    const facts: SetupRecordDeps & VerifyPerProgram = {
       setup,
       machine: mill,
       tool,
@@ -9170,13 +9181,15 @@ async function generateOneProgram(
       // above — such a program keeps a warning, not an error).
       footprint: jobFootprint(job),
       // #1235 (second ruling) — each op's own stated outside allowance, by toolpath number.
-      ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
+      outsideAllowancesMm,
       itemProgram: findings.some((f) => f.code === 'item-outside-stock'),
-      ...(limitReasonAt ? { limitReasonAt } : {}),
-      ...(rotaryMap === null
-        ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
-        : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock, limits: rotaryMap.limits } }),
-    });
+      limitReasonAt,
+      mount: rotaryMap === null ? shop.mount : null,
+      clearanceMm: job.jawClearance,
+      topLiftMm: liftOverStock,
+      rotary: rotaryMap,
+    };
+    const verify = verifyProgram(nc, verifyContextFrom(setupRecordFor(job, 0, facts), facts));
     if (verify.findings.some((f) => f.severity === 'error')) {
       errors.push({ stage: 'verify', message: `${verify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
       return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc, verify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: predictedForRun, designItems: designItemsForRun, errors };
@@ -9205,22 +9218,24 @@ async function generateOneProgram(
       const postedNeck = postFor(mill)(neckIr, ctx, { vacuum: withNeck.apart, thumbnail: null });
       if (!postedNeck.ok) return stop('post', { feeds, message: `the neck file: ${postedNeck.errors.join('; ')}`, facing });
       const neckAllowances = outsideAllowancesOf(neckIr);
-      const neckVerify = verifyProgram(postedNeck.text, {
+      // #1246 slice 1 — the neck is cut in the same job frame as the program above; its context
+      // comes from the setup record, with its own IR's allowances and (flat only) its footprint.
+      const neckFacts: SetupRecordDeps & VerifyPerProgram = {
         setup,
         machine: mill,
         tool,
         dialect: postKey(mill),
         depthLimit: limit,
         minRapidZ: neckIr.hopZ,
-        // #1235 stage 2 — the neck is cut in the same job frame as the program above, and its
-        // own IR states its own per-op allowances.
-        ...(rotaryMap === null ? { footprint: jobFootprint(job) } : {}),
-        ...(rotaryMap === null && neckAllowances !== undefined ? { outsideAllowancesMm: neckAllowances } : {}),
-        ...(limitReasonAt ? { limitReasonAt } : {}),
-        ...(rotaryMap === null
-          ? mountCtx(shop.mount, job.jawClearance, liftOverStock)
-          : { rotary: { radius: rotaryMap.radius, stickout: rotaryMap.stickout, tailstock: rotaryMap.tailstock, limits: rotaryMap.limits } }),
-      });
+        footprint: rotaryMap === null ? jobFootprint(job) : null,
+        outsideAllowancesMm: rotaryMap === null ? neckAllowances : undefined,
+        limitReasonAt,
+        mount: rotaryMap === null ? shop.mount : null,
+        clearanceMm: job.jawClearance,
+        topLiftMm: liftOverStock,
+        rotary: rotaryMap,
+      };
+      const neckVerify = verifyProgram(postedNeck.text, verifyContextFrom(setupRecordFor(job, 0, neckFacts), neckFacts));
       if (neckVerify.findings.some((f) => f.severity === 'error')) {
         errors.push({ stage: 'verify', message: `the neck file: ${neckVerify.findings.filter((f) => f.severity === 'error').length} verifier error(s)` });
         return { ok: false, stage: 'verify', findings, feeds, threads: threadPlans, threadMachining, drill: drillFacts, cam, nc: postedNeck.text, verify: neckVerify, frameNc: null, frameVerify: null, facingNc: null, facingVerify: null, facingToolKey: null, facingError: null, facingCam: null, predicted: neckPredicted, designItems: [], errors };
@@ -9248,7 +9263,7 @@ async function generateOneProgram(
     let frameZ: Mm | null = null;
     let frameError: string | null = null;
     if (rotaryMap === null) {
-      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, jobFootprint(job), liftOverStock);
+      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, jobFootprint(job), job, liftOverStock);
       if ('error' in frame) {
         // `withPeriod` rather than `+ '.'` (review, 2026-10-28): a cause that already ends in a
         // full stop used to print "..".

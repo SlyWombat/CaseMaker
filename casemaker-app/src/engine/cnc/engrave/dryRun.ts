@@ -33,6 +33,7 @@ import type { Diagnostic } from '../gcode/types';
 import { FINAL_RETRACT_Z } from '../post/z1';
 import { HOP_Z } from '../cam/ir';
 import { verifyProgram, type VerifyReport } from '../verify';
+import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '../setups/setupRecord';
 import type { FootprintShape } from '../footprint';
 import type { Setup } from '../setup';
 import type { Mill } from '../machine';
@@ -150,7 +151,11 @@ export interface DryRunVerifyDeps {
  * raises Z, so a lifted program's rapids are never lower than the original's.
  */
 export function verifyDryRun(nc: string, deps: DryRunVerifyDeps): VerifyReport {
-  return verifyProgram(nc, {
+  // #1246 slice 1 — the lifted text has no job document: the record states the stock the setup's
+  // own part gives and no sacrificial material, and the context is built from it. The dry-run
+  // verifier reads neither (its limit is infinite and its footprint is the caller's), so the
+  // record's box facts cannot move a verdict.
+  const facts: SetupRecordDeps & VerifyPerProgram = {
     setup: deps.setup,
     machine: deps.machine,
     tool: deps.tool,
@@ -158,8 +163,9 @@ export function verifyDryRun(nc: string, deps: DryRunVerifyDeps): VerifyReport {
     dialect: postKey(deps.machine),
     depthLimit: () => Number.POSITIVE_INFINITY,
     minRapidZ: HOP_Z,
-    ...(deps.footprint === undefined ? {} : { footprint: deps.footprint }),
-  });
+    footprint: deps.footprint ?? null,
+  };
+  return verifyProgram(nc, verifyContextFrom(setupRecordFor(null, 0, facts), facts));
 }
 
 /** Lift AND verify one program, ready for the upload gate. */

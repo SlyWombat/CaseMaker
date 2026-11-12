@@ -19,8 +19,7 @@
 
 import { HOP_Z, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
-import { buildThroughMask } from '@/engine/cnc/engrave/throughMask';
-import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { outsideAllowancesOf, setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
 import { verifyProgram, type VerifyFinding, type VerifyReport } from '@/engine/cnc/verify';
@@ -52,22 +51,6 @@ export interface StoredProgramRecheck {
   unresolved: { programIndex: number; toolKey: string }[];
 }
 
-/** The mount context `verify.ts` takes (#442/#710) — the model path's shape. */
-function mountCtx(mount: MountObstacles | null, clearanceMm: number): {
-  mountObstacles?: { obstacles: MountObstacles['obstacles']; uncertainty: number; clearance: number; topLift: number };
-} {
-  return mount
-    ? {
-        mountObstacles: {
-          obstacles: mount.obstacles,
-          uncertainty: mount.uncertainty,
-          clearance: clearanceMm,
-          topLift: 0,
-        },
-      }
-    : {};
-}
-
 /** The IRs in posting order — the plan's per-setup program lists, flattened as the worker posted them. */
 function planIrs(generated: EngraveGenerated): readonly ToolpathIR[] {
   return generated.plan?.perSetup.flatMap((setup) => setup.programs) ?? [];
@@ -79,24 +62,7 @@ function planIrs(generated: EngraveGenerated): readonly ToolpathIR[] {
  */
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
   const { job, generated, machine, mount, setup } = input;
-  const depthLimits = generated.plan?.perSetup.map((plan, i) => {
-    const thickness = stockForSetup(job, i).thickness;
-    const cutouts = plan.ops.flatMap((op) =>
-      op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : [],
-    );
-    if (cutouts.length === 0) return jobDepthLimit(job, undefined, undefined, undefined, thickness);
-    const mask = buildThroughMask({ thickness, breakthrough: job.breakthrough, cutouts });
-    return mask === null
-      ? jobDepthLimit(job, undefined, undefined, undefined, thickness)
-      : jobDepthLimit(job, undefined, mask, undefined, thickness);
-  }) ?? [];
   const irs = planIrs(generated);
-  const baseCtx = {
-    setup,
-    machine,
-    dialect: postKey(machine),
-    ...mountCtx(mount, job.jawClearance),
-  };
 
   const errors: StoredProgramRecheck['errors'] = [];
   const unresolved: StoredProgramRecheck['unresolved'] = [];
@@ -109,16 +75,29 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     // #1235 (second ruling) — the stored plan's own op records state the outside allowances; a
     // stored plan that predates the field states none and every move gets 0.
     const outsideAllowancesMm = irs[index] === undefined ? undefined : outsideAllowancesOf(irs[index]!);
-    const ctx = {
-      ...baseCtx,
+    // #1246 slice 1 — the context comes from the setup record. The record's limit is the setup's
+    // own (#1082/#943); a stored run with NO plan has no setup to state, so it keeps the plain
+    // job limit the inline builder's fallback used.
+    const setupIndex = program.setupIndex - 1;
+    const planSet = generated.plan?.perSetup[setupIndex];
+    const throughKerf = planSet?.ops.flatMap((op) =>
+      op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : [],
+    );
+    const facts: SetupRecordDeps & VerifyPerProgram = {
+      setup,
+      machine,
+      dialect: postKey(machine),
       tool,
-      depthLimit: depthLimits[program.setupIndex - 1] ?? jobDepthLimit(job),
       minRapidZ: irs[index]?.hopZ ?? HOP_Z,
+      ...(planSet === undefined ? { depthLimit: jobDepthLimit(job) } : { throughKerf }),
       // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
       // above describes (#1082): a flipped setup's stated box, else the job's blank.
-      footprint: setupFootprint(job, program.setupIndex - 1),
-      ...(outsideAllowancesMm === undefined ? {} : { outsideAllowancesMm }),
+      footprint: setupFootprint(job, setupIndex),
+      outsideAllowancesMm,
+      mount,
+      clearanceMm: job.jawClearance,
     };
+    const ctx = verifyContextFrom(setupRecordFor(job, setupIndex, facts), facts);
     const verify = verifyProgram(program.nc, ctx);
     for (const finding of verify.findings) {
       if (finding.severity === 'error') errors.push({ programIndex: index, frame: false, finding });
