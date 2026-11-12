@@ -22,6 +22,19 @@ export interface ShortlistEstimate {
   unpriced: number;
 }
 
+/**
+ * #1242 — THE PLAN'S NOTE when the shortlist dropped anything: one sentence naming how many chains
+ * were worked out in full of how many considered. A note (the plan's own prose), never a sheet
+ * line. Null when nothing was dropped: a full plan has nothing to explain.
+ */
+export function shortlistNote(counts: { candidates: number; kept: number }): string | null {
+  if (counts.kept >= counts.candidates) return null;
+  return (
+    `The planner worked out ${counts.kept} of ${counts.candidates} possible sets of cutters ` +
+    'in full, the most promising by estimate (a shop setting).'
+  );
+}
+
 /** The estimate's order of two estimates: leftover to a hundredth of a mm², then seconds. */
 function compareEstimates(a: ShortlistEstimate, b: ShortlistEstimate): number {
   const roundedA = Math.round(a.leftoverMm2 * 100);
