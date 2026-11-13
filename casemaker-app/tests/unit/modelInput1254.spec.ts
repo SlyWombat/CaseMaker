@@ -47,7 +47,7 @@ function trayJob(): EngraveJob {
 
 async function builtInput(job: EngraveJob, target: EngraveTargetObject, mount: ReturnType<typeof jobMountObstacles>): Promise<ModelPlanInput> {
   const { buildModelPlanInputForGoal } = await import('@/workers/sim/engraveGenerate');
-  return buildModelPlanInputForGoal(job, target, BALL, { mount, tools: [{ key: 'inv:test-ball', tool: BALL }] }, undefined, [BALL], []);
+  return buildModelPlanInputForGoal(job, target, BALL, { mount, tools: [{ key: 'inv:test-ball', tool: BALL, provenance: 'test fixture' }] }, undefined, [BALL], []);
 }
 
 /**
