@@ -6,6 +6,14 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ## [Unreleased]
 
+### Milestone 1.5 — group 12: the planner works out a shortlist (2026-11-12)
+
+- **The planner works out a shortlist of cutter sets before choosing** ([#1242](https://github.com/SlyWombat/CaseMaker/issues/1242)): every candidate set of cutters first gets the selector's cheap estimate, and only the K most thorough by that estimate and the K fastest within the 0.5 % leftover tolerance — plus every set the estimate could not price — are planned in full; the choice is made exactly as before. `plan.shortlistSize` sets K: "How many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same." (8 by default; a whole number, 0–200.) On the measured jobs every program and every pick was byte-identical at 8 and at 0, while Generate's wall time fell from 520 s to 219 s on the toolholder, 848 s to 225 s on the taped tray and 1,848 s to 1,216 s on the organizer; the tray bottom and the accuracy reference, whose chains are few, were essentially unchanged. A plan that worked out fewer sets than it considered says so in its notes.
+
+**Skipped — internal only:**
+
+- [#1178](https://github.com/SlyWombat/CaseMaker/issues/1178) — the store-selector instability's guard rule and spec: tests and a lint rule only, with no selector's meaning changed; [#1205](https://github.com/SlyWombat/CaseMaker/issues/1205) — the machine-change wizard's Home presses' stop-report pins: tests over the existing report path, with nothing an operator sees change.
+
 ### Milestone 1.5 — group 11: the tabs in the middle of each side, and the settings at the engine's edge (2026-11-12)
 
 **Holding tabs sit in the middle of each side.**

@@ -259,6 +259,7 @@ The keys added since v0.2, with their recommendations:
 | `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
 | `plan.leftoverEquivalencePct` | 0.5 % | 0–5 | The cutter-chain rank (#1217): sets of cutters whose leftover differs by no more than this share of the covered surface count as equal on that key, and the faster set is chosen. |
 | `plan.leftoverTallMm` | 1 mm | 0.1–50 | The same rank (#1224): material standing taller than this is never given up for a faster set, however much time the trade would save. |
+| `plan.shortlistSize` | 8 cutter sets | whole, 0–200 | The two-list shortlist (#1242): how many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same. |
 | `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch still too long gets a named tight tab before the job is ever refused. |
 
 The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
@@ -275,6 +276,13 @@ input** (`ModelPlanInput.defaults`, with `defaultsFrom` naming the location they
 realm that plans already carries the input — the app's sim worker, the CLI and both of its pool
 workers (#1237). A caller that states a location but passes no defaults is refused by name rather
 than planned on fallbacks; no location means the recommendations, stated as such.
+
+`plan.shortlistSize` above travels on the same input too: it decides how many candidate sets of
+cutters are worked out in full before the choice is made — the K most thorough by the estimate and
+the K fastest within `plan.leftoverEquivalencePct` of the best, plus every set the estimate could
+not price; 0 works out every one. It changes planning time, not the choice: at the recommended 8
+and at 0 every measured program and pick is byte-identical. When it drops anything, the plan's
+notes say how many sets were worked out in full of how many considered.
 
 The receipt's **provenance** lists every planner-read key whose value differs from its
 recommendation, with the value, its unit and the location's own source (`located`, `measured` or
