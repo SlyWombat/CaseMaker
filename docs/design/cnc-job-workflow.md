@@ -35,7 +35,7 @@ inner corner at the **front-left** of the bed (Makera's "lower-left corner").
 7. [Gaps, mapped to issues](#7-gaps)
 8. [Decisions (2026-10-15)](#8-decisions-the-maintainer-2026-10-15)
 9. [Sources](#9-sources)
-- [Appendix A: Makera Studio, read from the install](#appendix-a-makera-studio-0120-read-from-the-install-static-2026-10-15)
+- [Appendix A: Makera Studio, read from the install (kept on the share)](#appendix-a-makera-studio-read-from-the-install-kept-on-the-share)
 - [Appendix B: worked example — an aluminium plate on the anchor bracket](#appendix-b-worked-example-an-aluminium-plate-on-the-anchor-bracket)
 - [Appendix C: worked example — the two-colour badge blank in the vise](#appendix-c-worked-example-the-two-colour-badge-blank-in-the-vise)
 
@@ -269,7 +269,7 @@ vendor value is read-only with its sync date beside it.
 | Accessories / fixtures | vise: `DEFAULT_VISE` + saved/measured in settings; sacrificial presets; rotary, probes, bracket, clamps: documented in `Fabrication.md` §1 only | an accessories list with owned / measured / provenance; the bracket and clamps as modelled mounts |
 | Tools | **built**: `house.json` (`inv:` with qty, codes, notes; `user:` clones), `catalogue.json`, Manage › Tools, box-code scan (#309, #377–#380) | condition, runtime (#381), collet compatibility per machine, which machine/slot |
 | Materials | names: table ∪ profile (#347); feeds: house rows + catalogue tier (#310) | a materials scope (Manage rail says "later") |
-| Stock shelf | nothing (two template routes: badge, plank) | the shelf, offcuts, reservation/consumption; vendor sizes via the sync (`t_MaterialSpecs`) |
+| Stock shelf | nothing (two template routes: badge, plank) | the shelf, offcuts, reservation/consumption; vendor sizes via the sync (the catalogue's sized-stock list) |
 | Consumables | sacrificial board/strips as job fields (#213) | an inventory of them; wasteboard state |
 | Collets / holders | `Tool.handleDiameter`; `Z1.holder` null | collets owned per machine; the holder measured |
 | Measuring tools | the probe's tip in `PROBE_SPEC` | calipers' resolution as a stated input to "measured" |
@@ -309,7 +309,7 @@ built-ins and no location (as with the house today).
 | Fusion | machine library (optional per setup) | Local / Fusion Library (read-only) / Cloud / Document / Vendor libraries | no material library; stock is a per-setup box or solid | none | MFG-TOOL-LIB-TYPES, MFG-CREATE-SETUP |
 | Carbide Create | machine chosen in Job Setup | libraries "for each machine as well as specific materials", custom tools | material = a category key for feeds | none | guides.carbide3d.com/create/tool-library |
 | VCarve | Machine Management dialog | Tool Database: geometry tree × materials × machines → cutting data | material = appearance + feeds key | none | Tool Database V12.5 |
-| Makera Studio / DB | `t_MachineType`, `t_MyDeviceList` (name, IP), `t_MachineResourceParameters` (named XYZ per model) | `t_MakeraCutterList` + custom clones, **`t_CutterInventoryList` (qty)**, `t_SkuMapping` (shop URL) | `t_MaterialCategory` → `t_MaterialList` → **`t_MaterialSpecs` (sized stock, R/C)** + customer twins | cutters: yes (qty); stock: the purchasable list, not what is owned | Appendix A.3 |
+| Makera Studio / DB | machine list with device name and IP, named work-area sizes per model | Makera cutter list plus custom clones, **a quantity per cutter**, a shop link | material category, then material, then **sized stock** (plus customer twins) | cutters: yes (qty); stock: the purchasable list, not what is owned | install read, kept on the share (Appendix A.3) |
 | xTool XCS | device-bound | n/a | EasySet material library by machine/power/mode; custom materials via a camera-read test grid | none | support.xtool.com/article/1717 |
 | Glowforge | one printer | n/a | Proofgrade QR on the stock itself | implicitly: the sheet in the bed | glowforge "Proofgrade Material Not Detected" |
 | LightBurn | device profiles | n/a | material library `.clb` per device: name › thickness › settings; Material Test | none | docs.lightburnsoftware.com MaterialLibrary |
@@ -326,7 +326,7 @@ service, the sync and the provenance discipline already exist.
 ## 4. What the field does
 
 Sources are in §9. "unverified" marks what the researcher could not confirm from an official page.
-Makera's wiki is JS-rendered; what we know of it is the seven cached pages plus Appendix A's read of
+Makera's wiki is JS-rendered; what we know of it is the seven cached pages plus the install read (kept on the share, Appendix A) of
 the installed Studio.
 
 ### 4.1 Makera's own flow, and what it sells
@@ -339,7 +339,7 @@ dedicated V-carve; pocket and relief with **multi-tool clearing**; the tool numb
 tool-change identity (prompts a manual change on no-ATC machines); a toolpath line preview; one `.nc`
 out; no machine link.
 
-**Makera Studio** (Z1), from Appendix A: process modes per project (2D Vector, 3D Model, 3-Axis
+**Makera Studio** (Z1), from the install read (kept on the share, Appendix A; not public): process modes per project (2D Vector, 3D Model, 3-Axis
 Relief, Custom 3-Axis, Custom 4-Axis, Laser) with a **Guided Mode** of scheme steps that calculates
 tools (Main Tool by diameter, one roughing tool, a Clearance Tool for 3D pockets, finishing), and a
 per-run **Machining Wizard**: *Set Stock → Set Origin → Auto Probe → Assist Options → Run*, on a map
@@ -452,7 +452,7 @@ also a section of the Design panel.
 **Four doors, in this order.** (1) **On the shelf** — the location's own stock for this material:
 purchased sizes with quantity and offcuts with the job they came from; "add to the shelf" is how a
 new purchase or a printed blank gets in (its dims typed or taken from a catalogue spec, its layers
-if any, its finish). (2) **Makera sizes** — the synced catalogue's `t_MaterialSpecs` for this
+if any, its finish). (2) **Makera sizes** — the synced catalogue's sized-stock list for this
 material, read at runtime (names and dims, nothing committed; absent with the reason when no
 catalogue is present); picking one offers "add to the shelf" too. (3) **Load** — an STL or 3MF as
 the stock: a prism (identical slices) cuts as a block of that outline; a non-prismatic mesh is 3D
@@ -731,7 +731,7 @@ the most reachable detail is cut with the fewest changes, and say what is lost.
 The Tool section is a per-setup list with the recommendation **applied**, "change" opening the
 candidate list with reach and time per cutter; the user's choice is kept and the recommendation
 offered back (#211). Catalogue cutters nobody owns appear under "could buy" with their reach and the
-shop link the catalogue carries (`t_SkuMapping`), never picked. Two tools reach the machine as one
+shop link the catalogue carries, never picked. Two tools reach the machine as one
 program per tool (#410, proven) until #278's `M6` observation.
 
 **Saved:** per setup `tools[] { invKey, snapshot, role: face|rough|rest|drill|thread|single, overlap, feeds with sources }`.
@@ -813,7 +813,7 @@ the badge.
 | Auto-level `G32` | a phase | on when the stock's flatness is domed/unknown and the shallowest cut is under 0.5 mm (Studio's own rule), or on tape/vacuum; off for faced stock | by stock and mount | `G32 R1` + `M370`, unverified sequence (#176) |
 | Facing | an operation, not a feature | §5.3; its depth moves Z0 and the carried stock | on for raw metal/wood | NEW |
 | Registration | a phase with a yes/skip at the moment it is reached | §5.9 | ask | #391, #387 |
-| Light | machine state | the strip | on while a job runs | `M821`/`M822`: listed for all machines in Studio's own config (Appendix A.7); unobserved from our console |
+| Light | machine state | the strip | on while a job runs | `M821`/`M822`: listed for the Z1 (source kept on the share, Appendix A); unobserved from our console |
 | Spindle air `M7` | nothing | not shown: Carvera-only per Studio's config; a no-op here (§11.10) | — | — |
 | Bed clean / blow / ioniser | Studio's `M331.x` sub-modes | the strip reserves the slot; offered when #283/#289's bench rows map them | — | inferred |
 
@@ -997,7 +997,7 @@ Mapped to issues where they exist; **NEW** otherwise; not filed. S: a day; M: da
 |---|---|---|---|
 | Location | the entity: name, machines (serial, firmware, address, plug state, calibration together), accessories with owned/measured provenance, consumables, collets, measuring tools; `location.json` beside `house.json`; export | **NEW** (builds on #247, #306, #311) | L |
 | Location | the stock shelf: entries with layers/finish/flatness/conductive, quantities, offcuts from jobs, reserve/consume; Manage › Materials | **NEW** | M |
-| Location | vendor sizes at runtime: the sync reads `t_MaterialSpecs` into `catalogue.json` | **NEW** under #308/#347 Route A | S |
+| Location | vendor sizes at runtime: the sync reads the sized-stock list into `catalogue.json` | **NEW** under #308/#347 Route A | S |
 | Location | tool condition, runtime, collet compatibility per machine, where each copy is | #381 + **NEW** | M |
 | Location | the plug's state on the machine record (switch only on request) | **NEW** (`power.sh` exists) | S |
 | Stock | STL/3MF as stock; rod/tube/disc; sphere refused | **NEW**; 3D needs #222 | M |
@@ -1149,15 +1149,7 @@ https://cnx-software.com/2026/09/01/makera-z1-desktop-cnc-review-smart-milling-4
 https://core-electronics.com.au/makera-common-milling-bits-26-pcs.html ·
 https://core-electronics.com.au/makera-cnc-pcb-fabrication-pack.html.
 
-**Makera Studio install and user data (static read, Appendix A; copies, nothing modified):**
-`C:\Users\DavidSeaman\AppData\Local\Programs\Makera Studio\MakeraStudio.exe.orig` (strings),
-`…\config\config.json`, `…\config\interface_config.json`, `…\data\lang\lang_us_EN.json`,
-`…\data\configure\*.json`; `C:\Users\DavidSeaman\AppData\Roaming\MakeraStudio\config.ini`,
-`…\ControllerConfig.txt`, `…\config\ProjectDefault\default_3d_cnc.json`, `…\configure\*.json`,
-`…\GCodes\TopClamp.nc`, `…\logs\log_2026-10-07-22-54-47.txt`, `…\logs\log_2026-10-12-13-31-39.txt`,
-`…\makera_library.db` (REA `inspect-sqlite-database`, evidence `ev_662e5862…`, `ev_e2174548…`,
-`ev_cf580cbe…`, `ev_318dc173…`); `docs/bench/img/D0-wizard-*.png`, `docs/bench/img/D1-*.png`;
-REA: `rea doctor --client claude_code --json`, `rea capabilities`.
+**Makera Studio install and user data (static read, Appendix A):** kept on the share; the paths and evidence ids are in the moved appendix.
 
 **Competitors.** Carbide 3D: https://carbide3d.com/hub/courses/create/job-setup/ ·
 https://my.carbide3d.com/pdf/Nomad3_Starter_Project.pdf · https://my.carbide3d.com/pdf/bitsetter-v2.pdf ·
@@ -1214,154 +1206,12 @@ https://mecsoft.com/2-sided-flip-machining-explored/.
 
 ---
 
-## Appendix A. Makera Studio 0.1.2.0, read from the install (static, 2026-10-15)
+## Appendix A. Makera Studio, read from the install (kept on the share)
 
-**What was done, and what was not.** Static inspection only, on **copies** in the session scratchpad:
-the stock binary `MakeraStudio.exe.orig`, the install's `config/` and `data/` folders, and from the
-user's Roaming folder `config.ini`, `ControllerConfig.txt`, `config/ProjectDefault/default_3d_cnc.json`,
-`configure/*.json`, `GCodes/`, `PrjPathConfig/` (empty), `logs/` and `makera_library.db`. Studio was
-not launched, nothing under the two folders was modified, and no vendor feeds/speeds row is quoted
-anywhere in this document (#347). `docs/bench/img/D0-*.png` and `D1-*.png` are the maintainer's
-screenshots of the same screens, 2026-10-07.
-
-**The REA toolkit** (rea-agents 6.5.0): `rea doctor --client claude_code --json` reports Node 24.21
-healthy and **no native analysis engine** (Hopper, Ghidra, IDA and JADX all `missing_analysis_engine`);
-nothing was installed. No decompilation was done, and none was needed for a workflow read. REA
-supplied the database inspector: `rea inspect-sqlite-database` on the copied `makera_library.db`
-(sha256 `70ed4e86…3e3173`, SQLite 3.53.4) with evidence ids `ev_662e5862…` (full schema),
-`ev_e2174548…` (`t_MaterialCategory`), `ev_cf580cbe…` (`t_MaterialList`), `ev_318dc173…`
-(`t_SystemParameters`). Everything else is `strings` on the binary (275 895 ASCII and 13 914 UTF-16
-strings), the JSON files, the logs and the screenshots. There are **no `.qm` translation files**: the
-only language file is `data/lang/lang_us_EN.json` (239 strings, the diagnostic panel alone); the
-workflow strings live in the binary.
-
-### A.1 The project model
-
-`Roaming/config/ProjectDefault/default_3d_cnc.json`:
-
-```
-emMachineType, emSchemeType, version,
-vecClamDiameter: [ … ],                       ← the chuck/collet diameters the project may use
-workblank: { material: { materialInfoId, materialObjId, materialSpecId }, size: { length, width, height } }
-```
-
-A Studio project is **machine type + scheme (process mode) + a workblank**, and the workblank is a
-material **and a material spec** — the vendor's sized stock — plus dimensions. Strings confirm the
-names (`emMachineType`, `emSchemeType`, `workblank`, `widgetWorkblank`, `vecClamDiameter`,
-`lstClamDiameter`) and the refusals built on them: *"Project information is incomplete. Please set
-chuck diameter and workpiece material first."*, *"No tools found for the current chuck diameter and
-workpiece material. Please check project settings or add tools in the tool library."* Projects are
-`*.mks`. `PrjPathConfig/` is empty and `config.ini` has `STR_RECENT_JSON=`: no Studio project has
-been saved on this PC.
-
-### A.2 Process modes and the guided scheme
-
-Strings `SchemeInfo2DCNC`, `SchemeInfo3DCNC`, `SchemeInfo3DRelief`, `SchemeInfo4DRelief`,
-`SchemeInfo2DLaser`; mode cards **2D Vector Machining**, **3D Model Machining** ("Supports STEP, STP
-files"), **3-Axis Relief Carving** ("STL, STEP, STP, OBJ"), **Custom 3-Axis Machining**, **Custom
-4-Axis Machining**, **Laser Engraving & Cutting**; `Select Processing Mode`, `Guided Mode`, `Custom
-Mode`. Import filters: `*.step *.stp *.stl *.obj`, `*.dxf *.svg`, `*.jpg *.jpeg *.png *.bmp`, a Gerber
-list. **No 3MF.** Guided Mode is a sequence of scheme steps (`SchemeStepWidget`,
-`lblSchemeStepName/Image/Detail`, `pushButton_PrePage/NextPage`) with `Calculate Tools` /
-`Recalculate`: a **Main Tool** by diameter (*"No recommended Main Tool diameter can machine all
-selected models"*), **one roughing tool** (*"Rough machining can use at most one tool"*), a
-**Clearance Tool** for 3D pockets, **finishing** (*"No suitable finishing tool found"*), and the guard
-*"Continuing may machine stock that has not been roughed. Continue to the next step?"*; tools
-filtered by material duty (`metalDuty`) and chuck diameter. Operation defaults are one JSON per
-strategy in `data/configure/` (15 files) with `depth`, `safe`, `Ramping_clear`, `pocket_strategy`,
-`direction`, `pathOrder` and a full `tools[]` record.
-
-### A.3 The material and stock library (structure only)
-
-`makera_library.db` (REA `ev_662e5862…`): `t_MaterialCategory` (`materialCategoryName`,
-`materialPic`, `metalDuty`) → `t_MaterialList` (`materialSubcategoryName`) → **`t_MaterialSpecs`**
-(`materialName`, `materialShape`, `length`, `width`, `height`, `diameter`, `g_ID`), with customer
-twins; cutters `t_CutterCategory` → `t_MakeraCutterGroup` → `t_MakeraCutterList` (stick-out, shoulder,
-flute, tip, half angle, thread fields, `sellProduct`, `metalDuty`, `g_ID`) with `t_CustomCutterList`;
-feeds `t_MakeraCutterProperties` / `t_CustomerCutterProperties`; **`t_CutterInventoryList` (`cutterID`,
-`qty`)**; `t_SkuMapping` (shop SKU/URL per `g_ID` per region); `t_MachineType`;
-`t_MachineResourceFiles` / `t_MachineResourceParameters`; `t_MyDeviceList` (`strDeviceName`, `strIP`);
-`t_SystemParameters`; `t_DeletionQueue`. UI: `MaterialLibDialog`, `Material Library`, `Material
-Name`, `Material Specifications:`, `new material specifications`, `max thickness =`. For §5.1: the
-vendor's sized stock is first-class in Makera's own model and already in the database the house
-service syncs; a round shape exists in it.
-
-### A.4 The Machining Wizard, step by step
-
-| Step | What the screen shows | What it sends |
-|---|---|---|
-| **Set Stock** | the 200 × 200 bed with the L-bracket and its screws; a stock rectangle in the bracket's corner; `Anchor1` / `Custom`; *"Place the stock on the work bed and secure it firmly. We recommend using the anchor system and L-Bracket for quick and accurate positioning."* | nothing |
-| **Set Origin** | `Relative to: Anchor1`, X/Y offsets, `Same As CAM`, `Set Origin with 3D Probe`, `Apply Settings` ("Work origin will be set immediately when clicking OK"); **Auto-Scan Machining Area (Before Machining)** + `Scan Now`; *"Set the work origin when starting a new job, changing the workpiece, or re-fixturing…"* | `Scan Now` (2026-10-07): `M492.3 → M494.2 → M493.2 T0 → M497.4 → M494.0 → G53 G0 Z-3 → G90 G0 X10 Y8 → G1 … F1000` round the toolpath → `Done ATC`; a **Tool Change Required** dialog ("Please change to: Probe / Then press Confirm to continue." Confirm / Ignore) first |
-| **Auto Probe** | **Auto Workpiece Leveling** (Clearance Height 5, X/Y Points 3, *"Enable Auto Leveling for uneven surfaces or shallow cuts (<0.5 mm), especially for fine machining such as PCB and engraving bi-color sheet."*); **Auto Z-Height Probing** (`Relative to: Path Origin`, X 20, Y 7, `Recommended`; *"Run Z Height Probe when starting a new job or re-fixturing…"*); the red Z-probe dot on the map | nothing yet |
-| **Assist Options** | Auto Vacuum, Auto Blow, Auto Bed Clean, Anti-Static, Auto Time-Lapse, each with one line | each sends its mode code at once (§11.3) |
-| **Run** | the summary (origin from Anchor1, Scan Margin, Auto Leveling, Auto Z Probe `(20, 7) from Path Origin`, the assists); *"Confirm all settings before starting machining. You can stop the job at any time, adjust parameters, and restart if needed."*; red STOP on every step | `buffer M495 X<ox>Y<oy>[C<xmax>D<ymax>][O<px>F<py>][P1]` then `play`: `M495 X10Y8C50D22O20F7` (10-07) and `M495 X10Y8P1` (10-12, ×4); firmware: `Goto path origin first`, `G53 G0 Z-3.000`, `G90 G0 X10 Y8`, `Done ATC`, then the file |
-
-Copy: the **map** and the one-sentence why under every option. Avoid: a modal per run that
-remembers nothing.
-
-### A.5 Tool changes and probing, as the firmware runs them for Studio
-
-Manual change inside a program (10-12 log): `M497.2` → `M490.1` (wait: "Please change to: Tool
-T1(3.175 flat) / Then press Confirm to continue.") → ~90 s → `M493.2 T-1` → `M497.3` → `G53 G0 Z-3`
-→ `G53 G0 X-9.890 Y-12.830` → `G38.6 Z-108 F500` → `[PRB]` → `G91 G0 Z1` → `G38.6 Z-2 F100` →
-`[PRB]` → `M493.1` → `G53 G0 Z-20` → `M493.2 T1` → `M494.2` → `Done ATC` — §2 of
-`Z1-Firmware-Dialect.md` end to end, the sequence §5.8's tool-change phase reproduces with `M491`.
-Studio's Z touch (10-07): `G38.2 Z-108 F500` → `[PRB]` → `G91 G0 Z1` → `G38.2 Z-2 F100` → `[PRB]` →
-**`G10 L20 P0 Z0`** → `G91 G0 Z1` → `M494.2` — the `G10 L20` that #387 found resets the tool-length
-reference. Pause/resume: `Suspending, waiting for queue to empty… / now save current pos… /
-Suspended, resume to continue playing`, `Resuming playing… / Restoring saved XYZ positions and
-state…`. Stop: `Aborted playing or paused file.`; red STOP: `Aborted by halt / ALARM: Abort during
-cycle`. Other dialogs: `Set Origin with 3D Probe` (*"the detected corner position will overwrite the
-current work origin"*), the carbide-rod variant, `Probing completed. The work origin has been
-updated.` / `…not completed…`; rotary: *"closer to the rotary chuck than the recommended
-clearance…"*, *"In 4-axis mode, the Y-axis offset will automatically reset to 0."*, *"For stock size
-under 20 mm, Standard Jaw Setup…; 20-35 mm, Reverse Jaw Setup with Inner-Tooth Clamping; over 35 mm,
-Reverse Jaw Setup with Outer-Tooth Clamping."* (`Stock holding length`, `Stock Shape`).
-
-### A.6 The Monitor panel
-
-A 3D toolpath view with a transport; **Processing progress** (file, Scan Margin / Auto Z Probe /
-Auto-Level dots, `Progress: n%`, `Elapsed time`, `Remaining time`, pause / stop / STOP / Start); a
-**Control** card (WPos and MPos per axis, feed/spindle/override readouts, `Probe TLO`, a jog pad,
-Home, QuickMove, Unlock, Set Origin, Reset, 3D Probe, Auto Probe); **Operation Details** with
-`G-Code` / `MDI` tabs and `Enter Command…`. `EstimatedProcessingTimeFromPathvertex:` names the
-estimate's method. §5.10 keeps progress, elapsed vs remaining and the current line, adds the phase
-list, leaves out jog and overrides (R10).
-
-### A.7 Machine switches and settings, from Studio's own config
-
-`install/config/interface_config.json`:
-
-| Switch | On / off | Machines | Note |
-|---|---|---|---|
-| Spindle | `M3S10000` / `M5` | all | |
-| SpindleFan | `M811S20` / `M812` | all | |
-| Vacuum "Dust Collection" | `M801S20` / `M802` | **C1 only** | |
-| PowerFan "Control Box Fan" | `M801S20` / `M802` | CA1, **Z1, Z1Pro** | same code, different name |
-| Laser | `M3S0.05` / `M5` | all | |
-| Extend output | `M851S5` / `M852` | all | the external-collector port |
-| **Light** "Work Light" | **`M821` / `M822`** | **all** | so the Z1 has it; unobserved from our console |
-| Air "Air Blast" | `M7` / `M9` | **C1 only** | consistent with `M7` doing nothing here |
-| ToolSensorPWR "Tool Sensor Power" | `M831` / `M832` | **C1 only** | |
-| **Probe Laser** "Probe Laser ON/OFF" | **`M831` / `M832`** | **CA1, Z1, Z1Pro** | the same code the Carvera uses for its tool sensor; on the Z1 it is the pointing dot in the wired probe's tip — a pointer, not a sensor (§5.9) |
-| WP charge, Anti-Static | … | | |
-
-plus a status monitor (limits, probe, tool sensor, E-stop, **cover switch**, temperatures, RSSI).
-`install/config/config.json` ↔ `ControllerConfig.txt`: vacuum power, **`switch.light.startup_state`**,
-`light.turn_off_min`, **`stop_on_cover_open`**, auto-sleep, **`main_button_long_press_enable` = None /
-Sleep / Repeat** ("Repeat Last Job"), anchor and clearance coordinates, soft limits, feed and
-acceleration ceilings, ATC/probe speeds, the Z-probe group (`zprobe.slow_feedrate`, `fast_feedrate`,
-`return_feedrate`, `probe_height`, `max_z`), spindle cooldown, wireless-probe voltages. Our reads:
-`docs/bench/2026-10-07-config-sweep.json`, #281.
-
-### A.8 What the read changed in this document
-
-Vendor sizes are Makera's own model (`materialSpecId`), not an invention (§5.1); Studio already
-auto-picks a main tool and offers a clearance tool, so #410's rest pick is the 2.5D equivalent and the
-lost accounting is where we go past it (§5.5); the light is a Z1 switch and `M7` is Carvera-only
-(§5.8); draw the probe point, scan points and levelling grid on the map before anything moves
-(§5.7/§5.9); Studio's pause saves and restores position while our stop is `abort` and `M600` is
-unobserved here (§5.10, #303); the anchor-bracket datum is Makera's default registration (§5.9).
+Appendix A was a static read of Studio's installed binary, configuration files and library database.
+None of that is published by Makera, so under #1260 the appendix moved to the house share
+(`/mnt/house/casemaker/vendor-notes-from-repo/design/cnc-job-workflow-appendix-A-studio-install-read.md`).
+The sections below that cite "Appendix A" rest on that read; they carry no vendor figures.
 
 ---
 
