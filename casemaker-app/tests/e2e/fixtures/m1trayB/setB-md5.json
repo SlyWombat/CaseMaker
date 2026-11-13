@@ -1,6 +1,6 @@
 {
-  "_note": "Set B, VERSIONED WITH THE RULES (12 files: top p1..p8, bottom p1..p4). tableVersion 1234-1 \u2014 the BOTTOM p3/p4 rows re-pin from 1223-1 for #1234 (an overrun point takes the height at the posted position): raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved, cycle 16,900 \u2192 16,925 s. TOP p1..p8 and BOTTOM p1/p2 are byte-identical to 1223-1. 1223-1's own note follows: the combined tray-top re-pin. TOP rows re-pin from 1214-1 (their bytes were still 1195-1's): the planner stack (#1217's leftover tolerance, #1224's ruling, #1219's feed-row step-over), #1227's 0.001 ring inset and #1223's lobe order changed p1..p6; p7 and p8 are byte-identical. BOTTOM rows re-pin from 1214-1: #1214's F words and TIME as before, then the planner stack splits out a NEW \u23000.9 flat program at p2, so the finish and rest keep their bytes as p3/p4 and p1's rough/pocket is re-planned (1 h 26 min). Per-file old\u2192new and the issue each movement belongs to are in changedSince1223. The e2e reads this table as the cross-door check.",
-  "tableVersion": "1234-1",
+  "_note": "tableVersion 1251-1 \u2014 the #1251 re-pin: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again). THE TRAY TOP NOW POSTS NINE PROGRAMS WHERE IT POSTED EIGHT: the band-driven pick adds the \u23002 \u00d7 12 rest as a new cutter, so the job carries one more bit change and an operator will see one more tool change; it is still 82 s faster on the priced cycle (6,410 vs 6,492 s). Every top file re-pins. BOTTOM: only p1 (the rough/pocket) moves; p2\u2013p4 are byte-identical. Set B, VERSIONED WITH THE RULES (13 files: top p1..p9, bottom p1..p4). tableVersion 1234-1 \u2014 the BOTTOM p3/p4 rows re-pin from 1223-1 for #1234 (an overrun point takes the height at the posted position): raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved, cycle 16,900 \u2192 16,925 s. TOP p1..p8 and BOTTOM p1/p2 are byte-identical to 1223-1. 1223-1's own note follows: the combined tray-top re-pin. TOP rows re-pin from 1214-1 (their bytes were still 1195-1's): the planner stack (#1217's leftover tolerance, #1224's ruling, #1219's feed-row step-over), #1227's 0.001 ring inset and #1223's lobe order changed p1..p6; p7 and p8 are byte-identical. BOTTOM rows re-pin from 1214-1: #1214's F words and TIME as before, then the planner stack splits out a NEW \u23000.9 flat program at p2, so the finish and rest keep their bytes as p3/p4 and p1's rough/pocket is re-planned (1 h 26 min). Per-file old\u2192new and the issue each movement belongs to are in changedSince1223. The e2e reads this table as the cross-door check.",
+  "tableVersion": "1251-1",
   "rule": "(a) A CANDIDATE CHAIN IS RANKED BY THE TIME IT WILL REALLY TAKE (#1186 rule 1), ties to fewer bit changes then owned; (b) EVERY FLAT MAY PROPOSE AS A PRIMARY, shortlisted to the incumbent and the best own-row flat (#1192), and a cutter that can FREE the profile always joins when none shortlisted can (#1195); (c) THE FREEING CONTOUR IS A HARD CONSTRAINT (#1195, the analyst\u2019s field): no chain is a candidate without a cutter whose STATED flute reaches the profile\u2019s actual posted depth; the pick refuses only when nothing owned reaches or the operator pinned a cutter that does not, with a named sentence; (d) ONE CUTTER PER SHAPE AND DIAMETER, only on a job with a setup boundary (#1186 rule 6, gated by the setup count).",
   "source": "casemaker cut <job>.cutjob.json --location ~/setb-inputs/location.json --catalogue ~/setb-inputs/catalogue.json, branch 1195-freeing-reach @ 9338152b2 (1186-bench + the setup-boundary gate + #1195), k3, 2026-11-10; the CLI output is byte-identical to tableVersion 1114-1",
   "changedSince1129": [
@@ -64,55 +64,61 @@
   "_droppedFrom1129": "m1trayB-top-p9.nc (114ed00b\u2026, the contour \u2014 now top p8) and m1trayB-bottom-p2.nc (cda22e06\u2026, the 0.9 flat) + m1trayB-bottom-p4.nc (259fd058\u2026, the 22 ball's run \u2014 now bottom p2). Where the 1129-1 md5 is known the full value is quoted; the rest carry its sha prefix.",
   "jobs": {
     "m1trayB-top": {
-      "programs": 8,
+      "programs": 9,
       "files": [
         {
           "name": "m1trayB-top-p1.nc",
-          "bytes": 76268,
-          "md5": "3ad85d6e2713e0cd6276a8841b494061",
-          "note": "pocket/rough on the \u23003.175 \u00d7 42 O-flute \u2014 7 ops, 29 min 48 s"
+          "bytes": 77168,
+          "md5": "433326f84626bc04a4a9bdbcafd18274",
+          "note": "pocket/rough on the \u23003.175 \u00d7 42 O-flute"
         },
         {
           "name": "m1trayB-top-p2.nc",
           "bytes": 1289,
-          "md5": "a028f9f08ede462724abb8bbc6bee590",
-          "note": "\u23001 \u00d7 7 flat \u2014 14 s"
+          "md5": "8cdac279a793ccb1a7bbd6fcb236868d",
+          "note": "\u23001 \u00d7 7 flat"
         },
         {
           "name": "m1trayB-top-p3.nc",
-          "bytes": 1993,
-          "md5": "27d2530bf1d401f79686e142a21cae29",
-          "note": "\u23000.9 flat \u2014 22 s"
+          "bytes": 2002,
+          "md5": "cf327e2a3cb7c71401905b387cd63985",
+          "note": "\u23000.9 flat"
         },
         {
           "name": "m1trayB-top-p4.nc",
-          "bytes": 6774,
-          "md5": "5936ad354e34ff5303996c2d729b3303",
-          "note": "\u23000.6 \u00d7 3 flat \u2014 30 s"
+          "bytes": 6667,
+          "md5": "5275f401e7ad0eda0aeb0439e2ddfc58",
+          "note": "\u23000.6 \u00d7 3 flat"
         },
         {
           "name": "m1trayB-top-p5.nc",
-          "bytes": 197021,
-          "md5": "0265fba9274540602d6e8d337f818306",
-          "note": "curved rough on the \u23001.5 \u00d7 6 flat \u2014 21 ops, 14 min 47 s"
+          "bytes": 61327,
+          "md5": "6a683af7f8482bd60e8564ff32803ddc",
+          "note": "\u23002 \u00d7 12 flat \u2014 the new rest the band-driven pick adds (the chain\u2019s rest went \u23001.5 \u2192 \u23002 plus the \u23001.5)"
         },
         {
           "name": "m1trayB-top-p6.nc",
-          "bytes": 199884,
-          "md5": "4e2990e0bedc8cb5d0f4acae7e7aca2c",
-          "note": "finish on the \u23003.175 ball \u00d7 10 \u2014 14 ops, 5 min 58 s"
+          "bytes": 139869,
+          "md5": "c499883df18c018c44fe613708e450f9",
+          "note": "\u23001.5 \u00d7 6 flat"
         },
         {
           "name": "m1trayB-top-p7.nc",
-          "bytes": 373662,
-          "md5": "f38d4859d22da8d99c30fc38be45384b",
-          "note": "rest/pencil on the \u23001 \u00d7 4 ball \u2014 18 ops, 7 min 17 s"
+          "bytes": 199884,
+          "md5": "4e2990e0bedc8cb5d0f4acae7e7aca2c",
+          "note": "finish on the \u23003.175 ball \u00d7 10"
         },
         {
           "name": "m1trayB-top-p8.nc",
+          "bytes": 373662,
+          "md5": "f38d4859d22da8d99c30fc38be45384b",
+          "note": "rest/pencil on the \u23001 \u00d7 4 ball"
+        },
+        {
+          "name": "m1trayB-top-p9.nc",
           "bytes": 45454,
           "md5": "114ed00b170b6ba4a0dd3c5486507009",
-          "note": "the freeing contour, RETURN on the \u23003.175 \u00d7 42 O-flute \u2014 14 min 47 s"
+          "note": "the freeing contour, RETURN on the \u23003.175 \u00d7 42 O-flute"
         }
       ]
     },
@@ -121,27 +127,27 @@
       "files": [
         {
           "name": "m1trayB-bottom-p1.nc",
-          "bytes": 87246,
-          "md5": "57bfdafbddb18b38809560429cf62c9a",
-          "note": "rough + pocket on the \u23003.175 \u00d7 12 metal O-flute \u2014 2 ops, 1 h 26 min"
+          "bytes": 87114,
+          "md5": "ad3ee2d9bf3cf772fa4ca11bda4915c9",
+          "note": "rough + pocket on the \u23003.175 \u00d7 12 metal O-flute \u2014 the wall pass back at the plain radius"
         },
         {
           "name": "m1trayB-bottom-p2.nc",
           "bytes": 3011,
           "md5": "c919a46019c637a1e4f9a73aa1c6b3e0",
-          "note": "the \u23000.9 flat's small-region cut (Haocher corn PCB router) \u2014 1 min 49 s"
+          "note": "the \u23000.9 flat\u2019s small-region cut (Haocher corn PCB router)"
         },
         {
           "name": "m1trayB-bottom-p3.nc",
           "bytes": 2647540,
           "md5": "ab947ee3cf3206a3305a6d2e6375d618",
-          "note": "finish on the \u23003.175 ball \u00d7 22 \u2014 the gate refuses the 10 mm flute at the 9.613 mm cut (0.387 mm margin); 57 min 11 s"
+          "note": "finish on the \u23003.175 ball \u00d7 22"
         },
         {
           "name": "m1trayB-bottom-p4.nc",
           "bytes": 3736573,
           "md5": "fa20496b218588e316622bc78ec6f313",
-          "note": "rest/pencil on the \u23002 ball \u00d7 12 \u2014 the shortest sufficient rest ball; 1 h 28 min"
+          "note": "rest/pencil on the \u23002 ball \u00d7 12"
         }
       ]
     }
@@ -350,6 +356,98 @@
       "new": "fa20496b218588e316622bc78ec6f313",
       "newBytes": 3736573,
       "why": "#1234: points outside the stock on the posted grid with ceiled drop-cutter height; p3/p4 raw cut-into 0.0241 \u2192 0, adjudicated 0, the >1 mm band unchanged, links re-derived after the overrun tails moved (>0.1 mm band +3/+1), cycle 16,900 \u2192 16,925 s"
+    }
+  ],
+  "changedSince1251": [
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p1.nc",
+      "old": "3ad85d6e2713e0cd6276a8841b494061",
+      "oldBytes": 76268,
+      "new": "433326f84626bc04a4a9bdbcafd18274",
+      "newBytes": 77168,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p2.nc",
+      "old": "a028f9f08ede462724abb8bbc6bee590",
+      "oldBytes": 1289,
+      "new": "8cdac279a793ccb1a7bbd6fcb236868d",
+      "newBytes": 1289,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again) (same size; the coordinates move a thousandth where the path was re-routed)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p3.nc",
+      "old": "27d2530bf1d401f79686e142a21cae29",
+      "oldBytes": 1993,
+      "new": "cf327e2a3cb7c71401905b387cd63985",
+      "newBytes": 2002,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p4.nc",
+      "old": "5936ad354e34ff5303996c2d729b3303",
+      "oldBytes": 6774,
+      "new": "5275f401e7ad0eda0aeb0439e2ddfc58",
+      "newBytes": 6667,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p5.nc",
+      "old": "0265fba9274540602d6e8d337f818306",
+      "oldBytes": 197021,
+      "new": "6a683af7f8482bd60e8564ff32803ddc",
+      "newBytes": 61327,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p6.nc",
+      "old": "4e2990e0bedc8cb5d0f4acae7e7aca2c",
+      "oldBytes": 199884,
+      "new": "c499883df18c018c44fe613708e450f9",
+      "newBytes": 139869,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p7.nc",
+      "old": "f38d4859d22da8d99c30fc38be45384b",
+      "oldBytes": 373662,
+      "new": "4e2990e0bedc8cb5d0f4acae7e7aca2c",
+      "newBytes": 199884,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p8.nc",
+      "old": "114ed00b170b6ba4a0dd3c5486507009",
+      "oldBytes": 45454,
+      "new": "f38d4859d22da8d99c30fc38be45384b",
+      "newBytes": 373662,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-top",
+      "name": "m1trayB-top-p9.nc",
+      "old": null,
+      "oldBytes": null,
+      "new": "114ed00b170b6ba4a0dd3c5486507009",
+      "newBytes": 45454,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
+    },
+    {
+      "job": "m1trayB-bottom",
+      "name": "m1trayB-bottom-p1.nc",
+      "old": "57bfdafbddb18b38809560429cf62c9a",
+      "oldBytes": 87246,
+      "new": "ad3ee2d9bf3cf772fa4ca11bda4915c9",
+      "newBytes": 87114,
+      "why": "#1251: the stamp judges a cell within one posted step of the cutter\u2019s edge by the goal, and #1227\u2019s wall-pass offset is reversed (the pocket rings run at the plain radius again)"
     }
   ]
 }
