@@ -756,39 +756,15 @@ the machine's side of the wire.
 forms and the two traps — that an unknown *source* is answered with silence rather than an error, and
 that the one-argument effective-value form returns an empty cache on this build.
 
-### B8 — How Studio actually downloads a file (added 2026-10-06)
+### B8 — How Studio downloads a file (added 2026-10-06; moved to the share by #1260)
 
-*No machine contact. Read out of the desktop binary, because §9 had recorded the download direction as
-unanswerable on the grounds that the ESP32 link module's firmware is not published — and the client was
-sitting on disk the whole time.*
-
-**Makera Studio is a native Qt/C++ application, not Electron.** `MakeraStudio.exe`, 54 MB, at
-`%LOCALAPPDATA%\Programs\Makera Studio\`. Its strings and log format lines are legible, which makes the
-*client* half of the transfer readable even though the machine's half is not.
-
-What that reading settled:
-
-- The transfer is a **stop-and-wait block protocol inside the ordinary `0x8668`/`0x55AA` envelope** —
-  `CHECK_FOOTER: invalid frame end, expected 0x55AA`. Despite the class being named `XMODEM` and the
-  log line `Cancelling XMODEM modem directly`, it is **not** wire-compatible XMODEM: no SOH/STX, no
-  128/1024-byte block, no ACK/NAK.
-- The messages are `FILE_VIEW`, `FILE_DATA`, `FILE_MD5`, `FILE_END` and `RETRY`; the receiver drives by
-  sequence number; the sender sends the view; `FILE_END` is retried three times and then abandoned;
-  a send that hears nothing for 9 s aborts.
-- It is opened by the console line **`download <remote path>`**.
-- **`The file's MD5 comparison is successful. No need to download the file.`** — Studio hashes the
-  remote file first and skips the transfer when it already has it. That is the second independent use
-  of `md5sum` found in one session, and it is why B7's `md5sum` row is worth more than it looked.
-- QuickLZ rides the transfer path (`QuickLZCLI.exe`, `ftype == lz`, `Type_download_lz`, `the machine is
-  decompress the nc file!`), so at least one direction moves `.nc` payloads compressed. Whether §5's
-  raw upload is acceptable to this machine is now an **open question** — recorded in §9.
-
-**What it does not change.** Only the client half is derived; the machine's replies are still inferred
-from what the client expects, never observed, so no receive path gets written. And it is no longer
-wanted: the config question this was opened for was closed by `config-get sd <key>`, and `/sd/config.txt`
-is the file that is *missing* the compiled-in defaults, not the file that holds them.
-
-The full sequence is in `Z1-Bridge-Protocol.md` §5, "The framed download, as the Studio client does it".
+This section was read out of Studio's installed binary (its strings and log-format lines), which is
+not public, so it is kept on the share
+(`/mnt/house/casemaker/vendor-notes-from-repo/bench/2026-10-bench-day-1-B8-studio-download-protocol.md`).
+What our transport implements from it is in `casemaker-app/src/platform/desktop/protocol.ts` and
+`quicklz.ts`; the analyst is to say, sentence by sentence, which of those comments rest on a public
+source (the firmware repository, MakeraInc/MakeraZ1Firmware) or on our own bench capture, and which
+must be reworded. Listed on #1260.
 
 ### B9 — The whole of `/sd/config.txt`, key by key (added 2026-10-07)
 
