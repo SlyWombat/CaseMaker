@@ -142,7 +142,7 @@ import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
-import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
+import { evaluateOpenEdge, setupRecordFor, verifyContextFrom, type OpenEdgeFacts, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
 import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
@@ -262,7 +262,6 @@ import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 import { planOwnedOnly, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
-import type { StockSide } from '@/engine/cnc/cam/model/ops/edgeOverrun';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
 // #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
@@ -5155,44 +5154,6 @@ function validateGoalRoughTool(
   return { tool: entry.tool, finding: null };
 }
 
-/**
- * #1234 — THE FINISHING EDGE OVERRUN'S FIXTURE ANSWER, as data. A stock side is open to a finish
- * that overruns by `radiusMm` ONLY when no mount obstacle stands in the band that overrun would
- * leave through: the side's own strip, `radius + fit uncertainty + jaw clearance` wide, and (in Z)
- * anything whose top (plus its fit band) rises above `lowestTipZ − radius − jawClearance`. One box
- * in both → the side is closed; no fixture modelled → nothing stands there, so all sides are open.
- * The plan never sees the mount (`RegionRef.obstacles` is not wired); this closure carries the
- * answer across as data, exactly the shape `ModelPlanInput.stockEdgeOpen` takes.
- */
-function stockEdgeOpenAt(
-  job: EngraveJob,
-  envelope: FixtureEnvelope | null,
-  side: StockSide,
-  lowestTipZ: number,
-  radiusMm: number,
-): boolean {
-  const uncertainty = envelope?.uncertainty ?? 0;
-  const clearance = job.jawClearance;
-  const band = radiusMm + uncertainty + clearance;
-  const length = job.stock.length;
-  const width = job.stock.width;
-  const strip = side === 'left'
-    ? { minX: -band, maxX: 0, minY: -band, maxY: width + band }
-    : side === 'right'
-      ? { minX: length, maxX: length + band, minY: -band, maxY: width + band }
-      : side === 'front'
-        ? { minX: -band, maxX: length + band, minY: -band, maxY: 0 }
-        : { minX: -band, maxX: length + band, minY: width, maxY: width + band };
-  const lowestSolidZ = lowestTipZ - radiusMm - clearance;
-  for (const box of envelope?.boxes ?? []) {
-    const overlapX = Math.min(strip.maxX, box.max[0]) - Math.max(strip.minX, box.min[0]);
-    const overlapY = Math.min(strip.maxY, box.max[1]) - Math.max(strip.minY, box.min[1]);
-    if (overlapX <= 0 || overlapY <= 0) continue;
-    // "above" is the ordinary Z order: a top at −15.95 is NOT above −11.6.
-    if (box.max[2] + uncertainty > lowestSolidZ) return false;
-  }
-  return true;
-}
 
 /**
  * #966 — THE SEAM's own `ModelPlanInput`, built from the SAME job/goal/shop facts the heightfield
@@ -5587,6 +5548,15 @@ export async function buildModelPlanInputForGoal(
   // #1246 slice 2 — the stock's KIND, the fact `ModelPlanInput.stock` used to drop. A rotary job
   // is the rod case; the model engine's own plans stay box geometry this slice.
   const stockMap = rotaryMapOf(job, shop.defaults ?? null);
+  // #1246 slice 2 step 4 — the RAW fixture facts the edge-openness rule reads, stated once. The
+  // record carries them; the plan input's callback evaluates the same rule from them.
+  const openEdgeFacts: OpenEdgeFacts = {
+    boxes: (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
+    uncertaintyMm: envelope?.uncertainty ?? 0,
+    clearanceMm: job.jawClearance,
+    stockLengthMm: job.stock.length,
+    stockWidthMm: job.stock.width,
+  };
   // #1246 slice 2 — one record per setup, carrying the planner's own SetupFrame. The same frame
   // object is stated on the spec and on the record, so the planner's existing reads of
   // `setups[i].frame` ARE reads of the record's frame; nothing else in the plan is touched.
@@ -5595,6 +5565,7 @@ export async function buildModelPlanInputForGoal(
       setup: toSetup(job, jobMachine(job, null), shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, i), shop.defaults ?? null),
       frame: spec.frame,
       footprint: null,
+      openEdges: openEdgeFacts,
     }),
   );
 
@@ -5635,7 +5606,7 @@ export async function buildModelPlanInputForGoal(
     // #1234 — the fixture answer the finishing edge overrun reads (see `stockEdgeOpenAt`): the plan
     // never sees the mount, so the side's openness rides the input as data. Absent would close
     // every side; the seam fills it from the SAME obstacle boxes the sweep checks.
-    stockEdgeOpen: (side, lowestTipZ, radiusMm) => stockEdgeOpenAt(job, envelope, side, lowestTipZ, radiusMm),
+    stockEdgeOpen: (side, lowestTipZ, radiusMm) => evaluateOpenEdge(openEdgeFacts, side, lowestTipZ, radiusMm),
     cutters,
     // #1237 — THE PLANNER'S SEVEN SETTINGS RIDE THE INPUT: the map the shop carries, and where it
     // came from (null for a caller with no location; `defaults: null` is a location with none).

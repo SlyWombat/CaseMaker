@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
+import { evaluateOpenEdge, setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
 import { setupStockOf } from '@/engine/cnc/cam/model/plan';
 import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
@@ -470,5 +470,45 @@ describe('#1246 slice 2 pair (c) — a restored run without a stored plan says s
     const withPlan = { ...generatedWith(one), plan: { perSetup: [{ ops: [], programs: [] }] } } as unknown as EngraveGenerated;
     const withStoredPlan = recheck(withPlan);
     expect((withStoredPlan.generated.planStatements ?? []).map((s) => s.text)).not.toContain(SENTENCE);
+  });
+});
+
+describe('#1246 slice 2 step 4 — the open-edge raw facts ride the record', () => {
+  it('the rule evaluated from a record equals the hand-computed predicate', () => {
+    const facts = {
+      boxes: [{ minX: -10, maxX: 0, minY: 0, maxY: 10, topZ: 20 }],
+      uncertaintyMm: 0.1,
+      clearanceMm: 0.5,
+      stockLengthMm: 100,
+      stockWidthMm: 60,
+    };
+    const job = boxJob();
+    const record = setupRecordFor(job, 0, { setup: toSetup(job, Z1), openEdges: facts });
+    expect(record.openEdges).toEqual(facts);
+    // Band 1.6; the box overlaps the left strip; its top+fit (20.1) is above 10 − 1 − 0.5 → closed.
+    expect(evaluateOpenEdge(record.openEdges!, 'left', 10, 1)).toBe(false);
+    // …and below 30 − 1 − 0.5 → open.
+    expect(evaluateOpenEdge(record.openEdges!, 'left', 30, 1)).toBe(true);
+    // The box is nowhere near the right strip.
+    expect(evaluateOpenEdge(record.openEdges!, 'right', 10, 1)).toBe(true);
+
+    const none = { boxes: [], uncertaintyMm: 0, clearanceMm: 0, stockLengthMm: 100, stockWidthMm: 60 };
+    for (const side of ['left', 'right', 'front', 'back'] as const) expect(evaluateOpenEdge(none, side, -10, 3)).toBe(true);
+  });
+
+  it('the model input’s records carry the facts its own fixture states', async () => {
+    const job = jobFor(boxTarget('goal-open', 40, 30, 20), 40, 30, 20);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    const facts = input.records![0]!.openEdges!;
+    expect(facts).not.toBeNull();
+    expect(facts.stockLengthMm).toBe(job.stock.length);
+    expect(facts.stockWidthMm).toBe(job.stock.width);
+    expect(facts.clearanceMm).toBe(job.jawClearance);
+    // The facts are exactly the input's own fixture envelope, box for box.
+    const envelope = input.fixture.envelope;
+    expect(facts.boxes).toEqual(
+      (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
+    );
+    expect(facts.uncertaintyMm).toBe(envelope?.uncertainty ?? 0);
   });
 });

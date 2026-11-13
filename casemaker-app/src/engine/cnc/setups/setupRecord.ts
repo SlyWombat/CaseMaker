@@ -36,6 +36,7 @@ import { sacrificialBoxes } from '@/engine/cnc/sacrificial';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { OpOutcome } from '@/engine/cnc/cam/model/plan';
 import type { Mill } from '@/engine/cnc/machine';
+import type { StockSide } from '@/engine/cnc/cam/model/ops/edgeOverrun';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import type { RotaryMap } from '@/engine/cnc/rotary/wrap';
 import type { Setup } from '@/engine/cnc/setup';
@@ -43,6 +44,52 @@ import type { Tool } from '@/engine/cnc/tool';
 import type { DepthLimit, VerifyContext } from '@/engine/cnc/verify';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { SetupFrame } from '@/engine/cnc/cam/model/features';
+
+/** One mount box's XY extent and top, work frame — the raw fact the openness rule tests. */
+export interface OpenEdgeBox {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  topZ: number;
+}
+
+/** The raw facts #1234's side-openness predicate reads; the rule itself is `evaluateOpenEdge`. */
+export interface OpenEdgeFacts {
+  boxes: readonly OpenEdgeBox[];
+  uncertaintyMm: number;
+  clearanceMm: number;
+  /** The JOB blank's dims — the mount's boxes surround the blank, not a stated setup box. */
+  stockLengthMm: number;
+  stockWidthMm: number;
+}
+
+/**
+ * #1234's rule, evaluated from the record's raw facts — the SAME predicate the generator's
+ * closure ran: a side is open only when no box overlapping the side's overrun strip rises above
+ * the cutter's lowest clearance there. Behaviour-identical by construction; the record only moves
+ * WHERE the facts live.
+ */
+export function evaluateOpenEdge(facts: OpenEdgeFacts, side: StockSide, lowestTipZ: number, radiusMm: number): boolean {
+  const band = radiusMm + facts.uncertaintyMm + facts.clearanceMm;
+  const length = facts.stockLengthMm;
+  const width = facts.stockWidthMm;
+  const strip = side === 'left'
+    ? { minX: -band, maxX: 0, minY: -band, maxY: width + band }
+    : side === 'right'
+      ? { minX: length, maxX: length + band, minY: -band, maxY: width + band }
+      : side === 'front'
+        ? { minX: -band, maxX: length + band, minY: -band, maxY: 0 }
+        : { minX: -band, maxX: length + band, minY: width, maxY: width + band };
+  const lowestSolidZ = lowestTipZ - radiusMm - facts.clearanceMm;
+  for (const box of facts.boxes) {
+    const overlapX = Math.min(strip.maxX, box.maxX) - Math.max(strip.minX, box.minX);
+    const overlapY = Math.min(strip.maxY, box.maxY) - Math.max(strip.minY, box.minY);
+    if (overlapX <= 0 || overlapY <= 0) continue;
+    if (box.topZ + facts.uncertaintyMm > lowestSolidZ) return false;
+  }
+  return true;
+}
 
 /** The twelve facts of a setup, as the verifier's side can state them today. */
 export interface SetupRecord {
@@ -79,8 +126,12 @@ export interface SetupRecord {
   depthLimit: DepthLimit;
   /** Fact 7 (#1235) — the region a cut may travel over, or absent when the caller states none. */
   footprint: readonly FootprintShape[] | undefined;
-  /** Fact 8 (#1234) — slice 2; null until then. */
-  openEdges: null;
+  /**
+   * Fact 8 (#1234) — the RAW fixture facts the edge-openness predicate reads, so the rule can be
+   * evaluated from the record instead of from the generator's closure. Null when the caller states
+   * no fixture facts (a restored run, a direct caller).
+   */
+  openEdges: OpenEdgeFacts | null;
   /** Fact 9 — the outline-is-stock decision and the freeing contour; slice 2; null until then. */
   outline: null;
   /** Fact 10 — the rotary frame when this setup is a rod, exactly as the caller states it today. */
@@ -127,6 +178,8 @@ export interface SetupRecordDeps {
   rotary?: RotaryMap | null;
   /** The planner's own `SetupFrame` for this setup (slice 2), stated on the record as itself. */
   frame?: SetupFrame;
+  /** The raw #1234 fixture facts, when the caller has them (the model input builder does). */
+  openEdges?: OpenEdgeFacts;
   /**
    * The stock's box when the caller has NO `EngraveJob` — REQUIRED there (the builder throws
    * without it): a restart states the blank it cuts, and a dry run states the box its `Setup`
@@ -254,7 +307,7 @@ export function setupRecordFor(job: EngraveJob | null, setupIndex: number, deps:
     holds,
     depthLimit,
     footprint,
-    openEdges: null,
+    openEdges: deps.openEdges ?? null,
     outline: null,
     rotary,
     datum: null,
