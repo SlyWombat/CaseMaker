@@ -1,6 +1,7 @@
 /**
- * The Manage surface's scopes rail (#311): House (Tools, Materials) and Machines, with the
- * house service's own state in the foot.
+ * The Manage surface's scopes rail (#311): House (Tools, Accessories, Materials), Machines, and the
+ * Advanced scopes (#1207 — All values, generated from the defaults registry), with the house
+ * service's own state in the foot.
  *
  * The foot is the one place in the app that states what the service IS rather than what it served —
  * present or absent, at which origin, how old the catalogue is, and whether the service reported a
@@ -113,6 +114,10 @@ export function ManageRail() {
           }
         />,
       )}
+
+      {/* #1207 — every shop default the registry knows, edited one key at a time. */}
+      <div className="nav__divider">Advanced</div>
+      {scopeButton('advanced', '🎛️', 'All values', <span />)}
 
       <div className="mrail__foot" data-testid="manage-rail-foot">
         house service ·{' '}
