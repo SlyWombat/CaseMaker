@@ -28,7 +28,7 @@
  * a second time.
  */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { ProbeFitDiagram } from '@/components/ui/ProbeFitDiagram';
 import { clearanceHoldWords } from '@/components/welcome/holdingMounts';
 import { probeFor } from '@/engine/cnc/registration/mountContext';
@@ -63,6 +63,7 @@ import { DRY_RUN_SAFE_Z, dryRunProgramFor, type DryRunLevel } from '@/engine/cnc
 import { jobFootprint } from '@/engine/cnc/footprint';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { useSettingsStore } from '@/store/settingsStore';
 import { finishedProgramsFor, finishedRunsFor, useLocationStore } from '@/store/locationStore';
@@ -957,18 +958,23 @@ export function EngraveCutSurface({
   // The verifier context for the LIFTED text. The tool never affects a dry-run check (no spindle,
   // no cuts), so the job's cutter — or a minimal flat mill when none resolves — is an honest stand-in.
   const calibration = useSettingsStore((s) => s.machineCalibration) ?? null;
-  const dryRunDeps = useMemo(() => {
-    const mill = jobMachine(job, calibration);
-    return {
-      // #1241 — the setup's rotary limits come from this panel's store map, stated here.
-      setup: toSetup(job, mill, undefined, undefined, undefined, defaults),
-      machine: mill,
-      tool: jobTool(job) ?? flatEndMill(1),
-      // #1235 stage 2 — the lifted dry run has no cuts, but its verifier context still states the
-      // job's footprint (the same one the real program's check is measured from).
-      footprint: jobFootprint(job),
-    };
-  }, [job, calibration, defaults]);
+  // #1247 — the lifted text is verified against the SETUP'S own stock (#1082): a run's program
+  // names the setup it belongs to, and the body's work origin follows that setup's box.
+  const dryRunDepsFor = useCallback(
+    (setupIndex: number) => {
+      const mill = jobMachine(job, calibration);
+      return {
+        // #1241 — the setup's rotary limits come from this panel's store map, stated here.
+        setup: toSetup(job, mill, undefined, undefined, stockForSetup(job, setupIndex - 1), defaults),
+        machine: mill,
+        tool: jobTool(job) ?? flatEndMill(1),
+        // #1235 stage 2 — the lifted dry run has no cuts, but its verifier context still states the
+        // job's footprint (the same one the real program's check is measured from).
+        footprint: jobFootprint(job),
+      };
+    },
+    [job, calibration, defaults],
+  );
   /** The program list the run controls play: the frozen texts, or their lifted dry-run variants. */
   const runSources: ReleaseSource[] = useMemo(() => {
     if (dryRunLevel === 'off') return sources;
@@ -978,10 +984,10 @@ export function EngraveCutSurface({
       // surface program IS lifted like any other: the lifted text is a genuine 2D air program, and
       // the dry-run verifier's report becomes the lifted source's check.
       if (releaseCheck(s) === null) return s;
-      const dry = dryRunProgramFor(s.nc, dryRunDeps);
+      const dry = dryRunProgramFor(s.nc, dryRunDepsFor(s.setupIndex));
       return { ...s, nc: dry.nc, verify: dry.verify, surfaceCheck: null, hash: dry.hash, dryRun: true };
     });
-  }, [sources, dryRunLevel, dryRunDeps]);
+  }, [sources, dryRunLevel, dryRunDepsFor]);
   // A traverse plays ONE lifted program (a fast head/progress rehearsal); a full dry run plays all.
   const traverseOnly = dryRunLevel === 'traverse';
   const releaseSources = traverseOnly ? runSources.slice(0, 1) : runSources;

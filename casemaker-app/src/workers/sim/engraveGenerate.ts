@@ -141,6 +141,7 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
@@ -5876,7 +5877,6 @@ export async function postModelPlan(
     );
   }
 
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
   // #943 (10) — A THROUGH FREEING CONTOUR GRANTS THE BOARD'S BREAKTHROUGH AT ITS OWN KERF, and
   // only there: the plan states that kerf (`OpOutcome.throughKerf`, path + tab spans + radius +
   // tab height), and the verifier's through mask is built from it — the same mask the item
@@ -5926,6 +5926,9 @@ export async function postModelPlan(
     // real id when `job.setups` ever does carry one at this index (future wiring, not a guess
     // this entry makes), else synthesize a stable, readable one off the job's own implicit id.
     const setupId = jobSetupList[plan.setupIndex]?.id ?? `${jobSetupList[0]!.id}#${setupIndex}`;
+    // #1247 — the verifier's body is THIS setup's own stock (#1082); with no stated box it is the
+    // job's blank, exactly as before.
+    const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, plan.setupIndex), shop.defaults ?? null);
     // #943 — this setup's through kerfs, the record's depth-limit input.
     const throughKerf = plan.ops.flatMap((op) => (op.kind === 'contour' && op.outcome.throughKerf !== undefined ? [op.outcome.throughKerf] : []));
     if (plan.programs.length === 0) {
@@ -7271,7 +7274,7 @@ async function generateFaceProgram(
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
       }
-      const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
+      const fineSetup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, 0), shop.defaults ?? null);
       // #1246 slice 1 — the rest pass's context from the setup record (rotary face: no flat
       // footprint, and the site's own job limit).
       const fineFacts: SetupRecordDeps & VerifyPerProgram = {
@@ -7365,7 +7368,7 @@ async function generateFaceProgram(
     return fail('post', e instanceof Error ? e.message : String(e), { findings: allFindings, feeds });
   }
 
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, 0), shop.defaults ?? null);
   const limit: DepthLimit = jobDepthLimit(job, margins.boundaryMargin);
   // #1246 slice 1 — the face program's context from the setup record (rotary: no flat footprint).
   const faceFacts: SetupRecordDeps & VerifyPerProgram = {
@@ -9078,7 +9081,10 @@ async function generateOneProgram(
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
   // #725 B7 — the wasteboard rides the setup as the under-board (a through cut may enter it).
-  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, undefined, shop.defaults ?? null);
+  // #1247 — the verifier's body is the item path's setup (index 0). The sub-job a per-setup
+  // program carries already holds that setup's stock; the explicit resolver also covers the
+  // whole-job faces caller, whose body was the blank before.
+  const setup = toSetup(job, mill, shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, 0), shop.defaults ?? null);
 
   // 5. the post-processor (#173). Its `ctx` comes first because the facing file is posted from it
   // too (step 6), and the two files share one job name, stock and frame.
