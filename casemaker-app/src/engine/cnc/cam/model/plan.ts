@@ -19,6 +19,7 @@
  */
 
 import type { EngraveJob } from '@/types/engraveJob';
+import { resolveSetupStock } from '@/engine/cnc/setups/stockBox';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
@@ -271,12 +272,16 @@ export interface SetupSpec {
   stock?: { length: number; width: number; thickness: number };
 }
 
-/** #1082 — the box a setup is cut from: its own stock, else the job's blank. */
+/**
+ * #1082 — the box a setup is cut from: its own stock, else the job's blank. #1246 slice 2 — this
+ * is a thin call to the ONE resolver (`setups/perSetupStock.ts`), shared with `stockForSetup`; the
+ * two used to read their own copies of the statement.
+ */
 export function setupStockOf(
   input: { stock: { length: number; width: number; thickness: number } },
   spec: SetupSpec,
 ): { length: number; width: number; thickness: number } {
-  return spec.stock ?? { length: input.stock.length, width: input.stock.width, thickness: input.stock.thickness };
+  return resolveSetupStock(spec.stock, input.stock);
 }
 
 export interface ModelPlanInput {
