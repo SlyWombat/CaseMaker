@@ -12,14 +12,16 @@
  * The label leads and the key follows, so an operator reads what the value does before its name.
  * Each area heading carries its own count of changed values; there is no second filter.
  *
- * THE DETAIL SAYS WHAT THE VALUE DECIDES (not where it came from), and the record it names is
- * "this shop's record". A measured value may be replaced here by hand, with its provenance — the
- * record then says "entered by hand" — and it has no reset, because the way back is to measure
- * again (the detail links to the measuring procedure).
+ * THE DETAIL SAYS WHAT THE VALUE DECIDES (not where it came from), and names the shop's own copy
+ * "this shop's settings" — the analyst's ruling (2026-11-12), because #887 bans "record" as our
+ * internal bookkeeping word. The file that holds them is named in the "Saved in" row's own detail,
+ * for whoever needs it. A measured value may be replaced here by hand, with its provenance — the
+ * saved settings then say "entered by hand" — and it has no reset, because the way back is to
+ * measure again (the detail links to the measuring procedure).
  *
  * FOUR STATES, EACH DRAWN: an empty search, a value just saved, a save the house service refuses,
- * and a shop with no record to edit (read-only, showing the recommendations). On a phone the row
- * opens in place; on the desktop the detail sits in its own pane.
+ * and a shop with no saved settings to edit (read-only, showing the recommendations). On a phone
+ * the row opens in place; on the desktop the detail sits in its own pane.
  */
 import { useMemo, useState } from 'react';
 import { z } from 'zod';
@@ -256,8 +258,8 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
 /**
  * A registry label as an operator reads it. The registry's own labels carry provenance wording
  * ("(chosen)", "(chosen, not measured)") because the registry states where a number comes from;
- * on this page the provenance is the row's chips and the detail's record line, so the wording is
- * stripped HERE, never in the registry. Honest limitations — "(measured)", "(not measured)",
+ * on this page the provenance is the row's chips and the detail's provenance line, so the wording
+ * is stripped HERE, never in the registry. Honest limitations — "(measured)", "(not measured)",
  * "(provisional)", "(assumed)", "(placeholder)" — stay: they are what the value IS, not where it
  * came from.
  */
@@ -356,7 +358,7 @@ export function AllValuesScope() {
       });
       setSaving(false);
       if (ok) setSavedAt(new Date().toLocaleTimeString());
-      else setRefusal(useShopDefaultsStore.getState().reason ?? 'the shop’s record refused the value');
+      else setRefusal(useShopDefaultsStore.getState().reason ?? 'this shop’s settings refused the value');
       return;
     }
     const text = draft.trim();
@@ -390,13 +392,13 @@ export function AllValuesScope() {
       setSavedAt(new Date().toLocaleTimeString());
       setDraft(String(value));
     } else {
-      setRefusal(useShopDefaultsStore.getState().reason ?? 'the shop’s record refused the value');
+      setRefusal(useShopDefaultsStore.getState().reason ?? 'this shop’s settings refused the value');
     }
   }
 
   async function resetOne(key: string) {
     const ok = await resetDefault(key);
-    if (!ok) setRefusal(useShopDefaultsStore.getState().reason ?? 'the shop’s record refused the reset');
+    if (!ok) setRefusal(useShopDefaultsStore.getState().reason ?? 'this shop’s settings refused the reset');
     else setSavedAt(new Date().toLocaleTimeString());
   }
 
@@ -409,7 +411,7 @@ export function AllValuesScope() {
   const detailBody =
     selected === null ? (
       <p className="allvalues-hint">
-        Choose a value to see what it decides, its recommendation and this shop’s record.
+        Choose a value to see what it decides, its recommendation and this shop’s settings.
       </p>
     ) : (
       <>
@@ -422,7 +424,7 @@ export function AllValuesScope() {
           This value decides {midSentence(selected.label).replace(/[.\s]+$/, '')}.
         </h4>
         <div className="lf">
-          <span>Value in this shop’s record</span>
+          <span>Value in this shop’s settings</span>
           <div className="allvalues-inputrow">
             {selected.flag ? (
               <select
@@ -482,15 +484,22 @@ export function AllValuesScope() {
             </dd>
           </div>
           <div>
-            <dt>This shop’s record</dt>
+            <dt>Provenance</dt>
             <dd>
               {selected.measuredOnly
                 ? selected.fromShop
-                  ? `${selected.note ?? 'measured'} · ${timeOfDayWords(selected.setAt) ?? 'recorded'}`
+                  ? `${selected.note ?? 'measured'} · ${timeOfDayWords(selected.setAt) ?? 'saved'}`
                   : 'not measured yet'
                 : selected.fromShop
-                  ? `${selected.note ?? selected.source ?? 'saved'} · ${timeOfDayWords(selected.setAt) ?? 'recorded'}`
+                  ? `${selected.note ?? selected.source ?? 'saved'} · ${timeOfDayWords(selected.setAt) ?? 'saved'}`
                   : 'the recommendation is in force'}
+            </dd>
+          </div>
+          <div>
+            <dt>Saved in</dt>
+            <dd>
+              this shop’s settings
+              <span className="allvalues-file mono">location.json › defaults</span>
             </dd>
           </div>
         </dl>
@@ -514,7 +523,7 @@ export function AllValuesScope() {
         </div>
         {selected.measured && (
           <p className="allvalues-hint allvalues-hint--measured">
-            Replacing a measurement: this shop’s record will say <b>entered by hand</b>. There is no
+            Replacing a measurement: this shop’s settings will say <b>entered by hand</b>. There is no
             reset — the way back is to measure again.{' '}
             <button type="button" className="allvalues-linklike" onClick={() => setDocsOpen(true)}>
               Measuring procedure →
@@ -538,8 +547,8 @@ export function AllValuesScope() {
         <div>
           <h3>All values</h3>
           <p>
-            Every shop default, generated from the registry. Edits write this shop’s record; a plan
-            that read a changed value asks for Generate again.
+            Every shop default, generated from the registry. Each change is saved for this shop; a
+            plan that read a changed value asks for Generate again.
           </p>
         </div>
         <div className="row btn-row">
@@ -556,8 +565,8 @@ export function AllValuesScope() {
 
       {status === 'absent' && (
         <div className="allvalues-banner" data-testid="all-values-readonly">
-          No shop record at this origin — the registry’s recommendations are shown. Connect the shop’s
-          service to edit them.
+          This shop’s settings are not available at this origin — the registry’s recommendations are
+          shown. Connect the shop’s service to edit them.
         </div>
       )}
 

@@ -3224,6 +3224,13 @@ button:disabled {
   text-align: right;
   color: var(--cm-color-on-surface-variant);
 }
+/* The file behind "Saved in" — the detail a reader wants when they go looking, not the headline. */
+.manage .allvalues-file {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--cm-color-on-surface-muted);
+}
 .manage .allvalues-hint {
   color: var(--cm-color-on-surface-muted);
   font-size: 11px;

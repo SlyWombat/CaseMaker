@@ -2,8 +2,9 @@
 /**
  * #1207 — MANAGE › ADVANCED › ALL VALUES. The accepted mock-up's six changes and its four states:
  * the label leads and the key follows; chips mark exceptions only (changed/measured — never
- * "chosen, not measured"); the detail opens with what the value DECIDES; the record is "this shop's
- * record", not a file name; the phone row shows the recommendation beside the value; and the four
+ * "chosen, not measured"); the detail opens with what the value DECIDES; the shop's copy is "this
+ * shop's settings", with the file named only in the Saved in row's own detail; the phone row shows
+ * the recommendation beside the value; and the four
  * states are empty search, just saved, a save the house service refuses, and a read-only shop.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,7 +72,7 @@ describe('#1207 All values', () => {
     expect(labelAt, 'the row shows the registry label').toBeGreaterThanOrEqual(0);
     expect(keyAt).toBeGreaterThan(labelAt);
     // #1207 review — the registry's provenance wording is not the operator's: the page strips
-    // "(chosen)" from the label, because the row's chip and the detail's record already say it.
+    // "(chosen)" from the label, because the row's chip and the detail's provenance line already say it.
     expect(text).not.toMatch(/\(chosen/i);
   });
 
@@ -86,13 +87,16 @@ describe('#1207 All values', () => {
     expect(measured.querySelector('[data-kind="measured"]')).not.toBeNull();
   });
 
-  it('the detail says what the value decides, and calls the shop’s copy this shop’s record', () => {
+  it('the detail says what the value decides, and names this shop’s settings', () => {
     render(<AllValuesScope />);
     fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
     const detail = screen.getByTestId('all-values-detail');
     expect(detail.textContent).toMatch(/This value decides/i);
-    expect(detail.textContent).toMatch(/this shop’s record/i);
-    expect(detail.textContent).not.toMatch(/location\.json/i);
+    expect(detail.textContent).toMatch(/this shop’s settings/i);
+    // #887 bans "record"; the analyst ruled the copy says "settings". The file itself is named
+    // only in the Saved in row's own detail, for whoever needs it.
+    expect(detail.textContent).not.toMatch(/record/i);
+    expect(detail.querySelector('.allvalues-file')?.textContent).toContain('location.json');
     // #1207 review — one full stop: a description that already ends in one does not get another.
     const title = detail.querySelector('.allvalues-title')?.textContent ?? '';
     expect(title).toBe('This value decides holding tab width.');
@@ -112,7 +116,7 @@ describe('#1207 All values', () => {
   it('shows the house service’s refusal sentence, and applies nothing', async () => {
     set.mockResolvedValue(false);
     useShopDefaultsStore.setState({
-      reason: 'this shop’s record is locked while a registration is running; try again when it finishes',
+      reason: 'this shop’s settings are locked while a registration is running; try again when it finishes',
     });
     render(<AllValuesScope />);
     fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
@@ -128,7 +132,7 @@ describe('#1207 All values', () => {
     expect(screen.getByTestId('all-values-empty').textContent).toMatch(/No values match/i);
   });
 
-  it('a shop with no record is read-only: the recommendations show and saving is disabled', () => {
+  it('a shop with no saved settings is read-only: the recommendations show and saving is disabled', () => {
     useShopDefaultsStore.setState({ status: 'absent', defaults: null, etag: null, reason: 'no house service at this origin' });
     render(<AllValuesScope />);
     expect(screen.getByTestId('all-values-readonly').textContent).toMatch(/recommendations/i);

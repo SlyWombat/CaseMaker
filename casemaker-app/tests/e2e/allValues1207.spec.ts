@@ -1,8 +1,8 @@
 // #1207 — Manage › Advanced › All values: the four accepted states, drawn and measured.
 //
 // The page is a view of the registry, so the states are about the SHOP'S RECORD, not about a
-// hand-built row: a shop with a record (house `/defaults` served), a save the service accepts, a
-// save it refuses in its own words, and a shop with no record at all (read-only, recommendations
+// hand-built row: a shop with saved settings (house `/defaults` served), a save the service accepts, a
+// save it refuses in its own words, and a shop with no saved settings (read-only, recommendations
 // shown). The phone state draws the row opening in place instead of a detail pane.
 //
 // The pictures go beside the other visual QA (`/mnt/house/casemaker/qa/`); the assertions here are
@@ -41,7 +41,7 @@ test.describe('#1207 All values', () => {
     await page.screenshot({ path: `${QA}/empty-search.png` });
   });
 
-  test('a value just saved: the record takes it and says so', async ({ cm, page }) => {
+  test('a value just saved: the settings take it and say so', async ({ cm, page }) => {
     const doc = locationDocument();
     await serveHouse(page, { location: locationView(doc), defaults: doc.defaults, writes: 'applied' });
     await cm.ready();
@@ -51,7 +51,7 @@ test.describe('#1207 All values', () => {
     await page.getByTestId('all-values-input').fill('12');
     await page.getByTestId('all-values-save').click();
     await expect(page.getByTestId('all-values-saved')).toContainText('Saved');
-    // The re-read is the record's: the row now differs from its recommendation and says changed.
+    // The re-read is the shop's: the row now differs from its recommendation and says changed.
     await expect(page.getByTestId('all-values-row-tabs.widthMm')).toContainText('12');
     await expect(
       page.getByTestId('all-values-row-tabs.widthMm').locator('[data-kind="changed"]'),
@@ -71,12 +71,12 @@ test.describe('#1207 All values', () => {
       return route.fulfill({
         status: 400,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'this shop’s record is locked while a registration is running; try again when it finishes' }),
+        body: JSON.stringify({ error: 'this shop’s settings are locked while a registration is running; try again when it finishes' }),
       });
     });
     await cm.ready();
     await openAllValues(page);
-    // The record is loaded: the fixture's six measured values are marked.
+    // The settings are loaded: the fixture's six measured values are marked.
     await expect(page.getByTestId('all-values-chip-measured')).toContainText('Measured 6');
 
     await page.getByTestId('all-values-row-tabs.widthMm').click();
@@ -89,7 +89,7 @@ test.describe('#1207 All values', () => {
     await page.screenshot({ path: `${QA}/house-refused.png` });
   });
 
-  test('a shop with no record is read-only: the recommendations show', async ({ cm, page }) => {
+  test('a shop with no saved settings is read-only: the recommendations show', async ({ cm, page }) => {
     await serveHouse(page, {});
     await cm.ready();
     await openAllValues(page);
