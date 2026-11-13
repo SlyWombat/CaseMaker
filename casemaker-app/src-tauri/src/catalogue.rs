@@ -51,7 +51,7 @@
 //
 // EMPTY STRING MEANS UNSET, AND THAT IS NOT THE SAME AS ZERO. Every geometry column in this
 // database is nullable in practice, and Studio writes `''` rather than NULL for "no value"
-// (`/docs/bench/2026-10-08-makera-library-schema.md`). SQLite keeps `''` as TEXT even in a REAL
+// (the copy on the share, not in the repo). SQLite keeps `''` as TEXT even in a REAL
 // column, so a plain `get::<Option<f64>>` FAILS on the rows that matter — every ball nose, every
 // engraver, every thread mill. Reading through `ValueRef` and treating an empty or unparseable
 // string as "not stated" is what makes those rows importable at all, and a `0` stays a `0`.
@@ -1508,7 +1508,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// The eight categories, with the geometry the real install states for each. Copied from
-    /// `/docs/bench/2026-10-08-makera-library-schema.md` and from the rows themselves: getting one of
+    /// the copy on the share (not in the repo) and from the rows themselves: getting one of
     /// these numbers wrong here would be describing the import rather than testing it.
     fn a_library() -> (TempDir, PathBuf) {
         let dir = TempDir::new().unwrap();
