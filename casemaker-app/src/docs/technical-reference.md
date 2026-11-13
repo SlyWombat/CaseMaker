@@ -259,6 +259,7 @@ The keys added since v0.2, with their recommendations:
 | `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
 | `plan.leftoverEquivalencePct` | 0.5 % | 0–5 | The cutter-chain rank (#1217): sets of cutters whose leftover differs by no more than this share of the covered surface count as equal on that key, and the faster set is chosen. |
 | `plan.leftoverTallMm` | 1 mm | 0.1–50 | The same rank (#1224): material standing taller than this is never given up for a faster set, however much time the trade would save. |
+| `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch still too long gets a named tight tab before the job is ever refused. |
 
 The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
 into the rotary-chuck workholding, and the verifier and both simulators read the setup's copy, so
@@ -282,8 +283,13 @@ the plan ran on the recommendations rather than assume it. The key list (`PLANNE
 is held to the code by a source-scanning test, so a new read site cannot go unlisted. The same scan
 covers the other families the plan reads — the rotary limits (`rotary.*`), the face-angle pair,
 the probe residuals (`registration.*ResidualMm`, `bracket.repeatMm`), the bit-change rule and
-`probe.colletMatchMm`; those are read through the shared installer (`installShopDefaults`), called
-at each realm's edge, and a test pins the installer call in each realm.
+`probe.colletMatchMm`. After #1241 and #1244 those families read their map from the CALLER, not an
+ambient source: each reader takes the map (the rotary limits, the probe residuals, the run total's
+rule) or the value (the collet match) as an argument, every engine caller passes what its realm
+holds, and a gate test fails if any file under `src/engine/**` imports the ambient reader — with
+one named survivor, the main-thread IPC client `simClient`, whose exemption ends if it ever moves
+to a worker. `installShopDefaults` remains only where an edge owns it (the store's install and the
+worker entries).
 
 **What the sheet says a plan costs.** The run sheet prints the plan's own statements, so those
 settings are visible as words on paper, not only as a different program:
