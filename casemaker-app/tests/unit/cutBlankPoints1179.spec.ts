@@ -9,7 +9,6 @@
 import { describe, expect, it } from 'vitest';
 import { encodeRuns } from '@/engine/cnc/engrave/cutMap';
 import {
-  CUT_BLANK_MAX_POINTS,
   cutBlankCandidates,
   cutBlankCandidatesFromMap,
   cutFootprintMask,
@@ -81,7 +80,7 @@ describe('#1179 candidate points on a cut blank', () => {
   it('with finished programs: the uncut top first, then flat floors (depth carried)', () => {
     // A finished fill across the middle; the top remains at both ends.
     const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' as const };
-    const known = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 }, raster: RASTER, programs: [program], probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 }, fallbackRadiusMm: 2, obstacles: [] });
+    const known = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 }, raster: RASTER, programs: [program], probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 }, fallbackRadiusMm: 2, obstacles: [] });
     expect(known.earlierCutsKnown).toBe(true);
     expect(known.points.length).toBeGreaterThanOrEqual(2);
     // Every top point is outside the filled RECTANGLE grown by the cutter radius; floors carry 2 mm.
@@ -98,7 +97,7 @@ describe('#1179 candidate points on a cut blank', () => {
 
   it('with nothing recorded: outside today’s footprint, d = 0, and earlier cuts unknown', () => {
     const program = { nc: fillNc(30, 70, 10, 50, 1, 2), cutterRadiusMm: 2, finished: false, shape: 'flat' as const };
-    const unknown = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const unknown = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [program],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
@@ -116,7 +115,7 @@ describe('#1179 candidate points on a cut blank', () => {
   });
 
   it('keeps the 3 mm edge margin and the mount obstacles clear, and spreads the points', () => {
-    const points = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const points = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
@@ -134,13 +133,13 @@ describe('#1179 candidate points on a cut blank', () => {
     // The spread: no two points share a cell, and the list is capped.
     const keys = new Set(points.map((p) => `${p.x},${p.y}`));
     expect(keys.size).toBe(points.length);
-    expect(points.length).toBeLessThanOrEqual(CUT_BLANK_MAX_POINTS);
+    expect(points.length).toBeLessThanOrEqual(5);
   });
 
   it('a floor deeper than the tip needs the probe’s body: without it the uncut top only, with a note', () => {
     // The whole top is a 2 mm floor; the probe's tip sticks out 1 mm, so the body enters.
     const deep = { nc: fillNc(0, 100, 0, 60, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' as const };
-    const noBody = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const noBody = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [deep],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 1 },
@@ -149,7 +148,7 @@ describe('#1179 candidate points on a cut blank', () => {
     });
     expect(noBody.points).toEqual([]);
     expect(noBody.floorsRestricted).toContain('body diameter is not recorded');
-    const withBody = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const withBody = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [deep],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 1, bodyDiameterMm: 4 },
@@ -162,7 +161,7 @@ describe('#1179 candidate points on a cut blank', () => {
 
   it('an unrecorded tip length keeps the uncut top, and the note says the floors were not used', () => {
     const program = { nc: fillNc(20, 80, 10, 50, 1, 2), cutterRadiusMm: 2, finished: true, shape: 'flat' as const };
-    const r = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const r = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [program],
       probe: { tipRadiusMm: TIP_R },
@@ -181,7 +180,7 @@ describe('#1179 candidate points on a cut blank', () => {
   });
 
   it('offers no candidate when the mount’s obstacles leave nothing', () => {
-    const points = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const points = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
@@ -222,7 +221,7 @@ describe('#1179 a non-flat cutter’s floor is not flat (analyst, 2026-11-10)', 
     expect(depth[at(RASTER, 50, 30)]).toBe(0);
     const flat = flatFloorMask(RASTER, [ball], 3, { tipRadiusMm: TIP_R, tipLengthMm: 10 }, depth);
     expect(flat[at(RASTER, 50, 30)]).toBe(0);
-    const points = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const points = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster: RASTER,
       programs: [ball],
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
@@ -257,7 +256,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
     const rows = Math.ceil(60 / 2);
     const levels = new Array(cols * rows).fill(40);
     const flat = new Array(cols * rows).fill(1);
-    const out = cutBlankCandidatesFromMap({
+    const out = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: mapOf(2, levels, flat),
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
@@ -277,7 +276,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
     const rows = Math.ceil(60 / 4);
     const levels = new Array(cols * rows).fill(20); // 20 × 0.05 = 1 mm
     const flat = new Array(cols * rows).fill(1);
-    const out = cutBlankCandidatesFromMap({
+    const out = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: mapOf(4, levels, flat),
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
@@ -297,7 +296,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
     const flat = new Array(cols * rows).fill(0);
     // Make one interior cell flat so there is something to sample.
     flat[Math.floor(rows / 2) * cols + Math.floor(cols / 2)] = 1;
-    const out = cutBlankCandidatesFromMap({
+    const out = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: mapOf(2, levels, flat),
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,
@@ -313,7 +312,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
     const rows = Math.ceil(60 / 2);
     const levels = new Array(cols * rows).fill(40);
     const flat = new Array(cols * rows).fill(1);
-    const noBody = cutBlankCandidatesFromMap({
+    const noBody = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: mapOf(2, levels, flat),
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 1 },
       fallbackRadiusMm: 2,
@@ -323,7 +322,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
     } as never)!;
     expect(noBody.points).toEqual([]);
     expect(noBody.floorsRestricted).toContain('body diameter is not recorded');
-    const withBody = cutBlankCandidatesFromMap({
+    const withBody = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: mapOf(2, levels, flat),
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 1, bodyDiameterMm: 4 },
       fallbackRadiusMm: 2,
@@ -332,7 +331,7 @@ describe('#1179 stage 2 — candidates from the record’s per-setup cut map', (
       holdUncertainty: { xMm: 0, yMm: 0 },
     } as never)!;
     expect(withBody.points.length).toBeGreaterThanOrEqual(2);
-    const broken = cutBlankCandidatesFromMap({
+    const broken = cutBlankCandidatesFromMap({ maxPoints: 5, preferredInsetMm: 10,
       map: { ...mapOf(2, levels, flat), depth: { encoding: 'rle', data: 'not-a-run' } },
       probe: { tipRadiusMm: TIP_R, tipLengthMm: 10 },
       fallbackRadiusMm: 2,

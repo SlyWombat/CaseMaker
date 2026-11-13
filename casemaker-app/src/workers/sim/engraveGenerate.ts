@@ -6160,6 +6160,9 @@ async function flipReleaseProgram(
     pins,
     toolRadiusMm: diameter / 2,
     tabs,
+    // #1207 — the two ruled clearances, read from the shop record at this worker's edge.
+    cornerClearanceMm: readDefault(shop.defaults ?? null, 'tabs.cornerClearanceMm').value,
+    pinClearanceMm: readDefault(shop.defaults ?? null, 'tabs.pinClearanceMm').value,
     params,
     offset: makeClipperOffset(await getToplevel()),
   });

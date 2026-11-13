@@ -443,7 +443,7 @@ describe('#1179 amendment — above-band readings at a check point', () => {
 
   it('the first three candidates are inset from the edges and not the three corners', () => {
     const raster = { xMin: 0, yMin: 0, xMax: 100, yMax: 60, pitchMm: 1, nx: 100, ny: 60 };
-    const { points } = cutBlankCandidates({ shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
+    const { points } = cutBlankCandidates({ maxPoints: 5, preferredInsetMm: 10, shrinkMm: 3, holdUncertainty: { xMm: 0, yMm: 0 },
       raster,
       programs: [],
       probe: { tipRadiusMm: 0.7, tipLengthMm: null, bodyDiameterMm: null },

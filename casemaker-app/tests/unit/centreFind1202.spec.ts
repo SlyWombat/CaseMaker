@@ -20,6 +20,7 @@ function plan() {
     ballRadiusMm: 0.875,
     stockThicknessMm: 12,
     touchFeed: 120,
+    maxSearchMm: 60,
   });
   if (!made.ok) throw new Error(made.reason);
   return made.plan;

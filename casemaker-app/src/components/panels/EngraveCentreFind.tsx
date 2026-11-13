@@ -22,6 +22,7 @@ import {
   type CentreRunResult,
 } from '@/engine/cnc/registration/execute';
 import { planCentreFind, type CentreFindPlan, type CentreKind } from '@/engine/cnc/registration/centreFind';
+import { readDefault } from '@/platform/defaultsClient';
 import { probeInstrumentOf, type ProbeSpec, type RegistrationPlan } from '@/engine/cnc/registration/plan';
 import { topTouchEdgeMarginsMm } from '@/engine/cnc/registration/cutBlank';
 import type { RegistrationSettings } from '@/engine/cnc/registration/settings';
@@ -101,8 +102,11 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
       ballRadiusMm: probe.tip.rimOffsetMm,
       ...(thickness === undefined ? {} : { stockThicknessMm: thickness }),
       touchFeed: settings.touchFeed,
+      // #1207 — the travel bound is the shop's; a plan stored before the key reads the
+      // recommendation at this edge rather than a literal.
+      maxSearchMm: settings.centreSearchMaxMm ?? readDefault(null, 'registration.centreSearchMaxMm').value,
     });
-  }, [kind, search, defaultSearch, plan, probe, estimate, thickness, settings.touchFeed]);
+  }, [kind, search, defaultSearch, plan, probe, estimate, thickness, settings.touchFeed, settings.centreSearchMaxMm]);
   /** The executor's own options for this plan — the press and the preview must not differ. */
   const centreOptions = useMemo((): CentreFindOptions | null => {
     if (made === null || !made.ok || plan === null) return null;
