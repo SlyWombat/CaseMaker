@@ -674,6 +674,21 @@ stepped, because a cone's flank is tangent to one bevel plane and no second pass
 chamfer is its own program — a cone cannot profile — so the row states the order against its rim's
 cut, and `chamfer-order` refuses a run where the two programs are the wrong way round.
 
+**Holding tabs sit in the middle of each side.** A through cut that frees a part leaves holding
+tabs, and one rule places them. The outline's longest edges take one tab first, centred on the
+edge (opposite sides pair: 2 tabs on a rectangle are the two long sides' midpoints, 4 are every
+side's); a second tab comes to an edge only once every edge has one, and then the edge is divided
+evenly (thirds, then quarters). No tab's span sits within `max(2 × tab width, 10 % of the edge)`
+of a corner — an edge too short keeps none, and a round outline keeps equal spacing. No stretch of
+the outline is left longer than the shop's `tabs.maxSpanMm` (80 mm on stock 6 mm or thicker, 40 mm
+under 3 mm, linear between): the planner adds centred tabs beyond the count asked, so the count is
+a minimum, not a cap. When the stretch cannot take a corner-clear tab — a curve drawn in short
+segments — one TIGHT tab is placed inside the corner margin, and the run sheet names it with its
+distance from the nearest corner and the number of joins it spans; only when nothing can be placed
+is the part refused (`tab-unplaceable` below). The sheet states the placed count when it is fewer
+than asked and why, and the tabs it added when it is more. A tab's HEIGHT is unchanged in this
+rule — the apex-height placement is a later stage.
+
 **Bore to size** is the hole the box of bits cannot make: a **Hole** row whose width is the
 job's own — M3 to M6 clearance, a counterbore, a socket for a magnet — cut by helixing an end mill
 down the wall. Pick it and the row opens on the hole ⌀ (a clearance hole over the job's cutter, and

@@ -457,6 +457,24 @@ never an extrapolation, and nothing runs into a modelled fixture. A cutting feed
 the footprint than that allowance is a planning fault the verifier reports (`cut-outside-footprint`
 in the CNC guide), not something to fix at the machine.
 
+### Holding tabs
+
+A cut-out that frees a part leaves holding tabs — material the cut never enters — so the part
+cannot come loose under the cutter. Tabs sit in the middle of each side: the outline's longest
+edges take one first, centred on the edge (on a rectangle, two tabs are the two long sides'
+midpoints and four are every side's), a second tab comes to an edge only once every edge has one
+and then divides that edge evenly, and no tab's span sits within `max(2 × tab width, 10 % of the
+edge)` of a corner — an edge too short keeps none, and a round outline keeps equal spacing. No
+stretch of the outline is left longer than the shop's `tabs.maxSpanMm` (80 mm on 6 mm stock or
+thicker, 40 mm under 3 mm), so the planner may add centred tabs beyond the number asked: your
+count is a minimum, not a cap. When a stretch still cannot take a corner-clear tab — a curve
+drawn in short pieces — the planner places a tight tab inside the corner margin and the run sheet
+names it, its distance from the nearest corner and how many joins of the outline it spans:
+holding the part comes first, and the sheet says what was given up. A job that places fewer tabs
+than asked says so on the sheet ("N asked, M placed — the remaining edges are too short for
+another tab clear of the corners"), and one that gets more says why. The tab's height is
+unchanged; when nothing can be placed the cut is refused (`tab-unplaceable` in the CNC guide).
+
 ### Two-sided jobs (the flip)
 
 A two-sided job cuts some of the part from the stock's top and the rest from its underside, planned
