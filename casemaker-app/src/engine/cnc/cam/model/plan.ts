@@ -4325,6 +4325,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         },
         regions: shadowRegions,
         offset: opts.offset,
+        ...(opts.boolean === undefined ? {} : { subtract: opts.boolean.subtract }),
         contourPerimeterMm: polygonsPerimeter(tree.contour.outline),
         paramsFor: opts.paramsFor,
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),

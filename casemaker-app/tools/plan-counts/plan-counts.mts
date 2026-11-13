@@ -4,7 +4,7 @@
  * NOT A SPEC — a bench tool, like `tools/samples/run-gdrive-samples.mts`. Measurement only.
  *
  *   npx tsx tools/plan-counts/plan-counts.mts <trace.jsonl> [--json <out.json>] \
- *     [--shadow-csv <out.csv>] [--cutter-csv <out.csv>]
+ *     [--shadow-csv <out.csv>] [--cutter-csv <out.csv>] [--steps-csv <out.csv>]
  *
  * Reads the JSONL the CLI writes with `--mem-trace <file>`, counts the pipeline rows
  * (`summarize.ts` has the exact rules) and prints them. `--json` also writes the `PlanCounts`
@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 import { cutterRows, parseTrace, summarizeTrace, type TraceRow } from './summarize';
 
-const USAGE = 'usage: plan-counts <trace.jsonl> [--json <out.json>] [--shadow-csv <out.csv>] [--cutter-csv <out.csv>]';
+const USAGE = 'usage: plan-counts <trace.jsonl> [--json <out.json>] [--shadow-csv <out.csv>] [--cutter-csv <out.csv>] [--steps-csv <out.csv>]';
 
 const fail = (why: string): never => {
   console.error(why);
@@ -27,6 +27,7 @@ let file: string | undefined;
 let jsonOut: string | undefined;
 let shadowCsv: string | undefined;
 let cutterCsv: string | undefined;
+let stepsCsv: string | undefined;
 for (let i = 0; i < argv.length; i += 1) {
   const arg = argv[i]!;
   if (arg === '--json') {
@@ -43,6 +44,11 @@ for (let i = 0; i < argv.length; i += 1) {
     const value = argv[i + 1];
     if (value === undefined) fail(USAGE);
     cutterCsv = value;
+    i += 1;
+  } else if (arg === '--steps-csv') {
+    const value = argv[i + 1];
+    if (value === undefined) fail(USAGE);
+    stepsCsv = value;
     i += 1;
   } else if (arg.startsWith('--')) {
     fail(`plan-counts: unknown flag "${arg}" — ${USAGE}`);
@@ -105,12 +111,39 @@ function writeCutterCsv(path: string, rows: readonly TraceRow[]): void {
   const lines = ['signature,cutterKey,estSeconds,realSeconds,realChangeSeconds'];
   const cell = (value: number | null): string => (value === null ? '' : String(value));
   for (const r of cutterRows(rows)) {
-    lines.push(`"${r.signature.replace(/"/g, '""')}",${r.cutterKey},${cell(r.estSeconds)},${cell(r.realSeconds)},${cell(r.realChangeSeconds)}`);
+    lines.push(`"${r.signature.replace(/"/g, '""')}","${r.cutterKey.replace(/"/g, '""')}",${cell(r.estSeconds)},${cell(r.realSeconds)},${cell(r.realChangeSeconds)}`);
   }
   writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
 }
 
 if (cutterCsv !== undefined) writeCutterCsv(cutterCsv, rows);
+
+/** #1249 stage 2a — one line per `shadow:step` row: the estimate's inputs and the band it left. */
+const STEP_COLUMNS = [
+  'signature', 'stepIndex', 'kind', 'cutterKey', 'prevCutterKey', 'diameterMm', 'prevDiameterMm',
+  'addedAreaMm2', 'depthMm', 'levels', 'feed', 'plungeFeed', 'stepOverMm', 'stepDownMm', 'cutSeconds',
+  'bandAreaMm2', 'bandContourLengthMm', 'bandPatches',
+] as const;
+
+function writeStepsCsv(path: string, rows: readonly TraceRow[]): void {
+  const lines = [STEP_COLUMNS.join(',')];
+  for (const row of rows) {
+    if (row.stage !== 'shadow:step') continue;
+    lines.push(
+      STEP_COLUMNS.map((column) => {
+        const value = row[column];
+        if (value === undefined) return '';
+        if (column === 'signature' || column === 'cutterKey' || column === 'prevCutterKey') {
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }
+        return String(value);
+      }).join(','),
+    );
+  }
+  writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
+}
+
+if (stepsCsv !== undefined) writeStepsCsv(stepsCsv, rows);
 
 const seconds = (ms: number): string => (ms / 1000).toFixed(1);
 const lines = [

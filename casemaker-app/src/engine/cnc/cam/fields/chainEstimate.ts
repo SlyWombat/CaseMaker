@@ -48,6 +48,28 @@ export interface ChainEstimate {
   unpriced: number;
   /** Cutting seconds per cutter, in the order the cutters first appear in the chain. */
   perCutter: { cutterKey: string; cutSeconds: number }[];
+  /** #1249 stage 2a — every step's own inputs and priced seconds, for the trace (no value above changes). */
+  stepEstimates: StepEstimate[];
+}
+
+/** #1249 stage 2a — one step's inputs and its priced seconds, exactly as the estimate used them. */
+export interface StepEstimate {
+  stepIndex: number;
+  kind: string;
+  cutterKey: string;
+  /** '' for the chain's first step. */
+  prevCutterKey: string;
+  diameterMm: number;
+  prevDiameterMm: number;
+  /** The area this step was priced to remove (0 for a contour or an unpriced step). */
+  addedAreaMm2: number;
+  depthMm: number;
+  levels: number;
+  feed: number;
+  plungeFeed: number;
+  stepOver: number;
+  stepDown: number;
+  cutSeconds: number;
 }
 
 export function estimateChain(
@@ -68,6 +90,7 @@ export function estimateChain(
   };
 
   const perCutter: { cutterKey: string; cutSeconds: number }[] = [];
+  const stepEstimates: StepEstimate[] = [];
   let cutSeconds = 0;
   let changeSeconds = 0;
   let changes = 0;
@@ -75,9 +98,13 @@ export function estimateChain(
   let previousKey: string | null = null;
   let runSeconds = 0;
 
-  for (const step of steps) {
+  for (const [stepIndex, step] of steps.entries()) {
     let stepSeconds = 0;
+    let stepAddedArea = 0;
+    let stepDepth = 0;
+    let stepLevels = 1;
     const rates = step.rates;
+    const prevStep = stepIndex > 0 ? steps[stepIndex - 1]! : null;
     const areaPriceable =
       (step.kind === 'pocket' || step.kind === 'rest') &&
       rates !== null &&
@@ -113,6 +140,9 @@ export function estimateChain(
             (added / rates.stepOver / rates.feed) * 60 +
             (rates.plungeFeed > 0 ? (rates.stepDown / rates.plungeFeed) * 60 : 0);
           stepSeconds += levels * perLevel;
+          stepAddedArea += added;
+          stepDepth = Math.max(stepDepth, pocket.depthMm);
+          stepLevels = Math.max(stepLevels, levels);
         }
         cleared.set(id, Math.max(before, reach));
       }
@@ -126,6 +156,22 @@ export function estimateChain(
     runSeconds += stepSeconds;
     previousKey = step.cutterKey;
     cutSeconds += stepSeconds;
+    stepEstimates.push({
+      stepIndex,
+      kind: step.kind,
+      cutterKey: step.cutterKey,
+      prevCutterKey: prevStep === null ? '' : prevStep.cutterKey,
+      diameterMm: step.diameterMm,
+      prevDiameterMm: prevStep === null ? 0 : prevStep.diameterMm,
+      addedAreaMm2: stepAddedArea,
+      depthMm: stepDepth,
+      levels: stepLevels,
+      feed: rates?.feed ?? 0,
+      plungeFeed: rates?.plungeFeed ?? 0,
+      stepOver: rates?.stepOver ?? 0,
+      stepDown: rates?.stepDown ?? 0,
+      cutSeconds: stepSeconds,
+    });
     // Every step lands on its cutter's row — an unpriced one adds 0, so the cutter still appears.
     let entry = perCutter.find((e) => e.cutterKey === step.cutterKey);
     if (entry === undefined) {
@@ -146,5 +192,6 @@ export function estimateChain(
     leftoverMm2,
     unpriced,
     perCutter,
+    stepEstimates,
   };
 }

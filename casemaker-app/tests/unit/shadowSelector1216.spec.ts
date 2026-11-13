@@ -249,3 +249,33 @@ describe('shortlistReport (#1231)', () => {
     expect(rows.map((r) => r.signature)).toEqual(['A', 'B', 'C', 'D', 'E']);
   });
 });
+
+describe('#1249 stage 2a — the shadow:step row and the band', () => {
+  const RECT20x10: Polygons = [[[0, 0], [20, 0], [20, 10], [0, 10]]];
+
+  it('one row per pocket/rest step; the rest carries the band, the pocket zeros', () => {
+    const rows = capture(() =>
+      traceShadowSelection(
+        input({
+          demand: { features: [{ id: 'p1', kind: 'pocket', cornerRadiusMm: 1.5875, minOpeningMm: 7, depthMm: 6 }] },
+          cutters: { house: [flat('t6', 6, { fluteLength: 30 }), flat('t2', 2, { fluteLength: 20 })], catalogue: [] },
+          regions: new Map([['p1', RECT20x10]]),
+          paramsFor: () => ROW,
+          subtract: makeClipperSubtract(tl),
+        }),
+      ),
+    );
+    const steps = rows.filter((r) => r.stage === 'shadow:step');
+    expect(steps.length).toBeGreaterThanOrEqual(2);
+    const pocket = steps.find((r) => r.kind === 'pocket')!;
+    expect(pocket.bandAreaMm2).toBe(0);
+    expect(pocket.bandContourLengthMm).toBe(0);
+    expect(pocket.bandPatches).toBe(0);
+    const rest = steps.find((r) => r.kind === 'rest')!;
+    expect(rest.diameterMm).toBe(2);
+    expect(rest.prevDiameterMm).toBe(6);
+    expect(rest.bandPatches).toBe(4);
+    expect(rest.bandAreaMm2 as number).toBeCloseTo(6.9064, 2);
+    expect(rest.bandContourLengthMm as number).toBeCloseTo(41.1128, 1);
+  });
+});

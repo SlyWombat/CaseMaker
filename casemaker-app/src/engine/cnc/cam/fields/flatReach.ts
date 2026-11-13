@@ -74,3 +74,43 @@ export function polygonsPerimeter(region: Polygons): number {
   }
   return total;
 }
+
+/** #1249 stage 2a — the band between two cutters, as the rest pass sees it. */
+export interface ReachBand {
+  /** Area a cutter of diameter `d` can reach that one of diameter `dPrev` cannot, mm². */
+  areaMm2: number;
+  /** Total length of that band's outlines, mm. */
+  contourLengthMm: number;
+  /** Number of separate patches (outer rings whose area is above BAND_SLIVER_MM2). */
+  patches: number;
+}
+
+/** Slivers left by offset rounding are not patches a cutter visits. A geometric tolerance, not a shop setting. */
+export const BAND_SLIVER_MM2 = 0.001;
+
+/**
+ * #1249 stage 2a — THE BAND ONE CUTTER LEAVES THE NEXT. `reachOf(x)` is the region opened by
+ * radius x/2; the band is what `d` reaches that `dPrev` cannot. Slivers are dropped together with
+ * their holes; the outline length and the number of patches are what a rest pass really follows.
+ * `subtract` is injected like `offset` — this module imports no kernel.
+ */
+export function reachBand(
+  region: Polygons,
+  dPrev: number,
+  d: number,
+  offset: OffsetFn,
+  subtract: (a: Polygons, b: Polygons) => Polygons,
+): ReachBand {
+  if (!(d < dPrev)) return { areaMm2: 0, contourLengthMm: 0, patches: 0 };
+  const reachOf = (x: number): Polygons => offset(offset(region, -x / 2), x / 2);
+  const band = subtract(reachOf(d), reachOf(dPrev));
+  const kept: Polygons = [];
+  let patches = 0;
+  for (const contour of band) {
+    const a = signedArea(contour);
+    if (Math.abs(a) <= BAND_SLIVER_MM2) continue;
+    kept.push(contour);
+    if (a > 0) patches += 1;
+  }
+  return { areaMm2: polygonsArea(kept), contourLengthMm: polygonsPerimeter(kept), patches };
+}

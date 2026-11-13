@@ -11,6 +11,7 @@
  */
 import type { OffsetFn, Polygons } from '../pocket';
 import type { Tool } from '@/engine/cnc/tool';
+import { reachBand } from './flatReach';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import { memTrace } from '@/engine/cnc/memTrace';
@@ -32,6 +33,8 @@ export interface ShadowInput {
   chosenSignature: string;
   /** The length of the outline the contour step follows, mm; 0 when the job has no contour. */
   contourPerimeterMm: number;
+  /** #1249 stage 2a — the real Clipper subtract, for the band figures. Absent: bands are zeros. */
+  subtract?: (a: Polygons, b: Polygons) => Polygons;
 }
 
 /** Every number a trace row carries is rounded to three decimals (milliseconds stay integers). */
@@ -145,6 +148,8 @@ export function traceShadowSelection(input: ShadowInput): void {
 
   const estimates: { signature: string; est: ChainEstimate }[] = [];
   const shortlistRows: ShortlistRow[] = [];
+  /** #1249 — one band per (region, previous diameter, diameter), computed once per choice run. */
+  const bandCache = new Map<string, { areaMm2: number; contourLengthMm: number; patches: number }>();
   for (const candidate of candidates) {
     const signature = candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     const steps: EstimateStep[] = candidate.steps.map((s) => ({
@@ -182,6 +187,50 @@ export function traceShadowSelection(input: ShadowInput): void {
       realRank: real?.rank ?? -1,
       realSeconds: real?.cost ?? -1,
     });
+    // #1249 stage 2a — EVERY POCKET AND REST STEP's own inputs, and (for a rest) the band the
+    // previous cutter left it: area, outline length and separate patches. Trace-only.
+    for (const stepEst of est.stepEstimates) {
+      if (stepEst.kind !== 'pocket' && stepEst.kind !== 'rest') continue;
+      let bandArea = 0;
+      let bandContour = 0;
+      let bandPatches = 0;
+      if (stepEst.kind === 'rest' && stepEst.prevDiameterMm > 0 && input.subtract !== undefined) {
+        const regionIds = candidate.steps[stepEst.stepIndex]?.regionIds ?? [];
+        for (const id of regionIds) {
+          const region = input.regions.get(id);
+          if (region === undefined) continue;
+          const key = `${id}|${stepEst.prevDiameterMm}|${stepEst.diameterMm}`;
+          let band = bandCache.get(key);
+          if (band === undefined) {
+            band = reachBand(region, stepEst.prevDiameterMm, stepEst.diameterMm, input.offset, input.subtract);
+            bandCache.set(key, band);
+          }
+          bandArea += band.areaMm2;
+          bandContour += band.contourLengthMm;
+          bandPatches += band.patches;
+        }
+      }
+      memTrace('shadow:step', {
+        signature,
+        stepIndex: stepEst.stepIndex,
+        kind: stepEst.kind,
+        cutterKey: stepEst.cutterKey,
+        prevCutterKey: stepEst.prevCutterKey,
+        diameterMm: round3(stepEst.diameterMm),
+        prevDiameterMm: round3(stepEst.prevDiameterMm),
+        addedAreaMm2: round3(stepEst.addedAreaMm2),
+        depthMm: round3(stepEst.depthMm),
+        levels: stepEst.levels,
+        feed: round3(stepEst.feed),
+        plungeFeed: round3(stepEst.plungeFeed),
+        stepOverMm: round3(stepEst.stepOver),
+        stepDownMm: round3(stepEst.stepDown),
+        cutSeconds: round3(stepEst.cutSeconds),
+        bandAreaMm2: round3(bandArea),
+        bandContourLengthMm: round3(bandContour),
+        bandPatches,
+      });
+    }
   }
 
   // The shadow's own choice: leftover to a hundredth of a mm², then seconds, then the signature.
