@@ -9,13 +9,13 @@ import { describe, it, expect } from 'vitest';
 
 import {
   HOUSE_PLATE_THICKNESS_MM,
-  WORK_STOCK_MARGIN_MM,
   WORK_STOCK_SKIN_MM,
   proposeStock,
   proposedThickness,
   shelfPlateFor,
   type WorkShape,
 } from '@/engine/cnc/stockProposal';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from '@/engine/cnc/stockStart';
 import { PROPOSED_TEXT_SIZE_MM, workShapeFor } from '@/components/welcome/workShape';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -23,6 +23,9 @@ import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import type { OperationChoice } from '@/components/welcome/OperationStep';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { StockItem } from '@/platform/stockClient';
+
+// #1207 — the proposal margin is a shop key now; the tests run at the recommendation.
+const WORK_STOCK_MARGIN_MM = KNOWN_DEFAULTS['stock.workMarginMm']!.fallback;
 
 const MESH: WorkShape = { kind: 'mesh', size: { x: 40, y: 30, z: 12 } };
 const TEXT: WorkShape = { kind: 'text', size: { length: 50, width: 10 }, depth: 2 };

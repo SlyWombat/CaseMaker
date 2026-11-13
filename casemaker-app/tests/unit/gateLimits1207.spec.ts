@@ -168,7 +168,6 @@ const ALLOWED: Readonly<Record<string, AllowEntry>> = {
   'src/engine/cnc/toolCondition.ts:MAX_WARN_MINUTES': { reason: "a UI field/display bound, not a cut decision" },
   'src/engine/cnc/vCarveGeometry.ts:V_CARVE_STEPOVER_FALLBACK': { reason: "labelled fallback for `vcarve.stepoverRatio`; the gate asserts it equals that key’s recommendation", fallbackOf: 'vcarve.stepoverRatio' },
   'src/engine/cnc/vProfile.ts:DEG': { reason: "a maths constant (π/180 or a standard thread coefficient), not a shop decision" },
-  'src/engine/cnc/vProfile.ts:DEG': { reason: "a maths constant (π/180 or a standard thread coefficient), not a shop decision" },
 };
 
 /** One row of the checklist. `key` is `src/engine/cnc/<path>:<NAME>`, stable across edits. */
@@ -314,7 +313,7 @@ describe('#1207 the engine declares no chosen limit outside the registry', () =>
       'const NOTHING = 0;',
       'const ONE = 1;',
       'const TWO = 2;',
-      'const FROM_REGISTRY = readDefault(null, "plan.shortlistSize").value;',
+      'const FROM_REGISTRY = readDefault(null, "tabs.widthMm").value;',
       'const NAME = "not a number";',
     ].join('\n');
     const found = limitConstants(source, join(CNC_ENGINE, 'synthetic.ts'));

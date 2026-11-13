@@ -15,10 +15,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   blankDepthCeiling,
-  LAMINATE_CAP_MARGIN_MM,
   recommendLabelDepth,
   recommendedEngraveDepth,
 } from '@/engine/cnc/engrave/depthBounds';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { vCarvePlane } from '@/engine/cnc/vCarveGeometry';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
@@ -99,7 +99,7 @@ describe('the depth a stock kind recommends (#492 J19)', () => {
     expect(rec.source).toBe('laminate-cap');
     expect(rec.plane).toBe(0.075);
     expect(rec.depth).toBe(0.1);
-    expect(LAMINATE_CAP_MARGIN_MM).toBe(0.025);
+    expect(KNOWN_DEFAULTS['margins.laminateCapMm']!.fallback).toBe(0.025);
     expect(rec.reason).toContain('cap is 0.075 mm under the face');
     expect(rec.reason).toContain('going through the top colour needs 0.1 mm');
     expect(rec.reason).toContain('0.025 mm clear of the cap');

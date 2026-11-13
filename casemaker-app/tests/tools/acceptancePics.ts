@@ -35,7 +35,8 @@ import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import type { CamMove, ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { GoalCutIntoOptions, GoalCutIntoReport } from '@/engine/cnc/engrave/designCheck';
-import { GOAL_LEFTOVER_BANDS_MM, checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
+import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { Z1 } from '@/engine/cnc/machine';
@@ -296,7 +297,7 @@ function classify(goal: GoalHeightfield, top: ResultTop, report: GoalCutIntoRepo
       }
       const goalTop = z[k] as number;
       const d = t - goalTop;
-      if (d > GOAL_LEFTOVER_BANDS_MM[0]!) {
+      if (d > KNOWN_DEFAULTS['acceptance.leftoverBand1Mm']!.fallback) {
         leftover[k] = d;
         leftoverCells++;
       }
@@ -588,7 +589,7 @@ function renderMaps(
       const k = j * goal.nx + i;
       if (goal.covered[k] !== 1) return UNCOVERED;
       const left = cells.leftover[k]!;
-      if (left > GOAL_LEFTOVER_BANDS_MM[0]!) return mix(programRgb(owner[k]!), [255, 255, 255], Math.max(0, 0.35 - left / 6));
+      if (left > KNOWN_DEFAULTS['acceptance.leftoverBand1Mm']!.fallback) return mix(programRgb(owner[k]!), [255, 255, 255], Math.max(0, 0.35 - left / 6));
       return COVERED;
     },
     `leftover coloured by the program whose floor set the cell's top (1..${programs.length} = the panel order in 03-toolpaths)`,

@@ -41,12 +41,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GOAL_CUT_INTO_FLOOR_MM,
-  GOAL_LEFTOVER_BANDS_MM,
   GOAL_PASS_COVERAGE_FALLBACK,
   STRADDLING_SLACK_MM,
   checkGoalCutInto,
 } from '@/engine/cnc/engrave/designCheck';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { Timeline } from '@/engine/cnc/emulator/timeline';
@@ -198,7 +198,12 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
 
   it('states its constants, thresholds and exclusion set', () => {
     expect(GOAL_CUT_INTO_FLOOR_MM, FREEZE).toBe(FROZEN.constants.cutIntoFloorMm);
-    expect([...GOAL_LEFTOVER_BANDS_MM], FREEZE).toEqual(FROZEN.constants.leftoverBandsMm);
+    expect(
+      ['acceptance.leftoverBand1Mm', 'acceptance.leftoverBand2Mm', 'acceptance.leftoverBand3Mm'].map(
+        (key) => KNOWN_DEFAULTS[key]!.fallback,
+      ),
+      FREEZE,
+    ).toEqual(FROZEN.constants.leftoverBandsMm);
     expect(GOAL_PASS_COVERAGE_FALLBACK, FREEZE).toBe(FROZEN.constants.passCoverageFallback);
 
     const r = checkGoalCutInto(CANON, CANON_TOP, {
