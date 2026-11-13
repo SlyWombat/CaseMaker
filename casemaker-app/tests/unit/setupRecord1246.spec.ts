@@ -17,7 +17,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { evaluateOpenEdge, setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
-import { setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { planModelCam, setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
@@ -510,5 +511,24 @@ describe('#1246 slice 2 step 4 — the open-edge raw facts ride the record', () 
       (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
     );
     expect(facts.uncertaintyMm).toBe(envelope?.uncertainty ?? 0);
+  });
+});
+
+describe('#1246 slice 2 step 5 — the planner states the outline on its result', () => {
+  it('a goal that fills the blank states isStock true; a smaller goal states its margins', async () => {
+    const equal = jobFor(boxTarget('goal-outline-eq', 40, 30, 20), 40, 30, 20);
+    const equalInput = await buildModelPlanInputForGoal(equal, equal.targetObject!, FLAT3, SHOP);
+    const equalOut = await planModelCam(equalInput);
+    expect(equalOut.perSetup.every((p) => p.outline !== null)).toBe(true);
+    expect(equalOut.perSetup[0]!.outline).toEqual({ isStock: true, marginsMm: [0, 0, 0, 0] });
+
+    const smaller = jobFor(boxTarget('goal-outline-sm', 30, 20, 10), 40, 30, 12);
+    const smallerInput = await buildModelPlanInputForGoal(smaller, smaller.targetObject!, FLAT3, SHOP);
+    const smallerOut = await planModelCam(smallerInput);
+    const outline = smallerOut.perSetup[0]!.outline!;
+    expect(outline.isStock).toBe(false);
+    // A relief's skirt can extend past the blank (a negative margin); what makes the outline NOT
+    // the stock's is at least one side with more stock beyond it than the fit tolerance.
+    expect(outline.marginsMm.some((m) => m > GOAL_FIT_TOLERANCE_MM)).toBe(true);
   });
 });
