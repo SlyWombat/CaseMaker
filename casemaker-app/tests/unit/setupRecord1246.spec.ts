@@ -378,14 +378,14 @@ describe('#1246 slice 2 — ModelPlanInput no longer drops the stock kind', () =
 });
 
 describe('#1246 slice 2 — the record carries the planner’s own frame', () => {
-  it('the plan input’s records state the same SetupFrame, and the stub’s Z-up is pinned beside it', async () => {
+  it('the record states the frame it is given, and the stub’s Z-up is pinned beside it', async () => {
     const job = jobFor(boxTarget('goal-frame', 40, 30, 20), 40, 30, 20);
     const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
-    expect(input.records).toHaveLength(input.setups.length);
-    input.records!.forEach((record, i) => {
-      expect(record.frame).toBe(input.setups[i]!.frame);
-    });
-    const frame = input.records![0]!.frame!;
+    // #1254 — the records DO NOT ride ModelPlanInput: a record's `depthLimit` is the verifier's
+    // function, and the input is structured-cloned into the rank pool. The record is built in the
+    // seam; its frame is the spec's own object, which the planner reads.
+    const frame = setupRecordFor(job, 0, { setup: toSetup(job, Z1), frame: input.setups[0]!.frame }).frame!;
+    expect(frame).toBe(input.setups[0]!.frame);
     expect(frame.up).toEqual([0, 0, 1]);
     expect(frame.stockTop).toBe(0);
     // The verifier's stub is Z-up in the SETUP's own frame by construction — nothing forces it to
@@ -498,10 +498,10 @@ describe('#1246 slice 2 step 4 — the open-edge raw facts ride the record', () 
     for (const side of ['left', 'right', 'front', 'back'] as const) expect(evaluateOpenEdge(none, side, -10, 3)).toBe(true);
   });
 
-  it('the model input’s records carry the facts its own fixture states', async () => {
+  it('the model input’s plain edge facts are exactly its own fixture’s — and a record built from them evaluates the same', async () => {
     const job = jobFor(boxTarget('goal-open', 40, 30, 20), 40, 30, 20);
     const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
-    const facts = input.records![0]!.openEdges!;
+    const facts = input.openEdges!;
     expect(facts).not.toBeNull();
     expect(facts.stockLengthMm).toBe(job.stock.length);
     expect(facts.stockWidthMm).toBe(job.stock.width);
