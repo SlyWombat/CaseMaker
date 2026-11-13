@@ -600,6 +600,30 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("stock.shelfMatchMm", 1.0, "mm", "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"),
     ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
+    // ── #1207 (begin) — the checklist's accepted rows, registered together (the analyst's ruling
+    // of 2026-11-13). Every seed is exactly the literal the code carried before its key existed,
+    // so the recommended values change nothing; `defaultsClient.ts` carries the same bounds and
+    // fallbacks and the location fixture carries the same numbers.
+    ("acceptance.leftoverBand1Mm", 0.1, "mm", "chosen, not measured: the goal check's first leftover band, frozen for M2 (#948); the recommendation is the value the milestone was judged on, and the product's own gate always runs at it"),
+    ("acceptance.leftoverBand2Mm", 0.3, "mm", "chosen, not measured: the goal check's second leftover band, frozen for M2 (#948)"),
+    ("acceptance.leftoverBand3Mm", 1.0, "mm", "chosen, not measured: the goal check's third leftover band, frozen for M2 (#948)"),
+    ("plan.coverageRestMinMm2PerS", 0.01, "mm²/s", "chosen, not measured: the least top-surface area a rest pass must recover per second of added cutting to be worth taking (0.01 mm²/s = 36 mm² an hour); below this line the rest is floor-polishing"),
+    ("registration.cutBlankPreferredInsetMm", 10.0, "mm", "chosen, not measured: the preferred inset of a cut blank's first check points from every edge, where the uncut area allows it — chips and burrs collect against the stock's edges"),
+    ("registration.cutBlankMaxPoints", 5.0, "points", "chosen, not measured: the most spread check candidates the cut-blank choice offers (the executor touches three, five without an agreeing pair)"),
+    ("registration.centreSearchMaxMm", 60.0, "mm", "chosen, not measured: the most a centre-find search may travel — a wrong estimate must not cross the bed"),
+    ("stock.workMarginMm", 5.0, "mm", "chosen, not measured: the scrap the stock proposal leaves each side of a mesh or a line of text"),
+    ("stock.presetMarginMm", 10.0, "mm", "chosen, not measured: the scrap a preset's cut-out or pocket leaves each side — room for the cutter beside the part and for the clamps that hold the offcut"),
+    ("vcarve.stepoverRatio", 0.6, "x", "chosen, not measured: the V-carve step-over as a share of the groove's width at the colour plane; the seed the feeds rows and the CAM share"),
+    ("margins.laminateCapMm", 0.025, "mm", "chosen, not measured: how far below a purchased laminate's cap its floor sits — the supplier's tolerance and the machine's Z resolution, not a printer layer"),
+    ("flip.minGainFraction", 0.01, "x", "chosen, not measured: the least share of the goal's area a flipped side must gain for the flip to be worth offering"),
+    ("target.topTiltMaxDeg", 20.0, "°", "chosen, not measured: the steepest face still read as the part's top (the mesh's target rim), degrees from horizontal"),
+    ("finish.wallSkipDeg", 80.0, "°", "chosen, not measured: a raster row steeper than this is a wall, not finishable by raster, and is skipped with a note"),
+    ("facing.maxDepthMm", 10.0, "mm", "chosen, not measured: the deepest facing pass the app will accept; a job that claims more is refused"),
+    ("tabs.cornerClearanceMm", 15.0, "mm", "chosen, not measured: how far a holding tab's span must stand from the part's own corners (the analyst's ruling); an edge too short keeps none"),
+    ("tabs.pinClearanceMm", 10.0, "mm", "chosen, not measured: how far a holding tab's span must stand from a locating bore's centre (the analyst's ruling)"),
+    ("tabs.bridgeOvershootMm", 0.05, "mm", "chosen, not measured: how far a tab bridge overshoots the cutter's radius past the tab's edge, so the bridge takes the wall cleanly"),
+    ("tabs.cornerDeg", 20.0, "°", "chosen, not measured: the corner angle below which an outline joint is a corner, not an arc joint — a setting is stated in the unit an operator reads; the code converts"),
+    // ── #1207 (end)
 ];
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
@@ -1495,6 +1519,71 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.0..=1.0).contains(&v)),
             "0 to 1 (a fraction)",
         )),
+        // ── #1207 (begin) — the registered limits' bounds, the same inclusive ranges
+        // `defaultsClient.ts` states.
+        "acceptance.leftoverBand1Mm" | "acceptance.leftoverBand2Mm" | "acceptance.leftoverBand3Mm" => {
+            Some(need(
+                n.is_some_and(|v| (0.001..=10.0).contains(&v)),
+                "0.001 to 10 mm",
+            ))
+        }
+        "plan.coverageRestMinMm2PerS" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 mm²/s",
+        )),
+        "registration.cutBlankPreferredInsetMm" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 mm",
+        )),
+        "registration.cutBlankMaxPoints" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1.0..=20.0).contains(&v)),
+            "a whole number of points, 1 to 20",
+        )),
+        "registration.centreSearchMaxMm" => Some(need(
+            n.is_some_and(|v| (1.0..=200.0).contains(&v)),
+            "1 to 200 mm",
+        )),
+        "stock.workMarginMm" | "stock.presetMarginMm" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 mm",
+        )),
+        "vcarve.stepoverRatio" => Some(need(
+            n.is_some_and(|v| (0.1..=1.0).contains(&v)),
+            "0.1 to 1 (a fraction)",
+        )),
+        "margins.laminateCapMm" => Some(need(
+            n.is_some_and(|v| (0.0..=1.0).contains(&v)),
+            "0 to 1 mm",
+        )),
+        "flip.minGainFraction" => Some(need(
+            n.is_some_and(|v| (0.0..=1.0).contains(&v)),
+            "0 to 1 (a fraction)",
+        )),
+        "target.topTiltMaxDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=90.0).contains(&v)),
+            "0 to 90 degrees",
+        )),
+        "finish.wallSkipDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=90.0).contains(&v)),
+            "0 to 90 degrees",
+        )),
+        "facing.maxDepthMm" => Some(need(
+            n.is_some_and(|v| (0.1..=50.0).contains(&v)),
+            "0.1 to 50 mm",
+        )),
+        "tabs.cornerClearanceMm" | "tabs.pinClearanceMm" => Some(need(
+            n.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "0 to 100 mm",
+        )),
+        "tabs.bridgeOvershootMm" => Some(need(
+            n.is_some_and(|v| (0.0..=2.0).contains(&v)),
+            "0 to 2 mm",
+        )),
+        "tabs.cornerDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=90.0).contains(&v)),
+            "0 to 90 degrees",
+        )),
+        // ── #1207 (end)
         _ => None,
     }
 }
