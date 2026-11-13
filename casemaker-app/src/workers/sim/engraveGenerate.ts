@@ -3682,9 +3682,12 @@ function facingProgram(
       dialect: postKey(machine),
       minRapidZ: ir.hopZ,
       depthLimit: limit,
-      // #1235 stage 2 — the same job footprint as the engraving file; a facing pass may overrun
-      // the edge by the cutter's radius (the limit's own allowance), never further.
-      footprint: jobFootprint(job),
+      // #1246 slice 2 pair (a) — THE SETUP'S footprint, the same region the model path judges
+      // setup 0's programs against (#1235). On every job with no stated setup box this is the
+      // job's own footprint object for object; on one that states setup 0's box it is the box
+      // the skim is really cut on. The pass may overrun the edge by the cutter's radius, never
+      // further.
+      footprint: setupFootprint(job, 0),
       mount,
       clearanceMm: job.jawClearance,
       topLiftMm,
