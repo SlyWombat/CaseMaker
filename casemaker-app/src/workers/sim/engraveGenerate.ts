@@ -5774,6 +5774,19 @@ export interface PostModelPlanFindings {
   planTradeoff?: PlanTradeoff | null;
 }
 
+/**
+ * #1247 (d) — THE FITTED TOP'S LIFT for the model engine's mount boxes. This is the SAME quantity
+ * the item path states as `liftOverStock`: `maxSurfaceLift` over the job's blank, zero when no
+ * surface frame was measured or the job is rotary (a wrapped frame has no fitted flat top). One
+ * helper so the model and item paths cannot word the lift two ways. The lift RAISES the clamp and
+ * arm boxes the verifier must clear (`verify.ts`'s `topZ + uncertainty + clearance + topLift`), so
+ * stating 0 here would let the model path refuse LESS than the item path.
+ */
+export function modelTopLiftMm(job: EngraveJob, shop: EngraveShopOpts): number {
+  const frame = rotaryMapOf(job, shop.defaults ?? null) === null ? (shop.surface ?? null) : null;
+  return frame === null ? 0 : maxSurfaceLift(frame.plane, frame.z0, job.stock.length, job.stock.width);
+}
+
 export async function postModelPlan(
   job: EngraveJob,
   goal: EngraveTargetObject,
@@ -5883,6 +5896,8 @@ export async function postModelPlan(
   // pipeline builds from its cut-outs. Per SETUP, because a two-setup job's second frame is the
   // flipped one. #1246 slice 1 — the record builds the per-setup limit from this kerf and the
   // setup's own thickness (#1082), exactly as the inline builder did.
+  // #1247 (d) — the mount boxes take the fitted top's lift, the same value the item path states.
+  const topLiftMm = modelTopLiftMm(job, shop);
   const ctx: PostContext = {
     jobName: job.name,
     stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness },
@@ -5985,6 +6000,7 @@ export async function postModelPlan(
         outsideAllowancesMm,
         mount: shop.mount,
         clearanceMm: job.jawClearance,
+        topLiftMm,
       };
       const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, plan.setupIndex, facts), facts));
       const verifyErrors = verify.findings.filter((f) => f.severity === 'error');
