@@ -5551,6 +5551,9 @@ export async function buildModelPlanInputForGoal(
     const own = job.setups?.[i]?.stock ?? null;
     return own === null ? spec : { ...spec, stock: { length: own.length, width: own.width, thickness: own.thickness } };
   });
+  // #1246 slice 2 — the stock's KIND, the fact `ModelPlanInput.stock` used to drop. A rotary job
+  // is the rod case; the model engine's own plans stay box geometry this slice.
+  const stockMap = rotaryMapOf(job, shop.defaults ?? null);
 
   return {
     geometry,
@@ -5573,7 +5576,17 @@ export async function buildModelPlanInputForGoal(
               ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
               : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
         }),
-    stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness, material: job.stock.material },
+    // #1246 slice 2 — the record's stock kind and a rod's diameter, stated rather than dropped
+    // here. Nothing reads them in this slice (the planner's geometry is still the box; track E is
+    // the rod path), but the fact no longer disappears at this interface.
+    stock: {
+      length: job.stock.length,
+      width: job.stock.width,
+      thickness: job.stock.thickness,
+      material: job.stock.material,
+      kind: stockMap === null ? ('box' as const) : ('rod' as const),
+      ...(stockMap === null ? {} : { diameter: 2 * stockMap.radius }),
+    },
     fixture: { mount, envelope },
     // #1234/#1254 — the fixture answer the finishing edge overrun reads, as PLAIN DATA: the plan
     // never sees the mount, and the input is structured-cloned into the rank pool, so the facts
