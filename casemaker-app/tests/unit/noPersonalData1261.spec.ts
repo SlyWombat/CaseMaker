@@ -6,9 +6,10 @@
  * never printed back in a failure (file and line only), so a failing run does not republish what
  * it found.
  *
- * Out of scope on purpose: the licence texts that must stay byte-exact (NOTICE and the Windows
- * installer's licence file), lock files, and binary files. History is not rewritten; this gate
- * keeps the tree clean from here on.
+ * NOTICE and the Windows installer's licence file are scanned like any other file, and a second
+ * test requires their copyright line to name the holder, Electric RV Corporation. Out of scope on
+ * purpose: lock files and binary files. History is not rewritten; this gate keeps the tree clean
+ * from here on.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -17,9 +18,11 @@ import { describe, expect, it } from 'vitest';
 
 const REPO = join(process.cwd(), '..');
 
+const COPYRIGHT_HOLDER = 'Electric RV Corporation';
+/** The files that carry the project's own copyright line (the installer's licence page embeds NOTICE). */
+const HOLDER_FILES = ['NOTICE', 'casemaker-app/src-tauri/windows/license.txt'];
+
 const EXEMPT_FILES = new Set([
-  'NOTICE',
-  'casemaker-app/src-tauri/windows/license.txt',
   'casemaker-app/package-lock.json',
   'casemaker-app/src-tauri/Cargo.lock',
 ]);
@@ -70,6 +73,14 @@ function findings(): string[] {
 describe('#1261 no personal data in tracked files', () => {
   it('no tracked file names a real user profile or carries a personal e-mail address', () => {
     expect(findings()).toEqual([]);
+  });
+
+  it.each(HOLDER_FILES)('%s states the copyright holder', (rel) => {
+    const lines = readFileSync(join(REPO, rel), 'utf8').split(/\r?\n/);
+    // The project's own line starts in column 0; third-party notices are indented.
+    const own = lines.find((l) => /^Copyright\s+\d{4}\s/.test(l));
+    expect(own, `${rel}: no project copyright line`).toBeDefined();
+    expect(own).toMatch(new RegExp(`^Copyright \\d{4} ${COPYRIGHT_HOLDER}\\b`));
   });
 
   it('the patterns do catch what they are for', () => {
