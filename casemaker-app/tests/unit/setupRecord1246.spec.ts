@@ -17,6 +17,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
+import { setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import type { SetupSpec } from '@/engine/cnc/cam/model/plan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
@@ -296,5 +299,52 @@ describe('#1246 slice 1 — verifyContextFrom equals the inline builders', () =>
       minRapidZ: 7,
       footprint: [blankFootprint(job.stock)],
     });
+  });
+});
+
+describe('#1246 slice 2 — the two stock resolvers agree before they become one', () => {
+  const spec = (stock?: { length: number; width: number; thickness: number }, up: [number, number, number] = [0, 0, 1], top = 0, bottom = -12): SetupSpec => ({
+    frame: { up, stockTop: top, stockBottom: bottom },
+    underside: 'flatOnStockBottom',
+    ...(stock === undefined ? {} : { stock }),
+  });
+
+  function compare(name: string, job: EngraveJob, specs: SetupSpec[]): void {
+    const input = { stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness } };
+    specs.forEach((s, i) => {
+      const planner = setupStockOf(input, s);
+      const verifier = stockForSetup(job, i);
+      expect(verifier, `${name} setup ${i}: the two resolvers disagree`).toEqual(planner);
+    });
+  }
+
+  it('a box job, a two-setup job with no stated stock, the #1082 fixture and a rod all agree', () => {
+    // 1. A box job, no setups.
+    const box = boxJob();
+    compare('box', box, [spec()]);
+
+    // 2. Two setups, neither states a stock.
+    const twoPlain = boxJob({
+      setups: [
+        { id: 'a', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+        { id: 'b', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+      ] as never,
+    });
+    compare('two-plain', twoPlain, [spec(), spec(undefined, [0, 0, -1], 12, 0)]);
+
+    // 3. The #1082 fixture: setup 1 states 106 × 136 × 25.
+    const stated = { length: 106, width: 136, thickness: 25 };
+    const flip = boxJob({
+      stock: { ...box.stock, length: 120, width: 160, thickness: 28 },
+      setups: [
+        { id: 'top', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+        { id: 'flip', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [], stock: { ...stated, provenance: 'stated' } },
+      ] as never,
+    });
+    compare('1082', flip, [spec(undefined, [0, 0, 1], 0, -28), spec(stated, [0, 0, -1], 28, 0)]);
+
+    // 4. A rod job (its single setup states no box).
+    const rod = rodJob();
+    compare('rod', rod, [spec()]);
   });
 });
