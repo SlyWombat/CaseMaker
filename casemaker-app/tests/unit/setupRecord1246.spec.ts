@@ -19,6 +19,9 @@ import { describe, expect, it } from 'vitest';
 import { setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
 import { setupStockOf } from '@/engine/cnc/cam/model/plan';
 import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
+import type { VerifyReport } from '@/engine/cnc/verify';
 import { boxTarget, jobFor, FLAT3, SHOP } from './helpers/twoSetupBox966';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { SetupSpec } from '@/engine/cnc/cam/model/plan';
@@ -414,5 +417,58 @@ describe('#1246 slice 2 pair (a) — the facing file judges the setup’s footpr
     });
     expect(setupFootprint(stated, 0)).toEqual([{ kind: 'rect', x: 0, y: 0, length: 80, width: 50 }]);
     expect(setupFootprint(stated, 0)).not.toEqual(jobFootprint(stated));
+  });
+});
+
+describe('#1246 slice 2 pair (c) — a restored run without a stored plan says so', () => {
+  const SENTENCE = "This restored run has no stored plan; it was checked against the job's limits, not the setup's own.";
+  const program = (): EngraveProgram =>
+    ({
+      setupIndex: 1,
+      setupId: 'setup-1',
+      toolKey: 'flat-1.0',
+      nc: ['G90 G21', 'G0 Z5', 'G0 X0 Y0', 'M5', 'M02'].join('\n'),
+      verify: null as unknown as VerifyReport,
+      frameNc: null,
+      frameVerify: null,
+      programHash: 'h-1246c',
+      cam: null,
+    }) as unknown as EngraveProgram;
+  const generatedWith = (p: EngraveProgram): EngraveGenerated =>
+    ({
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: p.nc,
+      verify: null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      facingCam: null,
+      predicted: [],
+      programs: [p],
+      errors: [],
+    }) as unknown as EngraveGenerated;
+
+  it('the sentence rides the sheet statements only when the plan is missing', () => {
+    const job = boxJob();
+    job.toolKey = 'flat-1.0';
+    const one = program();
+    const recheck = (generated: EngraveGenerated) =>
+      recheckStoredPrograms({ job, generated, machine: Z1, mount: null, setup: toSetup(job, Z1) });
+
+    const withoutPlan = recheck(generatedWith(one));
+    expect((withoutPlan.generated.planStatements ?? []).map((s) => s.text)).toContain(SENTENCE);
+
+    const withPlan = { ...generatedWith(one), plan: { perSetup: [{ ops: [], programs: [] }] } } as unknown as EngraveGenerated;
+    const withStoredPlan = recheck(withPlan);
+    expect((withStoredPlan.generated.planStatements ?? []).map((s) => s.text)).not.toContain(SENTENCE);
   });
 });
