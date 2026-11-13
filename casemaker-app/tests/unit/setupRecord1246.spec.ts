@@ -16,7 +16,17 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { evaluateOpenEdge } from '@/engine/cnc/cam/model/openEdges';
 import { setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
+import { planModelCam, setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
+import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
+import type { VerifyReport } from '@/engine/cnc/verify';
+import { boxTarget, jobFor, FLAT3, SHOP } from './helpers/twoSetupBox966';
+import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
+import type { SetupSpec } from '@/engine/cnc/cam/model/plan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
@@ -296,5 +306,230 @@ describe('#1246 slice 1 — verifyContextFrom equals the inline builders', () =>
       minRapidZ: 7,
       footprint: [blankFootprint(job.stock)],
     });
+  });
+});
+
+describe('#1246 slice 2 — the two stock resolvers agree before they become one', () => {
+  const spec = (stock?: { length: number; width: number; thickness: number }, up: [number, number, number] = [0, 0, 1], top = 0, bottom = -12): SetupSpec => ({
+    frame: { up, stockTop: top, stockBottom: bottom },
+    underside: 'flatOnStockBottom',
+    ...(stock === undefined ? {} : { stock }),
+  });
+
+  function compare(name: string, job: EngraveJob, specs: SetupSpec[]): void {
+    const input = { stock: { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness } };
+    specs.forEach((s, i) => {
+      const planner = setupStockOf(input, s);
+      const verifier = stockForSetup(job, i);
+      expect(verifier, `${name} setup ${i}: the two resolvers disagree`).toEqual(planner);
+    });
+  }
+
+  it('a box job, a two-setup job with no stated stock, the #1082 fixture and a rod all agree', () => {
+    // 1. A box job, no setups.
+    const box = boxJob();
+    compare('box', box, [spec()]);
+
+    // 2. Two setups, neither states a stock.
+    const twoPlain = boxJob({
+      setups: [
+        { id: 'a', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+        { id: 'b', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+      ] as never,
+    });
+    compare('two-plain', twoPlain, [spec(), spec(undefined, [0, 0, -1], 12, 0)]);
+
+    // 3. The #1082 fixture: setup 1 states 106 × 136 × 25.
+    const stated = { length: 106, width: 136, thickness: 25 };
+    const flip = boxJob({
+      stock: { ...box.stock, length: 120, width: 160, thickness: 28 },
+      setups: [
+        { id: 'top', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [] },
+        { id: 'flip', orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' }, mount: { kind: 'tape' }, itemIds: [], tools: [], stock: { ...stated, provenance: 'stated' } },
+      ] as never,
+    });
+    compare('1082', flip, [spec(undefined, [0, 0, 1], 0, -28), spec(stated, [0, 0, -1], 28, 0)]);
+
+    // 4. A rod job (its single setup states no box).
+    const rod = rodJob();
+    compare('rod', rod, [spec()]);
+  });
+});
+
+describe('#1246 slice 2 — ModelPlanInput no longer drops the stock kind', () => {
+  it('a box job states box; a rod states rod and its diameter', async () => {
+    const job = jobFor(boxTarget('goal-kind', 40, 30, 20), 40, 30, 20);
+    const boxInput = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    expect(boxInput.stock.kind).toBe('box');
+    expect(boxInput.stock.diameter).toBeUndefined();
+
+    const rod = {
+      ...job,
+      stock: { ...job.stock, length: 60, width: 20, thickness: 20, shape: 'cylinder' as const, diameter: 20 },
+      workholding: {
+        kind: 'rotary-chuck' as const,
+        rotary: { stickout: 50, gripDiameter: null, jawMode: 'reverse-inner' as const, tailstock: false, source: 'test' },
+      },
+    };
+    const rodInput = await buildModelPlanInputForGoal(rod as never, rod.targetObject!, FLAT3, SHOP);
+    expect(rodInput.stock.kind).toBe('rod');
+    expect(rodInput.stock.diameter).toBe(20);
+  });
+});
+
+describe('#1246 slice 2 — the record carries the planner’s own frame', () => {
+  it('the record states the frame it is given, and the stub’s Z-up is pinned beside it', async () => {
+    const job = jobFor(boxTarget('goal-frame', 40, 30, 20), 40, 30, 20);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    // #1254 — the records DO NOT ride ModelPlanInput: a record's `depthLimit` is the verifier's
+    // function, and the input is structured-cloned into the rank pool. The record is built in the
+    // seam; its frame is the spec's own object, which the planner reads.
+    const frame = setupRecordFor(job, 0, { setup: toSetup(job, Z1), frame: input.setups[0]!.frame }).frame!;
+    expect(frame).toBe(input.setups[0]!.frame);
+    expect(frame.up).toEqual([0, 0, 1]);
+    expect(frame.stockTop).toBe(0);
+    // The verifier's stub is Z-up in the SETUP's own frame by construction — nothing forces it to
+    // equal a FLIPPED record frame, which is exactly A's observation this assertion pins.
+    expect(toSetup(job, Z1).placement.rotationZ).toBe(0);
+    const bottom = setupRecordFor(job, 0, {
+      setup: toSetup(job, Z1),
+      frame: { up: [0, 0, -1], stockTop: 20, stockBottom: 0 },
+    });
+    expect(bottom.frame!.up).toEqual([0, 0, -1]);
+    expect(toSetup(job, Z1).placement.rotationZ).toBe(0);
+  });
+});
+
+describe('#1246 slice 2 pair (a) — the facing file judges the setup’s footprint', () => {
+  it('it is the job footprint on a plain job and the setup’s own box when setup 0 states one', () => {
+    const plain = boxJob();
+    expect(setupFootprint(plain, 0)).toEqual(jobFootprint(plain));
+
+    const stated = boxJob({
+      setups: [
+        {
+          id: 'setup-0',
+          orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+          mount: { kind: 'tape' },
+          itemIds: [],
+          tools: [],
+          stock: { length: 80, width: 50, thickness: 10, provenance: 'stated' },
+        },
+      ] as never,
+    });
+    expect(setupFootprint(stated, 0)).toEqual([{ kind: 'rect', x: 0, y: 0, length: 80, width: 50 }]);
+    expect(setupFootprint(stated, 0)).not.toEqual(jobFootprint(stated));
+  });
+});
+
+describe('#1246 slice 2 pair (c) — a restored run without a stored plan says so', () => {
+  const SENTENCE = "This restored run has no stored plan; it was checked against the job's limits, not the setup's own.";
+  const program = (): EngraveProgram =>
+    ({
+      setupIndex: 1,
+      setupId: 'setup-1',
+      toolKey: 'flat-1.0',
+      nc: ['G90 G21', 'G0 Z5', 'G0 X0 Y0', 'M5', 'M02'].join('\n'),
+      verify: null as unknown as VerifyReport,
+      frameNc: null,
+      frameVerify: null,
+      programHash: 'h-1246c',
+      cam: null,
+    }) as unknown as EngraveProgram;
+  const generatedWith = (p: EngraveProgram): EngraveGenerated =>
+    ({
+      ok: true,
+      stage: 'done',
+      findings: [],
+      feeds: null,
+      threads: null,
+      threadMachining: null,
+      cam: null,
+      nc: p.nc,
+      verify: null,
+      frameNc: null,
+      frameVerify: null,
+      facingNc: null,
+      facingVerify: null,
+      facingToolKey: null,
+      facingError: null,
+      facingCam: null,
+      predicted: [],
+      programs: [p],
+      errors: [],
+    }) as unknown as EngraveGenerated;
+
+  it('the sentence rides the sheet statements only when the plan is missing', () => {
+    const job = boxJob();
+    job.toolKey = 'flat-1.0';
+    const one = program();
+    const recheck = (generated: EngraveGenerated) =>
+      recheckStoredPrograms({ job, generated, machine: Z1, mount: null, setup: toSetup(job, Z1) });
+
+    const withoutPlan = recheck(generatedWith(one));
+    expect((withoutPlan.generated.planStatements ?? []).map((s) => s.text)).toContain(SENTENCE);
+
+    const withPlan = { ...generatedWith(one), plan: { perSetup: [{ ops: [], programs: [] }] } } as unknown as EngraveGenerated;
+    const withStoredPlan = recheck(withPlan);
+    expect((withStoredPlan.generated.planStatements ?? []).map((s) => s.text)).not.toContain(SENTENCE);
+  });
+});
+
+describe('#1246 slice 2 step 4 — the open-edge raw facts ride the record', () => {
+  it('the rule evaluated from a record equals the hand-computed predicate', () => {
+    const facts = {
+      boxes: [{ minX: -10, maxX: 0, minY: 0, maxY: 10, topZ: 20 }],
+      uncertaintyMm: 0.1,
+      clearanceMm: 0.5,
+      stockLengthMm: 100,
+      stockWidthMm: 60,
+    };
+    const job = boxJob();
+    const record = setupRecordFor(job, 0, { setup: toSetup(job, Z1), openEdges: facts });
+    expect(record.openEdges).toEqual(facts);
+    // Band 1.6; the box overlaps the left strip; its top+fit (20.1) is above 10 − 1 − 0.5 → closed.
+    expect(evaluateOpenEdge(record.openEdges!, 'left', 10, 1)).toBe(false);
+    // …and below 30 − 1 − 0.5 → open.
+    expect(evaluateOpenEdge(record.openEdges!, 'left', 30, 1)).toBe(true);
+    // The box is nowhere near the right strip.
+    expect(evaluateOpenEdge(record.openEdges!, 'right', 10, 1)).toBe(true);
+
+    const none = { boxes: [], uncertaintyMm: 0, clearanceMm: 0, stockLengthMm: 100, stockWidthMm: 60 };
+    for (const side of ['left', 'right', 'front', 'back'] as const) expect(evaluateOpenEdge(none, side, -10, 3)).toBe(true);
+  });
+
+  it('the model input’s plain edge facts are exactly its own fixture’s — and a record built from them evaluates the same', async () => {
+    const job = jobFor(boxTarget('goal-open', 40, 30, 20), 40, 30, 20);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    const facts = input.openEdges!;
+    expect(facts).not.toBeNull();
+    expect(facts.stockLengthMm).toBe(job.stock.length);
+    expect(facts.stockWidthMm).toBe(job.stock.width);
+    expect(facts.clearanceMm).toBe(job.jawClearance);
+    // The facts are exactly the input's own fixture envelope, box for box.
+    const envelope = input.fixture.envelope;
+    expect(facts.boxes).toEqual(
+      (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
+    );
+    expect(facts.uncertaintyMm).toBe(envelope?.uncertainty ?? 0);
+  });
+});
+
+describe('#1246 slice 2 step 5 — the planner states the outline on its result', () => {
+  it('a goal that fills the blank states isStock true; a smaller goal states its margins', async () => {
+    const equal = jobFor(boxTarget('goal-outline-eq', 40, 30, 20), 40, 30, 20);
+    const equalInput = await buildModelPlanInputForGoal(equal, equal.targetObject!, FLAT3, SHOP);
+    const equalOut = await planModelCam(equalInput);
+    expect(equalOut.perSetup.every((p) => p.outline !== null)).toBe(true);
+    expect(equalOut.perSetup[0]!.outline).toEqual({ isStock: true, marginsMm: [0, 0, 0, 0] });
+
+    const smaller = jobFor(boxTarget('goal-outline-sm', 30, 20, 10), 40, 30, 12);
+    const smallerInput = await buildModelPlanInputForGoal(smaller, smaller.targetObject!, FLAT3, SHOP);
+    const smallerOut = await planModelCam(smallerInput);
+    const outline = smallerOut.perSetup[0]!.outline!;
+    expect(outline.isStock).toBe(false);
+    // A relief's skirt can extend past the blank (a negative margin); what makes the outline NOT
+    // the stock's is at least one side with more stock beyond it than the fit tolerance.
+    expect(outline.marginsMm.some((m) => m > GOAL_FIT_TOLERANCE_MM)).toBe(true);
   });
 });

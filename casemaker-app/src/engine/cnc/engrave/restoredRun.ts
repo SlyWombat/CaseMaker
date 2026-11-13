@@ -23,6 +23,7 @@ import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPer
 import { outsideAllowancesOf, setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
 import { verifyProgram, type VerifyFinding, type VerifyReport } from '@/engine/cnc/verify';
+import type { PlanStatement } from '@/engine/cnc/cam/model/types';
 import type { Setup } from '@/engine/cnc/setup';
 import type { Mill } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
@@ -69,6 +70,20 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
   // not re-read here: the verifier reads the body's part and work origin, not its sacrificial.
   const setupFor = (setupIndex: number): Setup =>
     job.setups === undefined ? setup : toSetup(job, machine, mount?.fixture ?? undefined, null, stockForSetup(job, setupIndex));
+
+  // #1246 slice 2 pair (c) — A RESTORED RUN WITH NO STORED PLAN SAYS WHAT IT WAS CHECKED
+  // AGAINST. The fallback to the job's limit stays; the run's sheet statements gain one line.
+  const noStoredPlan = generated.programs.some((program) => generated.plan?.perSetup[program.setupIndex - 1] === undefined);
+  const planStatements: PlanStatement[] | null | undefined = noStoredPlan
+    ? [
+        ...(generated.planStatements ?? []),
+        {
+          severity: 'sheet' as const,
+          code: 'plan-run' as const,
+          text: "This restored run has no stored plan; it was checked against the job's limits, not the setup's own.",
+        },
+      ]
+    : generated.planStatements;
 
   const errors: StoredProgramRecheck['errors'] = [];
   const unresolved: StoredProgramRecheck['unresolved'] = [];
@@ -127,6 +142,7 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     generated: {
       ...generated,
       programs,
+      planStatements,
       ...(first === undefined ? {} : { verify: first.verify, frameVerify: first.frameVerify, frameNc: first.frameNc }),
     },
     errors,
