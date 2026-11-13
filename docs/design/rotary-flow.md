@@ -129,7 +129,7 @@ Unchanged. Two facts the step already reads matter more on a rotary job and are 
 
   | Form | The vise | The rotary chuck | Rule and source |
   |---|---|---|---|
-  | Rod | stands on its end, cut on that end, when length X ≤ 20 mm | cut around, when ⌀ ≤ 80 and length ≤ 150 | the vise's floor depth `VISE_FLOOR_DEPTH` 20 mm (`stockStart.ts` `ROD_VISE_MAX_LENGTH_MM`, #683); the module's ⌀80 × 150 (`t_MachineType`, a Makera database figure) |
+  | Rod | stands on its end, cut on that end, when length X ≤ 20 mm | cut around, when ⌀ ≤ 80 and length ≤ 150 | the vise's floor depth `VISE_FLOOR_DEPTH` 20 mm (`stockStart.ts` `ROD_VISE_MAX_LENGTH_MM`, #683); the module's ⌀80 × 150 (the Z1 4th-axis module product page, <https://www.makera.com/products/makera-z1-4th-axis-module>) |
   | Tube | as a rod | cut around; the wall caps every depth | the column model's single-valued radius (R8) — a cut deeper than the wall would open the bore |
   | Block | held as today | **squared stock in the chuck** when it fits ⌀80 × 150 by its diagonal | Makera CAM's stock Shape: *Square or Round* (`/Rotary.md` §1.3, l. 1005); `rotaryFits` (`setups/plan.ts`) |
   | Disc | on its face, as today | not offered: a disc is cut on its face | a chuck gripping the rim leaves only the face, which the vise already gives |

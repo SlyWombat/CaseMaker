@@ -298,13 +298,10 @@ a fourth answer it did not list: **a human-readable product slug**. Three conseq
 - A QR of this size in a photograph is exactly what the browser's `BarcodeDetector` API is for, which
   is what #212 already proposes. This does not change that design.
 
-**Recorded 2026-10-08 — the first of the two open questions is closed, from the DB (#307).** The
-library database was dumped read-only (`docs/bench/2026-10-08-makera-library-schema.md`). The slug
-`C1-BIT-BALL-NOSE-1-4` **appears nowhere in it** — every text column of every table was searched for
-`C1-BIT` and `BALL-NOSE`. The one table shaped to bridge a slug to a `g_ID` is **`t_SkuMapping`**
-(`g_ID ↔ Shopify sku`, with `shopifyRegion` and `url`), and it is **empty**, so Studio resolves the
-slug **online**. There is also no 1/4-inch (6.35 mm) ball nose in the catalogue by name — its ball
-noses are 3.175, 4 and 6 mm. So "either the DB is keyed by the slug, or there is a mapping we have
+**Recorded 2026-10-08 — the first of the two open questions is closed, from our read of the installed library database (#307; the read is kept on the share, not public, #1260).** The slug
+`C1-BIT-BALL-NOSE-1-4` **appears nowhere in it**: every text column was searched for `C1-BIT` and
+`BALL-NOSE`. The one place that could bridge a slug to a catalogue id is empty, so Studio resolves the
+slug **online**. There is also no 1/4-inch (6.35 mm) ball nose in the installed catalogue by name. So "either the DB is keyed by the slug, or there is a mapping we have
 not seen" now reads: **there is a mapping, and it is a network one we do not hold.** The remaining
 A7 row was the **Z1-badged** label — **and there is none to photograph (2026-10-08, A1's photo): every
 cutter that came with the Z1 is branded MAKERA CARVERA.** Caveat 1 above therefore closes the other
@@ -528,7 +525,7 @@ not a deliberate `$H`, so the premise above stands as stated.
 
 **Do.** Firmware version, and whether the machine identifies as Z1 or Z1 Pro.
 
-**Expected.** Unknown. `t_MachineType` has one `Makera Z1` row; `/Fabrication.md` §1 notes
+**Expected.** Unknown. our read of the library database lists one Z1 (kept on the share); `/Fabrication.md` §1 notes
 "there is a Z1 Pro" and that `Z1/QuickStart` is written for "Makera Z1（Z1&Z1Pro）".
 
 **Recorded 2026-10-06.** Studio prints the version itself on connect, so this needed no query:
