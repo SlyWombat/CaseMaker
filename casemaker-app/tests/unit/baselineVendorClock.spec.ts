@@ -34,16 +34,16 @@ describe('#1233 vendor clock', () => {
   });
 
   it('every ratio in the reference table is taken on our clock, never against the header', () => {
-    const before: RefFacts[] = [{ part: 'organizer', verdict: 'match', makeraCycle: '47.8 min', makeraHeaderS: 2867, makeraClockS: 17958, oursTotalS: 34404, wall: 1936 }];
-    const after: RefFacts[] = [{ part: 'organizer', verdict: 'match', makeraCycle: '47.8 min', makeraHeaderS: 2867, makeraClockS: 17958, oursTotalS: 25000, wall: 1500 }];
+    const before: RefFacts[] = [{ part: 'sample-part', verdict: 'match', makeraCycle: '10.0 min', makeraHeaderS: 600, makeraClockS: 1000, oursTotalS: 2000, wall: 100 }];
+    const after: RefFacts[] = [{ part: 'sample-part', verdict: 'match', makeraCycle: '10.0 min', makeraHeaderS: 600, makeraClockS: 1000, oursTotalS: 1500, wall: 90 }];
     const t = referenceRows(before, after);
     const header = t.headers;
     const row = t.rows[0]!;
     const at = (h: string): string => row[header.indexOf(h)]!;
-    expect(at('Makera header (s)')).toBe('2867');
-    expect(at('Makera on our clock (s)')).toBe('17958');
-    expect(at('ratio before (ours ÷ Makera, our clock)')).toBe('1.92×');
-    expect(at('ratio after (ours ÷ Makera, our clock)')).toBe('1.39×');
+    expect(at('Makera header (s)')).toBe('600');
+    expect(at('Makera on our clock (s)')).toBe('1000');
+    expect(at('ratio before (ours ÷ Makera, our clock)')).toBe('2.00×');
+    expect(at('ratio after (ours ÷ Makera, our clock)')).toBe('1.50×');
     // no header-based ratio anywhere in the row
     expect(header.some((h) => /header/.test(h) && /ratio/.test(h))).toBe(false);
   });

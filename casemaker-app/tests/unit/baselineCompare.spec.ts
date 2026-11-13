@@ -50,11 +50,11 @@ describe('#1233 baseline comparison tables', () => {
   it('3. a part refused before and matched after is a highlighted row with its reason', () => {
     const before: RefFacts[] = [
       { part: 'tray70', verdict: 'refused', reason: 'the shank reaches into the vise jaw', wall: 929 },
-      { part: 'organizer', verdict: 'match', wall: 1936 },
+      { part: 'part-a', verdict: 'match', wall: 190 },
     ];
     const after: RefFacts[] = [
       { part: 'tray70', verdict: 'match', wall: 800 },
-      { part: 'organizer', verdict: 'match', wall: 1900 },
+      { part: 'part-a', verdict: 'match', wall: 180 },
     ];
     const t = referenceRows(before, after);
     expect(t.rows).toHaveLength(2);
@@ -75,8 +75,8 @@ describe('#1233 baseline comparison tables', () => {
   it('5. the cut-into table never pairs figures recorded at different floors', () => {
     const parts: CutPart[] = [
       {
-        part: 'organizer',
-        makera: { pct: 0.09, floorMm: 0.1, afterAllowances: true, maxMm: 0.141 },
+        part: 'part-a',
+        makera: { pct: 0.5, floorMm: 0.1, afterAllowances: true, maxMm: 0.3 },
         before: { pct: 0, floorMm: 0.1, afterAllowances: true },
         after: { pct: 0.22, floorMm: 0.01, afterAllowances: false },
       },
@@ -84,8 +84,8 @@ describe('#1233 baseline comparison tables', () => {
     const rows = cutIntoRows(parts, { floorMm: 0.1, afterAllowances: true });
     expect(rows).toHaveLength(1);
     const [part, makera, before, after, change] = rows[0]!;
-    expect(part).toBe('organizer');
-    expect(makera).toContain('0.09 %');
+    expect(part).toBe('part-a');
+    expect(makera).toContain('0.5 %');
     expect(before).toBe('0 %');
     expect(after).toBe('not recorded at this floor');
     expect(change).toBe('—');
@@ -170,12 +170,12 @@ describe('#1233 baseline comparison tables', () => {
       before: { sha: 'a'.repeat(40), tag: 'v0.2', harnessPatches: [] },
       after: { sha: 'b'.repeat(40), tag: null, harnessPatches: [] },
       headline: { before: head(8005, 100), after: head(8005, 100) },
-      references: { before: [{ part: 'organizer', verdict: 'match' }], after: [] },
+      references: { before: [{ part: 'part-a', verdict: 'match' }], after: [] },
       cutInto: [],
       samples: { before: [{ id: 's', status: 'pass/pass/pass' }], after: [] },
       cards: { before: [{ id: 'j01', status: 'match' }], after: [] },
-      programs: [{ group: 'reference organizer', rows: programRows({ 'p1.nc': 'x' }, {}) }],
-      pictures: [{ label: 'organizer', beforeRel: 'pictures/b.png', afterRel: null }],
+      programs: [{ group: 'reference part-a', rows: programRows({ 'p1.nc': 'x' }, {}) }],
+      pictures: [{ label: 'part-a', beforeRel: 'pictures/b.png', afterRel: null }],
     });
     expect(doc).toContain('the after folder holds none');
     expect(doc).toContain('Programs exist in the before folder only');
