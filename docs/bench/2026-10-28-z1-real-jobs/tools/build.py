@@ -29,6 +29,7 @@ W = os.path.dirname(HERE)                      # docs/bench/2026-10-28-z1-real-j
 JOBS = os.path.join(W, 'jobs')
 sys.path.insert(0, HERE)
 from cards import CARDS, APPENDIX, SAMPLES      # noqa: E402
+import limits                                    # noqa: E402
 
 # The reference parts (#955) are DATA kept off the repo: the table of vendor parts (names, files, hashes)
 # and the reference cards. `--references <file>` loads them at run time (init_references); without it the
@@ -38,6 +39,8 @@ PARKED = []
 REF_CARDS = []
 REF_BY_ID = {}
 REFERENCES_FILE = None        # {'path': ..., 'sha256': ...} once loaded; recorded in the page manifest
+LIMIT_TABLE = None            # the per-card reference seconds (limits.load_table), or None: every card has the fixed default limit
+LIMITS_FILE = None            # {'path', 'sha256', 'baseline', 'margin', 'floor'} once loaded; recorded in the page manifest
 
 # The app's Z1 rapid profile (machine.ts): 5000 mm/min XY, 1000 mm/min Z. Used for the vendor
 # file's air-fraction estimate until #964's scorer (which owns the shared implementation) lands.
@@ -45,10 +48,35 @@ RAPID_XY_MM_MIN = 5000.0
 RAPID_Z_MM_MIN = 1000.0
 
 
+def references_notice(path, n_ref):
+    """The line the build prints about its reference data: never silent when there is none."""
+    if not path:
+        return ('references: --references not given — the reference cards (ref-*) are NOT in this build '
+                '(the reference parts are data kept off the repo); nothing is scored against them')
+    if n_ref == 0:
+        return f'references: {path} adds no reference cards'
+    return f'references: {path} loaded ({n_ref} reference cards, sha256 {REFERENCES_FILE["sha256"][:12]}…)'
+
+
+def init_limits(path, default_seconds):
+    """Load the per-card reference table (a deliberate file written by derive_limits.py; a run only READS it)."""
+    global LIMIT_TABLE, LIMITS_FILE
+    if not path:
+        print(f'limits: --limits not given — every card has the fixed limit of {default_seconds} s', flush=True)
+        return
+    import hashlib
+    LIMIT_TABLE = limits.load_table(path)
+    LIMITS_FILE = {'path': os.path.abspath(path), 'sha256': hashlib.sha256(open(path, 'rb').read()).hexdigest(),
+                   'baseline': LIMIT_TABLE.get('baseline'), 'margin': LIMIT_TABLE.get('margin'), 'floor': LIMIT_TABLE.get('floor')}
+    print(f"limits: {path} (baseline {LIMIT_TABLE['baseline']['name']}, margin {LIMIT_TABLE['margin']}, floor {LIMIT_TABLE['floor']} s, "
+          f"{len(LIMIT_TABLE['cards'])} reference times)", flush=True)
+
+
 def init_references(path):
     """Load the reference data file by path. Returns the number of reference cards it adds (0 when none given)."""
     global REFS, PARKED, REF_CARDS, REF_BY_ID, REFERENCES_FILE
     if not path:
+        REFS, PARKED, REF_CARDS, REF_BY_ID, REFERENCES_FILE = [], [], [], {}, None
         return 0
     import hashlib
     import importlib.util
@@ -63,7 +91,8 @@ def init_references(path):
 TOL = 0.02          # fraction of an item's area; the same 2 % the issue's verdict rule names
 NOISE = {'vise-default', 'sacrificial-default', 'plunge-unproven'}
 PILL = {'match': ('ok', 'Matches the design'), 'deviates': ('gap', 'Deviates'),
-        'refused': ('fail', 'Refused'), 'unchecked': ('right', 'Not checkable'), 'error': ('cant', 'Not run')}
+        'refused': ('fail', 'Refused'), 'unchecked': ('right', 'Not checkable'), 'error': ('cant', 'Not run'),
+        'over-limit': ('cant', 'Over its limit')}
 
 
 def arg_parse():
@@ -88,7 +117,11 @@ def arg_parse():
     p.add_argument('--section-html', help='an extra HTML fragment appended before the page footer '
                                           '(the candidate-engine section, tools/candidate_section.py)')
     p.add_argument('--only', help='comma-separated card ids (debug)')
-    p.add_argument('--timeout', type=int, default=1800, help='seconds per job (default 1800)')
+    p.add_argument('--limits', default=os.environ.get('CM_LIMITS', ''),
+                   help='the per-card reference-seconds table (written by derive_limits.py from a named baseline; a run never '
+                        'rewrites it). A card limit = max(floor, margin x its reference); no table: every card has --timeout')
+    p.add_argument('--timeout', type=int, default=limits.LIMIT_DEFAULT_S,
+                   help=f'the limit of a card with no reference time, seconds (default {limits.LIMIT_DEFAULT_S})')
     return p.parse_args()
 
 
@@ -450,11 +483,19 @@ def run_card(c, args, sha, cat):
     # A receipt that exists but is EMPTY is a crashed command's leavings, not a result: retrying a
     # card must re-run the CLI (j28 was stuck on a 0-byte receipt from a failed first attempt).
     if not os.path.exists(receipt_path) or os.path.getsize(receipt_path) == 0:
-        r = sh(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
-                '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'), args.timeout)
+        # #1257 — THE CARD'S OWN LIMIT, from its own reference seconds in the named baseline (the fixed default when
+        # it has none), and the command runs traced so a card that goes over says how far it got.
+        lim = limits.card_limit((LIMIT_TABLE or {}).get('cards', {}).get(rid),
+                                *( (LIMIT_TABLE['margin'], LIMIT_TABLE['floor'], args.timeout) if LIMIT_TABLE else (limits.LIMIT_MARGIN, limits.LIMIT_FLOOR_S, args.timeout)))
+        if LIMIT_TABLE is None:
+            lim = {'limitSeconds': args.timeout, 'referenceSeconds': None, 'margin': None, 'floor': None, 'source': 'no-limits-table'}
+        lim['baseline'] = (LIMIT_TABLE or {}).get('baseline', {}).get('name')
+        r = limits.run_limited(['npm', 'run', '-s', 'casemaker', '--', 'cut', run_job, '--out', rundir,
+                                '--json', '--location', loc], os.path.join(args.repo, 'casemaker-app'),
+                               lim['limitSeconds'], os.path.join(rundir, 'trace.jsonl'))
         open(receipt_path, 'w').write(r['stdout'])
         open(os.path.join(rundir, 'stderr.txt'), 'w').write(r['stderr'])
-        json.dump({'exit': r['exit'], 'wall': r['wall'], 'timeout': r['timeout']},
+        json.dump({'exit': r['exit'], 'wall': r['wall'], 'timeout': r['timeout'], 'limit': lim, 'reached': r['reached']},
                   open(os.path.join(rundir, 'run.json'), 'w'))
     run = read_json(os.path.join(rundir, 'run.json'), {})
     # The card's own WALL-CLOCK compute time — the CLI command's wall as it actually spent it, from
@@ -462,8 +503,13 @@ def run_card(c, args, sha, cat):
     # card beside the CAM's estimate so a run's cost is visible, not inferred.
     if run.get('wall') is not None:
         card['computeSeconds'] = round(float(run['wall']), 1)
+    if run.get('limit'):
+        card['limit'] = run['limit']              # the reference seconds, baseline, margin and limit this card ran under
     if run.get('timeout'):
-        card['verdict'], card['sentence'] = 'error', f"the command ran {args.timeout} s with no result and was stopped"
+        # OVER LIMIT is its own outcome, not an error: both numbers and how far the card got (#1257)
+        lim_s = (run.get('limit') or {}).get('limitSeconds') or args.timeout
+        rec = limits.over_limit_record(lim_s, run.get('wall'), run.get('reached'))
+        card['verdict'], card['overLimit'], card['sentence'] = 'over-limit', rec, limits.over_limit_sentence(rec)
         return card
     rc = load_receipt(rundir)
     if rc['ok'] is None and not os.path.getsize(receipt_path):
@@ -944,14 +990,12 @@ def main():
     cat = read_json(args.catalogue) or {}
     only = set(args.only.split(',')) if args.only else None
     n_ref = init_references(args.references)
-    if not args.references:
-        print('references: --references not given — the reference cards (ref-*) are NOT in this build '
-              '(the reference parts are data kept off the repo); nothing is scored against them', flush=True)
-    elif n_ref == 0:
-        print(f'references: {args.references} adds no reference cards', flush=True)
-    else:
-        print(f'references: {args.references} loaded ({n_ref} reference cards, sha256 {REFERENCES_FILE["sha256"][:12]}…)', flush=True)
+    print(references_notice(args.references, n_ref), flush=True)
+    init_limits(args.limits, args.timeout)
     todo = [c for c in CARDS + REF_CARDS if not only or c['id'] in only]
+    no_reference = limits.no_reference_cards(LIMIT_TABLE['cards'], [c['id'] for c in todo]) if LIMIT_TABLE else []
+    if no_reference:
+        print(f"limits: no reference time for {', '.join(no_reference)} — they get the default limit of {args.timeout} s", flush=True)
     os.makedirs(args.out, exist_ok=True)
     out_cards = []
     for i, c in enumerate(todo, 1):
@@ -991,6 +1035,7 @@ def main():
                                'cutters': len((read_json(args.k3_location) or {}).get('inventory') or [])},
                 'catalogue': {'path': args.catalogue, 'syncedAt': cat.get('syncedAt'),
                               'cutters': len(cat.get('tools') or []), 'rows': len(cat.get('feeds') or [])},
+                'limits': dict(LIMITS_FILE, noReference=no_reference) if LIMITS_FILE else None,   # the table's path/sha256/baseline; cards listed with no reference
                 'references': REFERENCES_FILE,   # the data file's path and sha256, or null when none was given
                 'appendix': [{'card': a, 'why': b} for a, b in APPENDIX],
                 'cards': [{k: v for k, v in c.items() if k not in ('design', 'figures')} for c in page_cards]}
