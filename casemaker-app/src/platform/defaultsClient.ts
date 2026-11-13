@@ -796,7 +796,7 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'finish.pencilCreaseDeg': { label: 'the crease angle at which a corner gets a pencil pass (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
   'setups.minHoleSeparationMm': { label: 'the least distance between two dowel holes paired as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
   'setups.minEdgeLengthMm': { label: 'the shortest edge used as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(200), fallback: 15 },
-  'mold.minDraftDeg': { label: 'the least draft a mould cavity wall needs (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 5 },
+  'mould.minDraftDeg': { label: 'the least draft a mould cavity wall needs (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 5 },
   // ── #1207 (end)
 };
 

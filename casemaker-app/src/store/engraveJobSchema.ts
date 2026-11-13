@@ -2219,6 +2219,11 @@ const registrationSettingsSchema = z.object({
       // recommendation); every new plan carries the tolerance its collet words were chosen by.
       colletMatchMm: z.number().finite().optional().describe('The collet match tolerance the plan’s fit-probe words were chosen by.'),
       cutBlankAboveBandMm: z.number().finite().optional().describe('How far above the band a cut-blank check may stand before it stops the run, in millimetres.'),
+      // #1207 — the three limits this branch added to the plan's settings mirror: a plan frozen
+      // with them must round-trip them, or a reloaded job silently re-derives its own.
+      cutBlankPreferredInsetMm: z.number().finite().optional().describe('Cut-blank check: the preferred inset from the blank’s edge, in millimetres.'),
+      cutBlankMaxPoints: z.number().int().optional().describe('Cut-blank check: the most surface points it may take.'),
+      centreSearchMaxMm: z.number().finite().optional().describe('Centre find: the most the search may travel, in millimetres.'),
   // #475 — absent in a plan frozen before this key existed; such a plan is still a valid record
   // of the registration it was approved with, and the seed is the value every new plan carries.
   surfaceTouchCount: z

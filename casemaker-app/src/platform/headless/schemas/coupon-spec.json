@@ -1249,7 +1249,7 @@
           "properties": {
             "depth": {
               "description": "Total depth taken off the top face, in millimetres; 0 means nothing is removed.",
-              "maximum": 10,
+              "maximum": 50,
               "minimum": 0,
               "type": "number"
             },
@@ -2926,6 +2926,10 @@
                                 "description": "Probe cap height below the nominal surface, in millimetres.",
                                 "type": "number"
                               },
+                              "centreSearchMaxMm": {
+                                "description": "Centre find: the most the search may travel, in millimetres.",
+                                "type": "number"
+                              },
                               "coarseStepMm": {
                                 "description": "Coarse search step, in millimetres.",
                                 "type": "number"
@@ -2944,6 +2948,16 @@
                               },
                               "cutBlankAgreeMm": {
                                 "description": "How close two touches on a cut blank must agree, in millimetres.",
+                                "type": "number"
+                              },
+                              "cutBlankMaxPoints": {
+                                "description": "Cut-blank check: the most surface points it may take.",
+                                "maximum": 9007199254740991,
+                                "minimum": -9007199254740991,
+                                "type": "integer"
+                              },
+                              "cutBlankPreferredInsetMm": {
+                                "description": "Cut-blank check: the preferred inset from the blank’s edge, in millimetres.",
                                 "type": "number"
                               },
                               "cutterFootprintGrowMm": {
@@ -5055,6 +5069,10 @@
                             "description": "Probe cap height below the nominal surface, in millimetres.",
                             "type": "number"
                           },
+                          "centreSearchMaxMm": {
+                            "description": "Centre find: the most the search may travel, in millimetres.",
+                            "type": "number"
+                          },
                           "coarseStepMm": {
                             "description": "Coarse search step, in millimetres.",
                             "type": "number"
@@ -5073,6 +5091,16 @@
                           },
                           "cutBlankAgreeMm": {
                             "description": "How close two touches on a cut blank must agree, in millimetres.",
+                            "type": "number"
+                          },
+                          "cutBlankMaxPoints": {
+                            "description": "Cut-blank check: the most surface points it may take.",
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "cutBlankPreferredInsetMm": {
+                            "description": "Cut-blank check: the preferred inset from the blank’s edge, in millimetres.",
                             "type": "number"
                           },
                           "cutterFootprintGrowMm": {

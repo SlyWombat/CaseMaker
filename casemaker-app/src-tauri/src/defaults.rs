@@ -633,7 +633,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("finish.pencilCreaseDeg", 20.0, "°", "chosen, not measured: the crease angle at which a corner is steep enough for a pencil pass"),
     ("setups.minHoleSeparationMm", 10.0, "mm", "chosen, not measured: the least distance between two dowel holes the setup solver will pair as a datum"),
     ("setups.minEdgeLengthMm", 15.0, "mm", "chosen, not measured: the shortest edge the setup solver will use as a datum"),
-    ("mold.minDraftDeg", 5.0, "°", "chosen, not measured: the least draft a mould cavity wall needs — stated as 5 degrees of draft; the wall warning reads the wall angle (90 minus this)"),
+    ("mould.minDraftDeg", 5.0, "°", "chosen, not measured: the least draft a mould cavity wall needs — stated as 5 degrees of draft; the wall warning reads the wall angle (90 minus this)"),
     // ---- #1207 (end)
 ];
 
@@ -1630,7 +1630,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.1..=200.0).contains(&v)),
             "0.1 to 200 mm",
         )),
-        "mold.minDraftDeg" => Some(need(
+        "mould.minDraftDeg" => Some(need(
             n.is_some_and(|v| (0.0..=45.0).contains(&v)),
             "0 to 45 degrees",
         )),

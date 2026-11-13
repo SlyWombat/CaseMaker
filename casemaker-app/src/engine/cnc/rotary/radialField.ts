@@ -24,7 +24,7 @@
  * around extent is the full circumference. A cell no triangle's ray hits keeps the STOCK's surface
  * (`z = 0`, `covered = 0`) — the goal says nothing there, and the CAM leaves the stock standing,
  * exactly as the flat field's sentinel does. The grid is capped like the flat one: above
- * {@link readDefault(null, 'goal.maxCells').value} the pitch is COARSENED and the coarser value is stated, never refused.
+ * {@link GOAL_MAX_CELLS_FALLBACK} the pitch is COARSENED and the coarser value is stated, never refused.
  *
  * SINGLE-VALUED, HONESTLY SO. One radius per (x, φ) cannot express an undercut, a re-entrant
  * groove hidden behind the outer surface, or an internal void. The sampler takes the outermost
@@ -40,7 +40,7 @@
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetScale } from '@/engine/cnc/engrave/targetScale';
-import { readDefault } from '@/platform/defaultsClient';
+import { GOAL_MAX_CELLS_FALLBACK } from '@/engine/cnc/goalLimits';
 import { DEFAULT_GRID_PITCH_MM } from '@/engine/cnc/engrave/goalHeightfield';
 
 /**
@@ -74,7 +74,7 @@ export interface GoalRadialField {
 export interface SampleRadialOpts {
   /** The shop's grid pitch in map millimetres; absent → {@link DEFAULT_GRID_PITCH_MM}. */
   pitchMm?: number | null;
-  /** The grid cap; absent → {@link readDefault(null, 'goal.maxCells').value}. */
+  /** The grid cap; absent → {@link GOAL_MAX_CELLS_FALLBACK}. */
   maxCells?: number | null;
 }
 
@@ -94,7 +94,7 @@ export function sampleGoalRadialField(
   if (target.format === 'png') throw new Error('a picture relief is a flat heightfield; a rotary relief needs a mesh');
   const mesh = targetObjectMesh(target);
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
-  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : readDefault(null, 'goal.maxCells').value;
+  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : GOAL_MAX_CELLS_FALLBACK;
   const scale = targetScale(target);
 
   // The mesh's local X centre is placed at `position.x`; the section's origin stays on the axis.

@@ -30,7 +30,6 @@ import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { ORACLE_AREA_FLOOR, type OracleBbox, type OraclePolygon, type OracleSliceAt } from '@/engine/cnc/engrave/oracleTypes';
 import type { Tool } from '@/engine/cnc/tool';
-import { readDefault } from '@/platform/defaultsClient';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
@@ -132,6 +131,14 @@ const DESIGN_ZONE_PAD_MM = 1;
 /** The comparison grid's pitch, mm, when the caller states none. */
 export const DESIGN_CHECK_PITCH_MM = 0.02;
 const LEVEL_STEP_MM = 0.1;
+/**
+ * #1207 — the leftover bands' labelled fallbacks when a caller states none. They equal the
+ * recommendations of `acceptance.leftoverBand1/2/3Mm` (the gate asserts it), and keep this
+ * module's value-import closure free of `defaultsClient`, which reaches CAM (#964).
+ */
+const LEFTOVER_BAND_1_FALLBACK_MM = 0.1;
+const LEFTOVER_BAND_2_FALLBACK_MM = 0.3;
+const LEFTOVER_BAND_3_FALLBACK_MM = 1;
 const MAX_LEVEL_STEPS = 16;
 const ABOVE = 0.001;
 
@@ -1179,11 +1186,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // recommendations (the frozen-for-M2 product definition of done).
   const leftoverBandsMm =
     opts.leftoverBandsMm ??
-    [
-      readDefault(null, 'acceptance.leftoverBand1Mm').value,
-      readDefault(null, 'acceptance.leftoverBand2Mm').value,
-      readDefault(null, 'acceptance.leftoverBand3Mm').value,
-    ];
+    [LEFTOVER_BAND_1_FALLBACK_MM, LEFTOVER_BAND_2_FALLBACK_MM, LEFTOVER_BAND_3_FALLBACK_MM];
   // #964 — an exact-engine sweep keeps no column grid, so the caller may bring ONLY the page's
   // stamp (`leftoverTop`). With neither read there is nothing to compare; state it, never pass.
   if (sweptTop === null && opts.leftoverTop === undefined) {
@@ -1841,9 +1844,9 @@ export function goalCutIntoUnchecked(
   reason: string,
   passCoverage: number = GOAL_PASS_COVERAGE_FALLBACK,
   leftoverBandsMm: readonly number[] = [
-    readDefault(null, 'acceptance.leftoverBand1Mm').value,
-    readDefault(null, 'acceptance.leftoverBand2Mm').value,
-    readDefault(null, 'acceptance.leftoverBand3Mm').value,
+    LEFTOVER_BAND_1_FALLBACK_MM,
+    LEFTOVER_BAND_2_FALLBACK_MM,
+    LEFTOVER_BAND_3_FALLBACK_MM,
   ],
 ): GoalCutIntoReport {
   return {

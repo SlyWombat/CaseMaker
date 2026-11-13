@@ -427,7 +427,7 @@ export interface ModelPlanInput {
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
    * and the plan states the two mould findings that need the cavity's own geometry — one-sided
-   * (always, info) and no-draft (warning past `mold.minDraftDeg`). `steepestWallDeg` is
+   * (always, info) and no-draft (warning past `mould.minDraftDeg`). `steepestWallDeg` is
    * measured from the part's surface at the seam: a PLANAR wall is classified as a pocket wall and
    * appears in no `remainder[].slopeDeg`, so the tree alone could not answer the box case. Rim and
    * floor stay the goal validator's own findings (`validateGoalObject`), unchanged in code and
@@ -2673,11 +2673,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         'two-part mould — two setups.';
       notes.push(mouldOneSided);
       statements.push({ severity: 'info', code: 'goal-mold-one-sided', count: 1, text: mouldOneSided });
-      const moldDraftLimitDeg = 90 - readDefault(input.defaults ?? null, 'mold.minDraftDeg').value;
-      if (input.mould.steepestWallDeg > moldDraftLimitDeg) {
+      const mouldDraftLimitDeg = 90 - readDefault(input.defaults ?? null, 'mould.minDraftDeg').value;
+      if (input.mould.steepestWallDeg > mouldDraftLimitDeg) {
         const draft =
           `The mould of "${input.mould.name}" has a wall at ${Number(input.mould.steepestWallDeg.toFixed(1))}° — steeper than ` +
-          `${moldDraftLimitDeg}°, so it has little or no draft and may hold the casting. Give the ` +
+          `${mouldDraftLimitDeg}°, so it has little or no draft and may hold the casting. Give the ` +
           'part tapered sides, or use a flexible casting material.';
         notes.push(draft);
         statements.push({ severity: 'warning', code: 'goal-mold-no-draft', count: 1, text: draft });

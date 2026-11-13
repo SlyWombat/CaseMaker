@@ -2075,7 +2075,7 @@
       "unit": "mm",
       "note": "chosen, not measured: the shortest edge the setup solver will use as a datum"
     },
-    "mold.minDraftDeg": {
+    "mould.minDraftDeg": {
       "value": 5,
       "source": "seeded",
       "setAt": null,
