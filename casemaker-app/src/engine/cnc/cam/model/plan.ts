@@ -713,6 +713,16 @@ export interface PlanModelCamOptions {
   signal?: AbortSignal;
   onProgress?: (p: ModelPlanProgress) => void;
   /**
+   * #1252 — THE GOAL CHECK'S OWN ADJUDICATION, INJECTED BY THE SEAM (the check's code and options
+   * live in the caller; the planner imports nothing from it). It receives the chain's folded stamp
+   * — the field the planner already caches — plus the chain's IRs (for the check's own per-chain
+   * tool options), and answers the check's adjudicated cut-into for that chain, or `null` when the
+   * check cannot run. IT RIDES THE OPTIONS, NOT THE INPUT: `ModelPlanInput` is cloned to the rank
+   * pool's workers and must stay plain data (#1254's walker). Absent → the picker never
+   * adjudicates (today's behaviour exactly).
+   */
+  goalCutInto?: (field: Float32Array, irs: readonly ToolpathIR[]) => { adjudicatedCells: number; maxMm: number; areaMm2: number } | null;
+  /**
    * #1214's ruling (b) — THE POST'S PRINTED AXIS PRECISION (decimal places), from the job's
    * machine: the grid every feed word is decided on (`cam/printedZ.ts`). The caller that holds the
    * job's machine passes `dialectOf(jobMachine(...)).axisPrecision`; absent → the Z1's, because
@@ -1001,6 +1011,46 @@ function formatSpan(seconds: number): string {
   return `${rest} s`;
 }
 
+/** The goal cells one chain's stamped field is counted against, by the coverage closure below. */
+export interface GoalCoverageCounts {
+  leftoverCells: number;
+  coveredCells: number;
+  cellAreaMm2: number;
+  leftoverAboveMm: number;
+  tallCells: number;
+}
+
+/**
+ * ONE PASS over a stamped field against the goal: the numbers the chain rank is built from
+ * (leftover above the band, the deepest over-band standing, tall cells). The coverage closure
+ * below is this function; a hand-built field is checked by the same code.
+ */
+export function goalCoverageCounts(
+  goal: GoalCellField,
+  stamp: ArrayLike<number>,
+  bands: { leftoverBandMm: number; tallMm: number },
+): GoalCoverageCounts {
+  let covered = 0;
+  let leftover = 0;
+  let tall = 0;
+  let leftoverAboveMm = 0;
+  for (let k = 0; k < stamp.length; k++) {
+    if (goal.covered[k] !== 1) continue;
+    covered++;
+    const over = stamp[k]! - (goal.z[k] as number);
+    if (over > bands.leftoverBandMm) leftover++;
+    if (over > bands.tallMm) tall++;
+    if (over > leftoverAboveMm) leftoverAboveMm = over;
+  }
+  return {
+    leftoverCells: leftover,
+    coveredCells: covered,
+    cellAreaMm2: goal.pitch * goal.pitch,
+    leftoverAboveMm,
+    tallCells: tall,
+  };
+}
+
 /**
  * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
  * setup, every feature the tree recognises — planned through the model engine and returned as
@@ -1272,7 +1322,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const goalCoverage =
     coverageGoal === undefined
       ? undefined
-      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number; leftoverAboveMm: number; tallCells: number } | null => {
+      : (irs: readonly ToolpathIR[]): GoalCoverageCounts | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir);
@@ -1281,22 +1331,26 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
           }
           if (acc === null) return null;
-          let covered = 0;
-          let leftover = 0;
-          let tall = 0;
-          // #1028 — THE DEEPEST OVER-BAND STANDING, the same 0.1 mm band the share counts: the
-          // ladder's "takes it" test and its "would reduce it to X mm" sentence both read it.
-          let leftoverAboveMm = 0;
-          for (let k = 0; k < acc.length; k++) {
-            if (coverageGoal.covered[k] !== 1) continue;
-            covered++;
-            const over = acc[k]! - (coverageGoal.z[k] as number);
-            if (over > 0.1) leftover++;
-            if (over > leftoverTallMm) tall++;
-            if (over > leftoverAboveMm) leftoverAboveMm = over;
-          }
-          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm, tallCells: tall };
+          return goalCoverageCounts(coverageGoal, acc, { leftoverBandMm: 0.1, tallMm: leftoverTallMm });
         };
+  // #1252 — THE CHECK'S OWN ADJUDICATION, FOLDED THROUGH THE SAME CACHE. The caller injects
+  // `opts.goalCutInto` ON THE OPTIONS, never on the input (the input is cloned to the rank pool
+  // and must stay data); the check's code and options live in that function. This wrapper folds
+  // the candidate's stamped IRs exactly as `goalCoverage` does and hands the caller the same
+  // field, so one call costs the check's classification pass only.
+  const goalCutInto = opts.goalCutInto === undefined || coverageGoal === undefined
+    ? undefined
+    : (irs: readonly ToolpathIR[]): { adjudicatedCells: number; maxMm: number; areaMm2: number } | null => {
+        let acc: Float32Array | null = null;
+        for (const ir of irs) {
+          const field = stampedField(ir);
+          if (field === null) continue;
+          if (acc === null) acc = Float32Array.from(field);
+          else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
+        }
+        if (acc === null) return null;
+        return opts.goalCutInto!(acc, irs);
+      };
   const perSetup: SetupPlan[] = [];
   // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
   // The primary is the largest flat, chosen before feeds are known — so one cutter with no row for
@@ -2480,6 +2534,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
         facing: input.facing ?? 'off',
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
+        ...(goalCutInto === undefined ? {} : { goalCutInto }),
         ...(restRegion === undefined ? {} : { restRegion }),
         ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
@@ -3524,6 +3579,14 @@ export interface PlanPocketsOptions {
    */
   goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null;
   /**
+   * #1252 — THE CHECK'S OWN ADJUDICATION, injected by the caller (see
+   * {@link PlanModelCamOptions.goalCutInto}): the picker asks it of the chains it is considering, in rank
+   * order, until one comes back clean. The planner folds the candidate's stamped IRs with the
+   * same cache `goalCoverage` uses and hands the caller the field, so one call is the check's
+   * classification pass and nothing else. Absent → the picker never adjudicates.
+   */
+  goalCutInto?: (irs: readonly ToolpathIR[]) => { adjudicatedCells: number; maxMm: number; areaMm2: number } | null;
+  /**
    * #961 — a COVERAGE rest's region, from the caller's own simulated field: the cells the chain so
    * far leaves above the band, as polygons in the plan's XY (the caller owns the goal and the
    * stamp). Absent → the rest cuts its whole pocket floor (the pre-restriction behaviour).
@@ -3643,6 +3706,17 @@ export function tallGuardSentence(
     `A set of cutters about ${minutes} min faster was passed over: it would leave ${extraMm2} mm² more standing over ${tallMm} mm tall. ` +
     `Material that tall is never traded for time (a shop setting).`
   );
+}
+
+/**
+ * #1252 — THE ALL-CHAINS-CUT-IN SHEET LINE, in one place so the sheet and its test cannot drift.
+ * The figures are the check's own (the injected adjudicator's answer for the chosen chain): the
+ * area its adjudicated cells cover, and the deepest of those cuts.
+ */
+export function cutIntoAllSentence(cutInto: NonNullable<SequenceChoice['cutInto']>): string {
+  const areaMm2 = Math.round(cutInto.areaMm2 * 10) / 10;
+  const maxMm = Math.round(cutInto.maxMm * 100) / 100;
+  return `Every set of cutters cuts into the part; the one chosen cuts ${areaMm2} mm² more than the model allows, up to ${maxMm} mm.`;
 }
 
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
@@ -4246,6 +4320,30 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // drops it) and `chooseSequence` threw "no cutter sequence can be planned" against a relief
   // that in fact needs no pocket-chain cutter at all (#869's ball-alone relief, #966's open-mesh
   // relief). Guarded here, not in `sequence.ts`, so the general-purpose chooser stays untouched.
+  // #1252 — THE CANDIDATE'S PLANNED STEPS' IRs (cached by planStep) — what would post. A step
+  // that throws cuts nothing (`priceSequence` already caught it and stated the failure), so it
+  // contributes no IR here either: a candidate is never crashed by a simulation. Shared by the
+  // coverage measure and the check's adjudication, so both see exactly the same chain.
+  const plannedIrs = (steps: readonly SequenceStep[]): ToolpathIR[] => {
+    const irs: ToolpathIR[] = [];
+    const already: SequenceStep[] = [];
+    for (const step of steps) {
+      let ir: ToolpathIR | null;
+      try {
+        ir = planStep(step, already);
+      } catch (err) {
+        // #1025 — the coverage measure must not outlive a metadata contradiction: the
+        // candidate is refused (rethrown), never priced on a silently shortened chain.
+        if (err instanceof PlanMetadataInconsistentError) throw err;
+        // #1038 — a stop raised at a boundary hook is not a step failure: it must reach the caller.
+        if (isAbortError(err)) throw err;
+        ir = null;
+      }
+      if (ir !== null) irs.push(ir);
+      already.push(step);
+    }
+    return irs;
+  };
   const choice: SequenceChoice = demand.features.length === 0
     ? { steps: [], cost: { entries: [], estimateSeconds: 0, toolChanges: 0, changeSeconds: 0, changes: [], totalSeconds: 0 }, considered: [], unreachable: [], freeing: null, unplanned: [] }
     : chooseSequence(demand, cutters, {
@@ -4264,27 +4362,18 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
       ? {}
       : {
           coverage: (steps: readonly SequenceStep[]) => {
-            // The candidate's PLANNED steps' IRs (cached by planStep) — what would post. A step
-            // that throws cuts nothing (`priceSequence` already caught it and stated the failure),
-            // so it contributes no IR here either: a candidate is never crashed by a simulation.
-            const irs: ToolpathIR[] = [];
-            const already: SequenceStep[] = [];
-            for (const step of steps) {
-              let ir: ToolpathIR | null;
-              try {
-                ir = planStep(step, already);
-              } catch (err) {
-                // #1025 — the coverage measure must not outlive a metadata contradiction: the
-                // candidate is refused (rethrown), never priced on a silently shortened chain.
-                if (err instanceof PlanMetadataInconsistentError) throw err;
-                // #1038 — a stop raised at a boundary hook is not a step failure: it must reach the caller.
-                if (isAbortError(err)) throw err;
-                ir = null;
-              }
-              if (ir !== null) irs.push(ir);
-              already.push(step);
-            }
+            const irs = plannedIrs(steps);
             return irs.length === 0 ? null : opts.goalCoverage!(irs);
+          },
+        }),
+    // #1252 — the check's adjudication, asked of the chains the pick is considering (see
+    // `SequenceOptions.adjudicate`; the injected function lives in `opts.goalCutInto`).
+    ...(opts.goalCutInto === undefined
+      ? {}
+      : {
+          adjudicate: (steps: readonly SequenceStep[]) => {
+            const irs = plannedIrs(steps);
+            return irs.length === 0 ? null : opts.goalCutInto!(irs);
           },
         }),
   });
@@ -4787,6 +4876,23 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (choice.tallGuard !== undefined) {
     const tallMm = opts.leftoverTallMm ?? readDefault(null, 'plan.leftoverTallMm').value;
     const text = tallGuardSentence(choice.tallGuard, tallMm);
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1252 — the check's adjudication's own lines: a chain passed over for cutting in; every chain
+  // cutting in, with the chosen one's figures; or the check not running at all.
+  if (choice.passedOver !== undefined) {
+    const text = 'A faster set of cutters was passed over because it cuts into the part.';
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  if (choice.cutInto !== undefined) {
+    const text = cutIntoAllSentence(choice.cutInto);
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  if (choice.cutIntoNotRun === true) {
+    const text = 'The cut-into check did not run for this plan, so whether the chosen cutters cut into the part is not known.';
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
