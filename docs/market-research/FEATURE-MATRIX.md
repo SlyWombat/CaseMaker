@@ -242,8 +242,7 @@ Notes:
 
 Notes — this is the weakest group for the incumbent, and the most actionable:
 
-- **MKS material-removal = P, not N.** Studio ships a dexel simulator (`dexeltool.dll`),
-  so the *engine* exists, but `/Makera-Parity.md` §8.1 records that the workflow still
+- **MKS material-removal = P, not N.** Studio's internals (kept on the share, not public) suggest a simulation engine exists, but the documented workflow still
   ends in "upload and find out". A simulator that isn't wired into the flow is the
   difference between `Y` and a usable feature.
 - **MKC = N across the board.** Makera CAM Beta has **no simulation, no time estimate,
@@ -401,7 +400,7 @@ From local evidence (`/Makera-Parity.md`, `/Fabrication.md`), not re-researched:
 - Recorded failures: 25 minidumps ending in the same paint-time Qt exception, libEGL
   failures, `ERROR::FREETYPE: Failed to load font`, three malformed "where is the part"
   dialogs, and persisted settings holding `0xCCCCCCCC` and denormals.
-- Ships a dexel simulator (`dexeltool.dll`) that the documented workflow never reaches.
+- A simulation engine may exist inside the program (detail on the share, not public); the documented workflow never reaches one.
 
 ### 3.2 Makera CAM Beta v0.2.0 — the newer product, and it is not for the Z1
 

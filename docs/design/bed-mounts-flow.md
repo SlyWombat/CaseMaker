@@ -13,12 +13,12 @@ flow and the mockups.*
 value, **D** derived, **T** typed (Case Maker's default or the operator's), **R** read from the machine or
 the location — and the place it was found:
 
-- *Makera's Z1 QuickStart*, as the code quotes its cached capture (`engine/cnc/mounts/bracket.ts` header,
+- *Makera's Z1 QuickStart* (<https://wiki.makera.com/en/Z1/QuickStart>), as the code quotes its cached capture (`engine/cnc/mounts/bracket.ts` header,
   `src-tauri/src/defaults.rs` seed notes): the L-bracket is pinned at the anchor with two 4 mm dowels and
   three M5×20 screws (the kit's longer M5×30 screws are for the thick bracket); the stock is pushed into its inside corner (its front-left corner); the top clamps hold
-  the far side; the work origin is "relative to Anchor 1, X offset 0, Y offset 0". *The Z1 vise page*, as
+  the far side; the work origin is "relative to Anchor 1, X offset 0, Y offset 0". *The Z1 vise page* (<https://wiki.makera.com/en/Z1/Accessories/Low-Profile-Vise>), as
   `/Fabrication.md` §7.3 reads it: the vise mounts on two 4 × 11 mm pins and six M5×20 screws **after
-  removing the MDF wasteboard**. *Makera's accessory list* (`cnc-job-workflow.md` §3, "What Makera sells"):
+  removing the MDF wasteboard**. *Makera's accessory list* (`cnc-job-workflow.md` §3, "What Makera sells"; store pages at <https://www.makera.com/collections/all>):
   top clamp set, side clamps, L-bracket, **20 mm double-sided tape**; in the box, MDF 100 × 100 × 2.
   The captures themselves (`docs/market-research/raw/makera/`) are **not on this checkout** (#626's sweep
   and #607's review found the folder absent); nothing here is quoted from them directly.

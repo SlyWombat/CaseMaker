@@ -107,7 +107,7 @@ the files go to **Makera Studio** by hand. In both builds a person is at the mac
 
 > **Status: Available** — reference.
 
-**The Makera Z1** (the figures are Makera's published specifications, not a wiki page):
+**The Makera Z1** (the figures are Makera's published specifications, not a wiki page; source: the Z1 product page, <https://www.makera.com/products/makera-z1-desktop-cnc>, and the Z1 vs Carvera Air buying guide, <https://www.makera.com/blogs/cnc-buying-guide/makera-z1-vs-carvera-air>, read 2026-11-13):
 
 | | Makera Z1 |
 |---|---|
@@ -135,7 +135,7 @@ the paragraph under it.
 
 | Probe | Axes | Materials |
 |---|---|---|
-| **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated by Makera — **measured on the bench: a mechanical tip that triggers on PLA** |
+| **Wired probe** (in the box) | Z only, plus surface levelling and area scanning | not stated by Makera — **measured by us on our bench: a mechanical tip that triggers on PLA** (bench day 1, 2026-10) |
 | **3D Probe Rod** (in the box) | X, Y and Z | **conductive only** — the workpiece must be electrically connected to the aluminium table |
 | **Makera 3D Probe** (separate accessory) | X, Y and Z | both conductive **and non-conductive** |
 

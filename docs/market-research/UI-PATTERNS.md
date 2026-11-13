@@ -115,9 +115,7 @@ rather than re-running the whole preview.
 
 **What Makera does instead.** Two different failures.
 
-- **Studio** ships a dexel simulator (`dexeltool.dll`) — the engine exists — but the
-  documented workflow still ends in *"upload and find out"* (local, `/Makera-Parity.md`
-  §8.1 item 4). The capability is present and not in the path.
+- **Studio**'s documented workflow ends in *"upload and find out"*; whether a simulation engine sits inside the program is kept on the share, not public (#1260). Nothing in the documented path simulates.
 - **Makera CAM Beta has no simulation at all.** `[Calculate]` *"complete[s] the tool path
   calculation and … generate[s] a preview of the created tool path"* — a static drawing of
   the path, no stock, no removal, no playback. "Simulat" appears **zero times** in the
