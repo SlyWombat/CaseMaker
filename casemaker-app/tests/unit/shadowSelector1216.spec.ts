@@ -247,6 +247,9 @@ describe('shortlistReport (#1231)', () => {
   it('the input is not reordered', () => {
     shortlistReport(rows, [1, 2, 3, 5, 8]);
     expect(rows.map((r) => r.signature)).toEqual(['A', 'B', 'C', 'D', 'E']);
+  });
+});
+
 describe('#1249 stage 2a — the shadow:step row and the band', () => {
   const RECT20x10: Polygons = [[[0, 0], [20, 0], [20, 10], [0, 10]]];
 
