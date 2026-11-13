@@ -22,9 +22,12 @@
 #     quiet runs disproved). Run 1 writes the usual folder; run k >= 2 writes its own tree under
 #     repeat-k/ (same layout) and its log is <command>#k. --repeat 1 is one run, and the comparison
 #     then says "one run".
-#   * the load is logged every 10 s across each timed run (logs/load-<command>.tsv) and the run is
-#     marked busy in manifest.json if the 1-minute load exceeded MAX_LOAD at ANY point, not only at
-#     the start.
+#   * every 10 s across each timed run (logs/load-<command>.tsv) the 1-minute load average AND the CPU
+#     of every process OUTSIDE the command's own process tree are logged; the run is marked busy in
+#     manifest.json if that outside CPU exceeded OTHER_BUSY_PCT at ANY point, not only at the start.
+#     (The first rule marked a run busy when the load average passed 3 — but a parallel command such
+#     as vitest at 16 workers raises it by itself, so nearly every run read busy. The load average is
+#     still logged, and still gates the START of the replay.)
 #   * --only runs one section: suites (vitest, cargo, tsc, e2e), tray (the tray runs, pictures,
 #     facts, traces and the live-house pair), references (the demo restricted to its 12 ref-* cards,
 #     and their traced runs), samples, or demo (the 43 cards and the j28/j29 rerun).
@@ -43,6 +46,11 @@ set -u
 
 # A heavy job on the box makes a timed number meaningless; above this 1-minute load the run stops.
 MAX_LOAD=3
+
+# A timed run is marked busy when the processes outside its own tree used more than this much CPU
+# (percent of one core, as `ps` reports it: 200 = two cores' worth) at any sample. Other lines' jobs
+# raise it; the run's own workers never do, however many there are.
+OTHER_BUSY_PCT=200
 
 die() { printf 'rerun: %s\n' "$*" >&2; exit 2; }
 
@@ -179,7 +187,7 @@ for c in cmds:
     # the load every 10 s across the whole command, in logs/load-<name>.tsv (AFTER_OUT is the new folder)
     def sampler(tag):
         return ('__LF="$AFTER_OUT/logs/load-@TAG@.tsv"; mkdir -p "$AFTER_OUT/logs"; : > "$__LF"; '
-                '( while :; do echo "$(date +%s) $(cut -d\' \' -f1 /proc/loadavg)" >> "$__LF"; sleep 10; done ) & __LP=$!; '
+                '__ME=$$; ( while :; do echo "$(date +%s) $(cut -d\' \' -f1 /proc/loadavg) $(ps -eo pid=,ppid=,pcpu= | awk -v root=$__ME \'{pp[$1]=$2; c[$1]=$3} END{for (p in c){q=p; own=0; while (q>1){if (q==root){own=1; break} q=pp[q]} if (!own) s+=c[p]} printf "%.0f", s}\')" >> "$__LF"; sleep 10; done ) & __LP=$!; '
                 "trap 'kill $__LP 2>/dev/null' EXIT; ").replace('@TAG@', tag)
     safe = re.sub(r'[^A-Za-z0-9._-]', '_', name)
     timed = c.get('timed') is True
@@ -208,9 +216,9 @@ RC=$?
 
 # ---------------------------------------------------------------- the new folder's manifest
 if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true; fi
-python3 - "$MANIFEST" "$TMP/manifest.json" "$OUT" "$SHA_REF" "$STARTED" "$ONLY" "$RC" "$MAX_LOAD" "$REPEAT" <<'PY'
+python3 - "$MANIFEST" "$TMP/manifest.json" "$OUT" "$SHA_REF" "$STARTED" "$ONLY" "$RC" "$MAX_LOAD" "$REPEAT" "$OTHER_BUSY_PCT" <<'PY'
 import glob, json, os, platform, re, subprocess, sys
-src, replayed, out, ref, started, only, rc, max_load, repeat = sys.argv[1:10]
+src, replayed, out, ref, started, only, rc, max_load, repeat, other_busy = sys.argv[1:11]
 base = json.load(open(src, encoding='utf-8'))
 used = json.load(open(replayed, encoding='utf-8'))
 ver = str(base.get('version') or '')
@@ -238,17 +246,21 @@ for log in sorted(glob.glob(os.path.join(target, 'logs', '[0-9]*.log'))):
 # the load logged every 10 s across each timed command: busy if the 1-minute load exceeded the guard at ANY point
 busy = []
 for tsv in sorted(glob.glob(os.path.join(target, 'logs', 'load-*.tsv'))):
-    samples = []
+    samples, others = [], []
     for line in open(tsv, encoding='utf-8', errors='replace'):
         f = line.split()
-        if len(f) == 2:
+        if len(f) >= 2:
             try:
                 samples.append(float(f[1]))
+                if len(f) >= 3:
+                    others.append(float(f[2]))
             except ValueError:
                 pass
     name = os.path.basename(tsv)[len('load-'):-len('.tsv')]
     row = {'command': name, 'samples': len(samples), 'maxLoad1': max(samples) if samples else None,
-           'busy': bool(samples) and max(samples) > float(max_load)}
+           'maxOtherCpuPct': max(others) if others else None,
+           # busy = OTHER processes used more than the threshold; a log with no outside-CPU column cannot say
+           'busy': bool(others) and max(others) > float(other_busy)}
     loads.append(row)
     if row['busy']:
         busy.append(name)
@@ -268,6 +280,7 @@ out_manifest = {
     'busyRuns': busy,
     'repeat': int(repeat),
     'maxLoad1': float(max_load),
+    'otherBusyPct': float(other_busy),
     'commands': [{k: v for k, v in c.items() if k not in ('command', 'rerunOriginal')} | {'command': c.get('rerunOriginal', c.get('command', ''))} for c in used.get('commands', [])],
     'harnessPatches': base.get('harnessPatches', []),
     'perCardLimitSeconds': base.get('perCardLimitSeconds'),
