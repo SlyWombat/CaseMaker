@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 
 const FILE = process.argv[2] ||
-  '/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/samples/ELP-USBGS1200P01-H120_AR0234_USB_camera_Case.ascii.stl';
+  '<checkout>/samples/ELP-USBGS1200P01-H120_AR0234_USB_camera_Case.ascii.stl';
 
 const text = fs.readFileSync(FILE, 'utf8');
 

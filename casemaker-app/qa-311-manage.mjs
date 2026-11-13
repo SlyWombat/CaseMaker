@@ -196,7 +196,7 @@ function makeService() {
     }
     if (pathname.endsWith('/catalogue/sync') && method === 'POST') {
       return json(200, {
-        source: 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db',
+        source: 'C:\\Users\\<user>\\AppData\\Roaming\\MakeraStudio\\makera_library.db',
         syncedAt: '2026-10-09T14:02:57.269Z',
         total: tools.length,
         added: [],
