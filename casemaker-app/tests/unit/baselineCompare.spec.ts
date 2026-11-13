@@ -212,4 +212,20 @@ describe('#1233 baseline comparison tables', () => {
     expect(doc).toContain('load not recorded');
     expect(doc).toContain('BUSY: tray-timed_2');
   });
+
+  it('13. a refused tray run prints its refusal, never its 2.8 s wall or its memory as a result', () => {
+    const before: HeadlineInput = { tray: { 'app-top': { wall: 76.4, walls: [76.4], peakRssMiB: 3603 } }, suites: {} };
+    const after: HeadlineInput = {
+      tray: { 'app-top': { wall: 2.8, walls: [2.8, 2.7], peakRssMiB: 554, refused: 'refused at cam: could not be cloned' } },
+      suites: {},
+    };
+    const rows = headlineRows(before, after);
+    const wall = rows.find((r) => r.label === 'app-top: Generate wall (s)')!;
+    expect(wall.after).toContain('refused at cam');
+    expect(wall.after).not.toContain('2.8');
+    expect(wall.change).toBe('—');
+    const mem = rows.find((r) => r.label === 'app-top: peak memory (MiB)')!;
+    expect(mem.after).toContain('refused at cam');
+    expect(mem.change).toBe('—');
+  });
 });

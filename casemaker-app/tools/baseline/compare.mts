@@ -104,6 +104,14 @@ function repeatWalls(dir: string, run: string, first: number | null): number[] {
   return out;
 }
 
+/** A run whose receipt says `ok: false` refused: "refused at <stage>: <first reason>", or null when it planned. */
+function refusalOf(dir: string, run: string): string | null {
+  const r = readJson(join(dir, 'tray', run, 'receipt.json'));
+  if (!r || r.ok !== false) return null;
+  const first = Array.isArray(r.refusals) ? ((r.refusals as Json[]).find((x) => x.code !== 'stopped') ?? (r.refusals as Json[])[0]) : null;
+  return `refused at ${String(r.stage ?? '?')}${first ? `: ${String(first.reason ?? first.code).replace(/\s+/g, ' ').slice(0, 110)}` : ''}`;
+}
+
 function loadTray(dir: string): Record<string, TrayRunFacts> {
   const out: Record<string, TrayRunFacts> = {};
   for (const run of TRAY_RUNS) {
@@ -123,6 +131,7 @@ function loadTray(dir: string): Record<string, TrayRunFacts> {
       wall: num(timing.totalWallSeconds),
       walls: repeatWalls(dir, run, num(timing.totalWallSeconds)),
       peakRssMiB: num(timing.peakRssMiB),
+      refused: refusalOf(dir, run),
     };
   }
   return out;
