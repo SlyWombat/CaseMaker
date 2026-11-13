@@ -20,6 +20,10 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LocationCard } from '@/components/manage/LocationCard';
 import { BedWizard } from '@/components/bed-wizard/BedWizard';
+import { SimTransport } from '@/components/viewport/SimTransport';
+import { SourcesPanel } from '@/components/welcome/SourcesPanel';
+import { useSimStore } from '@/store/simStore';
+import { useLibraryStore } from '@/store/libraryStore';
 import { LocationViewSchema } from '@/platform/locationClient';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
 import { useBedWizardStore } from '@/store/bedWizardStore';
@@ -139,6 +143,50 @@ describe('#1178 the store-selector guard', () => {
       }
     }
     expect(violations, `unstable store selectors:\n${violations.join('\n')}`).toEqual([]);
+  });
+});
+
+
+describe('#1178 the sites the sweep cleared, pinned by test', () => {
+  // Site 1 — viewport/SimTransport.tsx: `s.diagnostics.find(...) ?? null`.
+  //
+  // INVESTIGATED FIRST: the diagnostics array is REPLACED only when a simulation
+  // loads or refuses (`simStore.ts` — the two `set({ …, diagnostics, … })` writes);
+  // a playback tick changes `step`/`seconds`/`progress` and leaves the array (and so
+  // every element) the same reference. The selector therefore returns the store's
+  // OWN element between ticks — never a value built per call — and this test pins
+  // both halves: the loop completes AND the element is reference-identical across
+  // ticks that do not replace the array.
+  it('the sim transport takes five sim-store ticks without a rebuilt diagnostics element', () => {
+    const crossing = { code: 'axis-crossing', severity: 'error', message: 'the path crosses the axis' };
+    useSimStore.setState({ diagnostics: [crossing as never], seconds: 0, step: 0 });
+    const selector = (s: ReturnType<typeof useSimStore.getState>): unknown => s.diagnostics.find((d) => d.code === 'axis-crossing') ?? null;
+    const first = selector(useSimStore.getState());
+
+    render(<SimTransport />);
+    for (let i = 1; i <= 5; i++) {
+      // A looping getSnapshot throws "Maximum update depth exceeded" inside act; settling is the proof.
+      act(() => {
+        useSimStore.setState({ seconds: i });
+      });
+      expect(selector(useSimStore.getState()), `tick ${i} rebuilt the element`).toBe(first);
+    }
+    expect(selector(useSimStore.getState())).toBe(crossing);
+  });
+
+  // Site 2 — welcome/SourcesPanel.tsx: `s.invalidBoards ?? []` lives in `invalidDetail`,
+  // a plain helper over a source object (not a store selector); the component's selectors
+  // are field reads. This pins that the panel takes library-store ticks without looping.
+  it('the sources panel takes five library-store ticks without a fresh snapshot', () => {
+    useLibraryStore.setState({ refreshing: [] });
+    render(<SourcesPanel />);
+    for (let i = 1; i <= 5; i++) {
+      act(() => {
+        useLibraryStore.setState({ refreshing: i % 2 === 0 ? [] : ['https://example.test/index.json'] });
+      });
+    }
+    // The fifth tick (odd) leaves the array holding the source; settling is the proof.
+    expect(useLibraryStore.getState().refreshing).toEqual(['https://example.test/index.json']);
   });
 });
 

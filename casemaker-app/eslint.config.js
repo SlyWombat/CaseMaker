@@ -43,6 +43,45 @@ export default defineConfig([
     },
   },
   {
+    // #1178 — NO STORE SELECTOR MAY BUILD A FRESH SNAPSHOT. zustand v5 + React 19 read a
+    // store through `useSyncExternalStore`, whose getSnapshot must be stable between store
+    // changes; a selector returning a new object/array per call (a literal body, or a
+    // `?? []` / `?? {}` fallback) loops the first store tick. The fix is the store's own
+    // reference, a module-level EMPTY, or `useShallow` where a derived object is genuinely
+    // needed (the LiveSwath precedent, #1141) — `useShallow`-wrapped selectors are exempt
+    // because the callback is not a direct child of the store call, which is exactly what
+    // these selectors require.
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression > ObjectExpression',
+          message: '#1178: a store selector must not build a fresh object — select the store\'s own reference, a module-level EMPTY, or wrap it in useShallow.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression > ArrayExpression',
+          message: '#1178: a store selector must not build a fresh array — select the store\'s own reference, a module-level EMPTY, or wrap it in useShallow.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression > BlockStatement > ReturnStatement > ObjectExpression',
+          message: '#1178: a store selector must not return a fresh object — select the store\'s own reference, a module-level EMPTY, or wrap it in useShallow.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression > BlockStatement > ReturnStatement > ArrayExpression',
+          message: '#1178: a store selector must not return a fresh array — select the store\'s own reference, a module-level EMPTY, or wrap it in useShallow.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression LogicalExpression[operator=/^(\\|\\||\\?\\?)$/] > ArrayExpression',
+          message: '#1178: a store selector must not fall back to a fresh `?? []` — use a module-level EMPTY constant.',
+        },
+        {
+          selector: 'CallExpression[callee.name=/^use[A-Z]\\w*Store$/] > ArrowFunctionExpression LogicalExpression[operator=/^(\\|\\||\\?\\?)$/] > ObjectExpression',
+          message: '#1178: a store selector must not fall back to a fresh `?? {}` — use a module-level EMPTY constant.',
+        },
+      ],
+    },
+  },
+  {
     files: ['tests/e2e/**/*.{ts,tsx}'],
     rules: {
       'react-hooks/rules-of-hooks': 'off',
