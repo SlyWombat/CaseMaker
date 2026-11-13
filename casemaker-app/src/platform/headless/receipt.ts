@@ -244,6 +244,15 @@ export const engraveGoalSchema = z
     leftoverFractions: z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
+    leftoverTall: z
+      .object({
+        wallLineCells: z.number().int().nonnegative().describe('Tall cells whose goal height differs by ≥ 1 mm from a 4-neighbour’s: samples on near-vertical faces.'),
+        wallFootCells: z.number().int().nonnegative().describe('Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.'),
+        openCells: z.number().int().nonnegative().describe('Every other tall cell: material standing proud away from any wall.'),
+        cellAreaMm2: z.number().describe('The goal grid’s cell area, mm².'),
+      })
+      .optional()
+      .describe('#1248 — the cells standing more than the shop’s `plan.leftoverTallMm` above the goal, split wall line / wall foot / open. Reported only; no rule reads it. Absent on a check that was not told the tall limit.'),
     passCoverage: z.number().describe('The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.'),
     causeClass: z
       .enum(['setup-infeasible', 'shop-infeasible', 'plan-shortfall'])
@@ -812,6 +821,7 @@ export function goalBlockFromReport(report: GoalCutIntoReport, cause?: GoalCause
     silhouetteUnavailableCells: report.silhouetteUnavailableCells,
     silhouetteByWitnessCells: report.silhouetteByWitnessCells,
     leftoverFractions: [...report.leftoverFractions],
+    ...(report.leftoverTall === undefined ? {} : { leftoverTall: report.leftoverTall }),
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,
     columnCutInto: extended.columnCutInto ?? null,

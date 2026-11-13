@@ -35,7 +35,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
-import { goalPassCoverage, liveShopDefaults } from '@/platform/defaultsClient';
+import { goalPassCoverage, liveShopDefaults, readDefault } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -1389,6 +1389,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             pureGoalObject(job) !== null,
             {
               passCoverage: goalPassCoverage(shopDefaults),
+              // #1248 — the tall leftover split's limit is the shop's own key, the same one the
+              // planner reads; the check is told, never left to a literal.
+              leftoverTallMm: readDefault(shopDefaults, 'plan.leftoverTallMm').value,
               // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
               ...(generated.plan?.outcome?.predictedCutIntoMm == null
                 ? {}

@@ -1411,6 +1411,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // the CLI and the Cut card cannot disagree about which cutter a posted program names.
     const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
       passCoverage: goalPassCoverage(shopDefaults),
+      // #1248 — the tall leftover split's limit is the shop's own key, the same one the planner
+      // reads; the check is told, never left to a literal. (The smallest cutter radius rides in
+      // from goalEdgeBreakOptions below.)
+      leftoverTallMm: readDefault(shopDefaults, 'plan.leftoverTallMm').value,
       // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
       ...(generated.plan?.outcome?.predictedCutIntoMm == null
         ? {}

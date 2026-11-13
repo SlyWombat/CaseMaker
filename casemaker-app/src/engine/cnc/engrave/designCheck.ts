@@ -718,6 +718,14 @@ export const GOAL_CUT_INTO_FLOOR_MM = 0.01;
 export const GOAL_LEFTOVER_BANDS_MM = [0.1, 0.3, 1] as const;
 
 /**
+ * #1248 — THE WALL-LINE STEP: a cell is on a wall line when its goal height differs by at least
+ * this much from a 4-neighbour one pitch away. #1245's classifier's rule, with the equality
+ * counting — a 1.0 mm step is not > 1.0 once float32 rounds it. A geometric class test, not a
+ * shop setting.
+ */
+export const LEFTOVER_TALL_WALL_STEP_MM = 1 - 1e-6;
+
+/**
  * #948 — THE PASS LINE's LABELLED FALLBACK: the share of the goal's top surface that must stand
  * within the 0.1 mm band (the first leftover band) for the run to pass. It is the demo page's own
  * rule — "zero cut-into AND top-surface coverage ≥ 95 %" — and the shop owns it as
@@ -796,6 +804,18 @@ export interface GoalCutIntoOptions {
    * ADJUDICATED, the conservative side (an uncounted excusal is a false pass).
    */
   clAt?: (x: number, y: number) => { x: number; y: number } | null;
+  /**
+   * #1248 — THE SHOP'S `plan.leftoverTallMm`: the height at which leftover counts as tall, for the
+   * reported wall line / wall foot / open split. A shop value, never a literal here; absent → the
+   * split is not reported at all (the field is additive).
+   */
+  leftoverTallMm?: number;
+  /**
+   * #1248 — HALF THE SMALLEST CUTTING DIAMETER among the programs this check judges; the wall-foot
+   * band is every tall cell whose CENTRE is within this radius of a wall-line cell's centre. Absent
+   * = no cutter is known and the foot cells count as open.
+   */
+  smallestCutterRadiusMm?: number;
 }
 
 export interface GoalCutIntoReport {
@@ -842,6 +862,21 @@ export interface GoalCutIntoReport {
   columnCutInto?: { fraction: number; maxMm: number; at: { x: number; y: number } | null };
   /** Share of covered cells left standing more than each of {@link GOAL_LEFTOVER_BANDS_MM} above the goal, 0-1, same order. */
   leftoverFractions: number[];
+  /**
+   * #1248 — THE TALL CELLS, SPLIT AND REPORTED ONLY: every covered cell standing more than the
+   * caller's `leftoverTallMm` above the goal is a wall-line sample, at a wall's foot, or in the
+   * open; the three counts partition them. Present only when the caller states the tall limit.
+   * No rule reads it.
+   */
+  leftoverTall?: {
+    /** Cells whose goal height differs by more than the tall limit from a 4-neighbour's: a sample on a near-vertical face. */
+    wallLineCells: number;
+    /** Not on a wall line, and within the smallest cutter radius the job used of a wall-line cell: the fillet that cutter leaves. */
+    wallFootCells: number;
+    /** Everything else: material standing proud away from any wall. */
+    openCells: number;
+    cellAreaMm2: number;
+  };
   leftoverVolumeMm3: number;
   maxLeftoverMm: number;
   /** Share of covered cells within the cut-into floor on both sides — the coverage % the acceptance asks for. */
@@ -1239,6 +1274,64 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       }
       if (Math.abs(d) <= cutIntoFloorMm) withinBoth++;
     }
+  }
+
+  // #1248 — THE TALL CELLS, SPLIT AND REPORTED ONLY. Tall is the caller's shop limit; the wall
+  // line is the goal's own 4-neighbour step (≥ 1 mm − 1e-6, the equality counting: a 1.0 mm step
+  // is not > 1.0 in float32); the foot is a tall cell whose CENTRE lies within the smallest cutter
+  // radius used of a wall-line cell's centre; the rest is open. The wall SEEDS are the goal's raw
+  // step cells, covered or not, exactly as #1245's classifier seeded its disc; the three counts
+  // partition the tall cells (the set is what `leftoverFractions`' 1 mm band counts).
+  let leftoverTall: GoalCutIntoReport['leftoverTall'];
+  if (opts.leftoverTallMm !== undefined && Number.isFinite(opts.leftoverTallMm) && opts.leftoverTallMm >= 0) {
+    const tallLimit = opts.leftoverTallMm;
+    const wallLine = new Uint8Array(cells);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        const g = goal.z[k] as number;
+        if (
+          (i > 0 && Math.abs(g - (goal.z[k - 1] as number)) >= LEFTOVER_TALL_WALL_STEP_MM) ||
+          (i + 1 < nx && Math.abs(g - (goal.z[k + 1] as number)) >= LEFTOVER_TALL_WALL_STEP_MM) ||
+          (j > 0 && Math.abs(g - (goal.z[k - nx] as number)) >= LEFTOVER_TALL_WALL_STEP_MM) ||
+          (j + 1 < ny && Math.abs(g - (goal.z[k + nx] as number)) >= LEFTOVER_TALL_WALL_STEP_MM)
+        ) {
+          wallLine[k] = 1;
+        }
+      }
+    }
+    // The foot's disc, from every wall-line seed (cell centres, di² + dj² ≤ (R/pitch)²). No
+    // cutter known: no disc, and the cells it would have claimed count as open.
+    const radiusOf = opts.smallestCutterRadiusMm;
+    const radius = radiusOf !== undefined && Number.isFinite(radiusOf) && radiusOf > 0 ? radiusOf : null;
+    const nearWall = radius === null ? null : new Uint8Array(cells);
+    if (nearWall !== null && radius !== null) {
+      const span = Math.ceil(radius / goal.pitch);
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          if (wallLine[j * nx + i] !== 1) continue;
+          for (let dj = -span; dj <= span; dj++) {
+            for (let di = -span; di <= span; di++) {
+              if ((di * goal.pitch) ** 2 + (dj * goal.pitch) ** 2 > radius * radius + 1e-12) continue;
+              const jj = j + dj;
+              const ii = i + di;
+              if (jj >= 0 && jj < ny && ii >= 0 && ii < nx) nearWall[jj * nx + ii] = 1;
+            }
+          }
+        }
+      }
+    }
+    let wallLineCells = 0;
+    let wallFootCells = 0;
+    let openCells = 0;
+    for (let k = 0; k < cells; k++) {
+      const dk = dOf[k];
+      if (sampled[k] !== 1 || dk === undefined || !(dk > tallLimit)) continue;
+      if (wallLine[k] === 1) wallLineCells++;
+      else if (nearWall !== null && nearWall[k] === 1) wallFootCells++;
+      else openCells++;
+    }
+    leftoverTall = { wallLineCells, wallFootCells, openCells, cellAreaMm2: cellArea };
   }
 
   const n = Math.max(covered, 1);
@@ -1763,12 +1856,20 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     opts.predictedCutIntoMm === undefined
       ? ''
       : ` The plan predicted ${opts.predictedCutIntoMm.toFixed(2)} mm, measured ${adjudicatedMaxMm.toFixed(2)} mm.`;
+  // #1248 — THE TALL CELLS, NAMED. One clause when any cell stands over the shop's tall limit:
+  // how much of that material is on wall lines, at a wall's foot, and in the open. Reported only.
+  const tallArea = (count: number): string => (count * cellArea).toFixed(2);
+  const tallClause =
+    leftoverTall === undefined ||
+    leftoverTall.wallLineCells + leftoverTall.wallFootCells + leftoverTall.openCells === 0
+      ? ''
+      : `; of the ${tallArea(leftoverTall.wallLineCells + leftoverTall.wallFootCells + leftoverTall.openCells)} mm² standing over ${opts.leftoverTallMm} mm, ${tallArea(leftoverTall.wallLineCells)} mm² is on wall lines, ${tallArea(leftoverTall.wallFootCells)} mm² at the foot of walls and ${tallArea(leftoverTall.openCells)} mm² in the open.`;
   const sentence =
-    judgedCells > 0
+    (judgedCells > 0
       ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.${predictedNote}`
       : coverageOk
         ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
+        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`) + tallClause;
 
   return {
     ok,
@@ -1786,6 +1887,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       ? {}
       : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
     leftoverFractions,
+    ...(leftoverTall === undefined ? {} : { leftoverTall }),
     leftoverVolumeMm3,
     maxLeftoverMm: maxLeftover,
     coverageFraction,
