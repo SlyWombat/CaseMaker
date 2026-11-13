@@ -13,6 +13,7 @@
 import type { EngraveJob, JobSetup, SetupStock } from '@/types/engraveJob';
 import type { ShopDefaults } from '@/platform/defaultsClient';
 import { cutRegionOf } from '@/engine/cnc/registration/footprintJob';
+import { resolveSetupStock } from './stockBox';
 
 const r3 = (v: number): number => Math.round(v * 1000) / 1000;
 
@@ -63,11 +64,9 @@ export function stockForSetup(
   // #1082 — STATED ONLY. The derived freed part is an OFFER the operator confirms in the flip row;
   // a reader that derived it here would silently re-plan every existing vendor-flip job (the
   // delivered tray NCs are byte-identical precisely because nothing was confirmed on them).
-  const own = setup?.stock ?? null;
-  return own === null
-    ? { length: job.stock.length, width: job.stock.width, thickness: job.stock.thickness }
-    : { length: own.length, width: own.width, thickness: own.thickness };
+  return resolveSetupStock(setup?.stock ?? null, job.stock);
 }
+
 
 /**
  * #1082 — THE BLANK'S MEASURED THICKNESS, from the bed profile: the registration's measured
