@@ -730,6 +730,14 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(50),
     fallback: 1,
   },
+  // #1242 (planner v3 C3) — how many chains get a real plan. 0 is off: every chain is planned,
+  // which is slower and picks the same on every job measured (the stop gate). Chosen, not measured.
+  'plan.shortlistSize': {
+    label: 'How many of the most thorough, and how many of the fastest, sets of cutters the planner works out in full before choosing. 0 works out every one, which is slower and chooses the same.',
+    unit: 'cutter sets',
+    rule: z.number().int().min(0).max(200),
+    fallback: 8,
+  },
   // ── #948 (end)
   // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
   // over the stock at a clearance above the job's own fixtures, and the air walk before the first

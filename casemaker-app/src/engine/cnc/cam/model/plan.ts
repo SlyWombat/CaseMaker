@@ -47,9 +47,10 @@ import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
-import { traceShadowSelection } from '../fields/shadowSelector';
+import { estimateCandidates, traceShadowSelection, type CandidateEstimates } from '../fields/shadowSelector';
+import { shortlistNote, shortlistOf } from '../fields/shortlist';
 import { polygonsPerimeter } from '../fields/flatReach';
-import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
+import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type CandidateSequence, type CutterCandidates, type PlannedOpKind, type SequenceChoice, type SequenceFeature, type SequenceOptions, type SequenceStep, type SequenceStepFailure } from './sequence';
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
 import { overrunFootprint, sidesReached, type StockSide } from './ops/edgeOverrun';
@@ -1044,6 +1045,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
+  // #1242 (planner v3 C3) — how many chains get a real plan (0 = every one, as before), and the
+  // leftover tolerance in mm² for the shortlist's FAST list: the same quantity the rank's floor is
+  // built from (`plan.leftoverEquivalencePct` × the goal's covered area).
+  const shortlistSize = readDefault(defaults, 'plan.shortlistSize').value;
+  let goalCoveredAreaMm2 = 0;
+  if (input.goal !== undefined) {
+    let covered = 0;
+    for (let k = 0; k < input.goal.covered.length; k++) if (input.goal.covered[k] === 1) covered++;
+    goalCoveredAreaMm2 = covered * input.goal.pitch * input.goal.pitch;
+  }
+  const shortlistToleranceMm2 = (leftoverEquivalencePct / 100) * goalCoveredAreaMm2;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -2447,6 +2459,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
         leftoverEquivalencePct,
+        // #1242 — how many chains get a real plan (0 = every one), and list B's tolerance.
+        shortlistSize,
+        shortlistToleranceMm2,
         // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
         leftoverTallMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
@@ -3466,6 +3481,16 @@ export interface PlanPocketsOptions {
    * → the registry's recommendation, never a literal.
    */
   leftoverTallMm?: number;
+  /**
+   * #1242 (planner v3 C3) — the shop's `plan.shortlistSize`: how many of the best-estimated chains
+   * get a real plan. Absent or 0 → every candidate, exactly as before.
+   */
+  shortlistSize?: number;
+  /**
+   * #1242's amended rule — the leftover tolerance in mm² for the shortlist's FAST list
+   * (`plan.leftoverEquivalencePct / 100` × the goal's covered area). Absent or 0 → no fast list.
+   */
+  shortlistToleranceMm2?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -4239,6 +4264,67 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     return merged;
   };
 
+  // #1242 (planner v3 C3) — THE SHORTLIST: the K best-estimated chains get a real plan. The cheap
+  // estimate is built ONCE, before any chain is priced for real, from the same candidate list the
+  // chooser walks; the shadow trace below reuses it rather than paying twice. Absent or 0
+  // `shortlistSize` → every candidate, as today. A demand with no pocket region to estimate from
+  // keeps every candidate too (the estimate has nothing to stand on — rule 4).
+  const shadowRegions = new Map<string, Polygons>();
+  for (const node of pocketNodes) shadowRegions.set(node.id, node.region);
+  for (const node of throughNodes) shadowRegions.set(node.id, node.region);
+  const shadowRule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds);
+  const shortlistSize = Math.floor(opts.shortlistSize ?? 0);
+  const shortlistToleranceMm2 = opts.shortlistToleranceMm2 ?? 0;
+  let estimatePass: CandidateEstimates | null = null;
+  if (demand.features.length > 0 && shadowRegions.size > 0 && (shortlistSize > 0 || memTraceEnabled())) {
+    try {
+      estimatePass = estimateCandidates({
+        demand,
+        cutters,
+        candidateOpts: {
+          maxCutters: opts.maxCutters,
+          ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
+        },
+        regions: shadowRegions,
+        offset: opts.offset,
+        contourPerimeterMm: polygonsPerimeter(tree.contour.outline),
+        paramsFor: opts.paramsFor,
+        changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
+      });
+    } catch {
+      estimatePass = null; // an estimate failure is no shortlist, never a failed plan
+    }
+  }
+  // What the shortlist kept, recorded by the callback the chooser calls (so `candidates` is exactly
+  // the list the chooser saw). A container, not a bare `let`: the read below must see the write.
+  const shortlistRecord: { counts: { candidates: number; kept: number; unpricedKept: number } | null } = { counts: null };
+  const shortlistOption: ((list: readonly CandidateSequence[]) => readonly CandidateSequence[]) | undefined =
+    shortlistSize > 0 && estimatePass !== null
+      ? (list) => {
+          const bySignature = new Map(estimatePass!.estimates.map((e) => [e.signature, {
+            leftoverMm2: e.est.leftoverMm2,
+            totalSeconds: e.est.totalSeconds,
+            unpriced: e.est.unpriced,
+          }]));
+          // The estimate is keyed by the chain's signature; a candidate carries its steps, not
+          // the string, so the signature is derived here exactly as the estimate derived it.
+          const wrapped = list.map((candidate) => ({
+            candidate,
+            signature: candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
+          }));
+          const kept = shortlistOf(wrapped, bySignature, shortlistSize, shortlistToleranceMm2);
+          shortlistRecord.counts = {
+            candidates: list.length,
+            kept: kept.length,
+            unpricedKept: kept.filter((entry) => {
+              const estimate = bySignature.get(entry.signature);
+              return estimate === undefined || estimate.unpriced > 0;
+            }).length,
+          };
+          return kept.map((entry) => entry.candidate);
+        }
+      : undefined;
+
   // #987 — a demand with NOTHING in it (every pocket/through-hole is a `curved` region planned
   // by `planCurvedForTree` instead, and the contour is synthetic or absent) is trivially
   // satisfied: no pocket-chain cutter is needed, so none is required to exist. Without this,
@@ -4258,6 +4344,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     planStep,
     maxCutters: opts.maxCutters,
     ...(opts.allowPrimary === undefined ? {} : { allowPrimary: opts.allowPrimary }),
+    ...(shortlistOption === undefined ? {} : { shortlist: shortlistOption }),
     ...(opts.onCandidate === undefined ? {} : { onCandidate: opts.onCandidate }),
     ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     ...(opts.goalCoverage === undefined
@@ -4289,14 +4376,21 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         }),
   });
 
+  // #1242 — what the shortlist did, one row per choice (trace only).
+  if (shortlistRecord.counts !== null) {
+    memTrace('shortlist', {
+      candidates: shortlistRecord.counts.candidates,
+      kept: shortlistRecord.counts.kept,
+      k: shortlistSize,
+      unpricedKept: shortlistRecord.counts.unpricedKept,
+      toleranceMm2: Math.round(shortlistToleranceMm2 * 1000) / 1000,
+    });
+  }
+
   // planner v3 slice 3 — THE SELECTOR IN SHADOW. Trace-only: with no trace file this block does
   // not run, and it never changes `choice`. A failure here is one trace row, never a failed plan.
   if (memTraceEnabled() && demand.features.length > 0) {
     try {
-      const shadowRegions = new Map<string, Polygons>();
-      for (const node of pocketNodes) shadowRegions.set(node.id, node.region);
-      for (const node of throughNodes) shadowRegions.set(node.id, node.region);
-      const shadowRule = opts.bitChange ?? flatBitChangeRule(opts.toolChangeSeconds);
       traceShadowSelection({
         demand,
         cutters,
@@ -4311,6 +4405,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
         considered: choice.considered,
         chosenSignature: choice.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
+        toleranceMm2: shortlistToleranceMm2,
+        ...(estimatePass === null ? {} : { estimates: estimatePass }),
       });
     } catch (err) {
       memTrace('shadow:error', { message: err instanceof Error ? err.message.slice(0, 200) : 'unknown' });
@@ -4789,6 +4885,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     const text = tallGuardSentence(choice.tallGuard, tallMm);
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1242 (planner v3 C3) — THE SHORTLIST'S NOTE (a note, not a sheet line): one sentence when the
+  // planner worked out fewer chains than it considered, so a shorter run has its reason on it.
+  if (shortlistRecord.counts !== null) {
+    const note = shortlistNote(shortlistRecord.counts);
+    if (note !== null) notes.push(note);
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
