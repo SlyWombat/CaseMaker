@@ -93,10 +93,10 @@
 import { z } from 'zod';
 import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambiguousCuttingDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
-import { DEFAULT_V_CARVE_STEPOVER_RATIO } from './vCarveGeometry';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
 import type { ClampDiagnostic, Mill } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
+import { V_CARVE_STEPOVER_FALLBACK } from './vCarveGeometry';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
 export interface CutParams {
@@ -317,7 +317,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     edge: 'v',
     minDiameter: 0.3,
     maxDiameter: 0.5,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: V_CARVE_STEPOVER_FALLBACK, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance:
       'From the 2026-10-15 bench cut (`docs/bench/185-v-groove.nc`): the hand file\'s own ' +
@@ -338,7 +338,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     edge: 'v',
     minDiameter: 0.3,
     maxDiameter: 0.5,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: V_CARVE_STEPOVER_FALLBACK, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance:
       'OBSERVED 2026-10-17, not measured: the 30° × 0.3 mm V-bit ran PETG at S12000, F500 along, ' +
@@ -358,7 +358,7 @@ export const UNMEASURED_FEEDS_TABLE: readonly FeedsEntry[] = [
     edge: 'v',
     minDiameter: 0.3,
     maxDiameter: 0.5,
-    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: DEFAULT_V_CARVE_STEPOVER_RATIO, peckFraction: 1.0, air: true },
+    params: { rpm: 12000, feed: 500, plungeFeed: 200, stepDown: 1.0, stepOverFraction: V_CARVE_STEPOVER_FALLBACK, peckFraction: 1.0, air: true },
     status: 'unmeasured',
     provenance:
       'OBSERVED 2026-10-17, not measured: chosen from the PETG observation of 2026-10-17, ' +

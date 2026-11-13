@@ -140,7 +140,6 @@ import {
 } from '@/engine/import/outlineImport';
 import { newEngraveShapeId, newEngraveTraceId } from '@/engine/cnc/engrave/defaults';
 import {
-  FACING_DEPTH_MAX_MM,
   facingDefault,
   facingDepthDefault,
   facingRefusal,
@@ -1516,6 +1515,8 @@ export function EngravePanel(): JSX.Element {
   // #474/#493 — no plastic is faced (wood and metal only), so the material refuses it whatever the
   // finish says; the panel withholds the choice rather than merely seeding it off.
   const facingRefused = facingRefusal(job.stock.material) !== null;
+  // #1207 — the shop's own deepest skim (`facing.maxDepthMm`); the field cannot state more.
+  const facingMaxMm = readDefault(shopDefaults ?? null, 'facing.maxDepthMm').value;
   const facingDef = facingDefault(finish ?? 'unknown', job.stock.material);
   const facing = job.facing ?? null;
   // #888 — THE PLAN OVERRIDES A SEEDED CHOICE. The finish's default (`source: 'seed'`) was written
@@ -3858,7 +3859,7 @@ export function EngravePanel(): JSX.Element {
               title="The TOTAL material taken off the top face. The passes are the feeds row's step-down."
               style={FIELD}
               min={0}
-              max={FACING_DEPTH_MAX_MM}
+              max={facingMaxMm}
               step={0.05}
               value={facing?.depth ?? 0}
               onChange={(e) => {
@@ -3868,7 +3869,7 @@ export function EngravePanel(): JSX.Element {
                   enabled: true,
                   // #888 — typing a depth is a person's choice too.
                   source: 'user',
-                  depth: Math.min(v, FACING_DEPTH_MAX_MM),
+                  depth: Math.min(v, facingMaxMm),
                   ...(facing?.toolKey ? { toolKey: facing.toolKey } : {}),
                 });
               }}

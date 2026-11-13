@@ -882,12 +882,6 @@ export function facingDefault(finish: JobStockFinish, material: StockMaterial): 
 export const FACING_DEPTH_FALLBACK_MM = { rough: 0.5, unknown: 0.2, margin: 0.1 } as const;
 
 /**
- * The most a facing pass may claim to remove, mm. A skim is a skim: the schema's bound for a hand-
- * edited document. The job's own thickness check is `facing-too-deep` (`validateJob`), not this.
- */
-export const FACING_DEPTH_MAX_MM = 10;
-
-/**
  * #473 — the fallback tolerance of the post-facing re-touch, mm. The shop setting
  * (`facing.retouchToleranceMm`) is the number used; this is what a build with no house service
  * reads. A skim never removes exactly its nominal depth (spindle growth, deflection, a blank

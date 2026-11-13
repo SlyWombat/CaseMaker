@@ -4,7 +4,7 @@ import { STOCK_MATERIALS } from '@/engine/cnc/materials';
 import { ToolSchema } from '@/engine/cnc/toolLibrary';
 import { DEFAULT_BREAKTHROUGH, noneSacrificial } from '@/engine/cnc/sacrificial';
 import { DEFAULT_JAW_CLEARANCE_MM } from '@/engine/cnc/engrave/depthBounds';
-import { FACING_DEPTH_MAX_MM, boxProblem } from '@/engine/cnc/stockStart';
+import { boxProblem } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
 import { MAX_LINE_POINTS, MAX_SLOT_WIDTH_MM, type EngraveJob } from '@/types/engraveJob';
@@ -2000,7 +2000,9 @@ const facingSchema = z.object({
     .number()
     .finite()
     .min(0)
-    .max(FACING_DEPTH_MAX_MM)
+    // #1207 — the schema allows the registry key's absolute upper bound; the SHOP's own
+    // `facing.maxDepthMm` is enforced by validateJob's `facing-beyond-limit` finding.
+    .max(50)
     .describe('Total depth taken off the top face, in millimetres; 0 means nothing is removed.'),
   // #432 slice 2 — the facing program's own cutter, as a registry key. OPTIONAL, so a job written
   // before the field existed round-trips byte-for-byte, and null/absent asks the default rule.

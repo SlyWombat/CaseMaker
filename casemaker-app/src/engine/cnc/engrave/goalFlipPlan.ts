@@ -26,6 +26,7 @@
  * pass); confirming a plan's number requires the simulation, which the run does per setup. A
  * ranking that ran the CAM for all six candidates would cost six runs to choose one.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import { orient } from '@/engine/cnc/setups/orient';
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
@@ -44,8 +45,6 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 
 /** #872's decided default target; the caller may state its own. */
 export const FLIP_TARGET_FRACTION = 0.95;
-/** A candidate must reach at least this share of the GOAL's area beyond the chosen sides. */
-export const FLIP_MIN_GAIN_FRACTION = 0.01;
 /** A gain this flat (a share of it square to the tool) is the stock's own face, not a feature. */
 export const FLIP_FLAT_GAIN_SHARE = 0.95;
 /** How far from square-to-the-tool a face may tilt and still count as flat, degrees. */
@@ -175,7 +174,8 @@ const CANDIDATE_ORDER: readonly Face[] = ['bottom', 'left', 'right', 'front', 'b
  */
 export function goalFlipPlan(input: FlipPlanInput): FlipPlan {
   const target = input.targetFraction ?? FLIP_TARGET_FRACTION;
-  const minGain = input.minGainFraction ?? FLIP_MIN_GAIN_FRACTION;
+  // #1207 — the shop's `flip.minGainFraction`; a caller that states none reads the recommendation.
+  const minGain = input.minGainFraction ?? readDefault(null, 'flip.minGainFraction').value;
   const flatShare = input.flatGainShare ?? FLIP_FLAT_GAIN_SHARE;
   const pitch = input.pitchMm ?? 0.3;
   const dropped: FlipPlan['dropped'] = [];
