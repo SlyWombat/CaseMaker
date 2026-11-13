@@ -190,26 +190,53 @@ function stampField(
           for (let i2 = iLo; i2 <= iHi; i2++) {
             const ddx = x0 + i2 * pitch - qx;
             const d2 = ddx * ddx + ddy * ddy;
-            if (band > 0) {
-              if (d2 >= Rout2) continue; // beyond the edge band: never
-            } else if (d2 >= Rin2) continue; // no band given: today's strict edge
-            // #1251 — AT OR BEYOND THE EDGE THE PROFILE IS THE EDGE'S OWN HEIGHT (a point just
-            // outside the disc is given the edge's height, a ball's R).
-            const v = z + stamp.profile(Math.min(Math.sqrt(d2), R));
             const k = rowBase + i2;
-            // #1251 — AN EDGE CELL IS NOT TAKEN BELOW THE GOAL: a floor cell at the edge counts as
-            // reached, a wall cell at the edge is not gouged. Further inside the band always cuts.
-            if (band > 0 && d2 >= Rband2 && v < goalZ![k]! - GOAL_AGREE_EPS_MM) continue;
-            // #964 — TIES GO TO THE LATER STAMP, as `goal_check.py`'s `put` does (`Wf[z <= Hf] =
-            // tn` AFTER `minimum.at`): a cell where the V and a flat cut to the same depth is the
-            // V's, which is what makes the `who`-gated edge-break share match the page's.
-            if (v <= field[k]!) {
-              field[k] = v;
-              who[k] = number;
-              clX[k] = qx;
-              clY[k] = qy;
+            if (band > 0) {
+              if (d2 < Rband2) {
+                // #1251 — THE INTERIOR IS v8's BODY, UNCHANGED: one comparison (the branch above)
+                // and the stamp exactly as the strict edge always did it. The disc is sampled at
+                // the cell's true distance and the cell is taken; interiors are the overwhelming
+                // majority of the stamped cells, so this is the path that decides the plan's cost.
+                const v = z + stamp.profile(Math.sqrt(d2));
+                // #964 — TIES GO TO THE LATER STAMP, as `goal_check.py`'s `put` does (`Wf[z <= Hf] =
+                // tn` AFTER `minimum.at`): a cell where the V and a flat cut to the same depth is the
+                // V's, which is what makes the `who`-gated edge-break share match the page's.
+                if (v <= field[k]!) {
+                  field[k] = v;
+                  who[k] = number;
+                  clX[k] = qx;
+                  clY[k] = qy;
+                }
+                stamped++;
+              } else if (d2 < Rout2) {
+                // #1251 — THE RING, the posted step at the cutter's edge (either side): the only
+                // cells that take the band path. At or beyond the edge the profile is the edge's
+                // own height (a point just outside the disc is given the edge's height, a ball's
+                // R), and an edge cell is not taken below the goal — a floor cell at the edge
+                // counts as reached, a wall cell at the edge is not gouged.
+                const v = z + stamp.profile(Math.min(Math.sqrt(d2), R));
+                if (v < goalZ![k]! - GOAL_AGREE_EPS_MM) continue;
+                // #964 — ties to the later stamp (see the interior path above).
+                if (v <= field[k]!) {
+                  field[k] = v;
+                  who[k] = number;
+                  clX[k] = qx;
+                  clY[k] = qy;
+                }
+                stamped++;
+              }
+            } else if (d2 < Rin2) {
+              // #964 — no band given: the strict edge, exactly as before (a cell is cut only while
+              // its centre is strictly inside the footprint).
+              const v = z + stamp.profile(Math.sqrt(d2));
+              if (v <= field[k]!) {
+                field[k] = v;
+                who[k] = number;
+                clX[k] = qx;
+                clY[k] = qy;
+              }
+              stamped++;
             }
-            stamped++;
           }
         }
       }
