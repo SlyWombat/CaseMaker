@@ -129,7 +129,7 @@ Sources, each marked where it appears: **public**: the firmware source (MakeraIn
 
 **The chuck.** The jaw setup follows the stock size by our chosen setting, not measured: under 20 mm standard jaws; 20–35 mm reverse jaws, inner teeth; over 35 mm reverse jaws, outer teeth. The wiki says only that reverse jaws are fitted by default for larger work (<https://wiki.makera.com/en/Z1/Accessories/4Axis>). The cutter recommendation reads the chuck diameter.
 
-**The 3D probe.** Studio's probing wizard asks the operator for a "Probe Diameter"; the wiki (<https://wiki.makera.com/en/Makera-Accessories/Makera-3D-Probe>) says the probe is factory-calibrated and publishes no ball size. So the diameter is an operator-stated value in Makera's own software, which is what #1200's fields rule.
+**The 3D probe.** The freely downloadable Makera software asks the operator for a "Probe Diameter"; the wiki (<https://wiki.makera.com/en/Makera-Accessories/Makera-3D-Probe>) says the probe is factory-calibrated and publishes no ball size. So the diameter is an operator-stated value in Makera's own software, which is what #1200's fields rule.
 
 ### 2.8 What is sound
 
