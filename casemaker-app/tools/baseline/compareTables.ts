@@ -321,10 +321,54 @@ export function cutIntoRows(parts: CutPart[], floor: CutFloor): string[][] {
 // ----------------------------------------------------------------------------------------------
 // 5, 6. samples and demo cards: statuses, changed items, largest wall changes
 
+export interface OverLimit {
+  elapsedSeconds: number;
+  limitSeconds: number;
+  /** The last phase the card's trace reached (plan / rank / chain / check / …), null when the card could not be traced. */
+  phase: string | null;
+  tMs: number | null;
+}
+
 export interface StatusRec {
   id: string;
   status: string;
   seconds?: Maybe;
+  /** The card's own time limit (#1257), when its run recorded one. */
+  limitSeconds?: Maybe;
+  /** Set when the card went over its limit — its own outcome, never an error. */
+  overLimit?: OverLimit;
+}
+
+/** A card above this share of its limit is listed: a slow card must be visible before it is over (#1257). */
+export const LIMIT_WARN_SHARE = 0.8;
+
+export interface LimitRow {
+  id: string;
+  seconds: number;
+  limit: number;
+  shareNum: number;
+  share: string;
+}
+
+export function limitSections(cards: StatusRec[]): { shares: LimitRow[]; above80: LimitRow[]; overLimit: string[]; noLimit: string[] } {
+  const shares: LimitRow[] = [];
+  const noLimit: string[] = [];
+  const overLimit: string[] = [];
+  for (const c of cards) {
+    if (c.overLimit) {
+      const o = c.overLimit;
+      const where = o.phase ? `${o.phase} at ${Math.round((o.tMs ?? 0) / 1000)} s of the trace` : 'not traced';
+      overLimit.push(`${c.id}: over limit after ${Math.round(o.elapsedSeconds)} s (limit ${Math.round(o.limitSeconds)} s; reached: ${where})`);
+    }
+    if (finite(c.limitSeconds) && c.limitSeconds > 0 && finite(c.seconds)) {
+      const shareNum = c.seconds / c.limitSeconds;
+      shares.push({ id: c.id, seconds: c.seconds, limit: c.limitSeconds, shareNum, share: `${(shareNum * 100).toFixed(1)} %` });
+    } else if (!finite(c.limitSeconds)) {
+      noLimit.push(c.id);
+    }
+  }
+  shares.sort((a, b) => b.shareNum - a.shareNum || a.id.localeCompare(b.id));
+  return { shares, above80: shares.filter((r) => r.shareNum > LIMIT_WARN_SHARE), overLimit, noLimit };
 }
 
 export function statusTables(
@@ -567,6 +611,7 @@ export function buildComparison(i: ComparisonInput): string {
   out.push('## 6. Demo cards\n');
   const c = statusTables(i.cards.before, i.cards.after);
   const cardGap = missingSide('Demo cards', i.cards.before.length, i.cards.after.length);
+  const lim = limitSections(i.cards.after);
   if (cardGap) {
     out.push(cardGap + '\n');
   } else {
@@ -576,6 +621,19 @@ export function buildComparison(i: ComparisonInput): string {
     out.push('\nTen largest changes in compute seconds:\n');
     out.push(c.largest.length === 0 ? 'none recorded.' : mdTable(['card', 'before (s)', 'after (s)', 'change'], c.largest));
     out.push('');
+  }
+  if (lim.shares.length === 0 && lim.overLimit.length === 0) {
+    out.push('Per-card limits are not recorded in these folders (a demo built before #1257), so no card is listed against its limit.\n');
+  } else {
+    out.push('\n**Cards over their limit** (their own outcome — not an error):\n');
+    out.push(lim.overLimit.length === 0 ? 'none.' : lim.overLimit.map((l) => `- ${l}`).join('\n'));
+    out.push(`\n**Cards above ${Math.round(LIMIT_WARN_SHARE * 100)} % of their limit** (compute seconds as a share of the card's own limit):\n`);
+    out.push(
+      lim.above80.length === 0
+        ? 'none.'
+        : mdTable(['card', 'compute (s)', 'limit (s)', 'share of limit'], lim.above80.map((r) => [r.id, r.seconds.toFixed(1), r.limit.toFixed(0), r.share])),
+    );
+    out.push(lim.noLimit.length > 0 ? `\n${lim.noLimit.length} card(s) carry no limit record: ${lim.noLimit.slice(0, 12).join(', ')}${lim.noLimit.length > 12 ? ', …' : ''}.\n` : '');
   }
 
   out.push('## 7. Programs\n');

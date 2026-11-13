@@ -184,7 +184,19 @@ function loadCards(dir: string): Map<string, { card: Json; path: string }> {
 }
 
 function toStatus(cards: Map<string, { card: Json; path: string }>): StatusRec[] {
-  return [...cards].map(([id, { card }]) => ({ id, status: String(card.verdict ?? 'unknown'), seconds: num(card.computeSeconds) }));
+  return [...cards].map(([id, { card }]) => {
+    const ol = card.overLimit as Json | undefined;
+    const reached = (ol?.reached ?? null) as Json | null;
+    return {
+      id,
+      status: String(card.verdict ?? 'unknown'),
+      seconds: num(card.computeSeconds),
+      limitSeconds: num((card.limit as Json | undefined)?.limitSeconds),
+      overLimit: ol
+        ? { elapsedSeconds: num(ol.elapsedSeconds) ?? 0, limitSeconds: num(ol.limitSeconds) ?? 0, phase: reached ? String(reached.phase) : null, tMs: reached ? num(reached.tMs) : null }
+        : undefined,
+    };
+  });
 }
 
 const REF_ID = /^ref-(.+)$/;

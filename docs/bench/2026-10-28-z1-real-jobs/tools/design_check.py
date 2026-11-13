@@ -184,8 +184,27 @@ def label_box(g, label):
     return g.rect(p['x'], p['y'], width, height, label.get('rotation') or 0)
 
 
+def job_cutter_v(job):
+    """The job's own cutter, resolved through the location the checker was handed: (is it a V, its
+    half-angle in radians or None). Both scoring rules below read the cutter from here, not from a
+    per-item vCarveDepth flag — the SVG import never writes one."""
+    tool = render.TOOLS.get((job.get('toolKey') or '').strip())
+    is_v = bool(tool) and tool.get('shape') in ('engraving', 'chamfer', 'v')
+    half = None
+    if is_v:
+        ang = tool.get('angle') or (2 * tool.get('halfAngle') if tool.get('halfAngle') else None)
+        if ang:
+            half = math.radians(float(ang) / 2)
+    return is_v, half
+
+
 def design_items(job, g):
     """Every enabled design region: id, kind, mask, expected floor depth, through flag."""
+    # THE CARD'S V-BAND RULE (one line on the page's method note): a painted BAND — an imported
+    # vector region — cut by a V cutter is a CONE, so its walls are the design and are not measured
+    # as material left. The job's own cutter decides (render.TOOLS): the coasters' bands were scored
+    # as flat pockets (8.6-11.4 % "left" on a clean V cut).
+    tool_is_v, _half = job_cutter_v(job)
     by_id = {s['id']: s for s in (job.get('shapes') or [])}
     label_by_id = {l['id']: l for l in (job.get('labels') or [])}
     # An inlay half is cut by the pair's V; every region in such a job is a cone-cut region.
@@ -202,7 +221,7 @@ def design_items(job, g):
     for v in job.get('vectors') or []:
         if not v.get('enabled'):
             continue
-        items.append({'id': v['id'], 'kind': 'vector', 'mask': vector_mask(g, v), 'depth': v['depth'], 'through': v.get('through') is True, 'construction': v.get('construction') is True, 'v': v.get('vCarveDepth') is not None or v.get('inlay') is not None or has_inlay})
+        items.append({'id': v['id'], 'kind': 'vector', 'mask': vector_mask(g, v), 'depth': v['depth'], 'through': v.get('through') is True, 'construction': v.get('construction') is True, 'v': v.get('vCarveDepth') is not None or v.get('inlay') is not None or has_inlay or tool_is_v})
     for t in job.get('traces') or []:
         if not t.get('enabled') or t.get('kind') != 'line':
             continue
@@ -345,6 +364,36 @@ def main():
         # allowance, and an item overlapping it must not read that allowance as a gouge.
         return -(T + 0.4) if it['through'] else -float(it['depth'])
 
+    # THE CARD'S j10 RULE (one line on the page's method note): a cell within the check's own
+    # erosion of a DEEPER item's region is THAT item's cut — a V's flank spreads past its region —
+    # and does not count against this item's floor. The rays start inside the head pocket's 90° V
+    # flank and read as 10.8 % "cut past the floor" while their own NC section is at Z -0.5.
+    def scored_item(it):
+        return not (it.get('profile') or it.get('cleared') or it.get('note') or it.get('v') or it.get('reference'))
+
+    tool_is_v, tool_half_rad = job_cutter_v(job)
+
+    def neighbour_halo(it):
+        # HOW FAR a deeper item's cut can reach past its own region: a V cutter's mouth at the
+        # item's depth (depth x tan half-angle) — j10's head pocket is a 90 deg V at 1.5 mm, so its
+        # flank runs up to 1.5 mm into the rays that start on it; a flat tool cannot spread beyond
+        # its region by more than the checker's own erosion, which is the floor of the rule.
+        if not tool_is_v or not tool_half_rad:
+            return ERODE_MM
+        return max(ERODE_MM, abs(float(it['depth'])) * math.tan(tool_half_rad))
+
+    deeper_exclusion = {}
+    for f in sorted({round(floor_of(it), 6) for it in items if scored_item(it)}):
+        members = [it for it in items if scored_item(it) and floor_of(it) < f - 1e-9]
+        if not members:
+            deeper_exclusion[f] = None
+            continue
+        union = g.empty()
+        for it in members:
+            union |= it['mask']
+        halo = max([ERODE_MM] + [neighbour_halo(it) for it in members])
+        deeper_exclusion[f] = g.dilated(union, halo) if union.any() else None
+
     # The floor every cell should end at, where items overlap: the DEEPEST one asks for it.
     floor_map = np.zeros((g.ny, g.nx))
     for it in items:
@@ -411,6 +460,9 @@ def main():
         # the cut-out removes, so only its part side is measured.
         region = mask & part_any if has_part else mask
         region = region & ~label_zone
+        exc = deeper_exclusion.get(round(floor_of(it), 6))
+        if exc is not None:
+            region = region & ~exc
         if not it.get('v'):
             region = region & ~v_any
         if not it['through']:
@@ -419,6 +471,14 @@ def main():
         inner = g.eroded(region, ERODE_MM)
         if not inner.any():
             inner = region
+        if not inner.any() and exc is not None:
+            # A thin item whose whole region the deeper neighbour's cut covers measures nothing;
+            # fall back to its own cells OUTSIDE that neighbour, never to the unfiltered mask —
+            # otherwise the neighbour's cut is judged against this item's floor again (tuft9_-35).
+            inner = mask & ~exc
+        if not inner.any():
+            report['items'].append({'id': it['id'], 'kind': it['kind'], 'note': 'covered by a deeper item — not measured'})
+            continue
         if not inner.any():
             inner = mask
         vals = (local_min(H) if it['kind'] == 'trace' else H)[inner]
@@ -434,11 +494,11 @@ def main():
         if it['through']:
             left = float(np.mean(vals > -T + TOL))
             deep = float(np.mean(vals < -T - 0.35))  # breakthrough depth is ~T + 0.3
-            report['items'].append({'id': it['id'], 'kind': it['kind'], 'through': True, 'left': round(left, 4), 'deepPastBreak': round(deep, 4), 'maxZ': round(float(vals.max()), 3)})
+            report['items'].append({'id': it['id'], 'kind': it['kind'], 'through': True, 'left': round(left, 4), 'deepPastBreak': round(deep, 4), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
         else:
             left = float(np.mean(vals > want + TOL))
             deep = float(np.mean(vals < want - TOL))
-            report['items'].append({'id': it['id'], 'kind': it['kind'], 'depth': it['depth'], 'left': round(left, 4), 'deep': round(deep, 4), 'p05': round(float(np.percentile(vals - want, 5)), 3), 'maxZ': round(float(vals.max()), 3)})
+            report['items'].append({'id': it['id'], 'kind': it['kind'], 'depth': it['depth'], 'left': round(left, 4), 'deep': round(deep, 4), 'p05': round(float(np.percentile(vals - want, 5)), 3), 'maxZ': round(float(vals.max()), 3), 'areaMm2': round(float(mask.sum()) * g.res * g.res, 2)})
     # Outside: material removed where the design expects stock. On a part cut free by a cut-out,
     # the stock AROUND the part is design waste, so the question is a gouge INTO the part, away
     # from every cut it asks for. Without a part, it is any cut away from the design (labels and a

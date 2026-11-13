@@ -13,6 +13,7 @@ import {
   parseCargoLog,
   parseE2eLog,
   parseVitestLog,
+  limitSections,
   programRows,
   referenceRows,
   statusTables,
@@ -227,5 +228,62 @@ describe('#1233 baseline comparison tables', () => {
     const mem = rows.find((r) => r.label === 'app-top: peak memory (MiB)')!;
     expect(mem.after).toContain('refused at cam');
     expect(mem.change).toBe('—');
+  });
+
+  it('14. a card at 85 % of its limit is in the above-80 % list; one at 50 % is not', () => {
+    const sec = limitSections([
+      { id: 'slow', status: 'match', seconds: 850, limitSeconds: 1000 },
+      { id: 'fine', status: 'match', seconds: 500, limitSeconds: 1000 },
+      { id: 'edge', status: 'match', seconds: 800, limitSeconds: 1000 },
+      { id: 'unlimited', status: 'match', seconds: 5 },
+    ]);
+    expect(sec.above80.map((r) => r.id)).toEqual(['slow']);
+    expect(sec.above80[0]!.share).toBe('85.0 %');
+    expect(sec.shares.find((r) => r.id === 'fine')!.share).toBe('50.0 %');
+    expect(sec.noLimit).toEqual(['unlimited']);
+  });
+
+  it('15. an over-limit card is its own outcome with both numbers and how far it got, never an error', () => {
+    const cards = [
+      { id: 'slowpoke', status: 'over-limit', seconds: 3600.2, limitSeconds: 3600, overLimit: { elapsedSeconds: 3600.2, limitSeconds: 3600, phase: 'chain', tMs: 2_800_000 } },
+      { id: 'broken', status: 'error', seconds: 1 },
+    ];
+    const sec = limitSections(cards);
+    expect(sec.overLimit).toHaveLength(1);
+    expect(sec.overLimit[0]).toContain('slowpoke');
+    expect(sec.overLimit[0]).toContain('over limit after 3600 s (limit 3600 s; reached: chain');
+    expect(sec.overLimit.join(' ')).not.toContain('broken');
+    const t = statusTables([], cards);
+    expect(t.counts).toEqual([['error', '0', '1'], ['over-limit', '0', '1']]);
+    // an over-limit card with no trace says so instead of inventing a phase
+    expect(limitSections([{ id: 'x', status: 'over-limit', seconds: 9, limitSeconds: 5, overLimit: { elapsedSeconds: 9, limitSeconds: 5, phase: null, tMs: null } }]).overLimit[0]).toContain('reached: not traced');
+  });
+
+  it('16. the demo section prints the over-limit lines and the share list; folders with no limits say so', () => {
+    const base = {
+      before: { sha: 'a'.repeat(40), tag: null, harnessPatches: [] as string[] },
+      after: { sha: 'b'.repeat(40), tag: null, harnessPatches: [] as string[] },
+      headline: { before: head(1), after: head(1) },
+      references: { before: [], after: [] },
+      cutInto: [],
+      samples: { before: [], after: [] },
+      programs: [],
+      pictures: [],
+    };
+    const withLimits = buildComparison({
+      ...base,
+      cards: {
+        before: [{ id: 'c1', status: 'match', seconds: 10 }],
+        after: [
+          { id: 'c1', status: 'match', seconds: 900, limitSeconds: 1000 },
+          { id: 'c2', status: 'over-limit', seconds: 2000, limitSeconds: 1500, overLimit: { elapsedSeconds: 2000, limitSeconds: 1500, phase: 'plan', tMs: 1000 } },
+        ],
+      },
+    });
+    expect(withLimits).toContain('over limit after 2000 s (limit 1500 s; reached: plan');
+    expect(withLimits).toContain('Cards above 80 % of their limit');
+    expect(withLimits).toMatch(/\| c1 \| 900\.0 \| 1000 \| 90\.0 % \|/);
+    const without = buildComparison({ ...base, cards: { before: [{ id: 'c1', status: 'match', seconds: 10 }], after: [{ id: 'c1', status: 'match', seconds: 11 }] } });
+    expect(without).toContain('limits are not recorded');
   });
 });
