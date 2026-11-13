@@ -32,10 +32,10 @@ test.describe('#1207 All values', () => {
     await cm.ready();
     await openAllValues(page);
 
-    await expect(page.getByTestId('all-values-row-plan.shortlistSize')).toBeVisible();
+    await expect(page.getByTestId('all-values-row-tabs.widthMm')).toBeVisible();
     await page.getByTestId('all-values-search').fill('no such value zzz');
     await expect(page.getByTestId('all-values-empty')).toContainText('No values match');
-    await expect(page.getByTestId('all-values-row-plan.shortlistSize')).toHaveCount(0);
+    await expect(page.getByTestId('all-values-row-tabs.widthMm')).toHaveCount(0);
 
     mkdirSync(QA, { recursive: true });
     await page.screenshot({ path: `${QA}/empty-search.png` });
@@ -47,14 +47,14 @@ test.describe('#1207 All values', () => {
     await cm.ready();
     await openAllValues(page);
 
-    await page.getByTestId('all-values-row-plan.shortlistSize').click();
-    await page.getByTestId('all-values-input').fill('10');
+    await page.getByTestId('all-values-row-tabs.widthMm').click();
+    await page.getByTestId('all-values-input').fill('12');
     await page.getByTestId('all-values-save').click();
     await expect(page.getByTestId('all-values-saved')).toContainText('Saved');
     // The re-read is the record's: the row now differs from its recommendation and says changed.
-    await expect(page.getByTestId('all-values-row-plan.shortlistSize')).toContainText('10');
+    await expect(page.getByTestId('all-values-row-tabs.widthMm')).toContainText('12');
     await expect(
-      page.getByTestId('all-values-row-plan.shortlistSize').locator('[data-kind="changed"]'),
+      page.getByTestId('all-values-row-tabs.widthMm').locator('[data-kind="changed"]'),
     ).toHaveCount(1);
 
     mkdirSync(QA, { recursive: true });
@@ -71,7 +71,7 @@ test.describe('#1207 All values', () => {
       return route.fulfill({
         status: 400,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'the shop’s record refused 10: outside the bounds it may set' }),
+        body: JSON.stringify({ error: 'this shop’s record is locked while a registration is running; try again when it finishes' }),
       });
     });
     await cm.ready();
@@ -80,10 +80,10 @@ test.describe('#1207 All values', () => {
     // of its range.
     await expect(page.getByTestId('all-values-chip-measured')).toContainText('Measured 6');
 
-    await page.getByTestId('all-values-row-plan.shortlistSize').click();
-    await page.getByTestId('all-values-input').fill('10');
+    await page.getByTestId('all-values-row-tabs.widthMm').click();
+    await page.getByTestId('all-values-input').fill('12');
     await page.getByTestId('all-values-save').click();
-    await expect(page.getByTestId('all-values-refusal')).toContainText('refused 10');
+    await expect(page.getByTestId('all-values-refusal')).toContainText('locked');
     await expect(page.getByTestId('all-values-saved')).toHaveCount(0);
 
     mkdirSync(QA, { recursive: true });
@@ -96,7 +96,7 @@ test.describe('#1207 All values', () => {
     await openAllValues(page);
 
     await expect(page.getByTestId('all-values-readonly')).toContainText('recommendations');
-    await page.getByTestId('all-values-row-plan.shortlistSize').click();
+    await page.getByTestId('all-values-row-tabs.widthMm').click();
     await expect(page.getByTestId('all-values-save')).toBeDisabled();
     await expect(page.getByTestId('all-values-reset')).toBeDisabled();
 
@@ -111,14 +111,14 @@ test.describe('#1207 All values', () => {
     await cm.ready();
     await openAllValues(page);
 
-    await page.getByTestId('all-values-row-plan.shortlistSize').click();
+    await page.getByTestId('all-values-row-tabs.widthMm').click();
     const detail = page.getByTestId('all-values-detail');
     await expect(detail).toBeVisible();
     await expect(detail).toContainText('This value decides');
     // In place: the detail is inside the list, directly after the chosen row.
     await expect(page.locator('.manage .allvalues-list [data-testid="all-values-detail"]')).toHaveCount(1);
     // The row keeps the recommendation beside the value at phone width.
-    await expect(page.getByTestId('all-values-row-plan.shortlistSize')).toContainText('rec.');
+    await expect(page.getByTestId('all-values-row-tabs.widthMm')).toContainText('rec.');
 
     mkdirSync(QA, { recursive: true });
     await page.screenshot({ path: `${QA}/phone-in-place.png` });

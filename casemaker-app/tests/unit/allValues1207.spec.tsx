@@ -26,8 +26,8 @@ function entry(value: number, source: 'seeded' | 'chosen' | 'measured' = 'seeded
 /** The store as a present shop with three exceptions: one changed, one measured, one seeded. */
 function presentShop(overrides: Record<string, ReturnType<typeof entry>> = {}) {
   const defaults = ShopDefaultsSchema.parse({
-    'plan.shortlistSize': entry(12, 'chosen'),
-    'plan.leftoverTallMm': entry(1, 'seeded'),
+    'tabs.widthMm': entry(10, 'chosen'),
+    'run.pollMs': entry(2000, 'seeded'),
     'registration.tipRadiusMm': entry(0.72, 'measured'),
     ...overrides,
   }) as ShopDefaults;
@@ -64,19 +64,22 @@ describe('#1207 All values', () => {
 
   it('lists every registry entry, with the label leading and the key following', () => {
     render(<AllValuesScope />);
-    const row = screen.getByTestId('all-values-row-plan.shortlistSize');
+    const row = screen.getByTestId('all-values-row-tabs.widthMm');
     const text = row.textContent ?? '';
-    const labelAt = text.indexOf(KNOWN_DEFAULTS['plan.shortlistSize']!.label.slice(0, 30));
-    const keyAt = text.indexOf('plan.shortlistSize');
+    const labelAt = text.indexOf('holding tab width');
+    const keyAt = text.indexOf('tabs.widthMm');
     expect(labelAt, 'the row shows the registry label').toBeGreaterThanOrEqual(0);
     expect(keyAt).toBeGreaterThan(labelAt);
+    // #1207 review — the registry's provenance wording is not the operator's: the page strips
+    // "(chosen)" from the label, because the row's chip and the detail's record already say it.
+    expect(text).not.toMatch(/\(chosen/i);
   });
 
   it('marks only exceptions: no "chosen, not measured" chip; changed and measured are marked', () => {
     render(<AllValuesScope />);
-    const changed = screen.getByTestId('all-values-row-plan.shortlistSize');
+    const changed = screen.getByTestId('all-values-row-tabs.widthMm');
     expect(changed.querySelector('[data-kind="changed"]')).not.toBeNull();
-    const plain = screen.getByTestId('all-values-row-plan.leftoverTallMm');
+    const plain = screen.getByTestId('all-values-row-run.pollMs');
     expect(plain.querySelector('[data-kind="changed"]')).toBeNull();
     expect(within(plain).queryByText(/chosen/i)).toBeNull();
     const measured = screen.getByTestId('all-values-row-registration.tipRadiusMm');
@@ -85,32 +88,37 @@ describe('#1207 All values', () => {
 
   it('the detail says what the value decides, and calls the shop’s copy this shop’s record', () => {
     render(<AllValuesScope />);
-    fireEvent.click(screen.getByTestId('all-values-row-plan.shortlistSize'));
+    fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
     const detail = screen.getByTestId('all-values-detail');
     expect(detail.textContent).toMatch(/This value decides/i);
     expect(detail.textContent).toMatch(/this shop’s record/i);
     expect(detail.textContent).not.toMatch(/location\.json/i);
+    // #1207 review — one full stop: a description that already ends in one does not get another.
+    const title = detail.querySelector('.allvalues-title')?.textContent ?? '';
+    expect(title).toBe('This value decides holding tab width.');
   });
 
   it('saves a value through the shop-defaults store and says it was saved', async () => {
     render(<AllValuesScope />);
-    fireEvent.click(screen.getByTestId('all-values-row-plan.shortlistSize'));
-    fireEvent.change(screen.getByTestId('all-values-input'), { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
+    fireEvent.change(screen.getByTestId('all-values-input'), { target: { value: '12' } });
     fireEvent.click(screen.getByTestId('all-values-save'));
     expect(set).toHaveBeenCalledTimes(1);
-    expect(set.mock.calls[0]![0]).toBe('plan.shortlistSize');
-    expect(set.mock.calls[0]![1].value).toBe(10);
+    expect(set.mock.calls[0]![0]).toBe('tabs.widthMm');
+    expect(set.mock.calls[0]![1].value).toBe(12);
     expect(await screen.findByTestId('all-values-saved')).toBeTruthy();
   });
 
   it('shows the house service’s refusal sentence, and applies nothing', async () => {
     set.mockResolvedValue(false);
-    useShopDefaultsStore.setState({ reason: 'the shop’s record refused 10: outside the bounds the page may set' });
+    useShopDefaultsStore.setState({
+      reason: 'this shop’s record is locked while a registration is running; try again when it finishes',
+    });
     render(<AllValuesScope />);
-    fireEvent.click(screen.getByTestId('all-values-row-plan.shortlistSize'));
-    fireEvent.change(screen.getByTestId('all-values-input'), { target: { value: '10' } });
+    fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
+    fireEvent.change(screen.getByTestId('all-values-input'), { target: { value: '12' } });
     fireEvent.click(screen.getByTestId('all-values-save'));
-    expect((await screen.findByTestId('all-values-refusal')).textContent).toMatch(/refused 10/);
+    expect((await screen.findByTestId('all-values-refusal')).textContent).toMatch(/locked/);
     expect(screen.queryByTestId('all-values-saved')).toBeNull();
   });
 
@@ -124,7 +132,7 @@ describe('#1207 All values', () => {
     useShopDefaultsStore.setState({ status: 'absent', defaults: null, etag: null, reason: 'no house service at this origin' });
     render(<AllValuesScope />);
     expect(screen.getByTestId('all-values-readonly').textContent).toMatch(/recommendations/i);
-    fireEvent.click(screen.getByTestId('all-values-row-plan.shortlistSize'));
+    fireEvent.click(screen.getByTestId('all-values-row-tabs.widthMm'));
     expect((screen.getByTestId('all-values-save') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('all-values-reset') as HTMLButtonElement).disabled).toBe(true);
   });
@@ -133,10 +141,10 @@ describe('#1207 All values', () => {
     render(<AllValuesScope />);
     fireEvent.click(screen.getByTestId('all-values-reset-changed'));
     const confirm = screen.getByTestId('all-values-reset-confirm');
-    expect(confirm.textContent).toContain(KNOWN_DEFAULTS['plan.shortlistSize']!.label.slice(0, 30));
-    expect(confirm.textContent).not.toContain(KNOWN_DEFAULTS['registration.tipRadiusMm']!.label.slice(0, 30));
+    expect(confirm.textContent).toContain('holding tab width');
+    expect(confirm.textContent).not.toContain('probe rim offset');
     fireEvent.click(screen.getByTestId('all-values-reset-confirm-yes'));
-    expect(reset).toHaveBeenCalledWith('plan.shortlistSize');
+    expect(reset).toHaveBeenCalledWith('tabs.widthMm');
     expect(reset).not.toHaveBeenCalledWith('registration.tipRadiusMm');
   });
 

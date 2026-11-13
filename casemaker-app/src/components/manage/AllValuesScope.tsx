@@ -193,7 +193,7 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
     const measured = entry?.source === 'measured';
     rows.push({
       key,
-      label: known.label,
+      label: displayLabel(known.label),
       unit: known.unit,
       recommendation: known.fallback,
       rule: known.rule,
@@ -216,7 +216,7 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
     const value = entry === undefined || typeof entry.value !== 'boolean' ? known.fallback : entry.value;
     rows.push({
       key,
-      label: known.label,
+      label: displayLabel(known.label),
       unit: '',
       recommendation: known.fallback,
       rule: null,
@@ -235,7 +235,7 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
     const entry = defaults?.[key];
     rows.push({
       key,
-      label: known.label,
+      label: displayLabel(known.label),
       unit: known.unit,
       recommendation: null,
       rule: known.rule,
@@ -251,6 +251,18 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
     });
   }
   return rows;
+}
+
+/**
+ * A registry label as an operator reads it. The registry's own labels carry provenance wording
+ * ("(chosen)", "(chosen, not measured)") because the registry states where a number comes from;
+ * on this page the provenance is the row's chips and the detail's record line, so the wording is
+ * stripped HERE, never in the registry. Honest limitations — "(measured)", "(not measured)",
+ * "(provisional)", "(assumed)", "(placeholder)" — stay: they are what the value IS, not where it
+ * came from.
+ */
+function displayLabel(label: string): string {
+  return label.replace(/\s*\((?:chosen|chosen,\s*not measured)\)\s*$/i, '');
 }
 
 function fmt(value: number | string | boolean | null, unit: string): string {
@@ -406,7 +418,9 @@ export function AllValuesScope() {
           {selected.measured ? ' · measured' : selected.measuredOnly ? ' · measured only' : ''}
         </div>
         <div className="allvalues-detailkey mono">{selected.key}</div>
-        <h4 className="allvalues-title">This value decides {midSentence(selected.label)}.</h4>
+        <h4 className="allvalues-title">
+          This value decides {midSentence(selected.label).replace(/[.\s]+$/, '')}.
+        </h4>
         <div className="lf">
           <span>Value in this shop’s record</span>
           <div className="allvalues-inputrow">
