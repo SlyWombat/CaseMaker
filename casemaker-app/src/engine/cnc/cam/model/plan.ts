@@ -4307,6 +4307,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         regions: shadowRegions,
         offset: opts.offset,
         ...(opts.boolean === undefined ? {} : { subtract: opts.boolean.subtract }),
+        // #1249 stage 2b — the plan's own rapid rates and its hop height (HOP_Z, above the stock
+        // top; the height the IR's links are built with). The trace-only selector's rest term.
+        rapid: opts.rapid,
+        hopClearanceMm: HOP_Z,
         contourPerimeterMm: polygonsPerimeter(tree.contour.outline),
         paramsFor: opts.paramsFor,
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),

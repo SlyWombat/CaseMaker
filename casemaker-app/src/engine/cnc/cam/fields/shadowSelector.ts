@@ -35,6 +35,10 @@ export interface ShadowInput {
   contourPerimeterMm: number;
   /** #1249 stage 2a — the real Clipper subtract, for the band figures. Absent: bands are zeros. */
   subtract?: (a: Polygons, b: Polygons) => Polygons;
+  /** #1249 stage 2b — the plan's own rapid rates, for a banded rest step's hops. Absent: area term. */
+  rapid?: { xyMmPerMin: number; zMmPerMin: number };
+  /** #1249 stage 2b — the plan's own hop height above the stock, mm. Absent: area term. */
+  hopClearanceMm?: number;
 }
 
 /** Every number a trace row carries is rounded to three decimals (milliseconds stay integers). */
@@ -150,6 +154,11 @@ export function traceShadowSelection(input: ShadowInput): void {
   const shortlistRows: ShortlistRow[] = [];
   /** #1249 — one band per (region, previous diameter, diameter), computed once per choice run. */
   const bandCache = new Map<string, { areaMm2: number; contourLengthMm: number; patches: number }>();
+  /** #1249 stage 2b — the plan's rates, or none: then every step keeps the area term. */
+  const restPricing =
+    input.rapid === undefined || input.hopClearanceMm === undefined
+      ? undefined
+      : { rapid: input.rapid, hopClearanceMm: input.hopClearanceMm };
   for (const candidate of candidates) {
     const signature = candidate.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
     const steps: EstimateStep[] = candidate.steps.map((s) => ({
@@ -162,7 +171,31 @@ export function traceShadowSelection(input: ShadowInput): void {
         ? { contour: { perimeterMm: input.contourPerimeterMm, depthMm: contourDepthMm } }
         : {}),
     }));
-    const est = estimateChain(steps, pockets, input.changePrice);
+    // #1249 stage 2b — the band the previous cutter left each rest step, attached BEFORE the step
+    // is priced: it is what the rest term follows, and the same figures the row below reports.
+    for (const [i, stepOfChain] of steps.entries()) {
+      if (stepOfChain.kind !== 'rest') continue;
+      const prevDiameterMm = i > 0 ? steps[i - 1]!.diameterMm : 0;
+      if (!(prevDiameterMm > 0) || !(stepOfChain.diameterMm > 0) || input.subtract === undefined) continue;
+      let bandArea = 0;
+      let bandContour = 0;
+      let bandPatches = 0;
+      for (const id of stepOfChain.regionIds) {
+        const region = input.regions.get(id);
+        if (region === undefined) continue;
+        const key = `${id}|${prevDiameterMm}|${stepOfChain.diameterMm}`;
+        let band = bandCache.get(key);
+        if (band === undefined) {
+          band = reachBand(region, prevDiameterMm, stepOfChain.diameterMm, input.offset, input.subtract);
+          bandCache.set(key, band);
+        }
+        bandArea += band.areaMm2;
+        bandContour += band.contourLengthMm;
+        bandPatches += band.patches;
+      }
+      stepOfChain.band = { areaMm2: bandArea, contourLengthMm: bandContour, patches: bandPatches };
+    }
+    const est = estimateChain(steps, pockets, input.changePrice, restPricing);
     const real = input.considered.find(
       (row) => row.steps.map((s) => `${s.kind}:${s.cutterKey}`).join('+') === signature,
     );
@@ -191,25 +224,7 @@ export function traceShadowSelection(input: ShadowInput): void {
     // previous cutter left it: area, outline length and separate patches. Trace-only.
     for (const stepEst of est.stepEstimates) {
       if (stepEst.kind !== 'pocket' && stepEst.kind !== 'rest') continue;
-      let bandArea = 0;
-      let bandContour = 0;
-      let bandPatches = 0;
-      if (stepEst.kind === 'rest' && stepEst.prevDiameterMm > 0 && input.subtract !== undefined) {
-        const regionIds = candidate.steps[stepEst.stepIndex]?.regionIds ?? [];
-        for (const id of regionIds) {
-          const region = input.regions.get(id);
-          if (region === undefined) continue;
-          const key = `${id}|${stepEst.prevDiameterMm}|${stepEst.diameterMm}`;
-          let band = bandCache.get(key);
-          if (band === undefined) {
-            band = reachBand(region, stepEst.prevDiameterMm, stepEst.diameterMm, input.offset, input.subtract);
-            bandCache.set(key, band);
-          }
-          bandArea += band.areaMm2;
-          bandContour += band.contourLengthMm;
-          bandPatches += band.patches;
-        }
-      }
+      const band = stepEst.kind === 'rest' ? steps[stepEst.stepIndex]?.band : undefined;
       memTrace('shadow:step', {
         signature,
         stepIndex: stepEst.stepIndex,
@@ -226,9 +241,10 @@ export function traceShadowSelection(input: ShadowInput): void {
         stepOverMm: round3(stepEst.stepOver),
         stepDownMm: round3(stepEst.stepDown),
         cutSeconds: round3(stepEst.cutSeconds),
-        bandAreaMm2: round3(bandArea),
-        bandContourLengthMm: round3(bandContour),
-        bandPatches,
+        restSeconds: round3(stepEst.restSeconds),
+        bandAreaMm2: round3(band?.areaMm2 ?? 0),
+        bandContourLengthMm: round3(band?.contourLengthMm ?? 0),
+        bandPatches: band?.patches ?? 0,
       });
     }
   }
