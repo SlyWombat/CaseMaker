@@ -716,6 +716,12 @@ export interface SetupPlan {
    * count (#962's rule); `notes` stays as the dump's full prose.
    */
   statements: PlanStatement[];
+  /**
+   * #1246 slice 2 — the outline-is-stock fact this setup's plan derived (see
+   * `PlanPocketsResult.outline`): stated on the result so consumers read the plan's own answer
+   * instead of re-deriving a bounding-box test.
+   */
+  outline: { isStock: boolean; marginsMm: [number, number, number, number] } | null;
   /** Features no cutter in the chain covers, each a sentence naming the limiting number. */
   unreachable: string[];
   /**
@@ -2940,6 +2946,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       ),
       unplanned: result.unplanned,
       choice: result.choice,
+      outline: result.outline,
     });
     finishStageMs += result.finishStageMs;
     opts.onProgress?.({ setupIndex, op: 'linking', fraction: 1 });
@@ -3644,6 +3651,13 @@ export interface PlanPocketsResult {
   choice: SequenceChoice;
   /** #959 item 5 — the chosen chain's failed steps, one entry per region that threw (with its own message). */
   unplanned: SequenceStepFailure[];
+  /**
+   * #1246 slice 2 — THE OUTLINE-IS-STOCK FACT as a plan OUTPUT: whether the recognised outline's
+   * bounding box sits inside the stock's box within the fit tolerance, and the four margins
+   * (left, front, right, back) the comparison saw. Null when the caller stated no stock
+   * footprint. The record keeps `outline: null` — this is not a setup input.
+   */
+  outline: { isStock: boolean; marginsMm: [number, number, number, number] } | null;
 }
 
 /**
@@ -3845,6 +3859,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   // #943 (10) — THE OUTLINE IS THE STOCK'S: no material stands outside the goal to free, so no
   // contour is demanded (the vendor tray's side 2, whose stock IS the freed part). Any side with
   // more than the fit tolerance of stock beyond the outline means a contour is demanded as before.
+  // #1246 slice 2 — the same derivation, now STATED on the result (the record keeps outline null:
+  // this is a plan output, not a setup input).
+  let outlineFact: PlanPocketsResult['outline'] = null;
   const outlineIsStock =
     opts.stockFootprintMm !== undefined &&
     (() => {
@@ -3860,8 +3877,9 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
           if (y > maxY) maxY = y;
         }
       }
-      const margins = [minX, minY, opts.stockFootprintMm!.length - maxX, opts.stockFootprintMm!.width - maxY];
-      return margins.every((m) => m <= GOAL_FIT_TOLERANCE_MM);
+      const margins: [number, number, number, number] = [minX, minY, opts.stockFootprintMm!.length - maxX, opts.stockFootprintMm!.width - maxY];
+      outlineFact = { isStock: margins.every((m) => m <= GOAL_FIT_TOLERANCE_MM), marginsMm: margins };
+      return outlineFact.isStock;
     })();
   if (!tree.contour.synthetic && !outlineIsStock) {
     features.push({ id: 'contour', kind: 'contour', depthMm: contourDepthMm });
@@ -4890,7 +4908,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     });
   }
 
-  return { ops, programs, sequence, unreachable, notes, statements, choice, unplanned };
+  return { ops, programs, sequence, unreachable, notes, statements, choice, unplanned, outline: outlineFact };
 }
 
 /**
@@ -6516,6 +6534,8 @@ export interface PlanTreeResult {
   unplanned: SequenceStepFailure[];
   /** #961 — the pocket chain's picker result, carried through for `SetupPlan.choice`. */
   choice: SequenceChoice;
+  /** #1246 slice 2 — the pocket plan's outline-is-stock fact, carried through for `SetupPlan`. */
+  outline: PlanPocketsResult['outline'];
   /** #1021 — the floor strips this plan built (and the ones nothing can reach), when it asked. */
   floorStrips?: PlanningFloorStrips;
   /** #1046 — the curved finish attempts' wall time (ms), summed from the curved pipeline. */
@@ -6639,6 +6659,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
           },
         ],
         unplanned: [],
+        outline: null,
         choice: {
           steps: [],
           cost: { entries: [], estimateSeconds: 0, toolChanges: 0, changeSeconds: 0, changes: [], totalSeconds: 0 },
@@ -6700,6 +6721,7 @@ export function planTreePrograms(tree: FeatureTree, opts: PlanTreeOptions): Plan
     statements: [...pocketResult.statements, ...curvedResult.statements],
     unplanned: [...pocketResult.unplanned, ...curvedResult.unplanned],
     choice: pocketResult.choice,
+    outline: pocketResult.outline,
     finishStageMs: curvedResult.finishMs,
     ...(stripped === undefined ? {} : { floorStrips: stripped }),
   };
