@@ -45,6 +45,7 @@ import { formatFixed, sanitizeMkrValue } from './post/format';
 import type { Setup } from './setup';
 import type { Tool } from './tool';
 import { stockDepthLimit, verifyProgram, type VerifyReport } from './verify';
+import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from './setups/setupRecord';
 import { blankFootprint } from './footprint';
 
 /**
@@ -365,7 +366,9 @@ export function generateRestart(input: RestartInput): RestartResult {
   // ---- The verifier, with no exemption for restarts (#249 acceptance 2). ----
   let verify: VerifyReport | null = null;
   if (nc !== null) {
-    verify = verifyProgram(nc, {
+    // #1246 slice 1 — a restart has no job document: the record states the stock the input
+    // carries, and its context comes from it.
+    const facts: SetupRecordDeps & VerifyPerProgram = {
       setup: input.setup,
       machine: input.machine,
       tool: input.tool,
@@ -374,7 +377,9 @@ export function generateRestart(input: RestartInput): RestartResult {
       // #1235 stage 2 — the restart cuts the stock the input states, and a restart's input is a
       // plain box (no shape is carried), so a rectangle is the honest outline here.
       footprint: [blankFootprint(input.stock)],
-    });
+      stock: input.stock,
+    };
+    verify = verifyProgram(nc, verifyContextFrom(setupRecordFor(null, 0, facts), facts));
     if (verify.findings.some((f) => f.severity === 'error')) {
       const n = verify.findings.filter((f) => f.severity === 'error').length;
       errors.push(`the verifier refused the restart (${n} error${n === 1 ? '' : 's'})`);
