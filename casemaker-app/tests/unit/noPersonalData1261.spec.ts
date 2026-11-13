@@ -28,7 +28,7 @@ const EXEMPT_FILES = new Set([
 ]);
 
 /** `C:\Users\<name>`, `C:\\Users\\<name>` (JSON-escaped) or `/mnt/c/Users/<name>`. */
-const PROFILE_PATH = /(?:[A-Za-z]:\\{1,2}|\/mnt\/[a-z]\/)Users[\\/]+([^\\/\s"'`<>]+)/g;
+const PROFILE_PATH = /(?:[A-Za-z]:[\\/]{1,2}|\/mnt\/[a-z]\/)Users[\\/]+([^\\/\s"'`<>]+)/g;
 /** A name that is a placeholder or a system profile, not an account. */
 const PLACEHOLDER = /^(?:<[^>]*>|\*|…|\.{3}|%[A-Za-z]+%|Public|Default|Default User|All Users)$/;
 
@@ -76,11 +76,11 @@ describe('#1261 no personal data in tracked files', () => {
   });
 
   it.each(HOLDER_FILES)('%s states the copyright holder', (rel) => {
-    const lines = readFileSync(join(REPO, rel), 'utf8').split(/\r?\n/);
+    const lines = readFileSync(join(REPO, rel), 'utf8').split(/\r?\n/); // CRLF-safe: $ anchors a stripped line
     // The project's own line starts in column 0; third-party notices are indented.
     const own = lines.find((l) => /^Copyright\s+\d{4}\s/.test(l));
     expect(own, `${rel}: no project copyright line`).toBeDefined();
-    expect(own).toMatch(new RegExp(`^Copyright \\d{4} ${COPYRIGHT_HOLDER}\\b`));
+    expect(own).toMatch(new RegExp(`^Copyright \\d{4} ${COPYRIGHT_HOLDER}$`));
   });
 
   it('the patterns do catch what they are for', () => {
@@ -89,7 +89,8 @@ describe('#1261 no personal data in tracked files', () => {
     const win = ['C:', 'Users', name, 'AppData'].join('\\');
     const wsl = ['/mnt/c', 'Users', name, 'Documents'].join('/');
     const json = ['C:', 'Users', name, 'AppData'].join('\\\\');
-    for (const s of [win, wsl, json]) {
+    const fwd = ['C:', 'Users', name, 'AppData'].join('/');
+    for (const s of [win, wsl, json, fwd]) {
       const m = [...s.matchAll(PROFILE_PATH)];
       expect(m.length).toBe(1);
       expect(PLACEHOLDER.test(m[0]?.[1] ?? '')).toBe(false);

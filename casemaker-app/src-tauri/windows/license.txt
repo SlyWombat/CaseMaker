@@ -211,7 +211,7 @@ notices are distributed with the licence as section 4(d) requires.
 NOTICE
 
 Case Maker
-Copyright 2026 Electric RV Corporation (SlyWombat)
+Copyright 2026 Electric RV Corporation
 
 This product includes software developed as part of the Case Maker project
 (https://github.com/SlyWombat/CaseMaker).
