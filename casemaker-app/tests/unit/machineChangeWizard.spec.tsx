@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MachineChangeWizard } from '@/components/machine-change';
 import { openMachineChange, resetMachineChange } from '@/store/machineChangeStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
@@ -28,6 +28,8 @@ import {
   type HouseProbe,
 } from '@/platform/houseClient';
 import { setMachineConsoleLoader, type ConsoleSend } from '@/platform/machineConsole';
+import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
+import type { MachineStopReport } from '@/platform/machineStopReport';
 import { fakeConsoleSession } from './helpers/fakeConsole';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -806,5 +808,170 @@ describe('#693 walking the change', () => {
     // The vise is already on the machine; it is not offered as a change.
     expect(within(targets).queryByTestId('machine-change-target-vise')).toBeNull();
     expect(screen.getByTestId('machine-change-title').textContent).toContain('Change the machine');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// #1205 — THE WIZARD'S TWO HOME PRESSES CARRY THEIR STOP REPORTS (#1187 rule 3, #1197's gate).
+//
+// The three presses #1205 names are the Manage card's Home (its own spec,
+// `manageHomeReport1205.spec.tsx`) and this wizard's `doHome` (step 2) and `doFinalHome` (the
+// closing line). Both call the SAME `homeMachine` and render the SAME `StopReportAction` under the
+// same `stopIsReportable` gate with no job — these tests pin that per press: a transport failure
+// offers the report (and nothing posts without the press); the app's own refusal does not.
+describe('#1205 — the wizard’s two Home presses carry their stop reports', () => {
+  const RESET = 'read failed: Connection reset by peer (os error 104)';
+  const ALARM_STATUS = '<Alarm|MPos:0,0,0|WPos:0,0,0>';
+  const ADDRESS = { host: '192.168.10.43', port: 2222 };
+
+  beforeEach(() => {
+    __resetMachineStopReportStoreForTests();
+  });
+
+  function reportsSink(): MachineStopReport[] {
+    const reports: MachineStopReport[] = [];
+    setStopReportSendIO(async (report) => {
+      reports.push(report as MachineStopReport);
+      return { kind: 'ok', path: 'crash-reports/stop-home.json' };
+    });
+    return reports;
+  }
+
+  it('step 2’s Home: a transport failure offers the report, and nothing posts without the press', async () => {
+    const reports = reportsSink();
+    seedLocation();
+    fakeMachine({
+      status: () => sent('?', IDLE_AWAY),
+      home: () => ({ ok: false, reason: 'refused', line: '$H', detail: RESET, text: '' }),
+    });
+    openMachineChange({ target: 'rotary' });
+    render(<MachineChangeWizard />);
+
+    fireEvent.click(await screen.findByTestId('machine-change-home'));
+    const note = await screen.findByTestId('machine-change-home-note');
+    expect(note.textContent).toContain('Home did not complete');
+    expect(screen.getByTestId('stop-report-action')).toBeTruthy();
+    expect(reports).toHaveLength(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stop-report-send'));
+    });
+    await waitFor(() => expect(reports).toHaveLength(1));
+    const report = reports[0]!;
+    expect(report.kind).toBe('casemaker-machine-stop-report');
+    expect(report.action).toBe('home');
+    expect(report.error).toContain(RESET);
+    expect(report.machine).toEqual(ADDRESS);
+    expect(report.job).toBeNull();
+  });
+
+  it('step 2’s Home: the app’s own refusal offers none — an alarm is not a transport failure', async () => {
+    seedLocation();
+    fakeMachine({ status: () => sent('?', ALARM_STATUS) });
+    openMachineChange({ target: 'rotary' });
+    render(<MachineChangeWizard />);
+
+    fireEvent.click(await screen.findByTestId('machine-change-home'));
+    const note = await screen.findByTestId('machine-change-home-note');
+    expect(note.textContent).toContain('Home did not complete');
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
+  });
+
+  it('the final Home: a transport failure offers the report, and nothing posts without the press', async () => {
+    const reports = reportsSink();
+    seedLocation();
+    let homed = false;
+    let handsIn = false;
+    fakeMachine({
+      status: () => sent('?', homed ? IDLE : handsIn ? IDLE_AWAY : IDLE),
+      home: () => ({ ok: false, reason: 'refused', line: '$H', detail: RESET, text: '' }),
+      other: (line) => {
+        if (line === 'M821') handsIn = true;
+        return sent(line, 'ok');
+      },
+    });
+    openMachineChange({ target: 'rotary' });
+    render(<MachineChangeWizard />);
+    // The full walk to the record, then the closing Home's own press.
+    await screen.findByTestId('machine-change-home-line');
+    await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-checked'));
+    await screen.findByTestId('machine-change-take');
+    for (let i = 0; i < 6; i++) clickCheck(`machine-change-take-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-take-done'));
+    await screen.findByTestId('machine-change-fit');
+    for (let i = 0; i < 8; i++) clickCheck(`machine-change-fit-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-measure-now'));
+    fireEvent.click(screen.getByTestId('machine-change-light-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-light-after-power').getAttribute('data-done')).toBe('true'),
+    );
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+    fireEvent.click(await screen.findByTestId('machine-change-confirm-button'));
+    await screen.findByTestId('machine-change-record');
+
+    fireEvent.click(screen.getByTestId('machine-change-home-again'));
+    const note = await screen.findByTestId('machine-change-home-again-note');
+    expect(note.textContent).toContain('Home did not complete');
+    expect(screen.getByTestId('stop-report-action')).toBeTruthy();
+    expect(reports).toHaveLength(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('stop-report-send'));
+    });
+    await waitFor(() => expect(reports).toHaveLength(1));
+    const report = reports[0]!;
+    expect(report.kind).toBe('casemaker-machine-stop-report');
+    expect(report.action).toBe('home');
+    expect(report.error).toContain(RESET);
+    expect(report.machine).toEqual(ADDRESS);
+    expect(report.job).toBeNull();
+  });
+
+  it('the final Home: the app’s own refusal offers none', async () => {
+    seedLocation();
+    let homed = false;
+    let handsIn = false;
+    let finalAlarm = false;
+    fakeMachine({
+      status: () => sent('?', homed ? IDLE : finalAlarm ? ALARM_STATUS : handsIn ? IDLE_AWAY : IDLE),
+      home: () => {
+        homed = true;
+        return sent('$H', IDLE);
+      },
+      other: (line) => {
+        if (line === 'M821') handsIn = true;
+        return sent(line, 'ok');
+      },
+    });
+    openMachineChange({ target: 'rotary' });
+    render(<MachineChangeWizard />);
+    await screen.findByTestId('machine-change-home-line');
+    await waitFor(() => expect(screen.getByTestId('machine-change-home-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-powered-off'));
+    await waitFor(() => expect(screen.getByTestId('machine-change-power-line').getAttribute('data-done')).toBe('true'));
+    fireEvent.click(screen.getByTestId('machine-change-checked'));
+    await screen.findByTestId('machine-change-take');
+    for (let i = 0; i < 6; i++) clickCheck(`machine-change-take-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-take-done'));
+    await screen.findByTestId('machine-change-fit');
+    for (let i = 0; i < 8; i++) clickCheck(`machine-change-fit-${i}`);
+    fireEvent.click(screen.getByTestId('machine-change-measure-now'));
+    fireEvent.click(screen.getByTestId('machine-change-light-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('machine-change-light-after-power').getAttribute('data-done')).toBe('true'),
+    );
+    fireEvent.click(screen.getByTestId('machine-change-fit-done'));
+    fireEvent.click(await screen.findByTestId('machine-change-confirm-button'));
+    await screen.findByTestId('machine-change-record');
+
+    // Only the live machine goes into its alarm now — the refusal the final press must meet.
+    finalAlarm = true;
+    fireEvent.click(screen.getByTestId('machine-change-home-again'));
+    const note = await screen.findByTestId('machine-change-home-again-note');
+    expect(note.textContent).toContain('Home did not complete');
+    expect(screen.queryByTestId('stop-report-action')).toBeNull();
   });
 });
