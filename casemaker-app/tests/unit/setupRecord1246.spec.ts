@@ -371,3 +371,26 @@ describe('#1246 slice 2 — ModelPlanInput no longer drops the stock kind', () =
     expect(rodInput.stock.diameter).toBe(20);
   });
 });
+
+describe('#1246 slice 2 — the record carries the planner’s own frame', () => {
+  it('the plan input’s records state the same SetupFrame, and the stub’s Z-up is pinned beside it', async () => {
+    const job = jobFor(boxTarget('goal-frame', 40, 30, 20), 40, 30, 20);
+    const input = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    expect(input.records).toHaveLength(input.setups.length);
+    input.records!.forEach((record, i) => {
+      expect(record.frame).toBe(input.setups[i]!.frame);
+    });
+    const frame = input.records![0]!.frame!;
+    expect(frame.up).toEqual([0, 0, 1]);
+    expect(frame.stockTop).toBe(0);
+    // The verifier's stub is Z-up in the SETUP's own frame by construction — nothing forces it to
+    // equal a FLIPPED record frame, which is exactly A's observation this assertion pins.
+    expect(toSetup(job, Z1).placement.rotationZ).toBe(0);
+    const bottom = setupRecordFor(job, 0, {
+      setup: toSetup(job, Z1),
+      frame: { up: [0, 0, -1], stockTop: 20, stockBottom: 0 },
+    });
+    expect(bottom.frame!.up).toEqual([0, 0, -1]);
+    expect(toSetup(job, Z1).placement.rotationZ).toBe(0);
+  });
+});
