@@ -28,6 +28,7 @@
  */
 
 import type { CutParams } from '../feeds';
+import { readDefault } from '@/platform/defaultsClient';
 import type { Tool } from '../tool';
 import { cuttingForTrace } from '../tool';
 import {
@@ -56,7 +57,7 @@ export interface ProfileCut {
   /** The blank's thickness, mm. The tab top is `-(thickness - tabs.height)`. */
   thickness: number;
   /** The cut-out's tab spec. `count: 0` cuts the part free. */
-  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number };
+  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number };
 }
 
 /** A tab span on one contour, by work XY and by arc length along the contour. */
@@ -151,6 +152,8 @@ export interface TabPlacementOptions {
    * own even division. Absent: no span rule (the requested count is placed and that is all).
    */
   maxSpanMm?: number;
+  /** #1207 — `tabs.cornerDeg`: the turn sharper than this is a corner, not an arc joint. */
+  cornerDeg?: number;
 }
 
 /** One cut's tab facts, for the run sheet and the `tab-unplaceable` finding. */
@@ -236,19 +239,17 @@ export function kerfPolygons(path: Polygons, toolRadius: number, offset: OffsetF
  * small in the other direction too: a tab may not reach a NEIGHBOURING contour's kerf, or the
  * bridge would hold material that contour's own pass removes (the two-part bounce of #750).
  */
-export const TAB_BRIDGE_OVERSHOOT_MM = 0.05;
-
 /**
  * The material a tab keeps, as a BRIDGE for the loose-piece analysis (#750).
  *
- * `width` of material along the path, the kerf's own width, and `TAB_BRIDGE_OVERSHOOT_MM` either
+ * `width` of material along the path, the kerf's own width, and `tabs.bridgeOvershootMm` either
  * side of it. Only material the kerf never removed is added (the part beyond the inner edge and
  * the waste beyond the outer one), so the removed band is unchanged; the tab joins both sides by
  * AREA rather than by a shared edge. Following the span's own points (#736), the bridge curves
  * with the path.
  */
-export function tabBridgeRectangles(spans: readonly ProfileSpan[], toolRadius: number): Polygons {
-  return tabBars(spans, toolRadius, toolRadius + TAB_BRIDGE_OVERSHOOT_MM);
+export function tabBridgeRectangles(spans: readonly ProfileSpan[], toolRadius: number, overshootMm: number): Polygons {
+  return tabBars(spans, toolRadius, toolRadius + overshootMm);
 }
 
 /**
@@ -437,8 +438,6 @@ interface Edge {
   end: number;
 }
 
-/** A turn sharper than this is a corner, and a tab span must not cross it. */
-const TAB_CORNER_RAD = (20 * Math.PI) / 180;
 /** Directions within this of each other form one straight (traced or flattened) edge. */
 const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
 
@@ -457,7 +456,7 @@ const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
  * `minStraightLengthMm` (the tab's centre-path span — shorter than that cannot hold a tab, and a
  * polygonised circle's chords are far below it).
  */
-function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLengthMm = 0): Edge[] {
+function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLengthMm = 0, cornerRad = readDefault(null, 'tabs.cornerDeg').value * (Math.PI / 180)): Edge[] {
   const n = segments.length;
   if (n === 0 || !(perimeter > 0)) return [];
   const dirs = segments.map((segment) => unitDirection(segment.a, segment.b));
@@ -466,7 +465,7 @@ function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLen
     const u = dirs[(i - 1 + n) % n]!;
     const v = dirs[i]!;
     if (u === null || v === null) return false;
-    return Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) > TAB_CORNER_RAD;
+    return Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) > cornerRad;
   });
   // `straight[i]`: segment i continues segment i - 1 in the same direction, within a tight
   // tolerance, so the two belong to one straight edge.
@@ -591,9 +590,12 @@ export function placeTabs(
     return { spans: [], unplaceable: count > 0 ? count : 0, added: 0, tight: [] };
   }
   const targets = options?.targets;
+  // #1207 — the corner angle is the shop's `tabs.cornerDeg`; a caller that states none reads the
+  // registry's recommendation here (never an ambient source — `readDefault(null, …)`).
+  const cornerRad = (options?.cornerDeg ?? readDefault(null, 'tabs.cornerDeg').value) * (Math.PI / 180);
   // #1206's single-segment straight edge is for the DEFAULT placement: the release pass (#1073)
   // hands explicit targets and keeps the edge structure it was tuned against.
-  const edges = edgesOf(segments, perimeter, targets === undefined ? spanLength : 0);
+  const edges = edgesOf(segments, perimeter, targets === undefined ? spanLength : 0, cornerRad);
   if (targets !== undefined) {
     return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => targets[k] ?? ((k + 0.5) / count) * perimeter);
   }
@@ -602,7 +604,7 @@ export function placeTabs(
   if (edges.length === 1 && edges[0]!.end - edges[0]!.start >= perimeter - 1e-6) {
     return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => ((k + 0.5) / count) * perimeter);
   }
-  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm);
+  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad);
 }
 
 /**
@@ -792,6 +794,7 @@ function placeMidSide(
   widthMm: number,
   spanLength: number,
   maxSpanMm: number | undefined,
+  cornerRad: number,
 ): TabPlacement {
   const sides = sideEdges(edges, widthMm, spanLength);
   const counts = new Map<SideEdge, number>(sides.map((side) => [side, 0] as const));
@@ -877,7 +880,7 @@ function placeMidSide(
       if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) break;
       spans.push({ startArc, endArc });
       // The joins the tab's span crosses, and how many of them turn sharper than the placement's
-      // own smooth-arc limit (TAB_CORNER_RAD — a corner, not an arc joint).
+      // own smooth-arc limit (tabs.cornerDeg — a corner, not an arc joint).
       const spanStart = centre - spanLength / 2;
       let joins = 0;
       let sharpJoins = 0;
@@ -890,7 +893,7 @@ function placeMidSide(
         const v = segments[k]!;
         const ud = unitDirection(u.a, u.b);
         const vd = unitDirection(v.a, v.b);
-        if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > TAB_CORNER_RAD) {
+        if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > cornerRad) {
           sharpJoins += 1;
         }
       }
@@ -1056,6 +1059,7 @@ export function generateProfile(
       for (const contour of cut.path) {
         const placement = placeTabs(contour, cut.tabs.count, cut.tabs.width, toolRadius, {
           ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
+          ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
         });
         // Count once per cut, not once per pass: the report is about the tabs, not the Z levels.
         if (z === passes[0]) {

@@ -2428,6 +2428,9 @@ export function engraveRegions(
   // #1206 — the shop's span limit: no stretch of a freeing contour is left longer than this
   // without a tab. Read once, so the mask, the cut and the sheet's words use one number.
   const tabMaxSpanMm = readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value;
+  // #1207 — the tab corner angle and the bridge's overshoot, read once beside the span limit.
+  const tabCornerDeg = readDefault(shop.defaults ?? null, 'tabs.cornerDeg').value;
+  const tabBridgeOvershootMm = readDefault(shop.defaults ?? null, 'tabs.bridgeOvershootMm').value;
   const profiles: ProfileCut[] = [];
   const cutoutMask: MaskCutout[] = [];
   const cutoutCuts: CutRegion[] = [];
@@ -2509,7 +2512,7 @@ export function engraveRegions(
       let placed = 0;
       let unplaceable = 0;
       for (const contour of path) {
-        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm });
+        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg });
         spans.push(placement.spans);
         placed += placement.spans.length;
         unplaceable += placement.unplaceable;
@@ -2551,7 +2554,7 @@ export function engraveRegions(
         path,
         depth: c.depth,
         thickness: c.thickness,
-        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm },
+        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg },
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {
@@ -2596,7 +2599,7 @@ export function engraveRegions(
       for (let i = 0; i < path.length; i++) {
         cutoutFaces.push({
           kerf: kerfPolygons([path[i]!], radius, offset),
-          tabs: tabBridgeRectangles(spans[i] ?? [], radius),
+          tabs: tabBridgeRectangles(spans[i] ?? [], radius, tabBridgeOvershootMm),
         });
       }
       // The part a DELIBERATELY released cut-out frees is the area ENCLOSED by its centre path.

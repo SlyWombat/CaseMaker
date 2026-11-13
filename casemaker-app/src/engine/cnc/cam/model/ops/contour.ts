@@ -35,7 +35,7 @@ export interface ContourOpOptions {
   /** The blank's own thickness, mm (for the tab top: `-(thickness - tabs.height)`); absent → `depthMm` (no separate skin). */
   thicknessMm?: number;
   /** `{count: 0}` cuts the part free with no tabs. `maxSpanMm` is the shop's `tabs.maxSpanMm` (#1206). */
-  tabs: { count: number; width: number; height: number; maxSpanMm?: number };
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
@@ -147,6 +147,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
       ? path.map((ring) =>
           placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
             ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
+            ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
           }),
         )
       : [];

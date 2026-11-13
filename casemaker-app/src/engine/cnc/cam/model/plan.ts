@@ -2073,10 +2073,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // as placed, not on the plan before the contour's own fallback). #1237 — the value comes from
     // the INPUT's defaults map, like the planner's other seven settings, never ambient state.
     const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
+    // #1207 — the corner angle travels with the same spec, so the plan and the cut agree.
+    const tabCornerDeg = readDefault(input.defaults ?? null, 'tabs.cornerDeg').value;
     const tabSpec =
       tabs === undefined
-        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm }
-        : { ...tabs, maxSpanMm: tabMaxSpanMm };
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -3487,7 +3489,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number; maxSpanMm?: number };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this

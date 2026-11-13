@@ -3148,7 +3148,7 @@ describe('through-cuts and cut-outs (#218)', () => {
       const bPath = byX[byX.length - 1]!;
       const aKerf = kerfPolygons([aPath], R, offset);
       const bKerf = kerfPolygons([bPath], R, offset);
-      const bTabs = tabBridgeRectangles(placeTabs(bPath, 1, 4, R).spans, R);
+      const bTabs = tabBridgeRectangles(placeTabs(bPath, 1, 4, R).spans, R, 0.05);
       expect(bTabs).toHaveLength(1);
 
       const CS = tl.CrossSection;
