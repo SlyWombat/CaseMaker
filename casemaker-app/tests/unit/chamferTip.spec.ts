@@ -32,7 +32,7 @@ import { generate } from './helpers/engravePipeline';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { feedRowDiameter, flatEndMill, tipNotRecorded, type Tool } from '@/engine/cnc/tool';
 import {
-  DEFAULT_V_CARVE_STEPOVER_RATIO,
+  V_CARVE_STEPOVER_FALLBACK,
   vCarveRowStepover,
 } from '@/engine/cnc/vCarveGeometry';
 import { vCone } from '@/engine/cnc/vProfile';
@@ -227,8 +227,8 @@ describe('#740 — one owner for the tip, one diameter for the feeds row', () =>
       halfAngle: 15,
     });
     const cone = vCone(engraver)!;
-    const step = vCarveRowStepover(engraver, DEFAULT_V_CARVE_STEPOVER_RATIO * 0.3, 0.2, cone)!;
-    expect(step.requested).toBeCloseTo(2 * 0.2 * DEFAULT_V_CARVE_STEPOVER_RATIO, 12);
+    const step = vCarveRowStepover(engraver, V_CARVE_STEPOVER_FALLBACK * 0.3, 0.2, cone)!;
+    expect(step.requested).toBeCloseTo(2 * 0.2 * V_CARVE_STEPOVER_FALLBACK, 12);
     expect(step.clamped).toBe(true); // 0.24 mm request vs the 0.15 mm tip radius
   });
 

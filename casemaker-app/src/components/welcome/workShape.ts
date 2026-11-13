@@ -235,5 +235,8 @@ export function proposalContextFor(
     jobMaterial: untouchedDemo ? null : job.stock.material,
     plateThicknessMm: readDefault(defaults, 'stock.defaultPlateThicknessMm').value,
     signMarginMm: readDefault(defaults, 'stock.signMarginMm').value,
+    // #1207 — the proposal's two scrap margins, from the shop's record.
+    workMarginMm: readDefault(defaults, 'stock.workMarginMm').value,
+    presetMarginMm: readDefault(defaults, 'stock.presetMarginMm').value,
   };
 }

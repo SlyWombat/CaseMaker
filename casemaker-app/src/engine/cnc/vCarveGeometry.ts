@@ -25,7 +25,7 @@
  * above it, not a 4.25 mm one. At `F = 0` each number is exactly the pre-#748 one.
  *
  * THE STEPOVER is `ratio × 2·rPlane` — of the groove's width AT THE PLANE, never of the tip flat
- * ({@link vCarvePlaneStepover}, seed {@link DEFAULT_V_CARVE_STEPOVER_RATIO}).
+ * ({@link vCarvePlaneStepover}, seed `vcarve.stepoverRatio`).
  *
  * THE OFFSET LADDER is a LATER OPTION, kept here as pure arithmetic and not built on by the CAM.
  * It sits on the same cone identity used by the oracle:
@@ -37,6 +37,7 @@
  * stepover uses the plane groove's real width, not a cone treated as a flat end mill.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import { feedRowDiameter, type Tool } from './tool';
 import { flankHeightAboveTip, type VCone } from './vProfile';
 
@@ -47,14 +48,6 @@ export interface VCarveLevel {
   /** The inward offset of the region at this depth, mm: `tipRadius + depth·tanHalf`. */
   radius: number;
 }
-
-/**
- * The shipped V-carve stepover, as a FRACTION of the groove's width at the colour plane
- * (`2·rPlane`): 0.6. On the thin blank that is 0.6 × 0.40396 = 0.242 mm; on the badge
- * 0.6 × 0.39378 = 0.236 mm. It is the seed for the shop setting `vcarve.stepoverRatio` (the
- * setting itself is a later slice), kept here so the feeds rows and the CAM cannot disagree.
- */
-export const DEFAULT_V_CARVE_STEPOVER_RATIO = 0.6;
 
 /** The machine's minimum X/Y step must be beaten by this many groove widths (#221). */
 export const V_CARVE_STEP_MARGIN = 2;
@@ -236,9 +229,13 @@ export function vCarvePlane(cone: VCone, depth: number, film: number | null, flo
  * width is measured AT THE COLOUR PLANE — not the tip flat — because that is the width whose
  * adjacent passes must meet for the second colour's area to be the design.
  */
+/** The V-carve step-over at its recommendation: the static feed table's labelled fallback (the
+ *  registry owns the value; `vcarve.stepoverRatio`'s recommendation equals this). */
+export const V_CARVE_STEPOVER_FALLBACK = 0.6;
+
 export function vCarvePlaneStepover(
   plane: VCarvePlane,
-  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+  ratio: number = readDefault(null, 'vcarve.stepoverRatio').value,
 ): number {
   checkStepoverRatio(ratio);
   return plane.grooveWidth * ratio;
@@ -290,7 +287,7 @@ export interface VCarveStepover {
 export function vCarveStepover(
   planeRadius: number,
   cone: VCone,
-  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+  ratio: number = readDefault(null, 'vcarve.stepoverRatio').value,
 ): VCarveStepover {
   positive('planeRadius', planeRadius);
   positive('tipRadius', cone.tipRadius);
@@ -304,7 +301,7 @@ export function vCarveStepover(
 export function vCarvePassPitch(
   planeRadius: number,
   cone: VCone,
-  ratio: number = DEFAULT_V_CARVE_STEPOVER_RATIO,
+  ratio: number = readDefault(null, 'vcarve.stepoverRatio').value,
 ): number {
   return vCarveStepover(planeRadius, cone, ratio).effective;
 }

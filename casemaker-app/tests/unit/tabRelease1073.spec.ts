@@ -76,6 +76,8 @@ const plan = () => {
     pins: PINS,
     toolRadiusMm: TOOL_R,
     tabs: TABS,
+    cornerClearanceMm: 15,
+    pinClearanceMm: 10,
     params: PARAMS,
     offset: makeClipperOffset(tl),
   });
@@ -139,6 +141,8 @@ describe('#1073 side 2’s tab release', () => {
       pins: PINS,
       toolRadiusMm: TOOL_R,
       tabs: { count: 4, widthMm: 8, heightMm: 1 },
+      cornerClearanceMm: 15,
+      pinClearanceMm: 10,
       params: PARAMS,
       offset: makeClipperOffset(tl),
     });
@@ -184,6 +188,8 @@ describe('#1073 side 2’s tab release', () => {
       pins: PINS,
       toolRadiusMm: TOOL_R,
       tabs: TABS,
+      cornerClearanceMm: 15,
+      pinClearanceMm: 10,
       params: PARAMS,
       offset: makeClipperOffset(tl),
     });
@@ -200,6 +206,8 @@ describe('#1073 side 2’s tab release', () => {
       pins: null,
       toolRadiusMm: TOOL_R,
       tabs: TABS,
+      cornerClearanceMm: 15,
+      pinClearanceMm: 10,
       params: PARAMS,
       offset: makeClipperOffset(tl),
     });
@@ -265,6 +273,8 @@ describe('#1073 — the release reads the flip plan’s own band', () => {
       pins: split.plan.setups[1]?.pins ?? null,
       toolRadiusMm: TOOL_R,
       tabs: TABS,
+      cornerClearanceMm: 15,
+      pinClearanceMm: 10,
       params: PARAMS,
       offset: makeClipperOffset(tl),
     });

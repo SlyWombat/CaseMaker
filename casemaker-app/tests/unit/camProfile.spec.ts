@@ -16,7 +16,6 @@ import {
   placeTabs,
   profilePath,
   signedArea,
-  TAB_BRIDGE_OVERSHOOT_MM,
   tabBars,
   tabBridgeRectangles,
   type ProfileCut,
@@ -460,13 +459,13 @@ describe('kerf and tab rectangles (#218)', () => {
         [7.175, 0],
       ] as [number, number][],
     };
-    const [rectangle] = tabBridgeRectangles([span], R);
+    const [rectangle] = tabBridgeRectangles([span], R, 0.05);
     expect(rectangle).toBeDefined();
     const b = bbox([rectangle!]);
     expect(b.x1 - b.x0).toBeCloseTo(7.175 - 2 * R, 6);
     // The kerf is one diameter across; the bridge is that plus the overshoot on each side, so it
     // MEETS the part and the waste by area instead of on a shared edge (#750).
-    expect(b.y1 - b.y0).toBeCloseTo(2 * R + 2 * TAB_BRIDGE_OVERSHOOT_MM, 6);
+    expect(b.y1 - b.y0).toBeCloseTo(2 * R + 2 * 0.05, 6);
   });
 });
 
@@ -500,7 +499,7 @@ describe('tab bands follow the span (#736)', () => {
   });
 
   it('the bridge band reaches past BOTH kerf edges at the arc midpoint, so part and waste meet', () => {
-    const bridge = tabBridgeRectangles([arcSpan()], R)[0];
+    const bridge = tabBridgeRectangles([arcSpan()], R, 0.05)[0];
     expect(bridge).toBeDefined();
     expect(bridge!.length).toBeGreaterThan(4);
     expect(signedArea(bridge!)).toBeLessThan(0);
@@ -511,7 +510,7 @@ describe('tab bands follow the span (#736)', () => {
     expect(Math.max(...atMid.map((p) => p.radius))).toBeGreaterThan(RC + R);
     // And it is the widened band, not the tab's own width: half-width r plus the 0.05 mm
     // overshoot at the midpoint (#750).
-    const reach = R + TAB_BRIDGE_OVERSHOOT_MM;
+    const reach = R + 0.05;
     expect(atMid.some((p) => Math.abs(p.radius - (RC - reach)) < 0.01)).toBe(true);
     expect(atMid.some((p) => Math.abs(p.radius - (RC + reach)) < 0.01)).toBe(true);
   });

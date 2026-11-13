@@ -114,13 +114,6 @@ export type PlanFindingCode =
   // free, so the plan cuts no freeing contour and says so.
   | 'goal-outline-is-stock';
 
-/**
- * #721/#1005 — the steepest cavity wall a mould is cut with before it is warned as having no
- * draft, degrees from horizontal. A labelled default: casting practice wants a degree or more of
- * draft. Shared by both engines so the warning's number cannot drift between them — the old
- * heightfield path re-exports it from here.
- */
-export const MOLD_DRAFT_LIMIT_DEG = 85;
 
 export type PlanSheetCode = 'plan-setup' | 'plan-run';
 

@@ -19,7 +19,6 @@ function dj(...args: Parameters<typeof defaultEngraveJob>): ReturnType<typeof de
   return job;
 }
 import {
-  MAX_EMBEDDED_SOURCE_BYTES,
   SOURCE_MISSING_SENTENCE,
   embedSource,
   jobSourceRefusal,
@@ -32,6 +31,7 @@ import {
   withSource,
 } from '@/engine/cnc/engrave/jobSources';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import type { EngraveJob, EngraveVectorShape, JobSource } from '@/types/engraveJob';
 import type { CustomFont } from '@/types/textLabel';
 import { generate } from './helpers/engravePipeline';
@@ -113,6 +113,7 @@ describe('a source record (#425 §4)', () => {
   });
 
   it('keeps a file over 4 MiB by name, size and hash, with no bytes, and says why', async () => {
+    const MAX_EMBEDDED_SOURCE_BYTES = KNOWN_DEFAULTS['job.maxEmbeddedSourceBytes']!.fallback;
     const big = new ArrayBuffer(MAX_EMBEDDED_SOURCE_BYTES + 1);
     const { source, skipped } = await embedSource({ kind: 'image', name: 'scan.png', bytes: big });
 

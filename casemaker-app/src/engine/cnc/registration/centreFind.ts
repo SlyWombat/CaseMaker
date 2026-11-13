@@ -38,6 +38,8 @@ export interface CentreFindRequest {
   stockThicknessMm?: number;
   /** The touch feed, mm/min. */
   touchFeed: number;
+  /** #1207 — the most the search may travel (`registration.centreSearchMaxMm`), mm. */
+  maxSearchMm: number;
 }
 
 /** One axis's pair of touches, as the executor will run them. */
@@ -65,8 +67,6 @@ export interface CentreFindPlan {
 /** Below this the ball cannot meet the wall at all: refuse rather than guess a height. */
 export const MIN_CENTRE_DEPTH_MM = 0.3;
 
-/** The most a search may be asked to travel, mm — a wrong estimate must not cross the bed. */
-export const MAX_CENTRE_SEARCH_MM = 60;
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
@@ -107,10 +107,10 @@ export function planCentreFind(req: CentreFindRequest): { ok: true; plan: Centre
       reason: 'the probe has no measured effective radius — measure its tip in Manage › Accessories, then find the centre',
     };
   }
-  if (!(req.searchMm > 0) || req.searchMm > MAX_CENTRE_SEARCH_MM) {
+  if (!(req.searchMm > 0) || req.searchMm > req.maxSearchMm) {
     return {
       ok: false,
-      reason: `the search radius must be between 0 and ${MAX_CENTRE_SEARCH_MM} mm — a wrong estimate must not send the ball across the bed`,
+      reason: `the search radius must be between 0 and ${req.maxSearchMm} mm — a wrong estimate must not send the ball across the bed`,
     };
   }
   if (req.stockThicknessMm !== undefined && req.stockThicknessMm <= 0) {

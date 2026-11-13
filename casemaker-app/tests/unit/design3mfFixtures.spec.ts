@@ -29,7 +29,7 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { ORACLE_AREA_FLOOR } from '@/engine/cnc/engrave/oracle';
 import { vCone, type VCone } from '@/engine/cnc/vProfile';
 import {
-  DEFAULT_V_CARVE_STEPOVER_RATIO,
+  V_CARVE_STEPOVER_FALLBACK,
   cutDepthAtDistance,
   vCarvePlane,
   vCarveStepover,
@@ -772,8 +772,8 @@ describe('the thin fixture end to end (#221 acceptance)', () => {
       expect(cut).toBeDefined();
       const planeRadius = cut!.vCarve!.planeRadius;
       // The request is the seed × the groove width at the plane; the floor allows the tip radius.
-      const step = vCarveStepover(planeRadius, cone, DEFAULT_V_CARVE_STEPOVER_RATIO);
-      expect(step.requested).toBeCloseTo(DEFAULT_V_CARVE_STEPOVER_RATIO * 2 * planeRadius, 9);
+      const step = vCarveStepover(planeRadius, cone, V_CARVE_STEPOVER_FALLBACK);
+      expect(step.requested).toBeCloseTo(V_CARVE_STEPOVER_FALLBACK * 2 * planeRadius, 9);
       expect(step.clamped).toBe(true);
       // "Beside the requested one": the same note carries the effective pitch AND the request.
       expect(note.message).toContain(`pitch ${mm(step.effective)} mm`);

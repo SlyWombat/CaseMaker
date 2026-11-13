@@ -108,14 +108,19 @@ function cutBlankCheckPoints(
   // #1199 field 7 — the shared inset's two inputs, from the plan; absent is refused by the caller.
   const shrinkMm = plan.settings.probeFootprintShrinkMm ?? Number.NaN;
   const holdUncertainty = plan.holdUncertainty as { xMm: number; yMm: number };
+  // #1207 — the cut-blank choice's two registered limits. A plan stored before the keys existed
+  // has no copy, so the caller reads the registry's labelled recommendation here, at the edge.
+  const maxPoints = plan.settings.cutBlankMaxPoints ?? readDefault(null, 'registration.cutBlankMaxPoints').value;
+  const preferredInsetMm =
+    plan.settings.cutBlankPreferredInsetMm ?? readDefault(null, 'registration.cutBlankPreferredInsetMm').value;
   if (blankMap !== null) {
-    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles, shrinkMm, holdUncertainty });
+    const fromMap = cutBlankCandidatesFromMap({ map: blankMap, probe, obstacles, shrinkMm, holdUncertainty, maxPoints, preferredInsetMm });
     if (fromMap !== null) {
       return { points: fromMap.points, earlierCutsKnown: true, floorsRestricted: fromMap.floorsRestricted };
     }
     // A map that does not decode is not trusted: the unknown-cuts path, never a half-read map.
     return {
-      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true, shrinkMm, holdUncertainty }),
+      ...cutBlankCandidates({ raster, programs, probe, fallbackRadiusMm, obstacles, earlierCutsUnknown: true, shrinkMm, holdUncertainty, maxPoints, preferredInsetMm }),
       earlierCutsKnown: false,
     };
   }
@@ -124,6 +129,8 @@ function cutBlankCheckPoints(
     programs,
     shrinkMm,
     holdUncertainty,
+    maxPoints,
+    preferredInsetMm,
     probe: {
       tipRadiusMm: plan.topTouchTip === undefined ? plan.settings.tipRadiusMm : topTouchTipRadiusMm(plan.topTouchTip),
       tipLengthMm: plan.probe?.tipLengthMm ?? null,

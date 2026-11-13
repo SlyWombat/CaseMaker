@@ -116,6 +116,7 @@ function options(feature: Feature, over: Partial<CentreFindOptions> = {}): Centr
     kind: feature.kind,
     at: { x: 10, y: 20 },
     searchMm: feature.kind === 'bore' ? 8 : 20,
+    maxSearchMm: 60,
     ballRadiusMm: R,
     stockThicknessMm: 10,
     touchFeed: 150,
@@ -206,6 +207,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
       kind: 'bore',
       at: { x: 11, y: 19.5 },
       searchMm: 8,
+      maxSearchMm: 60,
       ballRadiusMm: R,
       stockThicknessMm: 10,
       touchFeed: 150,
@@ -241,7 +243,8 @@ describe('#827 runCentreFind on a round part', () => {
     const made = planCentreFind({
       kind: 'boss',
       at: { x: 10, y: 20 },
-      searchMm: 12, // inside the ⌀30 part: the start is under its top
+      searchMm: 12,
+      maxSearchMm: 60, // inside the ⌀30 part: the start is under its top
       ballRadiusMm: R,
       stockThicknessMm: 10,
       touchFeed: 150,

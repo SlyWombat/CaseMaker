@@ -9,7 +9,6 @@ import {
   centreWallOffsetMm,
   planCentreFind,
   readCentrePair,
-  MAX_CENTRE_SEARCH_MM,
 } from '@/engine/cnc/registration/centreFind';
 
 const R = 0.875;
@@ -85,18 +84,18 @@ describe('#827 the routine geometry', () => {
   });
 
   it('the plan carries the depth, the order and the measured radius; a bad ask is refused with a sentence', () => {
-    const made = planCentreFind({ kind: 'bore', at: { x: 10, y: 20 }, searchMm: 8, ballRadiusMm: R, stockThicknessMm: 5, touchFeed: 150 });
+    const made = planCentreFind({ kind: 'bore', at: { x: 10, y: 20 }, searchMm: 8, ballRadiusMm: R, stockThicknessMm: 5, touchFeed: 150, maxSearchMm: 60 });
     expect(made.ok).toBe(true);
     if (made.ok) {
       expect(made.plan.order).toEqual(['x', 'y', 'x']);
       expect(made.plan.depthMm).toBe(0.875);
     }
-    expect(planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: 8, ballRadiusMm: 0, touchFeed: 150 })).toMatchObject({ ok: false });
-    expect(planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: 0, ballRadiusMm: R, touchFeed: 150 })).toMatchObject({ ok: false });
+    expect(planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: 8, ballRadiusMm: 0, touchFeed: 150, maxSearchMm: 60 })).toMatchObject({ ok: false });
+    expect(planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: 0, ballRadiusMm: R, touchFeed: 150, maxSearchMm: 60 })).toMatchObject({ ok: false });
     expect(
-      planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: MAX_CENTRE_SEARCH_MM + 1, ballRadiusMm: R, touchFeed: 150 }),
+      planCentreFind({ kind: 'bore', at: { x: 0, y: 0 }, searchMm: 61, ballRadiusMm: R, touchFeed: 150, maxSearchMm: 60 }),
     ).toMatchObject({ ok: false });
-    expect(planCentreFind({ kind: 'boss', at: { x: 0, y: 0 }, searchMm: 8, ballRadiusMm: R, stockThicknessMm: 0, touchFeed: 150 })).toMatchObject({
+    expect(planCentreFind({ kind: 'boss', at: { x: 0, y: 0 }, searchMm: 8, ballRadiusMm: R, stockThicknessMm: 0, touchFeed: 150, maxSearchMm: 60 })).toMatchObject({
       ok: false,
     });
   });

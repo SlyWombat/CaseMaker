@@ -65,7 +65,7 @@ import {
   type MountObstacles,
   type StockSize,
 } from '@/engine/cnc/mounts/bracket';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type {
   BedFence,
@@ -501,6 +501,7 @@ export type JobFindingCode =
   // An item over-deep once the skim is counted is still `depth-exceeds-stock`, whose own check
   // measures from the faced surface.
   | 'facing-too-deep'
+  | 'facing-beyond-limit'
   // #879 — a printed-plastic blank (PLA or PETG) carries ONE info line saying it softens from
   // cutting heat, with the ways to keep it cool. A fact, never a refusal, and never per program.
   | 'printed-plastic-melts'
@@ -1944,6 +1945,18 @@ export function validateJob(
   // item may cut to is one facing-depth lower than the blank's own: `thickness − facing − minFloor`.
   // Absent, disabled or zero means the job does not face and every number below is unchanged.
   const facingDepth = job.facing !== undefined && job.facing.enabled && job.facing.depth > 0 ? job.facing.depth : 0;
+  // #1207 — `facing.maxDepthMm`: the deepest skim this shop accepts. The document schema allows
+  // the key's absolute bound; the SHOP's value is enforced here, where the defaults arrive.
+  const facingMaxMm = readDefault(options.defaults ?? null, 'facing.maxDepthMm').value;
+  if (facingDepth > facingMaxMm + 1e-9) {
+    findings.push({
+      severity: 'error',
+      code: 'facing-beyond-limit',
+      message:
+        `The facing pass asks ${fmt3(facingDepth)} mm; this shop's deepest accepted skim is ${fmt3(facingMaxMm)} mm ` +
+        `(facing.maxDepthMm). Lower the depth, or raise the shop value in Manage › Advanced › All values.`,
+    });
+  }
   if (facingDepth > thickness - job.minFloor) {
     // #786 slice 1 — THE MINIMUM FLOOR IS A PREFERENCE, INFORMED. The skim is cut; the sentence
     // states the floor it leaves, and the fixtures judge what actually remains.
@@ -2902,7 +2915,9 @@ export function validateJob(
       continue;
     }
     const numbers = textureNumbers(item.texture, item.depth);
-    const strokes = textureStrokes(item, numbers);
+    // #1207 — the texture cap is the shop's `texture.maxStrokes`; the finding states the same number.
+    const textureCap = readDefault(options.defaults ?? null, 'texture.maxStrokes').value;
+    const strokes = textureStrokes(item, numbers, textureCap);
     if (strokes.paths.length === 0) {
       findings.push({
         severity: 'warning',
@@ -2918,9 +2933,9 @@ export function validateJob(
         code: 'texture-crowded',
         labelId: item.id,
         message:
-          `${who}’s pattern wants more than the 4000-` +
+          `${who}’s pattern wants more than the ${textureCap}-` +
           `${numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap at a ${fmt3(numbers.pitchMm)} mm ` +
-          'pitch; the program cuts the first 4000. Widen the pitch to cut the whole region.',
+          `pitch; the program cuts the first ${textureCap}. Widen the pitch to cut the whole region.`,
       });
     }
   }

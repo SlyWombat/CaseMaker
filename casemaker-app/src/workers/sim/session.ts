@@ -1376,7 +1376,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     if (goal === undefined) return report;
     const goalCutInto =
       'unchecked' in goal
-        ? goalCutIntoUnchecked(goal.unchecked, goal.opts?.passCoverage)
+        ? goalCutIntoUnchecked(goal.unchecked, goal.opts?.passCoverage, goal.opts?.leftoverBandsMm)
         : 'rotaryGoal' in goal
           ? ((): ReturnType<typeof goalCutIntoUnchecked> => {
               // #1083 — THE ROTARY COMPARISON, on the live column grid and the goal's radial field.
@@ -1385,6 +1385,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
                 return goalCutIntoUnchecked(
                   'the rotary goal was not compared — the live sweep is not on the rotary map',
                   goal.opts?.passCoverage,
+                  goal.opts?.leftoverBandsMm,
                 );
               }
               // #1083 — the run's OWN map tolerance: the cell's half-diagonal in map millimetres

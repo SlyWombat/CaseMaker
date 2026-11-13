@@ -74,6 +74,7 @@ async function cardDry() {
     kind: 'bore',
     at: { x: 20, y: 15 },
     searchMm: 8, // the card's default: round(min(40, 30) / 4)
+    maxSearchMm: 60, // registration.centreSearchMaxMm's recommendation
     ballRadiusMm: 0.875,
     stockThicknessMm: 5,
     touchFeed: 150,

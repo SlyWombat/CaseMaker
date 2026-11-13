@@ -759,6 +759,12 @@ function sweepPlan(
           gen.surface3d != null,
           {
             passCoverage: readDefault(ctx.shop.defaults ?? null, 'goal.passCoverage').value,
+            // #1207 — the shop's own three goal bands ride the check with the pass line.
+            leftoverBandsMm: [
+              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand1Mm').value,
+              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand2Mm').value,
+              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand3Mm').value,
+            ],
           },
           rotaryGoalMap === null ? null : { radius: rotaryGoalMap.radius, section: rotaryGoalMap.section },
         );

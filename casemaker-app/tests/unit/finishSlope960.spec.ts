@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor } from '../../src/engine/cnc/cam/model/ops/finish';
-import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../../src/engine/cnc/cam/model/settings';
+import { flatSurfaceMaxSlopeDeg } from '../../src/engine/cnc/cam/model/settings';
 import { clSurface } from '../../src/engine/cnc/cam/model/clsurface';
 import type { FeatureSource, RemainderRegion } from '../../src/engine/cnc/cam/model/features';
 import type { RegionRef } from '../../src/engine/cnc/cam/model/plan';
@@ -69,10 +69,10 @@ describe('#960 finishing by slope — the two levers', () => {
   it('chooses the flat by AREA under the threshold, not by the sequence slot', () => {
     const flatMesh = ramp(1, 50, 10); // 1° everywhere
     const { region } = regionOver(flatMesh, [[[0, -10], [50, -10], [50, 10], [0, 10]]]);
-    expect(finishKindFor(region, flatMesh.triangles, FLAT_SURFACE_MAX_SLOPE_DEG)).toBe('flat-raster');
+    expect(finishKindFor(region, flatMesh.triangles, flatSurfaceMaxSlopeDeg())).toBe('flat-raster');
     // 10° everywhere: well past the equal-cusp threshold, so the ball takes it.
     const steepMesh = ramp(10, 50, 10);
-    expect(finishKindFor(region, steepMesh.triangles, FLAT_SURFACE_MAX_SLOPE_DEG)).toBe('ball-scallop');
+    expect(finishKindFor(region, steepMesh.triangles, flatSurfaceMaxSlopeDeg())).toBe('ball-scallop');
     // The threshold is a PARAMETER: at 12° the same 10° region admits the flat.
     expect(finishKindFor(region, steepMesh.triangles, 12)).toBe('flat-raster');
   });

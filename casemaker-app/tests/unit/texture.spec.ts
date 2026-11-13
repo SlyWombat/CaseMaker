@@ -1,4 +1,5 @@
 /**
+import { readDefault } from '@/platform/defaultsClient';
  * #670 — SURFACE TEXTURES: a seeded pattern of short strokes over one region, cut as traces.
  *
  * The review seams. FUNNEL: the pattern arrives at the program, the oracle and the picture as
@@ -25,9 +26,9 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
+import { readDefault } from '@/platform/defaultsClient';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import {
-  DEFAULT_MAX_TEXTURE_STROKES,
   DEFAULT_TEXTURE_PITCH_MM,
   DEFAULT_TEXTURE_SEED,
   DEFAULT_TEXTURE_STROKE_MM,
@@ -327,7 +328,7 @@ describe('the plan — a texture is traces, never a pocket', () => {
     const numbers = textureNumbers(dense.texture, dense.depth);
     const capped = textureStrokes(dense, numbers);
     expect(capped.capped).toBe(true);
-    expect(capped.paths.length).toBe(DEFAULT_MAX_TEXTURE_STROKES);
+    expect(capped.paths.length).toBe(readDefault(null, 'texture.maxStrokes').value);
     // Under the cap nothing is flagged.
     expect(textureStrokes(rect(), textureNumbers(rect().texture, 0.8)).capped).toBe(false);
   });
@@ -387,7 +388,7 @@ describe('findings — a marked region that cannot cut, named', () => {
     const dense = rect('dense', { width: 38, height: 28, texture: { pattern: 'stipple', pitchMm: 0.2 } });
     const f = find(textureJob(dense), 'texture-crowded');
     expect(f).toBeDefined();
-    expect(f!.message).toContain(String(DEFAULT_MAX_TEXTURE_STROKES));
+    expect(f!.message).toContain(String(readDefault(null, 'texture.maxStrokes').value));
   });
 
   it('raises none of them for a plain V-bit stipple', () => {

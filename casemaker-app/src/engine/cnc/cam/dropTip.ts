@@ -22,27 +22,16 @@
  * path until 0f asks for its (concave-kernel) fast form; its budget unit is unchanged.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
-/**
- * The finishing tip-field compute budget (#540): the field's own work, counted in the unit its
- * algorithm uses. For a BALL it is COVERED CELLS × DISC-STENCIL CELLS (the brute drop); for a FLAT
- * it is GRID CELLS × ROWS IN THE DISC (the exact dilation). The two numbers are calibrated to the
- * SAME wall-clock ceiling: the measured cost is ~5 ns per ball stencil evaluation and ~11.5 ns per
- * flat cell-row, so 300 M stencil units and 150 M row units are both about 1.5 s — "billions of
- * inner-loop ops with no cutoff" remains the thing being prevented, whichever unit counts it.
- * Above the cap {@link finishTipField} REFUSES honestly (it states the op count and the fix),
- * mirroring the exact sweep's `sweep-budget-exceeded` rather than running to a hang.
- */
-export const DEFAULT_MAX_FINISH_TIP_OPS = 300_000_000;
 
 /** #1092 — the FLAT dilation's ceiling, in its own unit (grid cells × rows in the disc). */
-export const DEFAULT_MAX_FINISH_TIP_ROW_OPS = 150_000_000;
 
 /** The budget a tool's unit is measured against — one place, so callers cannot pair a unit with
  *  the other path's number. */
 export function maxTipOpsFor(tool: SurfaceTool): number {
-  return tool.ball ? DEFAULT_MAX_FINISH_TIP_OPS : DEFAULT_MAX_FINISH_TIP_ROW_OPS;
+  return readDefault(null, tool.ball ? 'finish.maxTipOps' : 'finish.maxTipRowOps').value;
 }
 
 export interface SurfaceTool {

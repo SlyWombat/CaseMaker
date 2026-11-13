@@ -18,6 +18,7 @@
  * the desktop path reader stay in their own modules.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import { arrayBufferToBase64, base64ToArrayBuffer } from '@/engine/import/base64';
 import { sha256Hex } from '@/engine/import/meshStock';
 import type { EngraveJob, JobSource } from '@/types/engraveJob';
@@ -28,7 +29,6 @@ import type { CustomFont } from '@/types/textLabel';
  * design's "up to 4 MB"). Per source, not per document: a job with four small files embeds four
  * small files.
  */
-export const MAX_EMBEDDED_SOURCE_BYTES = 4 * 1024 * 1024;
 
 /**
  * The exact sentence generate shows when it needs a source's bytes and they are not there —
@@ -86,7 +86,7 @@ function sizeInMb(size: number): string {
  */
 export function embeddingSkippedSentence(name: string, size: number): string {
   return (
-    `${name} is ${sizeInMb(size)} — larger than the ${MAX_EMBEDDED_SOURCE_BYTES / (1024 * 1024)} MiB ` +
+    `${name} is ${sizeInMb(size)} — larger than the ${readDefault(null, 'job.maxEmbeddedSourceBytes').value / (1024 * 1024)} MiB ` +
     'limit for embedding, so the job carries its name and SHA-256 instead of its bytes.'
   );
 }
@@ -134,7 +134,7 @@ export async function embedSource(input: SourceInput): Promise<EmbeddedSource> {
     path: input.path ?? null,
     ...(input.role === undefined ? {} : { role: input.role }),
   } as const;
-  if (size > MAX_EMBEDDED_SOURCE_BYTES) {
+  if (size > readDefault(null, 'job.maxEmbeddedSourceBytes').value) {
     return {
       source: { ...common, embedded: null },
       skipped: embeddingSkippedSentence(input.name, size),

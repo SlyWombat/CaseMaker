@@ -29,7 +29,7 @@ import { Z1 } from '@/engine/cnc';
 import { validateVise } from '@/engine/cnc/fixture';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { vCone } from '@/engine/cnc/vProfile';
-import { DEFAULT_V_CARVE_STEPOVER_RATIO, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
+import { V_CARVE_STEPOVER_FALLBACK, vCarvePlane, vCarveStepover } from '@/engine/cnc/vCarveGeometry';
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
@@ -191,7 +191,7 @@ describe('run sheet V-carve facts (#221)', () => {
     const cone = coneOf(j);
     const film = colourBoundaryDepthFor(3.81, 3.0, 0.2);
     const plane = vCarvePlane(cone, 1.0, film);
-    const stepover = vCarveStepover(plane.planeRadius, cone, DEFAULT_V_CARVE_STEPOVER_RATIO);
+    const stepover = vCarveStepover(plane.planeRadius, cone, V_CARVE_STEPOVER_FALLBACK);
     expect(stepover.clamped).toBe(true);
 
     const step = itemStep(sheetFor(j), 'A over pocket 1.0');

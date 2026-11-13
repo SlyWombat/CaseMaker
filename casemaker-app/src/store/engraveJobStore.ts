@@ -458,6 +458,8 @@ export function newItemDepthFor(job: EngraveJob): number {
   return recommendedEngraveDepth(job.stock, {
     boundaryMargin: effectiveMargins(job, useSettingsStore.getState().margins).boundaryMargin,
     shopDepth: { value: shop.value, source: shop.source },
+    // #1207 — the shop's laminate margin, so a laminate's field starts where this shop's does.
+    laminateCapMm: shopDefault('margins.laminateCapMm').value,
   }).depth;
 }
 

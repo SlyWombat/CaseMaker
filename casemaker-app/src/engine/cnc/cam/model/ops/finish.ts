@@ -28,6 +28,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { memTrace } from '@/engine/cnc/memTrace';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { readDefault } from '@/platform/defaultsClient';
 import type { RemainderRegion, FeatureSource } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
@@ -36,7 +37,6 @@ import { followCutSurface, followShortJoin } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { footprintIndex, type FootprintIndex } from '../footprintIndex';
 import { cutterKeyOf } from '../sequence';
-import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
 import { ballScallopStepOver } from '../../../ballScallop';
 import { isPlunge, postedZ } from '../../printedZ';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -101,11 +101,11 @@ export const DEFAULT_FINISH_SCALLOP_MM = 0.027;
 
 /**
  * #960 — the flat/ball threshold is the SHARED constant (`cam/model/settings.ts`'s
- * `FLAT_SURFACE_MAX_SLOPE_DEG`, also read by C's #959 skin pass), re-exported here so the finish's
+ * `flatSurfaceMaxSlopeDeg()`, also read by C's #959 skin pass), re-exported here so the finish's
  * callers name it from one place. Its value is a parameter at every call site; the manager ruled
  * 1.93° on 2026-11-05 (the equal-cusp derivation, not the vendor-like 7.1°).
  */
-export { FLAT_SURFACE_MAX_SLOPE_DEG };
+
 
 /** The share of a region's AREA that must lie under the threshold for the flat to take it. */
 export const FLAT_FINISH_AREA_SHARE = 0.9;
@@ -116,7 +116,6 @@ export const FLAT_FINISH_AREA_SHARE = 0.9;
  * construction at ~250 levels. Above this cap the op refuses BY NAME (the candidate leaves the
  * rank with its number, the plan continues), never an OOM. The §8.9 rule in code.
  */
-export const FINISH_MOVE_CAP = 5_000_000;
 
 /** Thrown when a finish op's moves pass the cap; the rank drops the candidate. */
 export class PlanFinishTooManyMoves extends Error {
@@ -125,7 +124,7 @@ export class PlanFinishTooManyMoves extends Error {
   readonly cap: number;
   /** True when `moves` is the pre-build estimate, not a count of moves already built. */
   readonly estimated: boolean;
-  constructor(moves: number, region: string, cap = FINISH_MOVE_CAP, estimated = false) {
+  constructor(moves: number, region: string, cap = readDefault(null, 'finish.moveCap').value, estimated = false) {
     super(
       `the finish of "${region}" ${estimated ? 'would build about' : 'passed'} ${moves.toLocaleString('en-US')} moves (the cap is ${cap.toLocaleString('en-US')} per op) — a finer scallop or a smaller region, or a larger cutter's band`,
     );
@@ -136,9 +135,6 @@ export class PlanFinishTooManyMoves extends Error {
     this.estimated = estimated;
   }
 }
-/** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
-const WALL_SKIP_DEG = 80;
-
 /**
  * #1080 (6b's ruling) — THE CROSS-ROW TRIANGLE SLOPE: |∂z/∂x|, the direction the raster rows
  * ADVANCE (rows run along y, `x += stepOverMm`). The cusp a row spacing creates is across the
@@ -217,6 +213,8 @@ export interface FinishOpOptions {
    */
   mesh?: FeatureSource['triangles'];
   scallopMm: number;
+  /** #1207 — `finish.wallSkipDeg`: a raster row steeper than this is a wall. Absent → the registry recommendation. */
+  wallSkipDeg?: number;
   /**
    * #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
    * remainder, and its step-over is the flat's own cusp rule `cusp / tan(thetaMax)` clamped to
@@ -264,7 +262,7 @@ export interface FinishOpOptions {
    */
   stockRectMm?: { length: number; width: number };
   /**
-   * #1052 — the move cap for THIS op, default {@link FINISH_MOVE_CAP}. Tests inject a small one
+   * #1052 — the move cap for THIS op, default `finish.moveCap`. Tests inject a small one
    * to pin the refusal without building millions of moves; production never passes it.
    */
   moveCap?: number;
@@ -416,6 +414,8 @@ export function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface,
 
 
 export function finish(opts: FinishOpOptions): OpOutcome {
+  // #1207 — the wall-skip angle is the shop's; a caller that states none reads the registry.
+  const wallSkipDeg = opts.wallSkipDeg ?? readDefault(null, 'finish.wallSkipDeg').value;
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
     throw new Error(`cam/model/ops/finish: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
@@ -431,7 +431,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // single steepest cell, so one near-vertical facet floored the WHOLE region's spacing (⌀6 ball →
   // the radius/10 floor = 0.3 mm, against the vendor's 0.8 mm). The slope is binned along X from
   // the region's own triangles; each raster band's spacing comes from its own slope. A band
-  // steeper than `WALL_SKIP_DEG` is a wall: it is CUT at the cutter's own floor, never skipped —
+  // steeper than `finish.wallSkipDeg` is a wall: it is CUT at the cutter's own floor, never skipped —
   // skipping lost the organizer 10 points.
   const BIN_MM = 0.25;
   const binCount = Math.max(1, Math.ceil((max[0] - min[0]) / BIN_MM));
@@ -685,7 +685,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
-  const cap = opts.moveCap ?? FINISH_MOVE_CAP;
+  const cap = opts.moveCap ?? readDefault(null, 'finish.moveCap').value;
   // #1234 (the fix) — the grown footprint's boundary, for the overrun rule's "no point on or past
   // the edge" test. One index for the whole op, the same predicate the CL gate uses.
   const boundaryIndex = opts.stockRectMm === undefined ? null : footprintIndex(opts.region.footprint);
@@ -701,7 +701,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     for (let k = 0; k < binCount; k++) {
       const binX = min[0] + (k + 0.5) * BIN_MM;
       const pitchMm = opts.kind === 'ball-scallop'
-        ? (bandSlopeAt(binX) >= WALL_SKIP_DEG ? profile.radiusMm / 10 : bandStepOverAt(binX))
+        ? (bandSlopeAt(binX) >= wallSkipDeg ? profile.radiusMm / 10 : bandStepOverAt(binX))
         : flatRowStepMm;
       estimated += (BIN_MM * avgY) / (Math.max(1e-6, pitchMm) * pointPitch);
     }
@@ -739,7 +739,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // Each row then advances by its OWN band's scallop step, unless the row guard finds the
   // stretch not straight — then it snaps to the old grid's next row.
   for (let x = originX; x <= max[0] + 1e-9; ) {
-    const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
+    const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= wallSkipDeg;
     if (wallBand) wallBandsCut++;
     let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
     // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
@@ -1040,7 +1040,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const notes: string[] = [];
   if (wallBandsCut > 0) {
     notes.push(
-      `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
+      `${wallBandsCut} raster row(s) over walls steeper than ${wallSkipDeg}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
     );
   }
   // #1033 (§6) — THE JOIN AUDIT: only where a join costs a retract (or a route) is the count worth

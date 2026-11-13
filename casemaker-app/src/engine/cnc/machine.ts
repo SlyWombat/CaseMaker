@@ -1644,7 +1644,8 @@ export interface ClampResult {
  * overage is a table written for a faster machine (Makera's 15 000 RPM rows on a 13 000 RPM
  * spindle are +15 %); a large one means the wrong tool, the wrong material, or garbage.
  *
- * THE LABELLED FALLBACK for the shop's `clamp.refuseFraction` (#448). The shop default lives in
+ * THE LABELLED FALLBACK for the shop's `clamp.refuseFraction` (#448). The key is registered; no product
+ * code reads it yet, so it is on the #1207 landing's unread list — follow-up #1256 wires it.
  * `location.json` and is read through `readDefault`; this is the number used with no house
  * service, and the value `clampToMachine` falls back to when a caller passes none.
  */

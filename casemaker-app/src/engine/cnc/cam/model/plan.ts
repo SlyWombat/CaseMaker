@@ -44,7 +44,6 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
-import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -119,7 +118,7 @@ export function oppositeSurfaceSafeDepthMm(
 }
 import { rough, skin } from './ops/rough';
 import { maskCellsExact } from './finishMask';
-import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
+import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor, type FinishKind } from './ops/finish';
 import { hasValley, pencil } from './ops/pencil';
@@ -367,7 +366,7 @@ export interface ModelPlanInput {
    * with no measurement: the facing depth comes from the stated stock top and the plan says so.
    */
   stockProbes?: StockProbes;
-  /** The shared flat/ball slope parameter (#959); absent → the provisional `FLAT_SURFACE_MAX_SLOPE_DEG`. */
+  /** The shared flat/ball slope parameter (#959); absent → the provisional `flatSurfaceMaxSlopeDeg()`. */
   flatSurfaceMaxSlopeDeg?: number;
   /**
    * Length 1 for the tray/organizer today; #898/#914's flip plan (`held/914-flip-plan`: the
@@ -445,7 +444,7 @@ export interface ModelPlanInput {
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
    * and the plan states the two mould findings that need the cavity's own geometry — one-sided
-   * (always, info) and no-draft (warning past {@link MOLD_DRAFT_LIMIT_DEG}). `steepestWallDeg` is
+   * (always, info) and no-draft (warning past `mould.minDraftDeg`). `steepestWallDeg` is
    * measured from the part's surface at the seam: a PLANAR wall is classified as a pocket wall and
    * appears in no `remainder[].slopeDeg`, so the tree alone could not answer the box case. Rim and
    * floor stay the goal validator's own findings (`validateGoalObject`), unchanged in code and
@@ -1093,6 +1092,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
+  // #1207 — the coverage rest's own shop threshold, through the plan's options.
+  const coverageRestMinMm2PerS = readDefault(defaults, 'plan.coverageRestMinMm2PerS').value;
+  // #1207 — the finish's wall-skip angle, carried to the curved planner.
+  const wallSkipDeg = readDefault(defaults, 'finish.wallSkipDeg').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -1726,6 +1729,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       hopZMm: HOP_Z,
       // #1214's ruling (b) — the plan's printed precision rides every stage's feed decisions.
       axisPrecision,
+      wallSkipDeg,
       memo: stageMemo,
       ...(depthBandMm === undefined ? {} : { depthBandMm }),
       geometry: curvedGeometry,
@@ -2122,10 +2126,12 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // as placed, not on the plan before the contour's own fallback). #1237 — the value comes from
     // the INPUT's defaults map, like the planner's other seven settings, never ambient state.
     const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
+    // #1207 — the corner angle travels with the same spec, so the plan and the cut agree.
+    const tabCornerDeg = readDefault(input.defaults ?? null, 'tabs.cornerDeg').value;
     const tabSpec =
       tabs === undefined
-        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm }
-        : { ...tabs, maxSpanMm: tabMaxSpanMm };
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -2496,6 +2502,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
         leftoverEquivalencePct,
+        coverageRestMinMm2PerS,
         // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
         leftoverTallMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
@@ -2715,10 +2722,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         'two-part mould — two setups.';
       notes.push(mouldOneSided);
       statements.push({ severity: 'info', code: 'goal-mold-one-sided', count: 1, text: mouldOneSided });
-      if (input.mould.steepestWallDeg > MOLD_DRAFT_LIMIT_DEG) {
+      const mouldDraftLimitDeg = 90 - readDefault(input.defaults ?? null, 'mould.minDraftDeg').value;
+      if (input.mould.steepestWallDeg > mouldDraftLimitDeg) {
         const draft =
           `The mould of "${input.mould.name}" has a wall at ${Number(input.mould.steepestWallDeg.toFixed(1))}° — steeper than ` +
-          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
+          `${mouldDraftLimitDeg}°, so it has little or no draft and may hold the casting. Give the ` +
           'part tapered sides, or use a flexible casting material.';
         notes.push(draft);
         statements.push({ severity: 'warning', code: 'goal-mold-no-draft', count: 1, text: draft });
@@ -3503,6 +3511,8 @@ export interface PlanPocketsOptions {
   toolChangeSeconds: number;
   /** planner v3 A1 — the shop's leftover tolerance, % of the goal's covered cells. */
   leftoverEquivalencePct?: number;
+  /** #1207 — the shop's `plan.coverageRestMinMm2PerS`, the coverage rest's threshold. */
+  coverageRestMinMm2PerS?: number;
   /**
    * planner v3 A6 (#1232) — the shop's `plan.leftoverTallMm`: the height at which leftover counts
    * as tall. Only the sheet's sentence reads it here (the picker's own use is the rank's); absent
@@ -3530,7 +3540,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number; maxSpanMm?: number };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
@@ -4306,6 +4316,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
     leftoverEquivalencePct: opts.leftoverEquivalencePct,
+    ...(opts.coverageRestMinMm2PerS === undefined ? {} : { coverageRestMinMm2PerS: opts.coverageRestMinMm2PerS }),
     // #1114 — the sequence's priced changes and its same-diameter tie rule.
     ...(opts.bitChange === undefined ? {} : { bitChange: opts.bitChange }),
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
@@ -4944,6 +4955,8 @@ export interface PlanCurvedOptions {
    * words are decided on. Absent → the Z1's (this planner posts through `postZ1`).
    */
   axisPrecision?: number;
+  /** #1207 — the shop's `finish.wallSkipDeg`, carried to every finish op. */
+  wallSkipDeg?: number;
   /** #982 — extra remainder-style regions the curved pipeline also plans (the no-flat path's
    *  synthetic pocket floors). Absent → the tree's own remainder only. */
   extraRegions?: RemainderRegion[];
@@ -5042,7 +5055,7 @@ export interface PlanCurvedOptions {
   startFrom?: readonly [number, number];
   /** #959 ruling: `'on'` puts the skin back on the facing stage; absent/`'off'` gives it to `skin`. */
   facing?: 'off' | 'on';
-  /** The shared flat/ball slope parameter (#959); absent → `FLAT_SURFACE_MAX_SLOPE_DEG`'s provisional value. */
+  /** The shared flat/ball slope parameter (#959); absent → `flatSurfaceMaxSlopeDeg()`'s provisional value. */
   flatSurfaceMaxSlopeDeg?: number;
   /**
    * #1054 — one stage op per distinct (cutter, region, params), shared by the ball rank's
@@ -5776,6 +5789,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
             axisPrecision,
+            wallSkipDeg: opts.wallSkipDeg,
             toolNumber: opts.toolNumberFor(floorFace.flat),
             spindleRpm: paramsFor(floorFace.flat).rpm,
             air: opts.air,
@@ -5851,7 +5865,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #982 — with no ball the slope limit is lifted: the flat raster covers the WHOLE remainder.
     const finishKind: FinishKind = ball === undefined
       ? 'flat-raster'
-      : finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+      : finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg());
     {
       const entry = finishKinds.get(finishKind) ?? { count: 0, minSlope: Infinity, maxSlope: -Infinity };
       entry.count++;
@@ -5935,6 +5949,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
         axisPrecision,
+        wallSkipDeg: opts.wallSkipDeg,
         toolNumber: opts.toolNumberFor(finishCutter),
         spindleRpm: paramsFor(finishCutter).rpm,
         air: opts.air,
@@ -6064,6 +6079,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
             axisPrecision,
+            wallSkipDeg: opts.wallSkipDeg,
             toolNumber: opts.toolNumberFor(restBallTool),
             spindleRpm: paramsFor(restBallTool).rpm,
             air: opts.air,
@@ -6446,7 +6462,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           : 'flat-following raster')
       : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
     const plural = entry.count === 1 ? 'region' : 'regions';
-    const text = `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`;
+    const text = `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg()).toFixed(2)}°)`;
     notes.push(text);
     // #992 — which finish mode ran, and at what scallop: a fact of the run with no action.
     statements.push({ severity: 'info', code: 'goal-finish-mode', count: entry.count, text });

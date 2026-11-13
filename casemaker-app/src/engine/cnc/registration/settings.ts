@@ -101,6 +101,16 @@ export interface RegistrationSettings {
    * touch. At least 5, so the centre and both extents on each axis are read; seeded 5.
    */
   surfaceTouchCount: number;
+  /**
+   * #1207 — the preferred inset of a cut blank's first check points from every edge, mm. OPTIONAL
+   * on a plan stored before the key existed; the candidates' caller then reads the key's labelled
+   * recommendation (`readDefault(null, …)`), never a literal.
+   */
+  cutBlankPreferredInsetMm?: number;
+  /** #1207 — the most spread check candidates the cut-blank choice offers. Same optionality. */
+  cutBlankMaxPoints?: number;
+  /** #1207 — the most a centre-find search may travel, mm. Same optionality. */
+  centreSearchMaxMm?: number;
   touchFeed: number;
   surfaceFastFeed: number;
   surfaceSlowFeed: number;
@@ -163,6 +173,9 @@ const KEYS: Record<keyof RegistrationSettings, string> = {
   surfaceToleranceMm: 'registration.surfaceToleranceMm',
   cutBlankAgreeMm: 'registration.cutBlankAgreeMm',
   cutBlankAboveBandMm: 'registration.cutBlankAboveBandMm',
+  cutBlankPreferredInsetMm: 'registration.cutBlankPreferredInsetMm',
+  cutBlankMaxPoints: 'registration.cutBlankMaxPoints',
+  centreSearchMaxMm: 'registration.centreSearchMaxMm',
   surfaceTouchCount: 'registration.surfaceTouchCount',
   edgeMarginMm: 'registration.edgeMarginMm',
   surfaceSeekMm: 'registration.surfaceSeekMm',

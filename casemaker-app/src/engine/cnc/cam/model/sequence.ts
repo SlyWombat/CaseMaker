@@ -43,6 +43,7 @@
  * the sequence is priced from those IRs. A caller with no ops yet (a test, the panel before the
  * engine lands) supplies a stand-in; the arithmetic is unchanged.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import type { Tool } from '@/engine/cnc/tool';
 import { cuttingDiameter } from '@/engine/cnc/tool';
@@ -221,6 +222,11 @@ export interface SequenceOptions {
    * the goal's covered cells (`plan.leftoverEquivalencePct`). Absent or 0: every difference counts.
    */
   leftoverEquivalencePct?: number;
+  /**
+   * #1207 — the shop's `plan.coverageRestMinMm2PerS`: the least area a coverage rest must recover
+   * per second of added cutting. Absent → the registry's recommendation.
+   */
+  coverageRestMinMm2PerS?: number;
   /** Build the step's moves; the op implementations, or a stand-in. */
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
@@ -285,7 +291,6 @@ export function isAbortError(e: unknown): boolean {
  * cell off a chain (0.01 mm² for the 100 s a small flat's extra pass costs, 0.0001 mm²/s) misses
  * it by a hundredfold. Below this line the rest is floor-polishing, not coverage.
  */
-export const COVERAGE_REST_MIN_MM2_PER_SECOND = 0.01;
 
 /** One candidate the search looked at: its steps, its price or null, and why it did not win. */
 export interface ConsideredSequence {
@@ -1286,6 +1291,7 @@ export function chooseSequence(
   // clears it, whatever its leftover count: coverage bought at any price is floor-polishing.
   // Without a simulated field on both sides the price cannot be judged and the rest is left to the
   // price order, exactly as before.
+  const coverageRestMinMm2PerS = opts.coverageRestMinMm2PerS ?? readDefault(null, 'plan.coverageRestMinMm2PerS').value;
   const carriesCoverageRest = (r: RankedSequence): boolean => r.sequence.steps.some((st) => st.coverageRest === true);
   if (feasible.some(carriesCoverageRest)) {
     const baseline = feasible
@@ -1303,7 +1309,7 @@ export function chooseSequence(
         const seconds = r.cost.totalSeconds - baseline.cost.totalSeconds;
         const mm2PerSecond = seconds > 0 ? gainMm2 / seconds : Number.POSITIVE_INFINITY;
         r.restPrice = { gainMm2, seconds, mm2PerSecond };
-        r.eligible = gainMm2 > 0 && (seconds <= 0 || mm2PerSecond >= COVERAGE_REST_MIN_MM2_PER_SECOND);
+        r.eligible = gainMm2 > 0 && (seconds <= 0 || mm2PerSecond >= coverageRestMinMm2PerS);
       }
     }
   }
@@ -1441,7 +1447,7 @@ export function chooseSequence(
       if (!feasible[i]!.eligible && price !== null) {
         entry.reason = price.gainMm2 <= 0
           ? 'its coverage rest recovers no surface the chain without it does not already have'
-          : `its coverage rest recovers ${price.gainMm2.toFixed(2)} mm² for ${price.seconds.toFixed(0)} s (${price.mm2PerSecond.toFixed(4)} mm²/s), below the ${COVERAGE_REST_MIN_MM2_PER_SECOND} mm²/s price`;
+          : `its coverage rest recovers ${price.gainMm2.toFixed(2)} mm² for ${price.seconds.toFixed(0)} s (${price.mm2PerSecond.toFixed(4)} mm²/s), below the ${coverageRestMinMm2PerS} mm²/s price`;
       }
     }
   }

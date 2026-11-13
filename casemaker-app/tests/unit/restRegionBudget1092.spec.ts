@@ -18,7 +18,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_MAX_FINISH_TIP_OPS, DEFAULT_MAX_FINISH_TIP_ROW_OPS, discRowCountFor, stencilCellsFor, tipFieldOpsFor } from '@/engine/cnc/cam/dropTip';
+import { discRowCountFor, stencilCellsFor, tipFieldOpsFor } from '@/engine/cnc/cam/dropTip';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
+
+// #1207 — the two tip-op budgets are shop keys now; the tests run at the recommendations.
+const DEFAULT_MAX_FINISH_TIP_OPS = KNOWN_DEFAULTS['finish.maxTipOps']!.fallback;
+const DEFAULT_MAX_FINISH_TIP_ROW_OPS = KNOWN_DEFAULTS['finish.maxTipRowOps']!.fallback;
 
 const PITCH = 0.1;
 /** The set B tray's own goal grid (`goal-hf.mts` header: 1,361 × 1,061 at 0.1 mm). */

@@ -16,8 +16,8 @@
  * refusal sentences.
  *
  * THE PLACEMENT RULES (Analyst's ruling): on the outline's long straight runs, each tab's whole
- * span ≥ {@link TAB_CORNER_CLEARANCE_MM} mm from the part's own corners and ≥
- * {@link TAB_PIN_CLEARANCE_MM} mm from a locating bore's centre. Each of the four tabs is placed
+ * span at least `tabs.cornerClearanceMm` from the part's own corners and at least
+ * `tabs.pinClearanceMm` from a locating bore's centre. Each of the four tabs is placed
  * INDEPENDENTLY (equal-arc spacing can put a short side's bridge too near a corner): the module
  * computes the exact span-start intervals that satisfy both rules on every straight run, picks
  * the most spread-out set of non-overlapping spans, and hands those centres to `placeTabs`, whose
@@ -49,12 +49,6 @@ import { crossSectionPolylines, UNDERSIDE_TAB_THICKNESS_MM } from './goalUndersi
 import { goalWorkMesh } from './goalFlipFindings';
 import type { EngraveTargetObject, JobSetupPins } from '@/types/engraveJob';
 
-/** How far a tab's span must stand from the part's own corners, mm (Analyst's ruling). */
-export const TAB_CORNER_CLEARANCE_MM = 15;
-
-/** How far a tab's span must stand from a locating bore's centre, mm (Analyst's ruling). */
-export const TAB_PIN_CLEARANCE_MM = 10;
-
 /** The tab bridges the release leaves: the shop's tab defaults, handed in by the caller. */
 export interface TabReleaseTabs {
   count: number;
@@ -81,6 +75,10 @@ export interface TabReleaseInput {
   toolRadiusMm: number;
   /** The tab bridges to leave (the shop's `tabs.*` defaults). */
   tabs: TabReleaseTabs;
+  /** #1207 — `tabs.cornerClearanceMm`: how far a span stands from the part's own corners. */
+  cornerClearanceMm: number;
+  /** #1207 — `tabs.pinClearanceMm`: how far a span stands from a locating bore's centre. */
+  pinClearanceMm: number;
   /** The feeds of the release's own cutter. */
   params: CutParams;
   /** The outward offset (the house kernel's), so the path is measured, not approximated. */
@@ -166,14 +164,16 @@ function spanClears(
   span: TabPlacement['spans'][number],
   corners: readonly [number, number][],
   pins: readonly { x: number; y: number }[],
+  cornerClearanceMm: number,
+  pinClearanceMm: number,
 ): boolean {
   // The span is the tab, not only its ends: every point of it must stand clear, so the distance is
   // measured to the segment itself (the ends were the earlier, weaker test).
   for (const [cx, cy] of corners) {
-    if (spanDistance([cx, cy], span.start, span.end) < TAB_CORNER_CLEARANCE_MM - 1e-6) return false;
+    if (spanDistance([cx, cy], span.start, span.end) < cornerClearanceMm - 1e-6) return false;
   }
   for (const pin of pins) {
-    if (spanDistance([pin.x, pin.y], span.start, span.end) < TAB_PIN_CLEARANCE_MM - 1e-6) return false;
+    if (spanDistance([pin.x, pin.y], span.start, span.end) < pinClearanceMm - 1e-6) return false;
   }
   return true;
 }
@@ -381,14 +381,16 @@ function placeReleaseTabs(
   toolRadiusMm: number,
   corners: readonly [number, number][],
   pins: readonly { x: number; y: number }[],
+  cornerClearanceMm: number,
+  pinClearanceMm: number,
 ): TabPlacement | null {
   const spanLength = tabs.widthMm + 2 * toolRadiusMm;
   if (!(spanLength > 0) || tabs.count <= 0) return null;
   const perimeter = ringPerimeter(ring);
   if (!(perimeter > 0)) return null;
   const voids: ClearancePoint[] = [
-    ...corners.map(([x, y]) => ({ x, y, clearanceMm: TAB_CORNER_CLEARANCE_MM })),
-    ...pins.map((pin) => ({ x: pin.x, y: pin.y, clearanceMm: TAB_PIN_CLEARANCE_MM })),
+    ...corners.map(([x, y]) => ({ x, y, clearanceMm: cornerClearanceMm })),
+    ...pins.map((pin) => ({ x: pin.x, y: pin.y, clearanceMm: pinClearanceMm })),
   ];
   const candidates = tabCandidates(ringRuns(ring), spanLength, voids, perimeter);
   const chosen = spreadSelect(candidates, tabs.count, spanLength, perimeter);
@@ -396,7 +398,7 @@ function placeReleaseTabs(
   const targets = chosen.map((c) => c.startArc + spanLength / 2);
   const placement = placeTabs(ring, tabs.count, tabs.widthMm, toolRadiusMm, { targets });
   if (placement.spans.length !== tabs.count) return null;
-  if (!placement.spans.every((span) => spanClears(span, corners, pins))) return null;
+  if (!placement.spans.every((span) => spanClears(span, corners, pins, cornerClearanceMm, pinClearanceMm))) return null;
   // The spans must be the ones asked for, not a distant edge's snap: each centre within half a
   // millimetre of its target (the clearance test above is the binding one).
   const midArc = (span: TabPlacement['spans'][number]): number => (span.startArc + spanLength / 2) % perimeter;
@@ -507,14 +509,14 @@ export function planTabRelease(input: TabReleaseInput): TabReleaseResult {
   const ring = rings.reduce((a, b) => (Math.abs(signedArea(b)) > Math.abs(signedArea(a)) ? b : a));
   const corners = bboxCorners(outer);
   const pins = input.pins === null ? [] : input.pins.at;
-  const placement = placeReleaseTabs(ring, tabs, input.toolRadiusMm, corners, pins);
+  const placement = placeReleaseTabs(ring, tabs, input.toolRadiusMm, corners, pins, input.cornerClearanceMm, input.pinClearanceMm);
   if (placement === null) {
     return {
       ok: false,
       code: 'tab-release-no-tabs',
       reason:
         `could not place ${tabs.count} tabs on the band’s outline: each needs a straight run clear of the part’s corners by ` +
-        `${TAB_CORNER_CLEARANCE_MM} mm and of the locating bores by ${TAB_PIN_CLEARANCE_MM} mm, and no placement satisfies all ` +
+        `${input.cornerClearanceMm} mm and of the locating bores by ${input.pinClearanceMm} mm, and no placement satisfies all ` +
         `${tabs.count} — the part would come free under the cutter, so the release is refused`,
     };
   }

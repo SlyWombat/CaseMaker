@@ -26,8 +26,6 @@ import { isPlunge } from './printedZ';
 // field's check read one definition.
 export {
   finishTipField,
-  DEFAULT_MAX_FINISH_TIP_OPS,
-  DEFAULT_MAX_FINISH_TIP_ROW_OPS,
   discRowCountFor,
   maxTipOpsFor,
   stencilCellsFor,

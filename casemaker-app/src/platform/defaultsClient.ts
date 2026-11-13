@@ -743,6 +743,60 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // tolerance, not a measured one: the bench's posts are nominal, and a slightly worn shank is
   // still that collet.
   'probe.colletMatchMm': { label: 'collet match tolerance for a probe’s recorded shank', unit: 'mm', rule: z.number().min(0.001).max(0.5), fallback: 0.05 },
+  // ── #1207 (begin) — the checklist's accepted rows, registered together: the analyst's ruling of
+  // 2026-11-13 made each of these a shop setting. Every recommendation is exactly the literal the
+  // code carried before the key existed, so the recommended values change nothing; `defaults.rs`
+  // seeds the same numbers and the location fixture carries them too. One sentence per key says
+  // what the value decides.
+  // The goal check's own three bands (the "Acceptance check" group, frozen for M2 — #948). The
+  // product's own definition of done is the RECOMMENDATION: a house that changes them cannot make
+  // the product's gate pass or fail, and a check at changed values states so on its verdict line.
+  'acceptance.leftoverBand1Mm': { label: 'goal check, the first leftover band (frozen for M2)', unit: 'mm', rule: z.number().min(0.001).max(10), fallback: 0.1 },
+  'acceptance.leftoverBand2Mm': { label: 'goal check, the second leftover band (frozen for M2)', unit: 'mm', rule: z.number().min(0.001).max(10), fallback: 0.3 },
+  'acceptance.leftoverBand3Mm': { label: 'goal check, the third leftover band (frozen for M2)', unit: 'mm', rule: z.number().min(0.001).max(10), fallback: 1 },
+  // The planner's rest floor: the least top-surface area a rest pass must recover per second of
+  // added cutting to be worth taking.
+  'plan.coverageRestMinMm2PerS': { label: 'rest coverage a pass must recover per second of cutting to be worth taking (chosen)', unit: 'mm²/s', rule: z.number().min(0).max(10), fallback: 0.01 },
+  // The cut-blank checks: where the first points prefer to sit, and how many spread candidates the
+  // choice offers.
+  'registration.cutBlankPreferredInsetMm': { label: 'cut-blank checks, preferred inset from the edges (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
+  'registration.cutBlankMaxPoints': { label: 'cut-blank checks, the most spread candidates offered (chosen)', unit: 'points', rule: z.number().int().min(1).max(20), fallback: 5 },
+  // The centre find's travel bound: a wrong estimate must not cross the bed.
+  'registration.centreSearchMaxMm': { label: 'centre find, the most the search may travel (chosen)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 60 },
+  // The stock proposal's scrap, and the preset's own (wider) scrap.
+  'stock.workMarginMm': { label: 'scrap the stock proposal leaves each side of a mesh or a line of text (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 5 },
+  'stock.presetMarginMm': { label: 'scrap a preset’s cut-out or pocket leaves each side (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
+  // The V-carve step-over, as a share of the groove's width at the colour plane.
+  'vcarve.stepoverRatio': { label: 'V-carve step-over, as a share of the groove’s width (chosen)', unit: 'x', rule: z.number().min(0.1).max(1), fallback: 0.6 },
+  // A laminate's floor sits this far below its purchased cap.
+  'margins.laminateCapMm': { label: 'how far below a laminate’s cap a floor sits (chosen)', unit: 'mm', rule: z.number().min(0).max(1), fallback: 0.025 },
+  // The least share of the goal's area a flipped side must gain for the flip to be offered.
+  'flip.minGainFraction': { label: 'the least share of the goal’s area a flipped side must gain (chosen)', unit: 'x', rule: z.number().min(0).max(1), fallback: 0.01 },
+  // The steepest face still read as the part's top.
+  'target.topTiltMaxDeg': { label: 'steepest face still read as the part’s top (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
+  // A raster row steeper than this is a wall, not finishable by raster.
+  'finish.wallSkipDeg': { label: 'a raster row steeper than this is a wall, skipped with a note (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 80 },
+  // The deepest facing pass the app will accept (a shop limit, not a form bound).
+  'facing.maxDepthMm': { label: 'the deepest facing pass the app accepts (chosen)', unit: 'mm', rule: z.number().min(0.1).max(50), fallback: 10 },
+  // The holding tabs' clearances and shape: how far a span stands from a corner and from a
+  // locating bore, the bridge's overshoot, and the corner angle a tab does not cross (degrees,
+  // the unit an operator reads; the code converts).
+  'tabs.cornerClearanceMm': { label: 'holding tab, clearance from the part’s corners (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 15 },
+  'tabs.pinClearanceMm': { label: 'holding tab, clearance from a locating bore (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
+  'tabs.bridgeOvershootMm': { label: 'holding tab bridge, overshoot past the cutter’s radius (chosen)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
+  'tabs.cornerDeg': { label: 'holding tab, the corner angle a tab does not cross (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
+  // #1207 (the final ruling's caps and feature keys) — six caps and five feature thresholds.
+  'finish.moveCap': { label: 'the most moves one finish pass may emit (chosen)', unit: 'moves', rule: z.number().int().min(1000).max(100_000_000), fallback: 5_000_000 },
+  'finish.maxTipOps': { label: 'the tip evaluations one finish field may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 300_000_000 },
+  'finish.maxTipRowOps': { label: 'the tip evaluations one finish raster row may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 150_000_000 },
+  'texture.maxStrokes': { label: 'the most strokes one texture pattern emits (chosen)', unit: 'strokes', rule: z.number().int().min(10).max(100_000), fallback: 4_000 },
+  'job.maxEmbeddedSourceBytes': { label: 'the largest source a job may embed (chosen)', unit: 'bytes', rule: z.number().int().min(1_048_576).max(268_435_456), fallback: 4_194_304 },
+  'finish.flatSurfaceMaxSlopeDeg': { label: 'the steepest face still finished as flat (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 1.93 },
+  'finish.pencilCreaseDeg': { label: 'the crease angle at which a corner gets a pencil pass (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
+  'setups.minHoleSeparationMm': { label: 'the least distance between two dowel holes paired as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
+  'setups.minEdgeLengthMm': { label: 'the shortest edge used as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(200), fallback: 15 },
+  'mould.minDraftDeg': { label: 'the least draft a mould cavity wall needs (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 5 },
+  // ── #1207 (end)
 };
 
 /**

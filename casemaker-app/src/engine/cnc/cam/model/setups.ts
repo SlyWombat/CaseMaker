@@ -25,6 +25,7 @@
  * `frameForFace`/`documentXY` — `setups/orient.ts`'s own `orient()` shows those are each a
  * DIFFERENT rotation, not a generalisation of the top/bottom one — and is not implemented here.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import type { Face, MountSpec } from '@/engine/cnc/setups/types';
 import { goalFlipPlan, type FlipPlan, type FlipPlanInput, type FlipPlanReachInput } from '@/engine/cnc/engrave/goalFlipPlan';
@@ -390,8 +391,6 @@ export interface SetupRegistration {
  * anywhere in its own recognised geometry, left to tell the mirror twins apart) do they throw the
  * new named "ambiguous" error below, instead of guessing.
  */
-const MIN_HOLE_SEPARATION_MM = 10;
-const MIN_EDGE_LENGTH_MM = 15;
 const COLLINEAR_TOL_RAD = 1e-3;
 const OFFSET_CONSISTENCY_TOL_MM = 1e-3;
 
@@ -537,7 +536,7 @@ function tryHolePair(tree0: FeatureTree, treeN: FeatureTree): SetupRegistration 
 
   const validated: { offset: [number, number]; holes: [LocatingHole, LocatingHole]; separationMm: number }[] = [];
   for (const { i, j, separationMm } of pairs) {
-    if (separationMm < MIN_HOLE_SEPARATION_MM) break; // sorted descending — no later pair clears it either.
+    if (separationMm < readDefault(null, 'setups.minHoleSeparationMm').value) break; // sorted descending — no later pair clears it either.
     const a = matches[i]!;
     const b = matches[j]!;
     const deltaA = holeDelta(a);
@@ -633,7 +632,7 @@ function candidateOutlineRuns(tree: FeatureTree): StraightRun[] {
   const outer = tree.contour.outline[0];
   if (outer === undefined) return [];
   const mapped = outer.map(([x, y]) => documentXY(tree.frame, x, y));
-  return straightRuns(mapped).filter((r) => r.lengthMm >= MIN_EDGE_LENGTH_MM);
+  return straightRuns(mapped).filter((r) => r.lengthMm >= readDefault(null, 'setups.minEdgeLengthMm').value);
 }
 
 /**
@@ -741,8 +740,8 @@ export function registerSetupOrigin(tree0: FeatureTree, treeN: FeatureTree): Set
   if (edgeDatum !== null) return edgeDatum;
   throw new Error(
     'cam/model/setups: no locating features found for the vise flip (#965 registration) — ' +
-      `neither two through-holes at least ${MIN_HOLE_SEPARATION_MM} mm apart nor a single straight outline edge at least ` +
-      `${MIN_EDGE_LENGTH_MM} mm long survive, consistently, in both setup 0's and this setup's own recognised geometry; ` +
+      `neither two through-holes at least ${readDefault(null, 'setups.minHoleSeparationMm').value} mm apart nor a single straight outline edge at least ` +
+      `${readDefault(null, 'setups.minEdgeLengthMm').value} mm long survive, consistently, in both setup 0's and this setup's own recognised geometry; ` +
       'this part cannot carry a computed vise-flip registration and must not be silently assumed aligned',
   );
 }

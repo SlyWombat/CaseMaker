@@ -20,8 +20,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  DEFAULT_MAX_FINISH_TIP_OPS,
-  DEFAULT_MAX_FINISH_TIP_ROW_OPS,
   discRowCountFor,
   finishTipField,
   maxTipOpsFor,
@@ -29,6 +27,11 @@ import {
   tipFieldOpsFor,
   type SurfaceTool,
 } from '@/engine/cnc/cam/dropTip';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
+
+// #1207 — the two tip-op budgets are shop keys now; the tests run at the recommendations.
+const DEFAULT_MAX_FINISH_TIP_OPS = KNOWN_DEFAULTS['finish.maxTipOps']!.fallback;
+const DEFAULT_MAX_FINISH_TIP_ROW_OPS = KNOWN_DEFAULTS['finish.maxTipRowOps']!.fallback;
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 
 // ── A deterministic heightfield: random z within [minZ, topZ], a random covered mask, a plateau

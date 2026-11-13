@@ -21,6 +21,7 @@
  * three or more faces meet stops its chain (a junction has no one air side). Neither is a
  * refusal — the goal itself is still cut.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
@@ -61,7 +62,6 @@ export interface RimOptions {
   simplifyMm?: number;
 }
 
-const DEFAULT_TOP_TILT_MAX_DEG = 20;
 const DEFAULT_WELD_MM = 0.01;
 const DEFAULT_SIMPLIFY_MM = 0.005;
 
@@ -108,7 +108,8 @@ export function targetRim(
   target: PlacementTarget & Pick<EngraveTargetObject, 'sha256' | 'format' | 'data'>,
   opts: RimOptions = {},
 ): RimResult {
-  const topTiltMaxDeg = opts.topTiltMaxDeg ?? DEFAULT_TOP_TILT_MAX_DEG;
+  // #1207 — the shop's `target.topTiltMaxDeg`; absent → the registry recommendation.
+  const topTiltMaxDeg = opts.topTiltMaxDeg ?? readDefault(null, 'target.topTiltMaxDeg').value;
   const weldMm = opts.weldMm ?? DEFAULT_WELD_MM;
   const simplifyMm = opts.simplifyMm ?? DEFAULT_SIMPLIFY_MM;
   const mesh: ParsedMesh = targetObjectMesh(target);

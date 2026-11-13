@@ -44,6 +44,7 @@
  *
  * Pure: the caller hands in the reach table, the candidate entries and the catalogue.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -53,7 +54,6 @@ import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
 import { threadMillFit } from './threadFit';
-import { DEFAULT_MAX_FINISH_TIP_OPS } from '@/engine/cnc/cam/surfaceFinishTipField';
 import { DEFAULT_GRID_PITCH_MM, sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { cutterRefusedOnMaterial } from './cutterMaterial';
 import { primitiveLabel, primitiveReducesToRegion } from './partPlan';
@@ -732,7 +732,7 @@ export function planCutters(
       return Math.max(1, n);
     };
     const budgetOk = (c: Candidate): boolean =>
-      coveredCount === null || coveredCount * stencilCells(c.diameter) <= DEFAULT_MAX_FINISH_TIP_OPS;
+      coveredCount === null || coveredCount * stencilCells(c.diameter) <= readDefault(null, 'finish.maxTipOps').value;
     // #1037 — THE GOAL'S DEPTH IS NOT THE BALL'S. The model engine assigns cutters per feature
     // (`cam/model/sequence.ts depthRefusal`): the ball finishes the curved remainders, and the
     // goal's whole depth belongs to its flat/contour. A ball that reaches is still preferred, but

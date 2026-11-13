@@ -41,12 +41,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GOAL_CUT_INTO_FLOOR_MM,
-  GOAL_LEFTOVER_BANDS_MM,
   GOAL_PASS_COVERAGE_FALLBACK,
   STRADDLING_SLACK_MM,
   checkGoalCutInto,
 } from '@/engine/cnc/engrave/designCheck';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { Timeline } from '@/engine/cnc/emulator/timeline';
@@ -196,9 +196,27 @@ describe('#948 the goal check’s rule is frozen at SIMULATOR_VERSION', () => {
     expect(SIMULATOR_VERSION, FREEZE).toBe(FROZEN.version);
   });
 
+  it('the leftover bands are the caller’s: each band changes the reported shares', () => {
+    // #1207 — the shop's bands reach the check as the caller's option; the registry recommendation
+    // is only the no-shop default. One changed band per call, and the matching share must move.
+    const opts = { edgeBreak: { reachMm: 1.5, legMm: 0.5, edges: 'all' as const } };
+    const base = checkGoalCutInto(CANON, CANON_TOP, { ...opts, leftoverBandsMm: [0.1, 0.3, 1] });
+    const band1 = checkGoalCutInto(CANON, CANON_TOP, { ...opts, leftoverBandsMm: [0.05, 0.3, 1] });
+    const band2 = checkGoalCutInto(CANON, CANON_TOP, { ...opts, leftoverBandsMm: [0.1, 0.2, 1] });
+    const band3 = checkGoalCutInto(CANON, CANON_TOP, { ...opts, leftoverBandsMm: [0.1, 0.3, 2] });
+    expect(band1.leftoverFractions[0], 'band 1').not.toBe(base.leftoverFractions[0]);
+    expect(band2.leftoverFractions[1], 'band 2').not.toBe(base.leftoverFractions[1]);
+    expect(band3.leftoverFractions[2], 'band 3').not.toBe(base.leftoverFractions[2]);
+  });
+
   it('states its constants, thresholds and exclusion set', () => {
     expect(GOAL_CUT_INTO_FLOOR_MM, FREEZE).toBe(FROZEN.constants.cutIntoFloorMm);
-    expect([...GOAL_LEFTOVER_BANDS_MM], FREEZE).toEqual(FROZEN.constants.leftoverBandsMm);
+    expect(
+      ['acceptance.leftoverBand1Mm', 'acceptance.leftoverBand2Mm', 'acceptance.leftoverBand3Mm'].map(
+        (key) => KNOWN_DEFAULTS[key]!.fallback,
+      ),
+      FREEZE,
+    ).toEqual(FROZEN.constants.leftoverBandsMm);
     expect(GOAL_PASS_COVERAGE_FALLBACK, FREEZE).toBe(FROZEN.constants.passCoverageFallback);
 
     const r = checkGoalCutInto(CANON, CANON_TOP, {

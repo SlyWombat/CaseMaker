@@ -10,7 +10,7 @@ import {
   capWallRadius,
   coreOffsetRadius,
   cutDepthAtDistance,
-  DEFAULT_V_CARVE_STEPOVER_RATIO,
+  V_CARVE_STEPOVER_FALLBACK,
   vCarveCap,
   vCarveGrooveRefusal,
   vCarveLevels,
@@ -206,7 +206,7 @@ describe('vCarvePlaneStepover', () => {
   const cone = bit30();
 
   it('is 0.6 of the groove width at the plane — not of the tip flat', () => {
-    expect(DEFAULT_V_CARVE_STEPOVER_RATIO).toBe(0.6);
+    expect(V_CARVE_STEPOVER_FALLBACK).toBe(0.6);
     const thin = vCarvePlane(cone, 0.394, 0.2);
     const badge = vCarvePlane(cone, 0.985, 0.81);
     expect(vCarvePlaneStepover(thin)).toBeCloseTo(0.6 * 2 * (0.15 + 0.194 * TAN15), 12);
