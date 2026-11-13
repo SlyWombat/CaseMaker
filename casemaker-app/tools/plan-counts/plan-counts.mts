@@ -111,7 +111,7 @@ function writeCutterCsv(path: string, rows: readonly TraceRow[]): void {
   const lines = ['signature,cutterKey,estSeconds,realSeconds,realChangeSeconds'];
   const cell = (value: number | null): string => (value === null ? '' : String(value));
   for (const r of cutterRows(rows)) {
-    lines.push(`"${r.signature.replace(/"/g, '""')}",${r.cutterKey},${cell(r.estSeconds)},${cell(r.realSeconds)},${cell(r.realChangeSeconds)}`);
+    lines.push(`"${r.signature.replace(/"/g, '""')}","${r.cutterKey.replace(/"/g, '""')}",${cell(r.estSeconds)},${cell(r.realSeconds)},${cell(r.realChangeSeconds)}`);
   }
   writeFileSync(path, `${lines.join('\n')}\n`, 'utf8');
 }
