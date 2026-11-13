@@ -8,13 +8,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-server-tray__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-server-tray__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-server-tray__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-server-tray__snap.png"
       }
     },
     {
@@ -23,13 +23,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-poe-stack__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-poe-stack__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-poe-stack__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-poe-stack__snap.png"
       }
     },
     {
@@ -38,13 +38,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-zero-tablet__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-zero-tablet__default.png"
       },
       "snap": {
         "alreadySnap": true,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/pi-zero-tablet__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/pi-zero-tablet__snap.png"
       }
     },
     {
@@ -53,13 +53,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/arduino-dmx__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/arduino-dmx__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/arduino-dmx__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/arduino-dmx__snap.png"
       }
     },
     {
@@ -68,13 +68,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/giga-dmx-controller__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/giga-dmx-controller__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/giga-dmx-controller__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/giga-dmx-controller__snap.png"
       }
     },
     {
@@ -83,13 +83,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/esp32-dev-tray__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/esp32-dev-tray__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/esp32-dev-tray__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/esp32-dev-tray__snap.png"
       }
     },
     {
@@ -98,13 +98,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/snap-fit-test__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/snap-fit-test__default.png"
       },
       "snap": {
         "alreadySnap": true,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/snap-fit-test__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/snap-fit-test__snap.png"
       }
     },
     {
@@ -113,13 +113,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/protective-case__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/protective-case__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/protective-case__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/protective-case__snap.png"
       }
     },
     {
@@ -128,13 +128,13 @@
       "default": {
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/large-box-200__default.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/large-box-200__default.png"
       },
       "snap": {
         "alreadySnap": false,
         "statusAttr": "idle",
         "floaters": null,
-        "screenshot": "/mnt/c/Users/DavidSeaman/OneDrive/My Documents/ElectricRV/Development/Projects/Case Maker/casemaker-app/triage-live-qa-out/loose-parts/large-box-200__snap.png"
+        "screenshot": "<checkout>/casemaker-app/triage-live-qa-out/loose-parts/large-box-200__snap.png"
       }
     }
   ]

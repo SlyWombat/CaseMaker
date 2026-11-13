@@ -629,7 +629,7 @@ describe('#311 — cloning a catalogue row', () => {
 // carries its weight (decision 1), and the service keeps the last report on `/health` (decision 2).
 describe('#328 — a sync’s notes reach the screen', () => {
   const SYNCED_AT = '2026-10-09T14:02:57.269Z';
-  const SOURCE = 'C:\\Users\\Someone\\AppData\\Roaming\\MakeraStudio\\makera_library.db';
+  const SOURCE = 'C:\\Users\\<user>\\AppData\\Roaming\\MakeraStudio\\makera_library.db';
   const REPORT = (notes: SyncNote[]): string =>
     JSON.stringify({
       source: SOURCE,

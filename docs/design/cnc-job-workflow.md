@@ -1150,9 +1150,9 @@ https://core-electronics.com.au/makera-common-milling-bits-26-pcs.html ·
 https://core-electronics.com.au/makera-cnc-pcb-fabrication-pack.html.
 
 **Makera Studio install and user data (static read, Appendix A; copies, nothing modified):**
-`C:\Users\DavidSeaman\AppData\Local\Programs\Makera Studio\MakeraStudio.exe.orig` (strings),
+`C:\Users\<user>\AppData\Local\Programs\Makera Studio\MakeraStudio.exe.orig` (strings),
 `…\config\config.json`, `…\config\interface_config.json`, `…\data\lang\lang_us_EN.json`,
-`…\data\configure\*.json`; `C:\Users\DavidSeaman\AppData\Roaming\MakeraStudio\config.ini`,
+`…\data\configure\*.json`; `C:\Users\<user>\AppData\Roaming\MakeraStudio\config.ini`,
 `…\ControllerConfig.txt`, `…\config\ProjectDefault\default_3d_cnc.json`, `…\configure\*.json`,
 `…\GCodes\TopClamp.nc`, `…\logs\log_2026-10-07-22-54-47.txt`, `…\logs\log_2026-10-12-13-31-39.txt`,
 `…\makera_library.db` (REA `inspect-sqlite-database`, evidence `ev_662e5862…`, `ev_e2174548…`,

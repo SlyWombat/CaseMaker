@@ -17615,7 +17615,7 @@
   ],
   "lastSync": {
     "syncedAt": "2026-10-18T03:24:13.374Z",
-    "source": "C:\\Users\\Dave\\AppData\\Roaming\\MakeraStudio\\makera_library.db",
+    "source": "C:\\Users\\<user>\\AppData\\Roaming\\MakeraStudio\\makera_library.db",
     "total": 129,
     "feedRows": 1328,
     "materialSpecRows": 189,
