@@ -52,7 +52,7 @@ import { checkGoalCutInto, goalCutIntoUnchecked, type GoalCutIntoReport } from '
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
-import { Z1 } from '@/engine/cnc/machine';
+import { dialectOf, Z1 } from '@/engine/cnc/machine';
 import type { Tool } from '@/engine/cnc/tool';
 import { createSimSession, type SimSession } from '@/workers/sim/session';
 import { buildTimeline, parseGcode } from '@/engine/cnc';
@@ -552,7 +552,9 @@ describe('#948 the live session’s swept top', () => {
 
       // The session's stamp is the page's own read of the SAME program timeline (F's path).
       const timeline = buildTimeline(parseGcode(program), setup, Z1);
-      const direct = exactSweptField(input.heightfield, timeline, tool);
+      // #1251 — the direct stamp is given the same goal and edge band the session uses, so the
+      // parity check compares like with like.
+      const direct = exactSweptField({ ...input.heightfield, edgeBandMm: 10 ** -dialectOf(Z1).axisPrecision }, timeline, tool);
       expect(direct).not.toBeNull();
       const field = session.sweptFieldExact(input.heightfield);
       expect(field).not.toBeNull(); // RED on a28b78ba: null — the exact live had no stamp
@@ -659,10 +661,10 @@ describe('#948 the live session’s swept top', () => {
       expect(report.goalCutInto?.adjudicatedFraction).toBe(0);
       expect(report.goalCutInto?.adjudicatedMaxMm).toBe(0);
       expect(report.goalCutInto?.adjudicatedMaxAt).toBeNull();
-      // #1227 (analyst, 2026-11-11) — samples on wall lines change side: the cutter is 0.001 mm
-      // further over, the mirror of the strip #1227 fixed; 600 wall cells are excused instead of
-      // 4. The excusal band is unchanged, and the adjudicated maximum is still exactly 0 above.
-      expect(report.goalCutInto?.wallNotScoredFraction).toBeCloseTo(600 / 120701, 12);
+      // #1251 — #1227 is reversed and the stamp judges an edge cell by the goal, so the wall
+      // excusal is back to its pre-#1227 figure: 4 wall cells of 120,701 are excused. The
+      // excusal band is unchanged, and the adjudicated maximum is still exactly 0 above.
+      expect(report.goalCutInto?.wallNotScoredFraction).toBeCloseTo(4 / 120701, 12);
       expect(report.goalCutInto?.maxCutIntoMm).toBe(3);
       // #948/#1007 — the leftover read is the page's own point rule, cell for cell. On the OLD
       // engine's program `goal_check.py` left 824 of 120701 cells more than 0.1 mm above the goal

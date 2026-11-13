@@ -90,7 +90,7 @@ describe('#959 pocket()', () => {
     expect(zs).toEqual([-2.5, -5, -6]);
   });
 
-  it('the first pass runs one posted step inside the wall (#1227)', () => {
+  it('the first pass runs at the plain radius against the wall (#1227 reversed by #1251)', () => {
     const out = pocket({
       cutter: flat6, node: node(-2.5, 0), region: region(),
       stepOverMm: 1.2, stepDownMm: 2.5,
@@ -101,8 +101,9 @@ describe('#959 pocket()', () => {
     const firstLevel = out.ir.operations[0]!.moves.filter((m) => m.kind === 'feed' && m.z === -2.5);
     expect(firstLevel.length).toBeGreaterThan(0);
     const minX = Math.min(...firstLevel.map((m) => m.x));
-    // The left wall is x = 0 and the ⌀6 cutter's radius is 3: one posted step inside is 2.999.
-    expect(minX).toBeCloseTo(0 + 3 - 0.001, 6);
+    // The left wall is x = 0 and the ⌀6 cutter's radius is 3: the wall pass is exact again, so
+    // the first ring's centre sits at the plain radius (the stamp's edge band judges the cell).
+    expect(minX).toBeCloseTo(0 + 3, 6);
   });
 
   it('every move is at the pocket floor or above, and the deepest level reaches exactly floorZ', () => {
