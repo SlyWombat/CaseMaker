@@ -394,3 +394,25 @@ describe('#1246 slice 2 — the record carries the planner’s own frame', () =>
     expect(toSetup(job, Z1).placement.rotationZ).toBe(0);
   });
 });
+
+describe('#1246 slice 2 pair (a) — the facing file judges the setup’s footprint', () => {
+  it('it is the job footprint on a plain job and the setup’s own box when setup 0 states one', () => {
+    const plain = boxJob();
+    expect(setupFootprint(plain, 0)).toEqual(jobFootprint(plain));
+
+    const stated = boxJob({
+      setups: [
+        {
+          id: 'setup-0',
+          orientation: { top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', back: 'back' },
+          mount: { kind: 'tape' },
+          itemIds: [],
+          tools: [],
+          stock: { length: 80, width: 50, thickness: 10, provenance: 'stated' },
+        },
+      ] as never,
+    });
+    expect(setupFootprint(stated, 0)).toEqual([{ kind: 'rect', x: 0, y: 0, length: 80, width: 50 }]);
+    expect(setupFootprint(stated, 0)).not.toEqual(jobFootprint(stated));
+  });
+});
