@@ -730,6 +730,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.1).max(50),
     fallback: 1,
   },
+  'plan.cutIntoFloorMm': {
+    label: 'A cell this far below the model counts as cutting into the part; a set of cutters that cuts in is never chosen over one that does not.',
+    unit: 'mm',
+    rule: z.number().min(0.01).max(5),
+    fallback: 0.1,
+  },
   // ── #948 (end)
   // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
   // over the stock at a clearance above the job's own fixtures, and the air walk before the first

@@ -376,6 +376,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
     ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured. Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen."),
     ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."),
+    ("plan.cutIntoFloorMm", 0.1, "mm", "chosen, not measured. A cell this far below the model counts as cutting into the part; a set of cutters that cuts in is never chosen over one that does not."),
     ("adaptive.residualShare", 0.005, "x", "chosen, not measured: the material adaptive clearing may leave as grid noise along the walls, as a share of the area to clear"),
     ("adaptive.neckAreaMm2", 0.05, "mm²", "chosen, not measured: material in a neck narrower than the grid can see, above this area, refuses the plan rather than being left standing"),
     // ── #451 adaptive settings (end)
@@ -1456,6 +1457,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "plan.leftoverTallMm" => Some(need(
             n.is_some_and(|v| (0.1..=50.0).contains(&v)),
             "a height in mm, 0.1 to 50",
+        )),
+        "plan.cutIntoFloorMm" => Some(need(
+            n.is_some_and(|v| (0.01..=5.0).contains(&v)),
+            "a depth in mm, 0.01 to 5",
         )),
         "adaptive.residualShare" => Some(need(
             n.is_some_and(|v| (0.0..=0.5).contains(&v)),

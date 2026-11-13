@@ -281,11 +281,12 @@ export function setupStockOf(
 export interface ModelPlanInput {
   geometry: FeatureSource;
   /**
-   * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its seven settings from
-   * (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm` and the four
-   * bit-change keys). The planner's settings are part of its input, not ambient state, so every
-   * realm that plans — the app's worker, the CLI, the pick and rank pools — carries them here and
-   * a future realm cannot forget an install. `null`/absent = the recommendations.
+   * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its eight settings from
+   * (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm`,
+   * `plan.cutIntoFloorMm` — #1252 — and the four bit-change keys). The planner's settings are
+   * part of its input, not ambient state, so every realm that plans — the app's worker, the CLI,
+   * the pick and rank pools — carries them here and a future realm cannot forget an install.
+   * `null`/absent = the recommendations.
    */
   defaults?: ShopDefaults | null;
   /**
@@ -1001,6 +1002,51 @@ function formatSpan(seconds: number): string {
   return `${rest} s`;
 }
 
+/** #1252 — the goal cells one chain's stamped field is counted against. */
+export interface GoalCoverageCounts {
+  leftoverCells: number;
+  coveredCells: number;
+  cellAreaMm2: number;
+  leftoverAboveMm: number;
+  tallCells: number;
+  cutIntoCells: number;
+}
+
+/**
+ * #1252 — ONE PASS over a stamped field against the goal: the numbers the chain rank is built
+ * from (leftover above the band, the deepest over-band standing, tall cells, and the cells the
+ * stamp leaves more than the cut-into floor BELOW the goal). The coverage closure below is this
+ * function; a hand-built field can call it directly.
+ */
+export function goalCoverageCounts(
+  goal: GoalCellField,
+  stamp: ArrayLike<number>,
+  bands: { leftoverBandMm: number; tallMm: number; cutIntoFloorMm: number },
+): GoalCoverageCounts {
+  let covered = 0;
+  let leftover = 0;
+  let tall = 0;
+  let cutInto = 0;
+  let leftoverAboveMm = 0;
+  for (let k = 0; k < stamp.length; k++) {
+    if (goal.covered[k] !== 1) continue;
+    covered++;
+    const over = stamp[k]! - (goal.z[k] as number);
+    if (over > bands.leftoverBandMm) leftover++;
+    if (over > bands.tallMm) tall++;
+    if (-over > bands.cutIntoFloorMm) cutInto++;
+    if (over > leftoverAboveMm) leftoverAboveMm = over;
+  }
+  return {
+    leftoverCells: leftover,
+    coveredCells: covered,
+    cellAreaMm2: goal.pitch * goal.pitch,
+    leftoverAboveMm,
+    tallCells: tall,
+    cutIntoCells: cutInto,
+  };
+}
+
 /**
  * THE ENTRY (#956 §3.0, filled in on F's check suite finding it still threw). One whole job — every
  * setup, every feature the tree recognises — planned through the model engine and returned as
@@ -1044,6 +1090,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
+  // #1252 — the depth below the model past which a cell counts as cut into the part; the rank's
+  // new first key is counted at this floor, and the sheet's sentence names it.
+  const cutIntoFloorMm = readDefault(defaults, 'plan.cutIntoFloorMm').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -1272,7 +1321,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const goalCoverage =
     coverageGoal === undefined
       ? undefined
-      : (irs: readonly ToolpathIR[]): { leftoverCells: number; coveredCells: number; cellAreaMm2: number; leftoverAboveMm: number; tallCells: number } | null => {
+      : (irs: readonly ToolpathIR[]): GoalCoverageCounts | null => {
           let acc: Float32Array | null = null;
           for (const ir of irs) {
             const field = stampedField(ir);
@@ -1281,21 +1330,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             else for (let k = 0; k < acc.length; k++) if (field[k]! < acc[k]!) acc[k] = field[k]!;
           }
           if (acc === null) return null;
-          let covered = 0;
-          let leftover = 0;
-          let tall = 0;
-          // #1028 — THE DEEPEST OVER-BAND STANDING, the same 0.1 mm band the share counts: the
-          // ladder's "takes it" test and its "would reduce it to X mm" sentence both read it.
-          let leftoverAboveMm = 0;
-          for (let k = 0; k < acc.length; k++) {
-            if (coverageGoal.covered[k] !== 1) continue;
-            covered++;
-            const over = acc[k]! - (coverageGoal.z[k] as number);
-            if (over > 0.1) leftover++;
-            if (over > leftoverTallMm) tall++;
-            if (over > leftoverAboveMm) leftoverAboveMm = over;
-          }
-          return { leftoverCells: leftover, coveredCells: covered, cellAreaMm2: coverageGoal.pitch * coverageGoal.pitch, leftoverAboveMm, tallCells: tall };
+          // #1252 — the counting lives in `goalCoverageCounts` so a hand-built field is checked by
+          // the same code; #1028's deepest over-band standing is one of its numbers.
+          return goalCoverageCounts(coverageGoal, acc, { leftoverBandMm: 0.1, tallMm: leftoverTallMm, cutIntoFloorMm });
         };
   const perSetup: SetupPlan[] = [];
   // #1044 — A CANDIDATE WITH NO FEEDS LEAVES THE SET, STATED; THE PLAN IS NOT REFUSED FOR IT.
@@ -2449,6 +2486,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         leftoverEquivalencePct,
         // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
         leftoverTallMm,
+        // #1252 — the cut-into floor the sheet's sentence names (the rank's key is already counted).
+        cutIntoFloorMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
         bitChange,
         reachMarginMm,
@@ -3466,6 +3505,13 @@ export interface PlanPocketsOptions {
    * → the registry's recommendation, never a literal.
    */
   leftoverTallMm?: number;
+  /**
+   * #1252 — the shop's `plan.cutIntoFloorMm`: the depth below the model past which a cell counts
+   * as cut into the part. The picker's own use is the rank's (the caller counts it in
+   * `goalCoverage`); only the sheet's sentence reads this value here. Absent → the registry's
+   * recommendation, never a literal.
+   */
+  cutIntoFloorMm?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -3522,7 +3568,7 @@ export interface PlanPocketsOptions {
    * band and the covered cells, stamped by the caller (which owns the goal). Absent → the
    * picker keeps its pocket-count completeness.
    */
-  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null;
+  goalCoverage?: (irs: readonly ToolpathIR[]) => { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number; cutIntoCells?: number } | null;
   /**
    * #961 — a COVERAGE rest's region, from the caller's own simulated field: the cells the chain so
    * far leaves above the band, as polygons in the plan's XY (the caller owns the goal and the
@@ -3642,6 +3688,22 @@ export function tallGuardSentence(
   return (
     `A set of cutters about ${minutes} min faster was passed over: it would leave ${extraMm2} mm² more standing over ${tallMm} mm tall. ` +
     `Material that tall is never traded for time (a shop setting).`
+  );
+}
+
+/**
+ * #1252 — THE CUT-IN SHEET LINE, in one place so the sheet and its test cannot drift. `floorMm`
+ * is the shop's `plan.cutIntoFloorMm`; the caller reads it, never this function, so the sentence
+ * states the value the rule actually used.
+ */
+export function cutIntoSentence(
+  cutInto: NonNullable<SequenceChoice['cutInto']>,
+  floorMm: number,
+): string {
+  const areaMm2 = Math.round(cutInto.cells * cutInto.cellAreaMm2 * 10) / 10;
+  return (
+    `The cutters chosen cut ${areaMm2} mm² of the part more than ${floorMm} mm below the model; ` +
+    `no set of cutters this shop owns avoids it.`
   );
 }
 
@@ -4787,6 +4849,14 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
   if (choice.tallGuard !== undefined) {
     const tallMm = opts.leftoverTallMm ?? readDefault(null, 'plan.leftoverTallMm').value;
     const text = tallGuardSentence(choice.tallGuard, tallMm);
+    notes.push(text);
+    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  }
+  // #1252 — every eligible chain cut into the goal, so the least was chosen: the sheet says so
+  // (nothing is said when a clean chain existed and won — that is the normal case).
+  if (choice.cutInto !== undefined) {
+    const floorMm = opts.cutIntoFloorMm ?? readDefault(null, 'plan.cutIntoFloorMm').value;
+    const text = cutIntoSentence(choice.cutInto, floorMm);
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }

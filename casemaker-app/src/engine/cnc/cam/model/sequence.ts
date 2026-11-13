@@ -250,6 +250,12 @@ export interface SequenceOptions {
     cellAreaMm2: number;
     /** planner v3 A1b — cells standing above the shop's tall height; absent counts as 0. */
     tallCells?: number;
+    /**
+     * #1252 — cells the chain's own stamp leaves BELOW the goal by more than the shop's
+     * `plan.cutIntoFloorMm`: a predicted cut into the part. The rank's first key after
+     * eligibility; absent counts as 0 (a caller that states no figure cannot claim a cut-in).
+     */
+    cutIntoCells?: number;
   } | null;
   /**
    * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
@@ -392,6 +398,13 @@ export interface SequenceChoice {
    * states it so a longer job has a reason on it.
    */
   tallGuard?: { extraTallCells: number; cellAreaMm2: number; givenUpSeconds: number };
+  /**
+   * #1252 — set only when the CHOSEN chain's stamp leaves cells more than the shop's
+   * `plan.cutIntoFloorMm` below the goal (every candidate cut in, so the least was chosen): the
+   * count and the goal field's cell area, for the sheet's own sentence. Absent when the chosen
+   * chain is clean — the normal case — or has no coverage figure.
+   */
+  cutInto?: { cells: number; cellAreaMm2: number };
 }
 
 const EPS = 1e-9;
@@ -1012,6 +1025,9 @@ interface RankedSequence {
   coveredCells: number | null;
   /** Cells standing more than the shop's tall height above the goal; null with no goal. */
   tallCells: number | null;
+  /** #1252 — cells this chain's stamp leaves more than the cut-into floor below the goal; null
+   *  with no coverage figure (ranked as 0 for its key). */
+  cutIntoCells: number | null;
   /** The goal field's cell area, mm² — with `coverage`, the leftover expressed in mm². */
   cellAreaMm2: number | null;
   /** #961 — what this candidate's coverage rests buy and cost against the chain without them. */
@@ -1022,9 +1038,10 @@ interface RankedSequence {
 
 /**
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
- * then the SIMULATED leftover, then pockets left behind, then failed steps, house/rowed, price.
+ * then a chain that cuts into the goal ranks after every chain that does not (#1252); then the
+ * SIMULATED leftover, pockets left behind, failed steps, house/rowed, price.
  */
-function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tallTerm = true): readonly [number, number, number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tallTerm = true): readonly [number, number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -1067,11 +1084,18 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tal
       ? floored
       : (tallTerm ? (ranked.tallCells ?? 0) * 2 * ((ranked.coveredCells ?? 0) + 1) : 0) + floored;
   const demoted = ranked.eligible ? 0 : 1;
+  // #1252 — A CHAIN THAT CUTS INTO THE GOAL NEVER BEATS ONE THAT DOES NOT. The planner already
+  // stamps every candidate against the goal to count leftover and tall cells; the cells its stamp
+  // leaves more than `plan.cutIntoFloorMm` BELOW the goal are a predicted cut into the part, and
+  // they rank ahead of every other comparison (and after eligibility). A chain with no coverage
+  // figure cannot claim a cut-in and is ranked as 0 for this key; a null/positive count is its own
+  // key, never folded into the leftover/tall composite.
   // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
   // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
   // after the change count (#1186 rule 1: ties to fewer bit changes, then to owned).
   return [
     demoted,
+    ranked.cutIntoCells ?? 0,
     leftover,
     ranked.leftBehind,
     ranked.failures.length,
@@ -1218,6 +1242,10 @@ export function chooseSequence(
       memTrace('chain:price', {
         signature: p.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
         totalSeconds: round(p.priced.cost.totalSeconds),
+        // #1252 — the rank's new first key, so the tables can see which chains were passed over
+        // for a cut into the part. A chain with no coverage figure ranks as 0 on this key, so the
+        // row states the value the rank used.
+        cutIntoCells: p.coverage === null ? 0 : (p.coverage.cutIntoCells ?? 0),
         estimateSeconds: round(p.priced.cost.estimateSeconds),
         changeSeconds: round(p.priced.cost.changeSeconds),
         toolChanges: p.priced.cost.toolChanges,
@@ -1259,7 +1287,7 @@ export function chooseSequence(
     demand.features.filter((f) => f.kind === 'pocket' || f.kind === 'contour').map((f) => f.id),
   );
   const feasible: RankedSequence[] = priced
-    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number } | null } => p.priced !== null)
+    .filter((p): p is { sequence: CandidateSequence; priced: PricedSequence; coverage: { leftoverCells: number; coveredCells: number; cellAreaMm2: number; tallCells?: number; cutIntoCells?: number } | null } => p.priced !== null)
     .map(({ sequence, priced: price, coverage }) => {
       const failedFeatures = new Set(
         price.failures.flatMap((f) => f.regionIds).filter((id) => demandFeatureIds.has(id)),
@@ -1273,6 +1301,7 @@ export function chooseSequence(
         coverage: coverage === null ? null : coverage.leftoverCells,
         coveredCells: coverage === null ? null : coverage.coveredCells,
         tallCells: coverage === null ? null : (coverage.tallCells ?? 0),
+        cutIntoCells: coverage === null ? null : (coverage.cutIntoCells ?? 0),
         cellAreaMm2: coverage === null ? null : coverage.cellAreaMm2,
         restPrice: null,
         eligible: true,
@@ -1332,7 +1361,9 @@ export function chooseSequence(
     (a: RankedSequence, b: RankedSequence): number => {
       const ra = rankOf(a, floor, tallTerm);
       const rb = rankOf(b, floor, tallTerm);
-      for (let i = 0; i < 8; i++) {
+      // #1252 — keys 0..8 now: eligibility, cut-into, leftover, leftBehind, failures, seconds,
+      // changes, catalogue, fallback.
+      for (let i = 0; i < 9; i++) {
         if (ra[i]! < rb[i]!) return -1;
         if (ra[i]! > rb[i]!) return 1;
       }
@@ -1347,12 +1378,12 @@ export function chooseSequence(
         );
         if (picked !== 0) return picked > 0 ? -1 : 1;
       }
-      // #1186 — the tuple's tail: the flute rank (index 8), then the signature (index 9). The
+      // #1186 — the tuple's tail: the flute rank (index 9), then the signature (index 10). The
       // signature used to sit at 8 and decide same-diameter ties by id before #1114's preference
-      // could; the flute rank now takes that place.
-      if (ra[8]! < rb[8]!) return -1;
-      if (ra[8]! > rb[8]!) return 1;
-      return ra[9]! < rb[9]! ? -1 : ra[9]! > rb[9]! ? 1 : 0;
+      // could; the flute rank now takes that place (#1252 moved both one place along).
+      if (ra[9]! < rb[9]!) return -1;
+      if (ra[9]! > rb[9]!) return 1;
+      return ra[10]! < rb[10]! ? -1 : ra[10]! > rb[10]! ? 1 : 0;
     };
   const compareRanked = compareRankedWith(leftoverFloor, true);
   feasible.sort(compareRanked);
@@ -1363,7 +1394,8 @@ export function chooseSequence(
     const strict = [...feasible].sort((a, b) => {
       const ra = rankOf(a);
       const rb = rankOf(b);
-      for (let i = 0; i < 8; i++) {
+      // Through fallback (index 8); #1252 moved it from 7 along with the new cut-into key.
+      for (let i = 0; i < 9; i++) {
         if (ra[i]! < rb[i]!) return -1;
         if (ra[i]! > rb[i]!) return 1;
       }
@@ -1404,7 +1436,8 @@ export function chooseSequence(
     const ra = rankOf(first);
     const rb = rankOf(second);
     let priceTies = true;
-    for (let i = 0; i < 7; i++) if (ra[i] !== rb[i]) { priceTies = false; break; }
+    // Through catalogue (index 7); #1252's cut-into key sits at 1 and moved the rest along.
+    for (let i = 0; i < 8; i++) if (ra[i] !== rb[i]) { priceTies = false; break; }
     const t1 = primaryOf(first);
     const t2 = primaryOf(second);
     if (priceTies && t1 !== undefined && t2 !== undefined && cuttingDiameter(t1) === cuttingDiameter(t2)
@@ -1474,6 +1507,11 @@ export function chooseSequence(
   const unreachable = [
     ...new Set([...best.sequence.unreachable, ...best.failures.flatMap((f) => f.regionIds)]),
   ];
+  // #1252 — every eligible chain cut in, so the least was chosen: the sheet states it (the
+  // picker never says it when a clean chain was available and passed over).
+  const cutInto = best.cutIntoCells === null || best.cutIntoCells <= 0
+    ? undefined
+    : { cells: best.cutIntoCells, cellAreaMm2: best.cellAreaMm2 ?? 0 };
   return {
     steps,
     cost: best.cost,
@@ -1484,6 +1522,7 @@ export function chooseSequence(
     ...(pickNote === null ? {} : { pickNote }),
     ...(leftoverTolerance === undefined ? {} : { leftoverTolerance }),
     ...(tallGuard === undefined ? {} : { tallGuard }),
+    ...(cutInto === undefined ? {} : { cutInto }),
   };
 }
 
