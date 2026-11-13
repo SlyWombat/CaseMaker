@@ -514,8 +514,8 @@ export function AllValuesScope() {
         </div>
         {selected.measured && (
           <p className="allvalues-hint allvalues-hint--measured">
-            Replacing a measurement: the record will say <b>entered by hand</b>. There is no reset — the
-            way back is to measure again.{' '}
+            Replacing a measurement: this shop’s record will say <b>entered by hand</b>. There is no
+            reset — the way back is to measure again.{' '}
             <button type="button" className="allvalues-linklike" onClick={() => setDocsOpen(true)}>
               Measuring procedure →
             </button>

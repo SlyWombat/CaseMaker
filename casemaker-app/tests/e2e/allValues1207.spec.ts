@@ -76,8 +76,7 @@ test.describe('#1207 All values', () => {
     });
     await cm.ready();
     await openAllValues(page);
-    // The record is loaded: the fixture's six measured values are marked, and none is editable out
-    // of its range.
+    // The record is loaded: the fixture's six measured values are marked.
     await expect(page.getByTestId('all-values-chip-measured')).toContainText('Measured 6');
 
     await page.getByTestId('all-values-row-tabs.widthMm').click();

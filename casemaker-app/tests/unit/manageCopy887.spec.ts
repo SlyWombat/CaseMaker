@@ -18,6 +18,13 @@ const COMPONENTS = join(process.cwd(), 'src', 'components');
 const DIR = join(COMPONENTS, 'manage');
 const BANNED = ['rail', 'write', 'record', 'claim', 'seam', 'ledger'];
 /**
+ * #1207 — the accepted All values copy names the shop's own copy of a value "this shop's record"
+ * (it replaced the file name `location.json`). That is the analyst's approved OPERATOR wording, so
+ * a sentence carrying that phrase is not an offender; "record" stays banned in every other
+ * sentence.
+ */
+const SHOP_RECORD = /shop(?:’|')s record|\bshop record\b/i;
+/**
  * #887 — a raw registry id is never text a person reads: `cat:<uuid>` (a catalogue row),
  * `user:<id>` (their own addition) and `inv:<id>` (an inventory row) are keys. The Cut panel
  * printed `program 1 (cat:019c049a-…)` after a simulation stopped; this is the rule that fails on
@@ -62,6 +69,7 @@ describe('#887 — the Manage area’s visible text', () => {
       const text = visibleText(stripComments(readFileSync(join(DIR, file), 'utf8')));
       for (const s of text) {
         for (const word of BANNED) {
+          if (word === 'record' && SHOP_RECORD.test(s)) continue;
           if (new RegExp(`\\b${word}\\b`, 'i').test(s)) offenders.push(`${file}: "${s.trim()}" (${word})`);
         }
         if (/profile id/i.test(s)) offenders.push(`${file}: "${s.trim()}" (profile id)`);
