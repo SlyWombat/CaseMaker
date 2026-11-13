@@ -169,7 +169,8 @@ function loadCards(dir: string): Map<string, { card: Json; path: string }> {
     }
   };
   scan(join(dir, 'demo', 'runs'));
-  scan(join(dir, 'demo', 'rerun-j28-j29', 'runs')); // the later, mesh-supplied run of j28/j29 replaces the first run's error cards
+  scan(join(dir, 'demo', 'rerun-j28-j29', 'runs')); // v0.2: the later, mesh-supplied run of j28/j29 replaces the first run's error cards
+  scan(join(dir, 'demo-j28-j29', 'runs')); // a rerun folder keeps that run as its own command's output
   return out;
 }
 
