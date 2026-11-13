@@ -45,7 +45,7 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import type { EngraveAnyItem, EngraveJob, EngraveLabel, EngraveMargins, FieldSource, MarginSource } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The house's thresholds (#345), persisted with the rest of the app settings.
@@ -658,16 +658,6 @@ export function splitDepthOf(job: Pick<EngraveJob, 'stock'>): Mm | null {
 }
 
 /**
- * `0.025` mm — how far below a purchased laminate's cap a floor sits (#492).
- *
- * The maintainer's first laminate depth is 0.1 mm on a 0.075 mm cap, which is `cap + 0.025`. It is
- * deliberately NOT `boundaryMargin` (0.2, one printed layer): a laminate has no printed layer grid,
- * and its cap is a manufactured plane, so the margin is the small clearance the supplier's tolerance
- * and the machine's Z resolution need rather than a whole printer layer.
- */
-export const LAMINATE_CAP_MARGIN_MM: Mm = 0.025;
-
-/**
  * `0.5` mm — the built-in starting depth when no location states one. It mirrors
  * `KNOWN_DEFAULTS['engrave.newItemDepthMm'].fallback`; the store passes the location's own number
  * (and its provenance) into {@link recommendedEngraveDepth} whenever it has one.
@@ -691,7 +681,7 @@ export type EngraveDepthSource = 'laminate-cap' | 'printed-colour-line' | 'shop-
  * operator may always type another depth, and no depth field or refusal is keyed to the stock kind.
  * What the kind chooses is which of three rules answers:
  *
- *   - `laminate` — through the cap by {@link LAMINATE_CAP_MARGIN_MM}: cap + 0.025 mm (0.1 mm on
+ *   - `laminate` — through the cap by {@link margins.laminateCapMm}: cap + 0.025 mm (0.1 mm on
  *     the 0.075 mm fixture). The cap is a manufactured plane, unsnapped.
  *   - `printed` — through the colour line by the job's boundary margin, on the printer's layer grid
  *     (`colourBoundaryDepthOf`, the #285 model). This is the same candidate `recommendLabelDepth`
@@ -704,19 +694,21 @@ export type EngraveDepthSource = 'laminate-cap' | 'printed-colour-line' | 'shop-
  */
 export function recommendedEngraveDepth(
   stock: EngraveJob['stock'],
-  options: { boundaryMargin?: Mm; shopDepth?: EngraveDepthDefault } = {},
+  options: { boundaryMargin?: Mm; shopDepth?: EngraveDepthDefault; laminateCapMm?: Mm } = {},
 ): { depth: Mm; reason: string; source: EngraveDepthSource; plane: Mm | null } {
   const colour = stock.colour;
+  // #1207 — the laminate margin is the shop's; absent → the registry recommendation.
+  const laminateCapMm = options.laminateCapMm ?? readDefault(null, 'margins.laminateCapMm').value;
   if (colour?.kind === 'laminate') {
     const cap = colourBoundaryDepthOf(stock) ?? colour.capMm;
-    const depth = deeper(cap + LAMINATE_CAP_MARGIN_MM);
+    const depth = deeper(cap + laminateCapMm);
     return {
       depth,
       source: 'laminate-cap',
       plane: cap,
       reason:
         `the laminate's cap is ${mm(cap)} mm under the face, so going through the top colour needs ` +
-        `${mm(depth)} mm (${mm(LAMINATE_CAP_MARGIN_MM)} mm clear of the cap)`,
+        `${mm(depth)} mm (${mm(laminateCapMm)} mm clear of the cap)`,
     };
   }
 

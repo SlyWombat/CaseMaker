@@ -17,9 +17,6 @@ import type { StockItem } from '@/platform/stockClient';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from './stockStart';
 
-/** The scrap the proposal leaves each side of a mesh or a line of text, mm. */
-export const WORK_STOCK_MARGIN_MM = 5;
-
 /** The skin left under a goal at the flat-bottom style, mm (#898 adds the other styles). */
 export const WORK_STOCK_SKIN_MM = 1;
 
@@ -41,6 +38,10 @@ export interface ProposalContext {
   plateThicknessMm?: number;
   /** #1100 item 3 — the margin a sign's proposed plate leaves around its line, mm. */
   signMarginMm?: number;
+  /** #1207 — `stock.workMarginMm`: the scrap a mesh or line's plate leaves each side, mm. */
+  workMarginMm?: number;
+  /** #1207 — `stock.presetMarginMm`: the scrap a preset's cut-out or pocket leaves each side, mm. */
+  presetMarginMm?: number;
 }
 
 /**
@@ -54,8 +55,9 @@ export function shelfPlateFor(
   needMm: number,
   material: StockMaterial | null,
   shelf: readonly StockItem[],
+  marginMm: number = readDefault(null, 'stock.workMarginMm').value,
 ): StockItem | null {
-  const m = WORK_STOCK_MARGIN_MM;
+  const m = marginMm;
   const needL = extent.length + 2 * m;
   const needW = extent.width + 2 * m;
   const free = (i: StockItem): number => i.quantity - i.reservations.reduce((a, r) => a + r.quantity, 0);
@@ -80,7 +82,6 @@ export function shelfPlateFor(
  * five: the profile needs room for the cutter beside the part and for the clamps that hold the
  * offcut. (Mockup/acceptance: a 60 × 40 shape proposes 80 × 60.)
  */
-export const PRESET_STOCK_MARGIN_MM = 10;
 
 /**
  * The material the work proposes for a blank it sized itself: the house default (#879 — the
@@ -174,11 +175,14 @@ export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): n
  * keeps today's default).
  */
 export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockProposal | null {
+  // #1207 — the two scrap margins are the shop's; a caller without them reads the recommendations.
+  const workMarginMm = ctx.workMarginMm ?? readDefault(null, 'stock.workMarginMm').value;
+  const presetMarginMm = ctx.presetMarginMm ?? readDefault(null, 'stock.presetMarginMm').value;
   const thickness = proposedThickness(work, ctx);
   if (thickness === null) return null;
   switch (work.kind) {
     case 'mesh': {
-      const m = WORK_STOCK_MARGIN_MM;
+      const m = workMarginMm;
       const { x, y, z } = work.size;
       return {
         form: 'plate',
@@ -213,7 +217,7 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
     case 'text': {
       // #1100 item 3 — a SIGN's line sizes its own plate with the sign margin (the shop's number);
       // any other text keeps the historical 5 mm proposal, and the stock step opens the house stick.
-      const m = work.sign === true ? (ctx.signMarginMm ?? WORK_STOCK_MARGIN_MM) : WORK_STOCK_MARGIN_MM;
+      const m = work.sign === true ? (ctx.signMarginMm ?? workMarginMm) : workMarginMm;
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,
@@ -227,7 +231,7 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
     case 'outline': {
       // #1098 — the drawing's own extent, plus the same margin every mesh gets; the plate is the
       // house's, because an SVG carries no material of its own.
-      const m = WORK_STOCK_MARGIN_MM;
+      const m = workMarginMm;
       // The shelf's own plate wins: a pocket needs its depth plus the skin; a cut-out no thickness.
       const need = work.through ? 0 : (work.depthMm ?? 0) + WORK_STOCK_SKIN_MM;
       const held = shelfPlateFor(work, need, ctx.jobMaterial ?? null, ctx.shelf ?? []);
@@ -255,7 +259,7 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
     }
     case 'cutout': {
       // #1100 — the shape's extent plus the preset margin (10 mm each side).
-      const m = PRESET_STOCK_MARGIN_MM;
+      const m = presetMarginMm;
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,
@@ -267,7 +271,7 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
       };
     }
     case 'pocket': {
-      const m = PRESET_STOCK_MARGIN_MM;
+      const m = presetMarginMm;
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,
