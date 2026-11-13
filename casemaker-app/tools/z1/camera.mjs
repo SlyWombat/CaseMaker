@@ -11,7 +11,7 @@
 //     before a 25 mm bed move; the third showed the move; a later capture with ONE frame skipped was
 //     still stale, a six-frame burst was live from its second). `captureFrames` therefore discards
 //     `skip` frames (default 3) before counting: a single-frame capture is the FOURTH off the wire.
-// Two capture modes, matching what Studio actually does (docs/reverse/makera-studio/04-camera.md):
+// Two capture modes, matching what Studio actually does (the copy on the share, not in the repo):
 //   - LIVE: the `start_stream` push above. It STALLS when the machine is busy (a probe starves it
 //     after ~4 frames). Studio survives this by RECONNECTING ("stream dropped unexpectedly.
 //     Reconnecting in 2 seconds") — `captureFrames({ reconnect: true })` does the same, so a capture

@@ -1,8 +1,8 @@
 /**
- * #562 — QUICKLZ, LEVEL 1: the codec Studio compresses uploads with (RE 05).
+ * #562 — QUICKLZ, LEVEL 1: the codec Studio compresses uploads with (our note on the share).
  *
- * The vendor's `QuickLZCLI.exe` ships beside Studio; its `.bin` uploads are QuickLZ level 1 — the
- * original 1.5 stream, not the later variants: a 9-byte long header, 32-bit little-endian control
+ * The vendor's `QuickLZCLI.exe` ships beside Studio; its `.bin` uploads are QuickLZ level 1 (our note on the share; no public MakeraInc source for the level has been found) — the
+ * original 1.5 stream (layout: the QuickLZ 1.5 reference implementation, quicklz.com), not the later variants: a 9-byte long header, 32-bit little-endian control
  * words interleaved with the token bytes, literals as raw bytes (one control bit each), and a
  * two- or three-byte MATCH TOKEN that carries a 12-bit HASH instead of an offset — the decoder
  * finds the source through its own table, which both sides update on the same positions.

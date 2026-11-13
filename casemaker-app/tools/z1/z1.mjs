@@ -138,7 +138,7 @@ reopens and keeps going until --count or the --max ms time-box, so a capture can
 \`timelapse\` replays the frames the module RECORDED for one job, by that job's G-code path on the
 module's SD card (not the live view — the module stores a job's frames and plays them back). Frames go
 into --out as a directory; --from <n> starts at a frame index, --max caps the pull (ms). A READ: moves
-and writes nothing. Protocol decoded from Makera Studio (docs/reverse/makera-studio/04-camera.md),
+and writes nothing. Protocol decoded from Makera Studio (the copy on the share, not in the repo),
 bench-verification pending.
 
 \`discover --all\` prints **every** datagram received in the window, un-de-duplicated and with nothing
