@@ -5558,25 +5558,12 @@ export async function buildModelPlanInputForGoal(
     stockLengthMm: job.stock.length,
     stockWidthMm: job.stock.width,
   };
-  // #1246 slice 2 — one record per setup, carrying the planner's own SetupFrame. The same frame
-  // object is stated on the spec and on the record, so the planner's existing reads of
-  // `setups[i].frame` ARE reads of the record's frame; nothing else in the plan is touched.
-  const records = setupsWithStock.map((spec, i) =>
-    setupRecordFor(job, i, {
-      setup: toSetup(job, jobMachine(job, null), shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, i), shop.defaults ?? null),
-      frame: spec.frame,
-      footprint: null,
-      openEdges: openEdgeFacts,
-    }),
-  );
-
   return {
     geometry,
     // #1129 — THE JOB'S STATED SAMPLING FLOOR rides the input; absent, each CL surface derives it
     // from its step-over (see `clsurface.ts`'s `minSampleSpacingFor`).
     ...(goal.surface?.minSpacingMm === undefined ? {} : { minSampleSpacingMm: goal.surface.minSpacingMm }),
     setups: setupsWithStock,
-    records,
     // #943 (10) — the JOB's own setup count rides the input, so a caller that re-plans ONE setup
     // alone (#1017's twin) keeps the two-setup rules: `outline-is-stock` reads this, not the
     // narrowed input's `setups.length`.

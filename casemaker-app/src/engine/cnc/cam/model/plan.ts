@@ -20,7 +20,6 @@
 
 import type { EngraveJob } from '@/types/engraveJob';
 import { resolveSetupStock } from '@/engine/cnc/setups/stockBox';
-import type { SetupRecord } from '@/engine/cnc/setups/setupRecord';
 import type { Mount } from '@/engine/cnc/setups/types';
 import type { FixtureEnvelope } from '@/engine/cnc/setup';
 import type { ObstacleBox } from '@/engine/cnc/setup';
@@ -287,12 +286,6 @@ export function setupStockOf(
 
 export interface ModelPlanInput {
   geometry: FeatureSource;
-  /**
-   * #1246 slice 2 — the setup records the input's own frames came from, one per setup. The
-   * planner's frames ARE these records' frames (the builder states the same SetupFrame object on
-   * both), so every existing read of `setups[i].frame` is a read of the record's frame.
-   */
-  records?: readonly SetupRecord[];
   /**
    * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its seven settings from
    * (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm` and the four
