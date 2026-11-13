@@ -82,7 +82,7 @@ From the Z1 Demo Jobs page rebuilt on the published build `e741c9266` (2026-11-1
 | Accuracy sample | 4 cutters, 55.9 min | 9 cutters, 1.0 h | 72 s |
 | Ring box body | 2 cutters, 23.4 min | 3 cutters, 0.5 h | 4.4 min |
 
-**Sources.** The Makera columns are our measurement of Makera's published programs for these four parts, read from each program's header and tool list (the files themselves are never committed). The parts are Makerables project pages, public; the files sit behind a free login:
+**Sources.** The Makera columns are our measurement of Makera's published programs for these four parts, read from each program's header and tool list (the files themselves are never committed). The parts are Makerables project pages:
 tool organizer, <https://www.makerables.com/project/makera-tool-organizer>; tool tray 70 mm, <https://www.makerables.com/project/modular-stackable-tool-trays> (CC BY-NC-SA 4.0); accuracy sample, <https://www.makerables.com/project/cnc-accuracy-test-sample>; ring box, <https://www.makerables.com/project/wooden-ring-box>. The Case Maker columns are ours, from the Demo Jobs page build named above.
 
 The agreed lines are cycle ≤ 2× vendor and cutters ≤ vendor + 1. The organizer misses both by a wide margin. The mechanism is the objective's first key: simulated leftover outranks everything, so any cutter that removes a few more cells is added whatever it costs in time and bit changes. The selector in §4.3 keeps the objective's order but needs a tolerance on that first key (open decision 7).
