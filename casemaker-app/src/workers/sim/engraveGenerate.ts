@@ -142,7 +142,7 @@ import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
-import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
+import { setupRecordFor, verifyContextFrom, type OpenEdgeFacts, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
 // #1117 — the freeing contour against the vise's jaws, refused at plan stage.
 import { contourJawClearanceFinding } from '@/engine/cnc/mounts/jawClearance';
@@ -5541,15 +5541,6 @@ export async function buildModelPlanInputForGoal(
   // #1082 stage 2 — EACH SETUP'S OWN STOCK (the vendor flip's side 2 is the freed part): the
   // document's stated box, or a flipped setup's derived one, attached by index; absent, the spec
   // keeps reading the job's blank exactly as before.
-  // #1254 — the plain facts the planner's own edge-openness rule is evaluated from; no function
-  // may ride ModelPlanInput (it is structured-cloned into the rank pool, #1151).
-  const openEdgeFacts = {
-    boxes: (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
-    uncertaintyMm: envelope?.uncertainty ?? 0,
-    clearanceMm: job.jawClearance,
-    stockLengthMm: job.stock.length,
-    stockWidthMm: job.stock.width,
-  };
   const setupsWithStock: SetupSpec[] = bandedSetups.map((spec, i) => {
     const own = job.setups?.[i]?.stock ?? null;
     return own === null ? spec : { ...spec, stock: { length: own.length, width: own.width, thickness: own.thickness } };
@@ -5557,6 +5548,16 @@ export async function buildModelPlanInputForGoal(
   // #1246 slice 2 — the stock's KIND, the fact `ModelPlanInput.stock` used to drop. A rotary job
   // is the rod case; the model engine's own plans stay box geometry this slice.
   const stockMap = rotaryMapOf(job, shop.defaults ?? null);
+  // #1254 / #1246 slice 2 step 4 — the RAW fixture facts the edge-openness rule reads, stated
+  // once: the record carries them AND the plan input rides them as plain data (`openEdges`; the
+  // planner evaluates the rule itself — no function may ride ModelPlanInput, #1151's pool clones it).
+  const openEdgeFacts: OpenEdgeFacts = {
+    boxes: (envelope?.boxes ?? []).map((b) => ({ minX: b.min[0], maxX: b.max[0], minY: b.min[1], maxY: b.max[1], topZ: b.max[2] })),
+    uncertaintyMm: envelope?.uncertainty ?? 0,
+    clearanceMm: job.jawClearance,
+    stockLengthMm: job.stock.length,
+    stockWidthMm: job.stock.width,
+  };
   // #1246 slice 2 — one record per setup, carrying the planner's own SetupFrame. The same frame
   // object is stated on the spec and on the record, so the planner's existing reads of
   // `setups[i].frame` ARE reads of the record's frame; nothing else in the plan is touched.
@@ -5565,6 +5566,7 @@ export async function buildModelPlanInputForGoal(
       setup: toSetup(job, jobMachine(job, null), shop.mount?.fixture ?? undefined, shop.bed ?? null, stockForSetup(job, i), shop.defaults ?? null),
       frame: spec.frame,
       footprint: null,
+      openEdges: openEdgeFacts,
     }),
   );
 
