@@ -165,16 +165,20 @@ test.describe('the goal corpus, desktop', () => {
     // coverage it measured against the pass line it judged (#948), never a 0 mm cut-into that never
     // happened; this spec pins the judge's own measured value, not a target.
     await expect(page.getByTestId('engrave-cut-goal')).toHaveText(
-      'Covers 88.41 % of the design’s top surface (the pass line is 95 %)',
+      // #1251's stamp edge rule: the pocket's wall pass runs at the plain radius again and a cell
+      // within one posted step of the cutter's edge is judged by the goal's own height, so the
+      // wall-adjacent band that used to read as standing stock now counts as covering the design
+      // (88.41 → 88.74 %, D's reason line).
+      'Covers 88.74 % of the design’s top surface (the pass line is 95 %)',
     );
-    // #964 — the raw reading beside the judged one. Its deepest cell was a wall column 10 mm below
-    // the goal at (44.8, 26.8) until the tray-top group: #1227's wall pass (rings one posted step
-    // closer) and #1223's nested lobe order no longer leave that wall column as the raw maximum —
-    // it is now 0.953 mm at (45.3, 44.8), with the judged cut-into still 0. Measured 2026-11-11 at
-    // 608e90eb6; the pre-#1003 spec pinned 0.023 mm at (65, 43.7), and 966-collapse pinned the
-    // 10 mm wall column.
+    // #964 — the raw reading beside the judged one. Under #1251's stamp edge rule (the wall pass
+    // back at the plain radius, and edge cells judged by the goal's own height) NO cell is cut into
+    // at all: max 0 mm, with the judged cut-into still 0. Its history: a 10 mm wall column at
+    // (44.8, 26.8) through 966-collapse, 0.953 mm at (45.3, 44.8) from the tray-top group (#1227 +
+    // #1223), and 0 from #1251; measured 2026-11-13 at e43f5dc13. The pre-#1003 spec pinned
+    // 0.023 mm at (65, 43.7).
     await expect(page.getByTestId('engrave-cut-goal-raw')).toHaveText(
-      'raw, before exclusions: 0 % cut-into, max 0.953 mm at 45.3, 44.8',
+      'raw, before exclusions: 0 % cut-into, max 0 mm',
     );
     await expect(page.getByTestId('engrave-cut-goal-coverage')).toHaveText(
       /^Top-surface coverage: [\d.]+ % \(the pass line is 95 %\)$/,
