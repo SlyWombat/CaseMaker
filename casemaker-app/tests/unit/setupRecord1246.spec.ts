@@ -18,6 +18,8 @@ import { describe, expect, it } from 'vitest';
 
 import { setupRecordFor, verifyContextFrom } from '@/engine/cnc/setups/setupRecord';
 import { setupStockOf } from '@/engine/cnc/cam/model/plan';
+import { buildModelPlanInputForGoal } from '@/workers/sim/engraveGenerate';
+import { boxTarget, jobFor, FLAT3, SHOP } from './helpers/twoSetupBox966';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { SetupSpec } from '@/engine/cnc/cam/model/plan';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -346,5 +348,26 @@ describe('#1246 slice 2 — the two stock resolvers agree before they become one
     // 4. A rod job (its single setup states no box).
     const rod = rodJob();
     compare('rod', rod, [spec()]);
+  });
+});
+
+describe('#1246 slice 2 — ModelPlanInput no longer drops the stock kind', () => {
+  it('a box job states box; a rod states rod and its diameter', async () => {
+    const job = jobFor(boxTarget('goal-kind', 40, 30, 20), 40, 30, 20);
+    const boxInput = await buildModelPlanInputForGoal(job, job.targetObject!, FLAT3, SHOP);
+    expect(boxInput.stock.kind).toBe('box');
+    expect(boxInput.stock.diameter).toBeUndefined();
+
+    const rod = {
+      ...job,
+      stock: { ...job.stock, length: 60, width: 20, thickness: 20, shape: 'cylinder' as const, diameter: 20 },
+      workholding: {
+        kind: 'rotary-chuck' as const,
+        rotary: { stickout: 50, gripDiameter: null, jawMode: 'reverse-inner' as const, tailstock: false, source: 'test' },
+      },
+    };
+    const rodInput = await buildModelPlanInputForGoal(rod as never, rod.targetObject!, FLAT3, SHOP);
+    expect(rodInput.stock.kind).toBe('rod');
+    expect(rodInput.stock.diameter).toBe(20);
   });
 });

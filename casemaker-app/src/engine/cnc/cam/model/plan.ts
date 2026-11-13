@@ -374,7 +374,16 @@ export interface ModelPlanInput {
    * to more than one entry. Reserved now so #965 does not reopen this interface.
    */
   setups: SetupSpec[];
-  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'material'>;
+  stock: Pick<EngraveJob['stock'], 'length' | 'width' | 'thickness' | 'material'> & {
+    /**
+     * #1246 slice 2 — THE STOCK'S KIND, stated rather than dropped at this interface. The box
+     * above is the planner's geometry and is unchanged; a rod job's plan is still made from its
+     * bounding box (track E reads these). Absent keeps every existing builder's reading.
+     */
+    kind?: 'box' | 'rod';
+    /** A rod's diameter, mm, when `kind` is `'rod'`. */
+    diameter?: number;
+  };
   /**
    * The resolved fixture, by mount type — `viseEnvelope(job.stock, jobVise(job), job.sacrificial)`
    * for a vise (`engine/cnc/fixture.ts:371`, the same call `jobSetup.ts:1207`'s `defaultFixture`
