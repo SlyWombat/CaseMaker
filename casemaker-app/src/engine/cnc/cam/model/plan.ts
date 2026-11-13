@@ -1044,6 +1044,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const toolChangeSeconds = readDefault(defaults, 'toolChange.seconds').value;
   const leftoverEquivalencePct = readDefault(defaults, 'plan.leftoverEquivalencePct').value;
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
+  // #1207 — the coverage rest's own shop threshold, through the plan's options.
+  const coverageRestMinMm2PerS = readDefault(defaults, 'plan.coverageRestMinMm2PerS').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -2449,6 +2451,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         rapid: Z1.rapidEstimate,
         toolChangeSeconds,
         leftoverEquivalencePct,
+        coverageRestMinMm2PerS,
         // #1232 — the tall height the sheet's sentence names (the picker's own rule already reads it).
         leftoverTallMm,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
@@ -3462,6 +3465,8 @@ export interface PlanPocketsOptions {
   toolChangeSeconds: number;
   /** planner v3 A1 — the shop's leftover tolerance, % of the goal's covered cells. */
   leftoverEquivalencePct?: number;
+  /** #1207 — the shop's `plan.coverageRestMinMm2PerS`, the coverage rest's threshold. */
+  coverageRestMinMm2PerS?: number;
   /**
    * planner v3 A6 (#1232) — the shop's `plan.leftoverTallMm`: the height at which leftover counts
    * as tall. Only the sheet's sentence reads it here (the picker's own use is the rank's); absent
@@ -4254,6 +4259,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
     leftoverEquivalencePct: opts.leftoverEquivalencePct,
+    ...(opts.coverageRestMinMm2PerS === undefined ? {} : { coverageRestMinMm2PerS: opts.coverageRestMinMm2PerS }),
     // #1114 — the sequence's priced changes and its same-diameter tie rule.
     ...(opts.bitChange === undefined ? {} : { bitChange: opts.bitChange }),
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),
