@@ -221,6 +221,13 @@ export interface SequenceOptions {
    * the goal's covered cells (`plan.leftoverEquivalencePct`). Absent or 0: every difference counts.
    */
   leftoverEquivalencePct?: number;
+  /**
+   * #1252 — the cut-in tolerance, built exactly as the leftover's: chains whose cut-in is within
+   * this share of the goal's covered cells of the least cut-in tie on the key
+   * (`plan.cutIntoEquivalencePct`, 0.05 %); a chain beyond ranks after every chain within.
+   * Absent or 0: the key is the raw count.
+   */
+  cutIntoEquivalencePct?: number;
   /** Build the step's moves; the op implementations, or a stand-in. */
   planStep: PlanStep;
   /** Whether a cutter's feeds are rowed or the labelled fallback; absent → rowed. */
@@ -399,10 +406,9 @@ export interface SequenceChoice {
    */
   tallGuard?: { extraTallCells: number; cellAreaMm2: number; givenUpSeconds: number };
   /**
-   * #1252 — set only when the CHOSEN chain's stamp leaves cells more than the shop's
-   * `plan.cutIntoFloorMm` below the goal (every candidate cut in, so the least was chosen): the
-   * count and the goal field's cell area, for the sheet's own sentence. Absent when the chosen
-   * chain is clean — the normal case — or has no coverage figure.
+   * #1252 — set only when EVERY eligible measured chain cuts into the goal for real (the least
+   * cut-in is above 0 — the chosen's own count and the goal field's cell area, for the sheet's
+   * sentence). Absent when a clean chain exists — the normal case — or nothing was measured.
    */
   cutInto?: { cells: number; cellAreaMm2: number };
 }
@@ -1040,8 +1046,13 @@ interface RankedSequence {
  * The rank: a coverage rest that misses the price line ranks after every chain that clears it;
  * then a chain that cuts into the goal ranks after every chain that does not (#1252); then the
  * SIMULATED leftover, pockets left behind, failed steps, house/rowed, price.
+ *
+ * #1252 — `cutIntoFloor` is the tolerance's floor in cells (the least cut-in among the eligible
+ * measured chains + `plan.cutIntoEquivalencePct/100 x coveredCells`): a chain at or under it ties
+ * at 0 on the cut-in key and the later keys decide, a chain beyond it ranks after every chain
+ * within it (fewer first), and `null` (tolerance 0) makes the key the raw count.
  */
-function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tallTerm = true): readonly [number, number, number, number, number, number, number, number, number, number, string] {
+function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tallTerm = true, cutIntoFloor: number | null = null): readonly [number, number, number, number, number, number, number, number, number, number, string] {
   // A COMPLETE chain beats an incomplete one first: an uncut pocket is not a cheaper plan, it is a
   // different part. "Complete" means every pocket a cutter in the set COULD cover is covered —
   // `leftBehind`, not `unreachable`, or the pockets no cutter can reach would tie every candidate
@@ -1087,15 +1098,22 @@ function rankOf(ranked: RankedSequence, leftoverFloor: number | null = null, tal
   // #1252 — A CHAIN THAT CUTS INTO THE GOAL NEVER BEATS ONE THAT DOES NOT. The planner already
   // stamps every candidate against the goal to count leftover and tall cells; the cells its stamp
   // leaves more than `plan.cutIntoFloorMm` BELOW the goal are a predicted cut into the part, and
-  // they rank ahead of every other comparison (and after eligibility). A chain with no coverage
-  // figure cannot claim a cut-in and is ranked as 0 for this key; a null/positive count is its own
-  // key, never folded into the leftover/tall composite.
+  // the count ranks ahead of every other comparison (after eligibility), through the tolerance:
+  // a chain at or under the floor ties at 0, one beyond reads its excess (fewer first). A chain
+  // with no coverage figure cannot claim a cut-in and is ranked as 0 for this key; the count is
+  // its own key, never folded into the leftover/tall composite.
+  const cutInto =
+    ranked.cutIntoCells === null
+      ? 0
+      : cutIntoFloor === null
+        ? ranked.cutIntoCells
+        : Math.max(0, ranked.cutIntoCells - cutIntoFloor);
   // #1186 — ONE CURRENCY FIRST: the priced total (cutting at the feed each cutter really runs +
   // the priced bit changes) ranks BEFORE owned/catalogue and rowed/fallback; those only break a tie,
   // after the change count (#1186 rule 1: ties to fewer bit changes, then to owned).
   return [
     demoted,
-    ranked.cutIntoCells ?? 0,
+    cutInto,
     leftover,
     ranked.leftBehind,
     ranked.failures.length,
@@ -1355,12 +1373,23 @@ export function chooseSequence(
     const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
     leftoverFloor = bestLeftover + (tolerancePct / 100) * coveredCells;
   }
+  // #1252 — THE CUT-IN TOLERANCE'S FLOOR, built exactly as the leftover's above: the smallest
+  // cut-in among the eligible measured chains plus the share of the covered surface the shop
+  // states. Chains at or under it tie at 0 on the key; a chain beyond ranks after every one of
+  // them. Off (the setting at 0) leaves `null` and the key is the raw count.
+  const cutIntoPct = opts.cutIntoEquivalencePct ?? 0;
+  const fewestCutInto = measured.length === 0 ? null : Math.min(...measured.map((r) => r.cutIntoCells ?? 0));
+  let cutIntoFloor: number | null = null;
+  if (cutIntoPct > 0 && measured.length > 0) {
+    const coveredCells = Math.max(...measured.map((r) => r.coveredCells ?? 0));
+    cutIntoFloor = fewestCutInto! + (cutIntoPct / 100) * coveredCells;
+  }
   // planner v3 A6 (#1232) — the comparator takes the floor and whether the tall term is in, so
   // the pick with the tall term OFF (the note's question) is the same keys in the same order.
   const compareRankedWith = (floor: number | null, tallTerm: boolean) =>
     (a: RankedSequence, b: RankedSequence): number => {
-      const ra = rankOf(a, floor, tallTerm);
-      const rb = rankOf(b, floor, tallTerm);
+      const ra = rankOf(a, floor, tallTerm, cutIntoFloor);
+      const rb = rankOf(b, floor, tallTerm, cutIntoFloor);
       // #1252 — keys 0..8 now: eligibility, cut-into, leftover, leftBehind, failures, seconds,
       // changes, catalogue, fallback.
       for (let i = 0; i < 9; i++) {
@@ -1392,8 +1421,8 @@ export function chooseSequence(
   const chosenRanked = feasible[0];
   if (leftoverFloor !== null && bestLeftover !== null && chosenRanked !== undefined && chosenRanked.coverage !== null && chosenRanked.coverage > bestLeftover) {
     const strict = [...feasible].sort((a, b) => {
-      const ra = rankOf(a);
-      const rb = rankOf(b);
+      const ra = rankOf(a, null, true, cutIntoFloor);
+      const rb = rankOf(b, null, true, cutIntoFloor);
       // Through fallback (index 8); #1252 moved it from 7 along with the new cut-into key.
       for (let i = 0; i < 9; i++) {
         if (ra[i]! < rb[i]!) return -1;
@@ -1507,11 +1536,19 @@ export function chooseSequence(
   const unreachable = [
     ...new Set([...best.sequence.unreachable, ...best.failures.flatMap((f) => f.regionIds)]),
   ];
-  // #1252 — every eligible chain cut in, so the least was chosen: the sheet states it (the
-  // picker never says it when a clean chain was available and passed over).
-  const cutInto = best.cutIntoCells === null || best.cutIntoCells <= 0
-    ? undefined
-    : { cells: best.cutIntoCells, cellAreaMm2: best.cellAreaMm2 ?? 0 };
+  // #1252 (amended) — THE SHEET'S STATEMENT ONLY WHEN THE CHOSEN CHAIN IS BEYOND THE FLOOR: with
+  // the tolerance on, a chosen chain at or under it ties at 0 and is the normal case (nothing is
+  // said — a chain within the noise band was chosen, as the shop's setting intends); with no
+  // tolerance, the key is the raw count and any cut-in is beyond the (absent) floor. The sentence
+  // then carries the CHOSEN chain's own cut-in area.
+  const chosenCutIntoKey = best.cutIntoCells === null
+    ? 0
+    : cutIntoFloor === null
+      ? best.cutIntoCells
+      : Math.max(0, best.cutIntoCells - cutIntoFloor);
+  const cutInto = chosenCutIntoKey > 0
+    ? { cells: best.cutIntoCells!, cellAreaMm2: best.cellAreaMm2 ?? 0 }
+    : undefined;
   return {
     steps,
     cost: best.cost,

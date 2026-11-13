@@ -281,12 +281,12 @@ export function setupStockOf(
 export interface ModelPlanInput {
   geometry: FeatureSource;
   /**
-   * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its eight settings from
+   * #1237 — THE SHOP'S DEFAULTS MAP: the run-time data this plan reads its nine settings from
    * (`toolChange.seconds`, `plan.leftoverEquivalencePct`, `plan.leftoverTallMm`,
-   * `plan.cutIntoFloorMm` — #1252 — and the four bit-change keys). The planner's settings are
-   * part of its input, not ambient state, so every realm that plans — the app's worker, the CLI,
-   * the pick and rank pools — carries them here and a future realm cannot forget an install.
-   * `null`/absent = the recommendations.
+   * `plan.cutIntoFloorMm` and `plan.cutIntoEquivalencePct` — #1252 — and the four bit-change
+   * keys). The planner's settings are part of its input, not ambient state, so every realm that
+   * plans — the app's worker, the CLI, the pick and rank pools — carries them here and a future
+   * realm cannot forget an install. `null`/absent = the recommendations.
    */
   defaults?: ShopDefaults | null;
   /**
@@ -1093,6 +1093,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // #1252 — the depth below the model past which a cell counts as cut into the part; the rank's
   // new first key is counted at this floor, and the sheet's sentence names it.
   const cutIntoFloorMm = readDefault(defaults, 'plan.cutIntoFloorMm').value;
+  // #1252 (amended) — the cut-in tolerance: chains within this share of the covered surface of
+  // the least cut-in tie on the key (built as the leftover tolerance is).
+  const cutIntoEquivalencePct = readDefault(defaults, 'plan.cutIntoEquivalencePct').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -2488,6 +2491,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         leftoverTallMm,
         // #1252 — the cut-into floor the sheet's sentence names (the rank's key is already counted).
         cutIntoFloorMm,
+        // #1252 (amended) — the rank's cut-in tolerance.
+        cutIntoEquivalencePct,
         // #1114 — the sequence's ties and its priced changes both read the new rule.
         bitChange,
         reachMarginMm,
@@ -3512,6 +3517,12 @@ export interface PlanPocketsOptions {
    * recommendation, never a literal.
    */
   cutIntoFloorMm?: number;
+  /**
+   * #1252 (amended) — the shop's `plan.cutIntoEquivalencePct`: chains whose cut-in is within
+   * this share of the goal's covered surface of the least cut-in tie on the rank's cut-in key.
+   * Absent or 0 → the key is the raw count.
+   */
+  cutIntoEquivalencePct?: number;
   /** #1114 — the shop's bit-change rule: a change is priced from the program before it. */
   bitChange?: BitChangeRule;
   /** #1114 — the shop's `reach.marginMm`, the gate a same-diameter tie's candidates must clear. */
@@ -4314,6 +4325,8 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     rapid: opts.rapid,
     toolChangeSeconds: opts.toolChangeSeconds,
     leftoverEquivalencePct: opts.leftoverEquivalencePct,
+    // #1252 (amended) — the cut-in tolerance, beside the leftover's.
+    ...(opts.cutIntoEquivalencePct === undefined ? {} : { cutIntoEquivalencePct: opts.cutIntoEquivalencePct }),
     // #1114 — the sequence's priced changes and its same-diameter tie rule.
     ...(opts.bitChange === undefined ? {} : { bitChange: opts.bitChange }),
     ...(opts.reachMarginMm === undefined ? {} : { reachMarginMm: opts.reachMarginMm }),

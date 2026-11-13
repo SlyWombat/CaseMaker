@@ -736,6 +736,12 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.01).max(5),
     fallback: 0.1,
   },
+  'plan.cutIntoEquivalencePct': {
+    label: 'Sets of cutters that cut into the part by within this share of its surface of each other count as equal on that key, and the rest of the rank decides.',
+    unit: '%',
+    rule: z.number().min(0).max(5),
+    fallback: 0.05,
+  },
   // ── #948 (end)
   // ── #1146 — the cleaning pass and the air walk (the maintainer's ruling, 2026-11-09): a raster
   // over the stock at a clearance above the job's own fixtures, and the air walk before the first

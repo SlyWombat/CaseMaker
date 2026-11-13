@@ -1732,6 +1732,13 @@
       "unit": "mm",
       "note": "chosen, not measured. A cell this far below the model counts as cutting into the part; a set of cutters that cuts in is never chosen over one that does not."
     },
+    "plan.cutIntoEquivalencePct": {
+      "value": 0.05,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "%",
+      "note": "chosen, not measured. Sets of cutters that cut into the part by within this share of its surface of each other count as equal on that key, and the rest of the rank decides."
+    },
     "adaptive.residualShare": {
       "value": 0.005,
       "source": "seeded",

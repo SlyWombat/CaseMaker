@@ -28,6 +28,7 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'facing.unknownMm',
   'finish.stockToLeaveMm',
   'goal.passCoverage',
+  'plan.cutIntoEquivalencePct',
   'plan.cutIntoFloorMm',
   'plan.leftoverEquivalencePct',
   'plan.leftoverTallMm',
