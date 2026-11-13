@@ -77,6 +77,8 @@ export interface TrayRunFacts {
   /** Every timed run's wall seconds, the first included, when the folder holds repeats (rerun.sh --repeat). */
   walls?: number[];
   peakRssMiB?: Maybe;
+  /** The run REFUSED (receipt `ok: false`): its wall and memory are those of a refusal, not of a plan, and are never printed as a result. */
+  refused?: string | null;
 }
 
 export interface SuiteCounts {
@@ -117,11 +119,13 @@ export function median(xs: number[]): number | null {
 
 /** The wall seconds a side stands for: the median of its repeats, or its one run. */
 function wallValue(f: TrayRunFacts): number | null {
+  if (f.refused) return null;
   const ws = (f.walls ?? []).filter(finite);
   return ws.length > 0 ? median(ws) : finite(f.wall) ? f.wall : null;
 }
 
 function wallText(f: TrayRunFacts): string {
+  if (f.refused) return f.refused;
   const ws = (f.walls ?? []).filter(finite);
   if (ws.length >= 2) return `min ${Math.min(...ws).toFixed(1)} / median ${fmtNumber(median(ws), 1)} (${ws.length} runs)`;
   const one = wallValue(f);
@@ -131,6 +135,14 @@ function wallText(f: TrayRunFacts): string {
 /** Generate wall: min / median over the repeats where there are some, "(one run)" where there is one; the change is median against median. */
 function wallRow(label: string, b: TrayRunFacts, a: TrayRunFacts): Row {
   return { label, before: wallText(b), after: wallText(a), change: changeText(wallValue(b), wallValue(a), { digits: 1, noise: true }) };
+}
+
+/** Peak memory: a refused run's is the memory of a refusal and reads as the refusal, with no change. */
+function memRow(label: string, b: TrayRunFacts, a: TrayRunFacts): Row {
+  const row = pairRow(label, b.refused ? null : b.peakRssMiB, a.refused ? null : a.peakRssMiB, 0);
+  if (b.refused) row.before = b.refused;
+  if (a.refused) row.after = a.refused;
+  return row;
 }
 
 function pairRow(label: string, b: Maybe, a: Maybe, digits: number, o: ChangeOptions = {}): Row {
@@ -158,7 +170,7 @@ export function headlineRows(before: HeadlineInput, after: HeadlineInput): Row[]
       rows.push(pairRow(`${run}: adjudicated cut-into (fraction)`, b.adjudicated, a.adjudicated, 4));
     }
     rows.push(wallRow(`${run}: Generate wall (s)`, b, a));
-    rows.push(pairRow(`${run}: peak memory (MiB)`, b.peakRssMiB, a.peakRssMiB, 0));
+    rows.push(memRow(`${run}: peak memory (MiB)`, b, a));
   }
   for (const [name, key] of [['vitest', 'vitest'], ['cargo test --lib', 'cargo'], ['Playwright e2e', 'e2e']] as const) {
     const b = before.suites[key];
