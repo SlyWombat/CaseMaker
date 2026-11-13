@@ -37,7 +37,6 @@ import { followCutSurface, followShortJoin } from '../rideTest';
 import { dropRow, type DroppedPoint } from '../rowDropper';
 import { footprintIndex, type FootprintIndex } from '../footprintIndex';
 import { cutterKeyOf } from '../sequence';
-import { FLAT_SURFACE_MAX_SLOPE_DEG } from '../settings';
 import { ballScallopStepOver } from '../../../ballScallop';
 import { isPlunge, postedZ } from '../../printedZ';
 import type { OpOutcome, PassRef, RegionAtZ, RegionRef } from '../plan';
@@ -102,11 +101,11 @@ export const DEFAULT_FINISH_SCALLOP_MM = 0.027;
 
 /**
  * #960 — the flat/ball threshold is the SHARED constant (`cam/model/settings.ts`'s
- * `FLAT_SURFACE_MAX_SLOPE_DEG`, also read by C's #959 skin pass), re-exported here so the finish's
+ * `flatSurfaceMaxSlopeDeg()`, also read by C's #959 skin pass), re-exported here so the finish's
  * callers name it from one place. Its value is a parameter at every call site; the manager ruled
  * 1.93° on 2026-11-05 (the equal-cusp derivation, not the vendor-like 7.1°).
  */
-export { FLAT_SURFACE_MAX_SLOPE_DEG };
+
 
 /** The share of a region's AREA that must lie under the threshold for the flat to take it. */
 export const FLAT_FINISH_AREA_SHARE = 0.9;
@@ -117,7 +116,6 @@ export const FLAT_FINISH_AREA_SHARE = 0.9;
  * construction at ~250 levels. Above this cap the op refuses BY NAME (the candidate leaves the
  * rank with its number, the plan continues), never an OOM. The §8.9 rule in code.
  */
-export const FINISH_MOVE_CAP = 5_000_000;
 
 /** Thrown when a finish op's moves pass the cap; the rank drops the candidate. */
 export class PlanFinishTooManyMoves extends Error {
@@ -126,7 +124,7 @@ export class PlanFinishTooManyMoves extends Error {
   readonly cap: number;
   /** True when `moves` is the pre-build estimate, not a count of moves already built. */
   readonly estimated: boolean;
-  constructor(moves: number, region: string, cap = FINISH_MOVE_CAP, estimated = false) {
+  constructor(moves: number, region: string, cap = readDefault(null, 'finish.moveCap').value, estimated = false) {
     super(
       `the finish of "${region}" ${estimated ? 'would build about' : 'passed'} ${moves.toLocaleString('en-US')} moves (the cap is ${cap.toLocaleString('en-US')} per op) — a finer scallop or a smaller region, or a larger cutter's band`,
     );
@@ -264,7 +262,7 @@ export interface FinishOpOptions {
    */
   stockRectMm?: { length: number; width: number };
   /**
-   * #1052 — the move cap for THIS op, default {@link FINISH_MOVE_CAP}. Tests inject a small one
+   * #1052 — the move cap for THIS op, default `finish.moveCap`. Tests inject a small one
    * to pin the refusal without building millions of moves; production never passes it.
    */
   moveCap?: number;
@@ -687,7 +685,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const cleared: RegionAtZ[] = [];
   let prevExit: DroppedPoint | null = null;
   let prevLevelZ: number | null = null;
-  const cap = opts.moveCap ?? FINISH_MOVE_CAP;
+  const cap = opts.moveCap ?? readDefault(null, 'finish.moveCap').value;
   // #1234 (the fix) — the grown footprint's boundary, for the overrun rule's "no point on or past
   // the edge" test. One index for the whole op, the same predicate the CL gate uses.
   const boundaryIndex = opts.stockRectMm === undefined ? null : footprintIndex(opts.region.footprint);

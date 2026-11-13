@@ -3,22 +3,14 @@
  *
  * One place for the numbers the CAM's stages read as PARAMETERS rather than constants-in-code.
  */
+import { readDefault } from '@/platform/defaultsClient';
 import type { Tool } from '@/engine/cnc/tool';
 
-/**
- * THE SLOPE ABOVE WHICH A FLAT CUTTER IS NOT WORTH USING, degrees — the shared flat/surface
- * threshold, read by the finish's flat/ball choice (`ops/finish.ts`, #960) and the skin pass's
- * flat (#959). A second copy in either module would let the two drift apart silently.
- *
- * The manager RULED 1.93° on 2026-11-05 (#960): the equal-cusp derivation on a ⌀6 ball at the
- * vendor's 0.027 mm scallop. The vendor-like 7.1° reading was not taken. Both ops read this ONE
- * number, so any further change lands here and nowhere else.
- */
-export const FLAT_SURFACE_MAX_SLOPE_DEG = 1.93;
 
 /** The ruled value, as a plain-number-returning function for callers that state no override. */
 export function flatSurfaceMaxSlopeDeg(): number {
-  return FLAT_SURFACE_MAX_SLOPE_DEG;
+  // #1207 — the ruled 1.93° is the registry's recommendation for `finish.flatSurfaceMaxSlopeDeg`.
+  return readDefault(null, 'finish.flatSurfaceMaxSlopeDeg').value;
 }
 
 /** The cutter shapes a flat/surface threshold applies to: the flat family, not balls or V bits. */

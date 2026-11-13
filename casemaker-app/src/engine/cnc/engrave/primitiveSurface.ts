@@ -25,7 +25,8 @@
  * mesh's uncovered cells are.
  */
 
-import { DEFAULT_GRID_PITCH_MM, DEFAULT_MAX_CELLS, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { readDefault } from '@/platform/defaultsClient';
+import { DEFAULT_GRID_PITCH_MM, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { EngraveConePrimitive, EngraveJob, EngravePrimitive, EngraveSpherePrimitive } from '@/types/engraveJob';
 
 /** The two shapes the flat region CAM cannot cut and the surface CAM can. */
@@ -91,7 +92,7 @@ export function primitiveHeightfield(
   const d = primitive.depth;
   const topZ = opts.stockTopZ ?? 0;
   const requested = opts.pitchMm !== null && opts.pitchMm !== undefined && opts.pitchMm > 0 ? opts.pitchMm : DEFAULT_GRID_PITCH_MM;
-  const maxCells = opts.maxCells !== null && opts.maxCells !== undefined && opts.maxCells > 0 ? opts.maxCells : DEFAULT_MAX_CELLS;
+  const maxCells = opts.maxCells !== null && opts.maxCells !== undefined && opts.maxCells > 0 ? opts.maxCells : readDefault(null, 'goal.maxCells').value;
 
   // The footprint, plus one cell of margin so the rim's zero-cells are inside the grid.
   const rim =

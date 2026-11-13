@@ -2915,7 +2915,9 @@ export function validateJob(
       continue;
     }
     const numbers = textureNumbers(item.texture, item.depth);
-    const strokes = textureStrokes(item, numbers);
+    // #1207 — the texture cap is the shop's `texture.maxStrokes`; the finding states the same number.
+    const textureCap = readDefault(options.defaults ?? null, 'texture.maxStrokes').value;
+    const strokes = textureStrokes(item, numbers, textureCap);
     if (strokes.paths.length === 0) {
       findings.push({
         severity: 'warning',
@@ -2931,9 +2933,9 @@ export function validateJob(
         code: 'texture-crowded',
         labelId: item.id,
         message:
-          `${who}’s pattern wants more than the 4000-` +
+          `${who}’s pattern wants more than the ${textureCap}-` +
           `${numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap at a ${fmt3(numbers.pitchMm)} mm ` +
-          'pitch; the program cuts the first 4000. Widen the pitch to cut the whole region.',
+          `pitch; the program cuts the first ${textureCap}. Widen the pitch to cut the whole region.`,
       });
     }
   }

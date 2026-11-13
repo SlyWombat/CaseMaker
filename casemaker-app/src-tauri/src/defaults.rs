@@ -623,7 +623,18 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("tabs.pinClearanceMm", 10.0, "mm", "chosen, not measured: how far a holding tab's span must stand from a locating bore's centre (the analyst's ruling)"),
     ("tabs.bridgeOvershootMm", 0.05, "mm", "chosen, not measured: how far a tab bridge overshoots the cutter's radius past the tab's edge, so the bridge takes the wall cleanly"),
     ("tabs.cornerDeg", 20.0, "°", "chosen, not measured: the corner angle below which an outline joint is a corner, not an arc joint — a setting is stated in the unit an operator reads; the code converts"),
-    // ── #1207 (end)
+    ("finish.moveCap", 5000000.0, "moves", "chosen, not measured: the most moves one finish pass may emit before the plan refuses it"),
+    ("finish.maxTipOps", 300000000.0, "tip ops", "chosen, not measured: the tip evaluations one finish field may spend before the plan refuses it"),
+    ("finish.maxTipRowOps", 150000000.0, "tip ops", "chosen, not measured: the tip evaluations one finish raster row may spend before the plan refuses it"),
+    ("goal.maxCells", 4000000.0, "cells", "chosen, not measured: the most cells a goal heightfield may hold"),
+    ("texture.maxStrokes", 4000.0, "strokes", "chosen, not measured: the most strokes one texture pattern emits; past it the first N are kept and the run says so"),
+    ("job.maxEmbeddedSourceBytes", 4194304.0, "bytes", "chosen, not measured: the largest source file a job may embed; the job refuses a bigger one by name"),
+    ("finish.flatSurfaceMaxSlopeDeg", 1.93, "°", "chosen, not measured: the steepest face still finished as flat (else the ball finishes it)"),
+    ("finish.pencilCreaseDeg", 20.0, "°", "chosen, not measured: the crease angle at which a corner is steep enough for a pencil pass"),
+    ("setups.minHoleSeparationMm", 10.0, "mm", "chosen, not measured: the least distance between two dowel holes the setup solver will pair as a datum"),
+    ("setups.minEdgeLengthMm", 15.0, "mm", "chosen, not measured: the shortest edge the setup solver will use as a datum"),
+    ("mold.minDraftDeg", 5.0, "°", "chosen, not measured: the least draft a mould cavity wall needs — stated as 5 degrees of draft; the wall warning reads the wall angle (90 minus this)"),
+    // ---- #1207 (end)
 ];
 
 /// Yes/no starting values, seeded `chosen`-in-spirit with a note (#414: the maintainer's "option to
@@ -1582,6 +1593,46 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tabs.cornerDeg" => Some(need(
             n.is_some_and(|v| (0.0..=90.0).contains(&v)),
             "0 to 90 degrees",
+        )),
+        "finish.moveCap" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1000.0..=100_000_000.0).contains(&v)),
+            "a whole number of moves, 1000 to 100000000",
+        )),
+        "finish.maxTipOps" | "finish.maxTipRowOps" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1_000_000.0..=2_000_000_000.0).contains(&v)),
+            "a whole number of tip ops, 1000000 to 2000000000",
+        )),
+        "goal.maxCells" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (10_000.0..=100_000_000.0).contains(&v)),
+            "a whole number of cells, 10000 to 100000000",
+        )),
+        "texture.maxStrokes" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (10.0..=100_000.0).contains(&v)),
+            "a whole number of strokes, 10 to 100000",
+        )),
+        "job.maxEmbeddedSourceBytes" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (1_048_576.0..=268_435_456.0).contains(&v)),
+            "a whole number of bytes, 1048576 to 268435456",
+        )),
+        "finish.flatSurfaceMaxSlopeDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=45.0).contains(&v)),
+            "0 to 45 degrees",
+        )),
+        "finish.pencilCreaseDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=90.0).contains(&v)),
+            "0 to 90 degrees",
+        )),
+        "setups.minHoleSeparationMm" => Some(need(
+            n.is_some_and(|v| (0.1..=100.0).contains(&v)),
+            "0.1 to 100 mm",
+        )),
+        "setups.minEdgeLengthMm" => Some(need(
+            n.is_some_and(|v| (0.1..=200.0).contains(&v)),
+            "0.1 to 200 mm",
+        )),
+        "mold.minDraftDeg" => Some(need(
+            n.is_some_and(|v| (0.0..=45.0).contains(&v)),
+            "0 to 45 degrees",
         )),
         // ── #1207 (end)
         _ => None,

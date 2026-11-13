@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type JSX, type ReactNode } from 'react';
+import { useShopDefault } from '@/store/shopDefaultsStore';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { EngraveInlayFacts } from '@/components/panels/EngraveInlayFacts';
 import { RestCutterControl, type RestChoice } from '@/components/panels/RestCutterControl';
@@ -10,7 +11,6 @@ import type { ShapePatch } from '@/store/engraveJobStore';
 import type { EngraveShape, TexturePattern } from '@/types/engraveJob';
 import type { InlayNumbers } from '@/engine/cnc/engrave/inlay';
 import {
-  DEFAULT_MAX_TEXTURE_STROKES,
   textureOperationName,
   type TextureNumbers,
 } from '@/engine/cnc/engrave/texture';
@@ -163,6 +163,8 @@ export function EngraveShapeRow({
   prism = null,
   technical = null,
 }: EngraveShapeRowProps): JSX.Element {
+  // #1207 — the texture cap is the shop's `texture.maxStrokes`.
+  const textureCap = useShopDefault('texture.maxStrokes').value;
   // #662 - the chip states what THIS cutter makes of a region.
   const region = useRegionOperationType();
   const depthInvalid = shape.depth > maxDepth;
@@ -604,7 +606,7 @@ export function EngraveShapeRow({
                   : '') +
                 `, cut ${fmt(texture.numbers.depthMm)} mm deep.` +
                 (texture.capped
-                  ? ` More than the ${DEFAULT_MAX_TEXTURE_STROKES}-${texture.numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap: the first ${DEFAULT_MAX_TEXTURE_STROKES} are cut.`
+                  ? ` More than the ${textureCap}-${texture.numbers.pattern === 'scallop' ? 'run' : 'stroke'} cap: the first ${textureCap} are cut.`
                   : '')}
           </p>
         </div>

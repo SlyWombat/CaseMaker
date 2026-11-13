@@ -43,7 +43,6 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
-import { MOLD_DRAFT_LIMIT_DEG } from './types';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -117,7 +116,7 @@ export function oppositeSurfaceSafeDepthMm(
 }
 import { rough, skin } from './ops/rough';
 import { maskCellsExact } from './finishMask';
-import { FLAT_SURFACE_MAX_SLOPE_DEG, flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
+import { flatSurfaceMaxSlopeDeg, skinStepdownFactor } from './settings';
 import { cellPolygons, rest } from './ops/rest';
 import { DEFAULT_FINISH_SCALLOP_MM, finish, finishKindFor, type FinishKind } from './ops/finish';
 import { hasValley, pencil } from './ops/pencil';
@@ -361,7 +360,7 @@ export interface ModelPlanInput {
    * with no measurement: the facing depth comes from the stated stock top and the plan says so.
    */
   stockProbes?: StockProbes;
-  /** The shared flat/ball slope parameter (#959); absent → the provisional `FLAT_SURFACE_MAX_SLOPE_DEG`. */
+  /** The shared flat/ball slope parameter (#959); absent → the provisional `flatSurfaceMaxSlopeDeg()`. */
   flatSurfaceMaxSlopeDeg?: number;
   /**
    * Length 1 for the tray/organizer today; #898/#914's flip plan (`held/914-flip-plan`: the
@@ -428,7 +427,7 @@ export interface ModelPlanInput {
    * #1005 — WHEN THIS PLAN CUTS A MOULD. The seam sets it when the goal's `goalMode` is `'mold'`:
    * its `geometry` is then the stock block minus the part turned over (`engrave/mouldSolid.ts`),
    * and the plan states the two mould findings that need the cavity's own geometry — one-sided
-   * (always, info) and no-draft (warning past {@link MOLD_DRAFT_LIMIT_DEG}). `steepestWallDeg` is
+   * (always, info) and no-draft (warning past `mold.minDraftDeg`). `steepestWallDeg` is
    * measured from the part's surface at the seam: a PLANAR wall is classified as a pocket wall and
    * appears in no `remainder[].slopeDeg`, so the tree alone could not answer the box case. Rim and
    * floor stay the goal validator's own findings (`validateGoalObject`), unchanged in code and
@@ -2674,10 +2673,11 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         'two-part mould — two setups.';
       notes.push(mouldOneSided);
       statements.push({ severity: 'info', code: 'goal-mold-one-sided', count: 1, text: mouldOneSided });
-      if (input.mould.steepestWallDeg > MOLD_DRAFT_LIMIT_DEG) {
+      const moldDraftLimitDeg = 90 - readDefault(input.defaults ?? null, 'mold.minDraftDeg').value;
+      if (input.mould.steepestWallDeg > moldDraftLimitDeg) {
         const draft =
           `The mould of "${input.mould.name}" has a wall at ${Number(input.mould.steepestWallDeg.toFixed(1))}° — steeper than ` +
-          `${MOLD_DRAFT_LIMIT_DEG}°, so it has little or no draft and may hold the casting. Give the ` +
+          `${moldDraftLimitDeg}°, so it has little or no draft and may hold the casting. Give the ` +
           'part tapered sides, or use a flexible casting material.';
         notes.push(draft);
         statements.push({ severity: 'warning', code: 'goal-mold-no-draft', count: 1, text: draft });
@@ -4994,7 +4994,7 @@ export interface PlanCurvedOptions {
   startFrom?: readonly [number, number];
   /** #959 ruling: `'on'` puts the skin back on the facing stage; absent/`'off'` gives it to `skin`. */
   facing?: 'off' | 'on';
-  /** The shared flat/ball slope parameter (#959); absent → `FLAT_SURFACE_MAX_SLOPE_DEG`'s provisional value. */
+  /** The shared flat/ball slope parameter (#959); absent → `flatSurfaceMaxSlopeDeg()`'s provisional value. */
   flatSurfaceMaxSlopeDeg?: number;
   /**
    * #1054 — one stage op per distinct (cutter, region, params), shared by the ball rank's
@@ -5804,7 +5804,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // #982 — with no ball the slope limit is lifted: the flat raster covers the WHOLE remainder.
     const finishKind: FinishKind = ball === undefined
       ? 'flat-raster'
-      : finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG);
+      : finishKindFor(roughRegion, opts.geometry.triangles, opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg());
     {
       const entry = finishKinds.get(finishKind) ?? { count: 0, minSlope: Infinity, maxSlope: -Infinity };
       entry.count++;
@@ -6401,7 +6401,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           : 'flat-following raster')
       : `ball at a constant ${scallopMm.toFixed(3)} mm scallop`;
     const plural = entry.count === 1 ? 'region' : 'regions';
-    const text = `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? FLAT_SURFACE_MAX_SLOPE_DEG).toFixed(2)}°)`;
+    const text = `finish: ${entry.count} ${plural} run as a ${words} (slopes ${entry.minSlope.toFixed(1)}–${entry.maxSlope.toFixed(1)}°, flat threshold ${(opts.flatFinishMaxSlopeDeg ?? flatSurfaceMaxSlopeDeg()).toFixed(2)}°)`;
     notes.push(text);
     // #992 — which finish mode ran, and at what scallop: a fact of the run with no action.
     statements.push({ severity: 'info', code: 'goal-finish-mode', count: entry.count, text });

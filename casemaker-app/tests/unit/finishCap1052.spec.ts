@@ -7,6 +7,7 @@
  * itself is pinned beside it. The fixture is #960's sloped plane, the smallest surface the op
  * cuts on a real raster.
  */
+import { readDefault } from '@/platform/defaultsClient';
 
 import { describe, expect, it } from 'vitest';
 
@@ -78,7 +79,7 @@ function run(moveCap: number) {
 
 describe('#1052 the finish move cap', () => {
   it('states the production cap', () => {
-    expect(finishModule.FINISH_MOVE_CAP).toBe(5_000_000);
+    expect(readDefault(null, 'finish.moveCap').value).toBe(5_000_000);
   });
 
   it('refuses a finish past the cap by name, with its number', () => {

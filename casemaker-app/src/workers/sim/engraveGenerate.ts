@@ -5090,7 +5090,6 @@ export function generateRotaryGoalProgram(
  * #1005 — the number lives in `cam/model/types.ts` now, where the model engine's own mould
  * statement reads it; re-exported here so this file's path and its callers are unchanged.
  */
-export { MOLD_DRAFT_LIMIT_DEG } from '@/engine/cnc/cam/model/types';
 
 /**
  * #869 — A GOAL'S `roughToolKey`, VALIDATED: present in the shop's library, and a flat end mill

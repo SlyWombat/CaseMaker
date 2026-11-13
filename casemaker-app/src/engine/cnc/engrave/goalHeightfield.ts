@@ -11,6 +11,7 @@
  * stated in `resolutionNote`. It is not a planning budget.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { base64ToArrayBuffer } from '@/engine/import/base64';
@@ -31,7 +32,6 @@ export const DEFAULT_GRID_PITCH_MM = 0.1;
  * refused. 4 M cells at 4 bytes is 16 MB — the same comfort the sim's ~16 M-cell bed figure is
  * sized against, held lower here because a CAM pass walks the grid many times.
  */
-export const DEFAULT_MAX_CELLS = 4_000_000;
 
 /**
  * A TOP-Z HEIGHTFIELD over an (x, y) grid in the WORK frame (z = 0 = stock top). `z[j*nx + i]` is
@@ -70,7 +70,7 @@ export interface GoalHeightfield {
 export interface SampleGoalOpts {
   /** The shop's `sim.columnFlatPitchYMm`; absent → {@link DEFAULT_GRID_PITCH_MM}. */
   pitchMm?: number | null;
-  /** The grid cap; absent → {@link DEFAULT_MAX_CELLS}. */
+  /** The grid cap; absent → {@link readDefault(null, 'goal.maxCells').value}. */
   maxCells?: number | null;
   /** Work Z of the stock top, mm; absent → 0 (the flat frame's own top). */
   stockTopZ?: number;
@@ -133,7 +133,7 @@ export function sampleGoalHeightfield(
   const mesh = targetObjectMesh(target);
   const topZ = opts.stockTopZ ?? 0;
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
-  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : DEFAULT_MAX_CELLS;
+  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : readDefault(null, 'goal.maxCells').value;
 
   // The placed mesh's XY footprint, from the LOCAL bbox's eight corners turned about its centre,
   // so the grid is sized for the object as it sits on the stock. #829 — the placement itself is
@@ -366,7 +366,7 @@ function sampleImageHeightfield(
 ): GoalHeightfield {
   const topZ = opts.stockTopZ ?? 0;
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
-  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : DEFAULT_MAX_CELLS;
+  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : readDefault(null, 'goal.maxCells').value;
   // #720 — the bytes live beside the document; without them there is no picture to sample. The
   // job's `target-mesh-missing` finding refuses the Generate before this runs.
   if (target.data === undefined) throw new Error('the image relief has no bytes loaded — import the picture again');

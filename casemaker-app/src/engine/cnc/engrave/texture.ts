@@ -44,6 +44,7 @@
  * four simple kinds are the surface a texture sits on, and `validateJob` refuses the rest by name.
  */
 
+import { readDefault } from '@/platform/defaultsClient';
 import type { EngraveShape, TextureMark, TexturePattern } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 
@@ -61,7 +62,6 @@ export const DEFAULT_TEXTURE_SEED = 1;
  * order and `texture-crowded` says so: the preview unions the swept cones per stroke, so the cap
  * is also the picture's cost bound.
  */
-export const DEFAULT_MAX_TEXTURE_STROKES = 4000;
 
 /** Segments per semicircular bump of a scallop row — 0.019·r chord error. */
 export const SCALLOP_ARC_SEGMENTS = 8;
@@ -136,7 +136,7 @@ export interface TextureStrokes {
 export function textureStrokes(
   shape: EngraveShape,
   numbers: TextureNumbers,
-  maxStrokes: number = DEFAULT_MAX_TEXTURE_STROKES,
+  maxStrokes: number = readDefault(null, 'texture.maxStrokes').value,
 ): TextureStrokes {
   if (!(numbers.depthMm > 0) || !(numbers.pitchMm > 0)) return { paths: [], capped: false };
   const inside = insideOf(shape);

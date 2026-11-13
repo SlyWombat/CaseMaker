@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react';
+import { useShopDefault } from '@/store/shopDefaultsStore';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import type { GoalSurfaceFacts } from '@/engine/cnc/engrave/runSheet';
-import { DEFAULT_PENCIL_CREASE_DEG } from '@/engine/cnc/engrave/goalSurfaceSettings';
 import { DEFAULT_RELIEF_DEPTH_MM } from '@/engine/cnc/engrave/relief';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
 import {
@@ -669,6 +669,8 @@ export function EngraveTargetObjectRow({
   onCutterChange,
   stock,
 }: EngraveTargetObjectRowProps): JSX.Element {
+  // #1207 — the pencil crease's UI fallback is the shop’s `finish.pencilCreaseDeg`.
+  const pencilCreaseDefault = useShopDefault('finish.pencilCreaseDeg').value;
   // #722 — the row states the PLACED size (the file's bbox times the scale).
   const size = placedSize(target);
   const sizeText = `${Number(size.x.toFixed(2))}×${Number(size.y.toFixed(2))}×${Number(size.z.toFixed(2))} mm`;
@@ -1099,7 +1101,7 @@ export function EngraveTargetObjectRow({
                 title="The pencil pass follows creases where the surface's slope changes by more than this across one grid cell, degrees."
                 index={index}
                 value={settings.pencilCreaseDeg}
-                fallback={DEFAULT_PENCIL_CREASE_DEG}
+                fallback={pencilCreaseDefault}
                 sourceWords="the CAM’s default"
                 min={1}
                 onChange={(v) => setSurface({ pencilCreaseDeg: v })}

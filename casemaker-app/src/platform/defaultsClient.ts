@@ -785,6 +785,18 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tabs.pinClearanceMm': { label: 'holding tab, clearance from a locating bore (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
   'tabs.bridgeOvershootMm': { label: 'holding tab bridge, overshoot past the cutter’s radius (chosen)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
   'tabs.cornerDeg': { label: 'holding tab, the corner angle a tab does not cross (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
+  // #1207 (the final ruling's caps and feature keys) — six caps and five feature thresholds.
+  'finish.moveCap': { label: 'the most moves one finish pass may emit (chosen)', unit: 'moves', rule: z.number().int().min(1000).max(100_000_000), fallback: 5_000_000 },
+  'finish.maxTipOps': { label: 'the tip evaluations one finish field may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 300_000_000 },
+  'finish.maxTipRowOps': { label: 'the tip evaluations one finish raster row may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 150_000_000 },
+  'goal.maxCells': { label: 'the most cells a goal heightfield may hold (chosen)', unit: 'cells', rule: z.number().int().min(10_000).max(100_000_000), fallback: 4_000_000 },
+  'texture.maxStrokes': { label: 'the most strokes one texture pattern emits (chosen)', unit: 'strokes', rule: z.number().int().min(10).max(100_000), fallback: 4_000 },
+  'job.maxEmbeddedSourceBytes': { label: 'the largest source a job may embed (chosen)', unit: 'bytes', rule: z.number().int().min(1_048_576).max(268_435_456), fallback: 4_194_304 },
+  'finish.flatSurfaceMaxSlopeDeg': { label: 'the steepest face still finished as flat (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 1.93 },
+  'finish.pencilCreaseDeg': { label: 'the crease angle at which a corner gets a pencil pass (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
+  'setups.minHoleSeparationMm': { label: 'the least distance between two dowel holes paired as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(100), fallback: 10 },
+  'setups.minEdgeLengthMm': { label: 'the shortest edge used as a datum (chosen)', unit: 'mm', rule: z.number().min(0.1).max(200), fallback: 15 },
+  'mold.minDraftDeg': { label: 'the least draft a mould cavity wall needs (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 5 },
   // ── #1207 (end)
 };
 

@@ -14,12 +14,6 @@
 import { isMold } from './goalHeightfield';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 
-/**
- * #671 — the crease angle the PENCIL pass follows when the operation states none, degrees. The
- * mark is a change of slope across one grid cell sharper than this: a 90° wall's foot marks a
- * line; a cylinder, a dome and a ramp do not.
- */
-export const DEFAULT_PENCIL_CREASE_DEG = 20;
 
 /**
  * #764/#888 — THE CLEAR BAND A GOAL'S PROGRAM CUTS AROUND ITS FOOTPRINT, from the goal's own
