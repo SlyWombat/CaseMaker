@@ -211,4 +211,21 @@ describe('#1249 stage 2b — the rest term is the band', () => {
     expect(e.stepEstimates[1]!.restSeconds).toBe(0);
     expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(24.9, 9);
   });
+
+  it('7: the spacing is the pocket set’s whole area, not the step’s share of it', () => {
+    // A second pocket of 100 mm² in the estimate's list, untouched by this chain: regionArea = 300,
+    // spacing = √(300/4) = 8.6603; hop = 1.6 + 8.6603/1200·60 = 2.03301 s; seconds = 12 + 3.6 +
+    // 5·2.03301 = 25.765 s. The rest step's own regionIds still name only p200.
+    const P100: PocketArea = {
+      id: 'p100', depthMm: 3, areaMm2: 100,
+      reach: [{ diameterMm: 2, reach: [], areaMm2: 40, addedAreaMm2: 40 }],
+    };
+    const e = estimateChain(
+      [POCKET, REST({ areaMm2: 6, contourLengthMm: 40, patches: 4 })],
+      [P200, P100],
+      () => 0,
+      REST_PRICING,
+    );
+    expect(e.stepEstimates[1]!.restSeconds).toBeCloseTo(25.765, 3);
+  });
 });
