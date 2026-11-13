@@ -250,9 +250,10 @@ describe('the package engine (#419 §4)', () => {
     // and programs, reads stale under this build, named by the simulator, and is not tampered.
     // #996 bumped the simulator to 6 (the straddling-cell excuse on proof); #1064 bumped it to 7
     // (the edge-break band seeds only from the edges the job names); #1092 bumped it to 8 (the
-    // excuses are proofs bounded by the goal's own relief). This pin is the bump checklist's
-    // third site.
-    expect(SIMULATOR_VERSION).toBe(8);
+    // excuses are proofs bounded by the goal's own relief); #1251 bumped it to 9 (the stamp
+    // judges a cell within one posted step of the cutter's edge by the goal). This pin is the
+    // bump checklist's third site.
+    expect(SIMULATOR_VERSION).toBe(9);
     const frozenUnderV1 = { ...pkg, hash: packageHash(pkg.jobHash, pkg.programs, 1) };
     expect(frozenUnderV1.hash).not.toBe(pkg.hash);
     expect(packageStaleness(frozenUnderV1, job)).toEqual({ stale: true, reason: 'the simulator changed since it was frozen' });
