@@ -11,7 +11,7 @@ already running (the evidence pass; R-3's data model and post) proceed in parall
 **Source rule.** Every option and default below names where it comes from: a `/Rotary.md` section, the Z1 wiki's
 4th-axis page as read in `/Rotary.md` §1.4 (the capture itself is not on this machine's checkout — #626's sweep
 found `docs/market-research/raw/` absent), the firmware's shipped config or Robot.cpp as read in `/Rotary.md`
-§1.2, Studio's `RotationReliefPath.json` (§1.3), Makera CAM's user guide (§1.3, by line), the machine profile
+§1.2, Makera CAM's user guide (§1.3, by line), the machine profile
 (`engine/cnc/machine.ts`, the `Z1.rotary` block), this machine's config read (2026-10-07, B9), or the market
 research (`/Rotary.md` §8). A value nobody has published is shown as a value with its provenance in the
 Technical fold — "Makera's shipped value", "Case Maker's default", "not published — measured at the bench" —
@@ -169,23 +169,22 @@ Unchanged. Two facts the step already reads matter more on a rotary job and are 
   machine…` (already built, `holdingMounts.ts`). Selecting it **writes the job** (`workholding: rotary-chuck`) —
   the answer #697 waits for; the "the job is held in the vise" sentence goes.
 - **The four chuck answers**, each one line, each defaulted:
-  - **Jaws** — `standard` / `reverse, inner teeth` / `reverse, outer teeth`. Default **from the diameter, by
-    Makera's own rule** (the decompiled Studio, `/Rotary.md` §9 row 7, evidence pass 08ea46ff): under ⌀20 mm
-    standard; ⌀20–35 mm reverse with the inner teeth; over ⌀35 mm reverse with the outer teeth. The wiki's
-    *"reverse jaws fitted by default for larger work"* agrees. The chuck's physical clamping limits are still
+  - **Jaws** — `standard` / `reverse, inner teeth` / `reverse, outer teeth`. Default **from the diameter, our
+    chosen setting, not measured**: under ⌀20 mm standard; ⌀20–35 mm reverse with the inner teeth; over ⌀35 mm
+    reverse with the outer teeth. The wiki says only *"reverse jaws fitted by default for larger work"*
+    (<https://wiki.makera.com/en/Z1/Accessories/4Axis>) and gives no diameters. The values' provenance note is kept on the share. The chuck's physical clamping limits are still
     the bench's (§9 row 7); until then the size gate is the ⌀80 × 150 envelope.
   - **Grip** — how much of the stock is in the jaws, mm. Default **15 mm**, a Case Maker default (§9 Q3):
     Makera publishes no jaw depth. Typed over in place; the shelf entry can carry it.
   - **Stick-out** — derived, `length − grip`, shown not asked (`Workholding.rotary-chuck.stickout`).
-  - **Tailstock** — in / out. Default **in**: Studio's rotary relief ships `haveTailTop: true` (`/Rotary.md`
-    §1.3). The line carries the wiki's instruction as an action — *"drill a centre hole in the free end first"*
+  - **Tailstock** — in / out. Default **in**: our chosen setting, not measured (the provenance note is kept on the share). The line carries the wiki's instruction as an action — *"drill a centre hole in the free end first"*
     (§1.4) — and on a Tube *"the centre seats in the bore"*.
 - **The picture** is the front view (looking along Y at the X–Z plane the cutter lives in — the most useful
   rotary view, R11a): the chuck on the left with the jaws and the grip, the stock with its stick-out, the
   tailstock on the right, X from the jaws, and the A arrow round the stock. The chuck on the left is the wiki's
   *"zero point preset … at the centre of the right edge"* read as the chuck's right face (§9 Q5).
-- **Technical fold** (provenance, one sentence each): envelope ⌀80 × 150 mm — Makera's figure; the jaws —
-  Makera's rule by diameter (Studio); tailstock in — Makera's shipped value (Studio's rotary relief); grip 15 mm and the 3 mm
+- **Technical fold** (provenance, one sentence each): envelope ⌀80 × 150 mm — Makera's figure; the jaws by
+  diameter and tailstock in — our chosen settings, not measured; grip 15 mm and the 3 mm
   keep-out from the jaws and 10 mm tailstock band — Case Maker's defaults until measured; the axis datum — as
   the change wizard left it ("shipped value ±0.5" or "measured 09:20").
 - The orientation fold of the vise ("face up · against the fixed jaw · nearest you") does not apply: a round
@@ -219,7 +218,7 @@ screws, and the 4th-axis cable is never plugged with the machine on.
   switch the machine off and on at its own switch, and answers with the machine's state when it comes back; it
   never drives a plug.
 - **The axis datum.** With no reading on this machine, the line offers the module's preset: the wiki's *"4th-axis
-  zero point is preset in the software"* (§1.4), which Studio carries as the rotary offsets
+  zero point is preset in the software"* (§1.4), which the firmware holds as the rotary offsets
   (`coordinate.rotation_offset_x/y/z`: shipped 12.0 / 85.5 / 23.0, this machine's config −7.5 / 69.0 / 17.0 —
   `docs/bench/2026-10-bench-day-1.md:845`). "Measure now" is the registration's side-and-top touch (§3.10),
   not a nose tap: a touch from above on the chuck body is the axis plus an unmeasured radius (#626).
@@ -244,13 +243,13 @@ operations matrix's where one exists (first-job §4: an item is an *operation*).
 | Group | Operation | What it does on a round stock | Class, engine | Source |
 |---|---|---|---|---|
 | On the surface | **Engrave text** | text on the map, cut at its depth below the surface; A and X interpolate on every stroke | W, column engine, flat end | `/Rotary.md` §2 (the dowel, #223's first job); R10 |
-| | **V-carve** | the same on the map with a V-bit | W; **needs the V footprint in the rotary column engine** — today it sweeps a flat end only (`columnEngine.ts` `tool-refused`) | Studio's `AVRotationVReliefPath` (binary only, `/Makera-Parity.md` §2); V-carve on the flat (#674) |
+| | **V-carve** | the same on the map with a V-bit | W; **needs the V footprint in the rotary column engine** — today it sweeps a flat end only (`columnEngine.ts` `tool-refused`) | V-carve on the flat (#674) |
 | | **Pocket** | a region on the map to a floor depth; a band *all the way round* is the same pocket with a full-circumference height (and marks a saw line) | W, column engine | `/Rotary.md` §2 class W "text and shapes" |
 | | **Flute** | a ramped line along X (a fluted column) or around | W, column engine | the flat Flute (#674); Vectric names fluting as rotary work (`/Rotary.md` §8) |
 | On a face | **Flat** | turn to an angle, hold, cut a flat to a depth (a D-flat, a key face) | I, exact sweeper (R-4) | `/Rotary.md` §2 class I; Roland's "multiple-surface cutting" (§8) |
 | | **Faces all round** | n flats evenly indexed: square, hex, octagon, by across-flats | I | `/Rotary.md` §2 ("hex sections"); `cnc-job-workflow.md` §5.4 "the rotary as the alternative" |
 | | **Cross-hole** | turn to an angle, drill across (to a depth or through) | I, exact sweeper; a through hole crosses the centre, which the exact sweeper models and the column engine refuses | `/Rotary.md` §2 ("cross-drilling patterns") |
-| 3D | **Relief from a mesh** | Z follows a mesh as A sweeps — Makera's Rotation Relief | R; the column engine simulates it while it stays above the axis and refuses the first move that crosses it (R8); **the run path refuses class R** in this design | Studio type 11 / Makera CAM Rotation Relief (`/Rotary.md` §1.3); R-5 not committed (R2) |
+| 3D | **Relief from a mesh** | Z follows a mesh as A sweeps — Makera's Rotation Relief | R; the column engine simulates it while it stays above the axis and refuses the first move that crosses it (R8); **the run path refuses class R** in this design | Makera CAM Rotation Relief (MakeraCAM user guide, <https://wiki.makera.com/en/software/MakeraCAM_userguide>); R-5 not committed (R2) |
 
 - **The face operations take the flat operations onto the face.** Once a Flat exists, `+ Add operation` on it
   offers the flat picker (Engrave text, Pocket, Hole) at that angle — an indexed job is flat work at an index
@@ -453,8 +452,8 @@ The run sheet's rotary sections (`/Rotary.md` §6.5; `runSheet.ts` has nine vise
   radius and run-out (measured, this run).
 - The **surface-speed table** for the job's radii (the floor and the surface of each item) replaces the single
   feed line; a row where the cap binds says so.
-- **Clearance** is *"half the diameter + 3 mm above the axis"* — 13 mm for ⌀20 — Makera CAM's rule (user guide
-  l. 1025), which Studio's `safeZ` 27.749 also follows (§1.3).
+- **Clearance** is *"half the diameter + 3 mm above the axis"* — 13 mm for ⌀20 — Makera CAM's rule (user guide,
+  <https://wiki.makera.com/en/software/MakeraCAM_userguide>).
 
 ## 4. Vocabulary additions (to first-job §4)
 
@@ -482,7 +481,7 @@ The run sheet's rotary sections (`/Rotary.md` §6.5; `runSheet.ts` has nine vise
 
 ## 5. Options matrix — every option a rotary job exposes
 
-*Default* is what the job gets with no answer. *From*: **M** Makera's value (where), **D** derived (from
+*Default* is what the job gets with no answer. *From*: **M** Makera's value (where), **C** our chosen setting, not measured (on the bench list), **D** derived (from
 what), **T** typed (Case Maker's default or the operator's), **R** read from the machine or the location.
 *Bench?* marks the ones #238 replaces with a measurement.
 
@@ -492,13 +491,13 @@ what), **T** typed (Case Maker's default or the operator's), **R** read from the
 | Stock | Material | the house's (PLA) | R location | — |
 | Stock | Diameter ⌀, length X | ⌀20 × 100 mm on the starter; else the shelf | T #240's recommended first stock | — |
 | Stock | Tube wall | none — typed | T | — |
-| Stock | Fits the rotary | ⌀ ≤ 80, length ≤ 150 | M `t_MachineType` (Makera library database) | yes, §9 row 7 |
+| Stock | Fits the rotary | ⌀ ≤ 80, length ≤ 150 | M Z1 4th-axis module product page, work area 8 cm diameter × 15 cm length (<https://www.makera.com/products/makera-z1-4th-axis-module>) | yes, §9 row 7 |
 | Stock | Rod in the vise vs the chuck | the vise up to 20 mm long | D `VISE_FLOOR_DEPTH` (`ROD_VISE_MAX_LENGTH_MM`) | — |
 | Holding | The mount | the one on the pins that holds this stock | R the active bed profile | — |
-| Holding | Jaws | by diameter: standard < ⌀20 · reverse inner 20–35 · reverse outer > 35 | M Makera's rule (Studio, `/Rotary.md` §9 row 7) | clamping limits, §9 row 7 |
+| Holding | Jaws | by diameter: standard < ⌀20 · reverse inner 20–35 · reverse outer > 35 | C our chosen setting, not measured (bench list) | clamping limits, §9 row 7 |
 | Holding | Grip | 15 mm | T Case Maker's default (§9 Q3); Makera publishes no jaw depth | yes |
 | Holding | Stick-out | length − grip | D | — |
-| Holding | Tailstock | in | M Studio `RotationReliefPath.json` `haveTailTop: true` (§1.3) | reach, §9 row 7 |
+| Holding | Tailstock | in | C our chosen setting, not measured (bench list) | reach, §9 row 7 |
 | Holding | Centre hole | "drill a centre hole in the free end first" | M Z1 wiki (§1.4) | — |
 | Holding | Which end is in the jaws | either | T | — |
 | Change | Axis datum | the module's preset (rotation offsets, this machine's config −7.5 / 69.0 / 17.0) or measured | M wiki preset + config read 2026-10-07 | yes, §9 rows 5–6 |
@@ -521,7 +520,7 @@ what), **T** typed (Case Maker's default or the operator's), **R** read from the
 | Cutter | A limit | 3 600 °/min = 10 rpm | R config-get sd 2026-10-07 (B9) | yes |
 | Cutter | A acceleration | 360 °/s² | R config-get sd 2026-10-07 (B9) | yes |
 | Cutter | Step-over | ≤ the cutter's radius, measured along the arc at the floor | D #191's rule in §4.2's metric | — |
-| Program | Clearance above the axis | ½ ⌀ + 3 mm | M Makera CAM user guide l. 1025; Studio `safeZ` 27.749 | — |
+| Program | Clearance above the axis | ½ ⌀ + 3 mm | M Makera CAM user guide (URL in the clearance paragraph) | — |
 | Program | Origin | on the axis (Y 0, Z 0), X 0 at the jaws, A 0° at home | M the firmware's feed arithmetic (R6); the wiki's preset | sign/position §9 rows 1, 5 |
 | Program | Steps per degree | 88.889 | M `configZ1.default` shipped | yes, §9 row 2 |
 | Program | +A direction | Makera's shipped direction (the dir pin as shipped) | M `configZ1.default` (the evidence pass, #545 order 0) | yes, §9 row 1 |
@@ -565,7 +564,7 @@ absent, as the corpus specs do):
 **What stays bench-only** (`/Rotary.md` §9, unless the evidence pass answers a row from Makera's sources): which way
 +A turns; steps per degree on the device; the real A rate and the perimeter scaling; whether `$H` homes A and
 where A 0 is after it; the axis height and the chuck face's X; the preset's precision across mountings; the jaw
-range and the tailstock reach; the round-stock `;@MKR|STOCK` / `ORIGIN` header; `G92.4 A S/R` on the device;
+range, **the jaw-by-diameter thresholds, the tailstock default** and the tailstock reach; the round-stock `;@MKR|STOCK` / `ORIGIN` header; `G92.4 A S/R` on the device;
 run-out and backlash; feeds at radius. Each appears in the app as Makera's value with its provenance until then,
 and the Run line's sentence is the only place the bench is mentioned.
 

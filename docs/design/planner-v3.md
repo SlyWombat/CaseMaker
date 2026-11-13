@@ -127,7 +127,7 @@ Sources, each marked where it appears: **public**: the firmware source (MakeraIn
 - The firmware holds the preset as `coordinate.rotation_offset_x/y/z`; our machine's config reads −7.5 / 69.0 / 17.0 (our reading, bench day 1, 2026-10, `docs/bench/2026-10-bench-day-1.md`) (`docs/design/rotary-flow.md:223`).
 - Work Z is the distance above the rotary axis; Makera's clearance rule is half the stock diameter plus 3 mm. (MakeraCAM user guide, <https://wiki.makera.com/en/software/MakeraCAM_userguide>).
 
-**The chuck.** Studio chooses the jaw setup from the stock size: under 20 mm standard jaws; 20–35 mm reverse jaws, inner teeth; over 35 mm reverse jaws, outer teeth. Its cutter recommendation reads the chuck diameter.
+**The chuck.** The jaw setup follows the stock size by our chosen setting, not measured: under 20 mm standard jaws; 20–35 mm reverse jaws, inner teeth; over 35 mm reverse jaws, outer teeth. The wiki says only that reverse jaws are fitted by default for larger work (<https://wiki.makera.com/en/Z1/Accessories/4Axis>). The cutter recommendation reads the chuck diameter.
 
 **The 3D probe.** Studio's probing wizard asks the operator for a "Probe Diameter"; the wiki (<https://wiki.makera.com/en/Makera-Accessories/Makera-3D-Probe>) says the probe is factory-calibrated and publishes no ball size. So the diameter is an operator-stated value in Makera's own software, which is what #1200's fields rule.
 

@@ -173,8 +173,8 @@ machine). For forward (standard) jaws: back the jaws all the way out, then inser
 turning the scroll (rear nut) 90° between jaws. For reverse jaws: insert No.4 to No.1. It warns that *"the
 rear nut will become very tight just before the jaws are almost completely loosened"*. That guide numbers
 **four** jaws. The Z1 page does not give the Z1 chuck's jaw count, so the Z1 chuck has four
-jaws on a self-centring scroll (maintainer, 2026-10-30; Corrections C15). The jaw-size rule (under ⌀20 standard; ⌀20–35 reverse
-inner; over ⌀35 reverse outer) comes from decompiled Makera Studio (`Rotary.md`), not from the wiki.
+jaws on a self-centring scroll (maintainer, 2026-10-30; Corrections C15). The wiki gives no jaw-size rule; the app's jaw-by-diameter default (under ⌀20 standard; ⌀20–35 reverse
+inner; over ⌀35 reverse outer) is our chosen setting, not measured, and is on the bench list.
 
 **Tailstock.** It slides on the base rail. Loosen its screws, slide it up to the work, tighten, then use
 the knob. Drill a centre hole first.
