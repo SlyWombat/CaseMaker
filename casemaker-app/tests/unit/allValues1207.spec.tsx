@@ -12,6 +12,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { fireEvent } from '@testing-library/react';
 
 import { KNOWN_DEFAULTS, KNOWN_FLAGS, MEASURED_ONLY, ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
+import { UNREAD_DEFAULT_KEYS } from '@/platform/unreadDefaults';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { AllValuesScope } from '@/components/manage/AllValuesScope';
 
@@ -52,15 +53,20 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('#1207 All values', () => {
-  it('lists every registry entry by its own key', () => {
+  it('lists every registry entry that has a reader, and none of the unread list', () => {
     render(<AllValuesScope />);
+    const unread = new Set(UNREAD_DEFAULT_KEYS);
     const keys = [
       ...Object.keys(KNOWN_DEFAULTS),
       ...Object.keys(KNOWN_FLAGS),
       ...Object.keys(MEASURED_ONLY),
-    ];
+    ].filter((key) => !unread.has(key));
     expect(screen.getByTestId('all-values-chip-all').textContent).toContain(String(keys.length));
     for (const key of keys) expect(screen.getByTestId(`all-values-row-${key}`), key).toBeTruthy();
+    // #1207 landing rule — a registered key no product code reads gets no control.
+    for (const key of UNREAD_DEFAULT_KEYS) {
+      expect(screen.queryByTestId(`all-values-row-${key}`), key).toBeNull();
+    }
   });
 
   it('lists every registry entry, with the label leading and the key following', () => {

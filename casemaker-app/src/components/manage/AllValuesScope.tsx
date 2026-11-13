@@ -32,6 +32,7 @@ import {
   type KnownDefault,
   type ShopDefaults,
 } from '@/platform/defaultsClient';
+import { UNREAD_DEFAULT_KEYS } from '@/platform/unreadDefaults';
 import { useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { NARROW_QUERY } from '@/components/welcome/wizardLayout';
@@ -187,7 +188,11 @@ interface Row {
 
 function rowsFrom(defaults: ShopDefaults | null): Row[] {
   const rows: Row[] = [];
+  // #1207 landing rule — the page is generated from the registry MINUS the keys no product code
+  // reads yet (`unreadDefaults.ts`, owned by #1256): a control that changes nothing is not drawn.
+  const unread = new Set(UNREAD_DEFAULT_KEYS);
   for (const [key, known] of Object.entries(KNOWN_DEFAULTS)) {
+    if (unread.has(key)) continue;
     const entry = defaults?.[key];
     const fromShop = entry !== undefined && entry.source !== 'seeded';
     const value = entry === undefined ? known.fallback : entry.value;
@@ -213,6 +218,7 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
   // The yes/no keys are registry entries too: the page lists them, so none is editable only
   // elsewhere (#1207 acceptance).
   for (const [key, known] of Object.entries(KNOWN_FLAGS)) {
+    if (unread.has(key)) continue;
     const entry = defaults?.[key];
     const fromShop = entry !== undefined && entry.source !== 'seeded';
     const value = entry === undefined || typeof entry.value !== 'boolean' ? known.fallback : entry.value;
@@ -234,6 +240,7 @@ function rowsFrom(defaults: ShopDefaults | null): Row[] {
     });
   }
   for (const [key, known] of Object.entries(MEASURED_ONLY)) {
+    if (unread.has(key)) continue;
     const entry = defaults?.[key];
     rows.push({
       key,
