@@ -30,6 +30,7 @@ import { ARC_CHORD_TOLERANCE_MM, SWEEP_SIMPLIFY_EPS_MM } from '@/engine/compiler
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { ORACLE_AREA_FLOOR, type OracleBbox, type OraclePolygon, type OracleSliceAt } from '@/engine/cnc/engrave/oracleTypes';
 import type { Tool } from '@/engine/cnc/tool';
+import { readDefault } from '@/platform/defaultsClient';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { goalTopAt, type ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 
@@ -715,7 +716,6 @@ export function checkVolumeAgreement(
 export const GOAL_CUT_INTO_FLOOR_MM = 0.01;
 
 /** The leftover-material reporting bands `goal_check.py` prints (0.1 / 0.3 / 1 mm), kept here so the app's sentence matches the bench tool's. */
-export const GOAL_LEFTOVER_BANDS_MM = [0.1, 0.3, 1] as const;
 
 /**
  * #948 — THE PASS LINE's LABELLED FALLBACK: the share of the goal's top surface that must stand
@@ -738,10 +738,15 @@ export interface GoalCutIntoOptions {
   leftoverTop?: ResultTop;
   /**
    * #948 — the top-surface coverage the run must reach to pass, 0–1: the share of the goal's
-   * covered cells standing within {@link GOAL_LEFTOVER_BANDS_MM}[0] of the goal. The shop's
+   * covered cells standing within the first leftover band of the goal. The shop's
    * `goal.passCoverage`; absent → {@link GOAL_PASS_COVERAGE_FALLBACK}.
    */
   passCoverage?: number;
+  /**
+   * #1207 — the three leftover bands the check reads (`acceptance.leftoverBand1Mm` … `3Mm`).
+   * Absent → the registry's recommendations (the product's own definition of done, frozen for M2).
+   */
+  leftoverBandsMm?: readonly number[];
   /**
    * #955/V2-2 — THE EDGE-BREAK ALLOWANCE, as GATE parameters (A's R3): the V bit's cutting reach
    * of a design edge and the cone's own leg, computed by the caller from the job's `edgeBreak`
@@ -840,7 +845,7 @@ export interface GoalCutIntoReport {
    * pass. #964: absent on an exact-engine sweep, which has no columns to read.
    */
   columnCutInto?: { fraction: number; maxMm: number; at: { x: number; y: number } | null };
-  /** Share of covered cells left standing more than each of {@link GOAL_LEFTOVER_BANDS_MM} above the goal, 0-1, same order. */
+  /** Share of covered cells left standing more than each leftover band above the goal, 0-1, same order. */
   leftoverFractions: number[];
   leftoverVolumeMm3: number;
   maxLeftoverMm: number;
@@ -848,7 +853,7 @@ export interface GoalCutIntoReport {
   coverageFraction: number;
   /**
    * #948 — the TOP-SURFACE coverage the pass line was judged at, 0–1: the share of covered cells
-   * standing within {@link GOAL_LEFTOVER_BANDS_MM}[0] (0.1 mm) of the goal — the demo page's
+   * standing within the first leftover band (0.1 mm by recommendation) of the goal — the demo page's
    * `coveragePct` = 100 − 100 × `leftoverFractions[0]`. NOT the same band as
    * {@link coverageFraction}. The report states the number it judged against so a reader never has
    * to know the constant; the measured value is `1 − leftoverFractions[0]`.
@@ -1170,12 +1175,22 @@ function reliefAt(goal: GoalHeightfield, x: number, y: number, radiusMm: number,
 export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | null, opts: GoalCutIntoOptions = {}): GoalCutIntoReport {
   const cutIntoFloorMm = opts.cutIntoFloorMm ?? GOAL_CUT_INTO_FLOOR_MM;
   const passCoverage = opts.passCoverage ?? GOAL_PASS_COVERAGE_FALLBACK;
+  // #1207 — the check reads the shop's bands when the caller states them, otherwise the registry
+  // recommendations (the frozen-for-M2 product definition of done).
+  const leftoverBandsMm =
+    opts.leftoverBandsMm ??
+    [
+      readDefault(null, 'acceptance.leftoverBand1Mm').value,
+      readDefault(null, 'acceptance.leftoverBand2Mm').value,
+      readDefault(null, 'acceptance.leftoverBand3Mm').value,
+    ];
   // #964 — an exact-engine sweep keeps no column grid, so the caller may bring ONLY the page's
   // stamp (`leftoverTop`). With neither read there is nothing to compare; state it, never pass.
   if (sweptTop === null && opts.leftoverTop === undefined) {
     return goalCutIntoUnchecked(
       'the goal check was given neither a swept top nor the page’s own stamp — there is nothing to compare the goal with',
       passCoverage,
+      leftoverBandsMm,
     );
   }
   const cellArea = goal.pitch * goal.pitch;
@@ -1185,7 +1200,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   const dOf = new Float64Array(cells);
   const sampled = new Uint8Array(cells);
   const deltas: number[] = [];
-  const leftoverCounts = GOAL_LEFTOVER_BANDS_MM.map(() => 0);
+  const leftoverCounts = leftoverBandsMm.map(() => 0);
   let leftoverVolumeMm3 = 0;
   let maxLeftover = 0;
   let withinBoth = 0;
@@ -1230,10 +1245,10 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       // #948/#945 — the leftover bands, the pass line and the cut-into verdict all read the page's
       // own point of the sweep (the same field, one model).
       const dLeft = (verdictTop(x, y) ?? top) - goalTop;
-      for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
-        if (dLeft > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
+      for (let b = 0; b < leftoverBandsMm.length; b++) {
+        if (dLeft > leftoverBandsMm[b]!) leftoverCounts[b]! += 1;
       }
-      if (dLeft > GOAL_LEFTOVER_BANDS_MM[0]!) {
+      if (dLeft > leftoverBandsMm[0]!) {
         leftoverVolumeMm3 += dLeft * cellArea;
         maxLeftover = Math.max(maxLeftover, dLeft);
       }
@@ -1768,7 +1783,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.${predictedNote}`
       : coverageOk
         ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal).`;
+        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${leftoverBandsMm[0]} mm above the goal).`;
 
   return {
     ok,
@@ -1822,7 +1837,15 @@ function cutIntoAreaMm2(cells: number, cellArea: number): number {
  * that could not run, and it is never reported as a pass either (the sentence says what was not
  * compared). A caller that can sample the swept top calls {@link checkGoalCutInto} instead.
  */
-export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL_PASS_COVERAGE_FALLBACK): GoalCutIntoReport {
+export function goalCutIntoUnchecked(
+  reason: string,
+  passCoverage: number = GOAL_PASS_COVERAGE_FALLBACK,
+  leftoverBandsMm: readonly number[] = [
+    readDefault(null, 'acceptance.leftoverBand1Mm').value,
+    readDefault(null, 'acceptance.leftoverBand2Mm').value,
+    readDefault(null, 'acceptance.leftoverBand3Mm').value,
+  ],
+): GoalCutIntoReport {
   return {
     ok: true,
     ran: false,
@@ -1835,7 +1858,7 @@ export function goalCutIntoUnchecked(reason: string, passCoverage: number = GOAL
     cutIntoVolumeMm3: 0,
     maxCutIntoMm: 0,
     maxCutIntoAt: null,
-    leftoverFractions: GOAL_LEFTOVER_BANDS_MM.map(() => 0),
+    leftoverFractions: leftoverBandsMm.map(() => 0),
     leftoverVolumeMm3: 0,
     maxLeftoverMm: 0,
     coverageFraction: 0,

@@ -12,7 +12,6 @@ import {
 import { aabbOfProfile } from '@/engine/compiler/profile';
 import { itemLabel, jobFence, jobMount, jobSetups, jobTool, type JobFinding } from '@/engine/cnc/engrave/jobSetup';
 // #1087 — the goal check's first leftover band: the number the no-scallop cusp line is stated against.
-import { GOAL_LEFTOVER_BANDS_MM } from '@/engine/cnc/engrave/designCheck';
 // #1193 — the run's own cycle (every posted program) rides the generated result.
 import type { RunCycle } from '@/engine/cnc/engrave/runTotals';
 import {
@@ -118,7 +117,7 @@ import { clearanceZOf, rotaryOf, type WorkOrigin } from '@/engine/cnc/machine';
 import { facingDefault, facingRefusal, finishOf } from '@/engine/cnc/stockStart';
 import { NO_FACING_TOP, NO_FACING_TOP_REASON } from '@/engine/cnc/engrave/goalTopFace';
 import type { FacingCamSummary } from '@/engine/cnc/cam/facing';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { probeResiduals } from '@/engine/cnc/probePlan';
 import type { InkMeasure } from '@/engine/cnc/engrave/inkBox';
 import type { VerifyReport } from '@/engine/cnc/verify';
@@ -3663,7 +3662,7 @@ function surfaceSteps(facts: GoalSurfaceFacts): RunSheetStep[] {
       ? ''
       : facts.finishScallopMm === undefined
         ? `, leaving a ${fmtNum(facts.finishCuspMm)} mm cusp — no scallop is stated ` +
-          `(the goal check’s first band is ${fmtNum(GOAL_LEFTOVER_BANDS_MM[0])} mm)`
+          `(the goal check’s first band is ${fmtNum(readDefault(null, 'acceptance.leftoverBand1Mm').value)} mm)`
         : facts.finishGridLimited === true
           ? ` — the finest the ${fmtNum(facts.gridPitchMm ?? 0)} mm surface grid allows — leaving a ` +
             `${fmtNum(facts.finishCuspMm)} mm cusp against the ${fmtNum(facts.finishScallopMm)} mm the job asks for`

@@ -29,13 +29,13 @@ import {
   ADJUDICATED_FLOOR_MM,
   GOAL_CUT_INTO_FLOOR_MM,
   GOAL_EDGE_STEP_MM,
-  GOAL_LEFTOVER_BANDS_MM,
   GOAL_PASS_COVERAGE_FALLBACK,
   STRADDLING_SLACK_MM,
   wallDistanceField,
   type GoalCutIntoOptions,
   type GoalCutIntoReport,
 } from '@/engine/cnc/engrave/designCheck';
+import { readDefault } from '@/platform/defaultsClient';
 
 /** The report's own words for one percentage (one decimal, as the flat sentence prints it). */
 const pct = (v: number): string => `${(v * 100).toFixed(2)} %`;
@@ -192,7 +192,13 @@ export function checkGoalCutIntoRotary(
   const colDOf = stamped === null ? null : new Float64Array(cells);
   const colSampled = stamped === null ? null : new Uint8Array(cells);
   const deltas: number[] = [];
-  const leftoverCounts = GOAL_LEFTOVER_BANDS_MM.map(() => 0);
+  // #1207 — the check reads the registry's recommendation bands (the product's own frozen rule).
+  const leftoverBandsMm = [
+    readDefault(null, 'acceptance.leftoverBand1Mm').value,
+    readDefault(null, 'acceptance.leftoverBand2Mm').value,
+    readDefault(null, 'acceptance.leftoverBand3Mm').value,
+  ];
+  const leftoverCounts = leftoverBandsMm.map(() => 0);
   let leftoverVolumeMm3 = 0;
   let maxLeftover = 0;
   let withinBoth = 0;
@@ -219,10 +225,10 @@ export function checkGoalCutIntoRotary(
       dOf[k] = d;
       sampled[k] = 1;
       deltas.push(d);
-      for (let b = 0; b < GOAL_LEFTOVER_BANDS_MM.length; b++) {
-        if (d > GOAL_LEFTOVER_BANDS_MM[b]!) leftoverCounts[b]! += 1;
+      for (let b = 0; b < leftoverBandsMm.length; b++) {
+        if (d > leftoverBandsMm[b]!) leftoverCounts[b]! += 1;
       }
-      if (d > GOAL_LEFTOVER_BANDS_MM[0]!) {
+      if (d > leftoverBandsMm[0]!) {
         leftoverVolumeMm3 += d * cellArea;
         maxLeftover = Math.max(maxLeftover, d);
       }
@@ -397,7 +403,7 @@ export function checkGoalCutIntoRotary(
   }
   const sentence =
     `goal check on the rotary map: coverage ${pct(coverage)} of the goal's surface — the pass line asks ${pct(passCoverage)} ` +
-    `(${pct(leftoverFractions[0] ?? 0)} stands more than ${GOAL_LEFTOVER_BANDS_MM[0]} mm above the goal)` +
+    `(${pct(leftoverFractions[0] ?? 0)} stands more than ${leftoverBandsMm[0]} mm above the goal)` +
     (cutCells === 0 ? '; nothing is cut into the goal' : `; ${pct(cutIntoFraction)} is cut into the goal, up to ${mm3(maxCutIntoMm)} mm`) +
     (exclusionWords.length === 0
       ? ''
