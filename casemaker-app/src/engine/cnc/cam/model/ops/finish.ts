@@ -28,6 +28,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { memTrace } from '@/engine/cnc/memTrace';
 import { estimateCycleSeconds, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
+import { readDefault } from '@/platform/defaultsClient';
 import type { RemainderRegion, FeatureSource } from '../features';
 import type { ClSurface } from '../clsurface';
 import { profileOf } from '../dropcutter';
@@ -136,9 +137,6 @@ export class PlanFinishTooManyMoves extends Error {
     this.estimated = estimated;
   }
 }
-/** A raster row steeper than this is a wall: not finishable by raster, skipped with a note. */
-const WALL_SKIP_DEG = 80;
-
 /**
  * #1080 (6b's ruling) — THE CROSS-ROW TRIANGLE SLOPE: |∂z/∂x|, the direction the raster rows
  * ADVANCE (rows run along y, `x += stepOverMm`). The cusp a row spacing creates is across the
@@ -217,6 +215,8 @@ export interface FinishOpOptions {
    */
   mesh?: FeatureSource['triangles'];
   scallopMm: number;
+  /** #1207 — `finish.wallSkipDeg`: a raster row steeper than this is a wall. Absent → the registry recommendation. */
+  wallSkipDeg?: number;
   /**
    * #982 (the review session's ruling) — NO BALL IN THE SET: the flat finishes the whole curved
    * remainder, and its step-over is the flat's own cusp rule `cusp / tan(thetaMax)` clamped to
@@ -416,6 +416,8 @@ export function ridesTheCl(from: LinkPoint, to: LinkPoint, clSurface: ClSurface,
 
 
 export function finish(opts: FinishOpOptions): OpOutcome {
+  // #1207 — the wall-skip angle is the shop's; a caller that states none reads the registry.
+  const wallSkipDeg = opts.wallSkipDeg ?? readDefault(null, 'finish.wallSkipDeg').value;
   const toolRadius = (cuttingDiameter(opts.cutter) ?? 0) / 2;
   if (!(toolRadius > 0)) {
     throw new Error(`cam/model/ops/finish: ${opts.cutter.name || opts.cutter.shape} states no cutting diameter`);
@@ -431,7 +433,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // single steepest cell, so one near-vertical facet floored the WHOLE region's spacing (⌀6 ball →
   // the radius/10 floor = 0.3 mm, against the vendor's 0.8 mm). The slope is binned along X from
   // the region's own triangles; each raster band's spacing comes from its own slope. A band
-  // steeper than `WALL_SKIP_DEG` is a wall: it is CUT at the cutter's own floor, never skipped —
+  // steeper than `finish.wallSkipDeg` is a wall: it is CUT at the cutter's own floor, never skipped —
   // skipping lost the organizer 10 points.
   const BIN_MM = 0.25;
   const binCount = Math.max(1, Math.ceil((max[0] - min[0]) / BIN_MM));
@@ -701,7 +703,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
     for (let k = 0; k < binCount; k++) {
       const binX = min[0] + (k + 0.5) * BIN_MM;
       const pitchMm = opts.kind === 'ball-scallop'
-        ? (bandSlopeAt(binX) >= WALL_SKIP_DEG ? profile.radiusMm / 10 : bandStepOverAt(binX))
+        ? (bandSlopeAt(binX) >= wallSkipDeg ? profile.radiusMm / 10 : bandStepOverAt(binX))
         : flatRowStepMm;
       estimated += (BIN_MM * avgY) / (Math.max(1e-6, pitchMm) * pointPitch);
     }
@@ -739,7 +741,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   // Each row then advances by its OWN band's scallop step, unless the row guard finds the
   // stretch not straight — then it snaps to the old grid's next row.
   for (let x = originX; x <= max[0] + 1e-9; ) {
-    const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= WALL_SKIP_DEG;
+    const wallBand = opts.kind === 'ball-scallop' && bandSlopeAt(x) >= wallSkipDeg;
     if (wallBand) wallBandsCut++;
     let stepOverMm = wallBand ? profile.radiusMm / 10 : bandStepOverAt(x);
     // A region whose OLD step is already the ball's radius/10 floor has no finer grid to offer:
@@ -1040,7 +1042,7 @@ export function finish(opts: FinishOpOptions): OpOutcome {
   const notes: string[] = [];
   if (wallBandsCut > 0) {
     notes.push(
-      `${wallBandsCut} raster row(s) over walls steeper than ${WALL_SKIP_DEG}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
+      `${wallBandsCut} raster row(s) over walls steeper than ${wallSkipDeg}° ride at or below the cutter's own ${(opts.kind === 'flat-raster' ? 'flat' : 'ball')} floor (radius/10) rather than the scallop spacing — they are cut, not skipped`,
     );
   }
   // #1033 (§6) — THE JOIN AUDIT: only where a join costs a retract (or a route) is the count worth

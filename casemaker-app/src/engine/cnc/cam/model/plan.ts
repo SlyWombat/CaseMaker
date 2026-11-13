@@ -1046,6 +1046,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   const leftoverTallMm = readDefault(defaults, 'plan.leftoverTallMm').value;
   // #1207 — the coverage rest's own shop threshold, through the plan's options.
   const coverageRestMinMm2PerS = readDefault(defaults, 'plan.coverageRestMinMm2PerS').value;
+  // #1207 — the finish's wall-skip angle, carried to the curved planner.
+  const wallSkipDeg = readDefault(defaults, 'finish.wallSkipDeg').value;
   // #1114 — THE BIT-CHANGE RULE: a change is priced from the program before it (the shop's four
   // settings; the recommendations stand in for a shop that states none).
   const bitChange: BitChangeRule = {
@@ -1679,6 +1681,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       hopZMm: HOP_Z,
       // #1214's ruling (b) — the plan's printed precision rides every stage's feed decisions.
       axisPrecision,
+      wallSkipDeg,
       memo: stageMemo,
       ...(depthBandMm === undefined ? {} : { depthBandMm }),
       geometry: curvedGeometry,
@@ -4891,6 +4894,8 @@ export interface PlanCurvedOptions {
    * words are decided on. Absent → the Z1's (this planner posts through `postZ1`).
    */
   axisPrecision?: number;
+  /** #1207 — the shop's `finish.wallSkipDeg`, carried to every finish op. */
+  wallSkipDeg?: number;
   /** #982 — extra remainder-style regions the curved pipeline also plans (the no-flat path's
    *  synthetic pocket floors). Absent → the tree's own remainder only. */
   extraRegions?: RemainderRegion[];
@@ -5723,6 +5728,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
             axisPrecision,
+            wallSkipDeg: opts.wallSkipDeg,
             toolNumber: opts.toolNumberFor(floorFace.flat),
             spindleRpm: paramsFor(floorFace.flat).rpm,
             air: opts.air,
@@ -5882,6 +5888,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         safeZMm: opts.safeZMm,
         hopZMm: opts.hopZMm,
         axisPrecision,
+        wallSkipDeg: opts.wallSkipDeg,
         toolNumber: opts.toolNumberFor(finishCutter),
         spindleRpm: paramsFor(finishCutter).rpm,
         air: opts.air,
@@ -6011,6 +6018,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
             safeZMm: opts.safeZMm,
             hopZMm: opts.hopZMm,
             axisPrecision,
+            wallSkipDeg: opts.wallSkipDeg,
             toolNumber: opts.toolNumberFor(restBallTool),
             spindleRpm: paramsFor(restBallTool).rpm,
             air: opts.air,
