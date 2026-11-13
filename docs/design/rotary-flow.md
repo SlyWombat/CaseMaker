@@ -526,7 +526,7 @@ what), **T** typed (Case Maker's default or the operator's), **R** read from the
 | Program | +A direction | Makera's shipped direction (the dir pin as shipped) | M `configZ1.default` (the evidence pass, #545 order 0) | yes, §9 row 1 |
 | Program | Unwind at the end | `G92.4 A0 S0` | M the vendor rotary files' last line (§1.1) | yes, §9 row 9 |
 | Program | Rough / finish (relief) | separate paths | M Makera CAM l. 1069 | — |
-| Program | Relief direction | Makera's `reliefdirection: 0` | M `RotationReliefPath.json` | — |
+| Program | Relief direction | the same direction as the first relief pass | C our chosen setting, not measured (bench list) | — |
 | Simulate | View | Stock (turning) | — R11 | — |
 | Simulate | Oracle tolerance | one cell each way + the facet term | D §4.5 (Δx, Δθ, r_t, Z_t) | — |
 | Cut | Touch plan | sides × 2, top × 4, end × 1 (top × 4 again with the tailstock in) | D §6.2 + Stepcraft/Tormach (§8) | — |
@@ -564,7 +564,7 @@ absent, as the corpus specs do):
 **What stays bench-only** (`/Rotary.md` §9, unless the evidence pass answers a row from Makera's sources): which way
 +A turns; steps per degree on the device; the real A rate and the perimeter scaling; whether `$H` homes A and
 where A 0 is after it; the axis height and the chuck face's X; the preset's precision across mountings; the jaw
-range, **the jaw-by-diameter thresholds, the tailstock default** and the tailstock reach; the round-stock `;@MKR|STOCK` / `ORIGIN` header; `G92.4 A S/R` on the device;
+range, **the jaw-by-diameter thresholds, the tailstock default, the relief direction** and the tailstock reach; the round-stock `;@MKR|STOCK` / `ORIGIN` header; `G92.4 A S/R` on the device;
 run-out and backlash; feeds at radius. Each appears in the app as Makera's value with its provenance until then,
 and the Run line's sentence is the only place the bench is mentioned.
 
