@@ -526,7 +526,7 @@ what), **T** typed (Case Maker's default or the operator's), **R** read from the
 | Program | +A direction | Makera's shipped direction (the dir pin as shipped) | M `configZ1.default` (the evidence pass, #545 order 0) | yes, §9 row 1 |
 | Program | Unwind at the end | `G92.4 A0 S0` | M the vendor rotary files' last line (§1.1) | yes, §9 row 9 |
 | Program | Rough / finish (relief) | separate paths | M Makera CAM l. 1069 | — |
-| Program | Relief direction | the same direction as the first relief pass | C our chosen setting, not measured (bench list) | — |
+| Program | Relief direction | direction 0 | C our chosen setting, not measured (bench list) | — |
 | Simulate | View | Stock (turning) | — R11 | — |
 | Simulate | Oracle tolerance | one cell each way + the facet term | D §4.5 (Δx, Δθ, r_t, Z_t) | — |
 | Cut | Touch plan | sides × 2, top × 4, end × 1 (top × 4 again with the tailstock in) | D §6.2 + Stepcraft/Tormach (§8) | — |
