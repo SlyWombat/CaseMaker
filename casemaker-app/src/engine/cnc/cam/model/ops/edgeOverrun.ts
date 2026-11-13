@@ -7,7 +7,7 @@
  * stock's own edge its centre has to go PAST the edge, over air. `sidesReached` says which sides
  * of the stock the region's footprint actually reaches (its own boundary lies on the edge line);
  * `overrunFootprint` grows the footprint by the cutter's radius on the sides a caller has opened,
- * and only there. The caller owns the fixture answer (`stockEdgeOpen`): a region boundary on the
+ * and only there. The caller owns the fixture answer (`ModelPlanInput.openEdges`, #1234/#1254): a region boundary on the
  * stock's edge is not by itself permission to leave it.
  */
 import type { OffsetFn } from '@/engine/cnc/cam/pocket';
