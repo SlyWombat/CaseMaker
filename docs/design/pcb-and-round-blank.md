@@ -7,8 +7,7 @@ that build it. It follows `first-job-flow.md` (principles, the four wizard steps
 the shape of `rotary-flow.md`. Where this document is silent, those hold. Status: PROPOSED. No implementation
 until the maintainer approves the decisions in §8.*
 
-**Source rule.** Every default names its source: Makera's catalogue (the synced `t_MakeraCutterProperties`
-rows, as `feeds.ts` reads them), Makera Studio as read in `docs/reverse/makera-studio/` (untracked), the Carvera
+**Source rule.** Every default names its source: Makera's catalogue (read at run time from the user's own installation, as `feeds.ts` reads it; nothing from it is committed), the Carvera
 PCB write-up j09 is taken from (raajthakur1.github.io, read 2026-10-28), the machine profile
 (`engine/cnc/machine.ts`, `Z1`), or "Case Maker's default". A default shown on screen carries that source in
 the Technical fold. §9 lists what this design could not settle, and the default it takes for each.
@@ -20,10 +19,7 @@ the Technical fold. §9 lists what this design could not settle, and the default
 | **j09 PCB** (`manifest.json` → j09, no job file) | "Cannot be described yet: there is no PCB material and no way to bring in the board's Gerber layout." No stand-in was drawn, because a hand-drawn board tests nothing. | (a) `StockMaterial` has no PCB. `CATALOGUE_MATERIALS` maps Makera's names by exact match and leaves `PCB` out on purpose (`feeds.ts`, `machine.ts` `Z1.materials`), so Makera's PCB rows are never read. (b) No importer reads RS-274X Gerber or Excellon. `engine/import/` reads SVG, DXF, raster, STL and 3MF only. (c) The job needs a V-bit for isolation, a drill and a flat for the outline, in one setup. A later cutter can only cut rest passes today (#746, open). |
 | **j04 coin** (`jobs/j04-coin-pla-proxy.json`) | A ⌀30 mm coin had to be described as a 32 × 32 × 3 mm square, with `stockEntry: null`. On that square, "CNX" comes out right. | `stock` is a rectangle or a rod (`shape?: 'cylinder'`). A **disc** writes no shape: its round fact lives only in `stockEntry.form`, which a job file may omit (j04's does). So `toPartPlan`'s `stockOutline` is always `rectProfile(length, width)`. A `border` or a `stock-inset` cut-out follows the square. The preview and the sweep start from a box, and nothing measures the rim. `item-off-round-stock` (`jobSetup.ts`) is the only round check, and it reads `stockEntry.form`. |
 
-Makera's own tools describe both jobs. Studio's file dialogs accept the Gerber set (`*.gbr *.gtl *.gbl *.drl
-*.art *.top *.bot …`, `06-toolpath-cam.md`). Its stock specs carry a `materialShape` and a `diameter`
-(`t_MaterialSpecs`, `07-library-db.md`). The catalogue has PCB rows for the engraving bits (0.1 mm × 60°:
-12 000 rpm, feed 500 mm/min, plunge 200 mm/min, step-down 0.1 mm) and for the corn bits.
+Makera's own tools describe both jobs: Studio imports Gerber files and its stock specs carry a shape and a diameter (the detail was read from the installed program and is kept on the share, not public, #1260). The catalogue has PCB rows for the engraving and corn bits; their figures are Makera's and are read at run time, never committed.
 
 ## 2. Principles (added to first-job §1 and rotary §1)
 
