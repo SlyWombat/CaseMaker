@@ -259,14 +259,6 @@ export interface SequenceOptions {
    */
   onCandidate?: (index: number, total: number) => void;
   /**
-   * #1242 (planner v3 C3) — THE SHORTLIST: a filter applied to the candidate chains BEFORE any is
-   * priced for real. The caller builds it from the cheap estimate, so only the most promising
-   * chains cost a real plan. Absent → every candidate, exactly as today. `sequence.ts` does not
-   * know where the estimate comes from (it must not import `cam/fields/`): the caller supplies
-   * the function and the estimate stays on the caller's side of the seam.
-   */
-  shortlist?: (candidates: readonly CandidateSequence[]) => readonly CandidateSequence[];
-  /**
    * #1038 — THE STOP THE CALLER ALREADY HOLDS, checked once per candidate boundary: the plan is
    * one synchronous call, and without this a stop raised mid-plan waits for the next stage line
    * (429 s on the tray). Checked before the tick, so an aborted plan emits no further report.
@@ -1154,12 +1146,7 @@ export function chooseSequence(
   cutters: CutterCandidates,
   opts: SequenceOptions,
 ): SequenceChoice {
-  const allCandidates = candidateSequences(demand, cutters, opts);
-  // #1242 — THE SHORTLIST DECIDES WHICH CHAINS GET A REAL PLAN. The caller's filter runs before
-  // any candidate is priced; everything below is unchanged and still ranks every PLANNED chain
-  // exactly as before. Absent → the whole candidate list, as today.
-  const candidates: readonly CandidateSequence[] =
-    opts.shortlist === undefined ? allCandidates : opts.shortlist(allCandidates);
+  const candidates = candidateSequences(demand, cutters, opts);
   if (candidates.length === 0) {
     // #1195 (the analyst's field) — THE REFUSAL IS NAMED AND ONLY WHEN IT MUST BE: no owned
     // cutter with a STATED flute reaches the profile, or the operator pinned a cutter that does

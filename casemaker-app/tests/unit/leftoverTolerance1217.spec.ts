@@ -152,36 +152,3 @@ describe('#1217 the setting', () => {
     expect(readDefault(null, 'plan.leftoverTallMm').value).toBe(1);
   });
 });
-
-// #1242 (C3) — THE SHORTLIST FILTER ON chooseSequence, on this fixture's three candidates:
-// `pocket:t6` (42.1 s, 1,000 cells), `pocket:t6+rest:t3` (165.5 s, 700 cells) and `pocket:t3`
-// (72.1 s, 1,000 cells). Absent → the existing tests above, unedited.
-import type { CandidateSequence } from '@/engine/cnc/cam/model/sequence';
-
-const chooseShortlisted = (shortlist?: (candidates: readonly CandidateSequence[]) => readonly CandidateSequence[]) =>
-  chooseSequence(DEMAND, { house: HOUSE, catalogue: [] }, {
-    rapid: RAPID,
-    toolChangeSeconds: 91.4,
-    planStep: (step) => ir(step.cutter.tool, WORK[`${step.kind}:${step.cutter.key}`] ?? 50),
-    coverage: (steps) => ({ leftoverCells: sig(steps).includes('rest:') ? 700 : 1000, coveredCells: 100000, cellAreaMm2: 0.01 }),
-    ...(shortlist === undefined ? {} : { shortlist }),
-  });
-
-describe('#1242 the shortlist filter', () => {
-  it('keeping every candidate leaves today’s choice untouched', () => {
-    const base = chooseShortlisted();
-    const kept = chooseShortlisted((candidates) => candidates);
-    expect(sig(kept.steps)).toBe(sig(base.steps));
-    expect(sig(kept.steps)).toBe('pocket:t6+rest:t3');
-  });
-
-  it('dropping the chosen chain picks the best of the two left, and nothing throws', () => {
-    const kept = chooseShortlisted((candidates) =>
-      candidates.filter((candidate) => sig(candidate.steps) !== 'pocket:t6+rest:t3'));
-    expect(sig(kept.steps)).toBe('pocket:t6');
-  });
-
-  it('an empty shortlist is refused by name, not crashed', () => {
-    expect(() => chooseShortlisted(() => [])).toThrow(/no cutter sequence can be planned/);
-  });
-});
