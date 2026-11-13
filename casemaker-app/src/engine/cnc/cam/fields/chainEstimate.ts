@@ -22,6 +22,12 @@ export interface PocketArea {
 /** The four numbers of a cutter's feed row the estimate uses. */
 export interface CutterRates { feed: number; plungeFeed: number; stepDown: number; stepOver: number }
 
+/** #1249 stage 2b — the two rapid rates a hop is priced at, taken from the plan's own RapidEstimate. */
+export interface RestRapidRates { xyMmPerMin: number; zMmPerMin: number }
+
+/** #1249 stage 2b — what a banded rest step's hops are priced at: the plan's rapid rates and hop height. */
+export interface RestPricing { rapid: RestRapidRates; hopClearanceMm: number }
+
 export interface EstimateStep {
   kind: string;
   cutterKey: string;
@@ -31,6 +37,9 @@ export interface EstimateStep {
   rates: CutterRates | null;
   /** For a 'contour' step: the outline's length and the depth it is cut to. Absent: the step is unpriced. */
   contour?: { perimeterMm: number; depthMm: number };
+  /** #1249 stage 2b — the band the previous cutter left this step, summed over its regions (reachBand).
+   *  Absent, or an outline of 0: the step keeps the area term. */
+  band?: { areaMm2: number; contourLengthMm: number; patches: number };
 }
 
 export interface ChainEstimate {
@@ -69,13 +78,18 @@ export interface StepEstimate {
   plungeFeed: number;
   stepOver: number;
   stepDown: number;
+  /** What the estimate priced this step at: the band term when one was used, else the area term. */
   cutSeconds: number;
+  /** #1249 stage 2b — the band term's own seconds; 0 when the step took the area term (or is no rest). */
+  restSeconds: number;
 }
 
 export function estimateChain(
   steps: readonly EstimateStep[],
   pockets: readonly PocketArea[],
   changePrice: (precedingSeconds: number) => number,
+  /** #1249 stage 2b — the plan's rapid rates and hop height. Absent: every step keeps the area term. */
+  restPricing?: RestPricing,
 ): ChainEstimate {
   const cleared = new Map<string, number>();
   const pocketById = new Map<string, PocketArea>();
@@ -91,6 +105,13 @@ export function estimateChain(
 
   const perCutter: { cutterKey: string; cutSeconds: number }[] = [];
   const stepEstimates: StepEstimate[] = [];
+  // #1249 stage 2b — the area a rest step's patches are spread over: the POCKET the job works,
+  // not the step's own share of it. A rest step's regions can be slivers of a few mm² scattered
+  // across the whole pocket (the tray's Haocher step: 3 small pockets totalling 27 mm²), and the
+  // average patch spacing is only meaningful against the pocket they sit in. The analyst's own
+  // 2,822-row check used this area; the step's own share lands at 0 % within ×1.5.
+  let pocketAreaMm2 = 0;
+  for (const pocket of pockets) pocketAreaMm2 += pocket.areaMm2;
   let cutSeconds = 0;
   let changeSeconds = 0;
   let changes = 0;
@@ -147,6 +168,37 @@ export function estimateChain(
         cleared.set(id, Math.max(before, reach));
       }
     }
+    // #1249 stage 2b — a rest step WITH a band is priced by the line it follows, not the area it
+    // could reach: cut along max(outline, area/step-over) (a thin band is followed, a fat one is
+    // cleared like a pocket), one plunge per patch per level, and a hop per patch and one for the
+    // way in and out, each hop the plan's Z rapid twice plus the average patch spacing at its XY
+    // rapid. A step with no band (outline 0) or no rates keeps the area term above.
+    let restSeconds = 0;
+    if (
+      restPricing !== undefined &&
+      step.kind === 'rest' &&
+      areaPriceable &&
+      rates !== null &&
+      step.band !== undefined &&
+      step.band.contourLengthMm > 0 &&
+      step.band.patches > 0 &&
+      rates.plungeFeed > 0 &&
+      restPricing.rapid.zMmPerMin > 0 &&
+      restPricing.rapid.xyMmPerMin > 0 &&
+      Number.isFinite(restPricing.hopClearanceMm) &&
+      restPricing.hopClearanceMm >= 0
+    ) {
+      const patches = step.band.patches;
+      const path = Math.max(step.band.contourLengthMm, step.band.areaMm2 / rates.stepOver);
+      const cut = (stepLevels * path / rates.feed) * 60;
+      const plunges = (patches * stepLevels * rates.stepDown / rates.plungeFeed) * 60;
+      const spacing = Math.sqrt(pocketAreaMm2 / Math.max(patches, 1));
+      const hop =
+        (2 * (stepDepth + restPricing.hopClearanceMm) / restPricing.rapid.zMmPerMin) * 60 +
+        (spacing / restPricing.rapid.xyMmPerMin) * 60;
+      restSeconds = cut + plunges + (patches + 1) * hop;
+      stepSeconds = restSeconds;
+    }
     // A step it cannot price still costs its bit change (the change is between cutters, not cuts).
     if (previousKey !== null && previousKey !== step.cutterKey) {
       changeSeconds += changePrice(runSeconds);
@@ -171,6 +223,7 @@ export function estimateChain(
       stepOver: rates?.stepOver ?? 0,
       stepDown: rates?.stepDown ?? 0,
       cutSeconds: stepSeconds,
+      restSeconds,
     });
     // Every step lands on its cutter's row — an unpriced one adds 0, so the cutter still appears.
     let entry = perCutter.find((e) => e.cutterKey === step.cutterKey);

@@ -118,11 +118,12 @@ function writeCutterCsv(path: string, rows: readonly TraceRow[]): void {
 
 if (cutterCsv !== undefined) writeCutterCsv(cutterCsv, rows);
 
-/** #1249 stage 2a — one line per `shadow:step` row: the estimate's inputs and the band it left. */
+/** #1249 stage 2a — one line per `shadow:step` row: the estimate's inputs and the band it left.
+ *  Stage 2b adds `restSeconds`, the band term where one was used. */
 const STEP_COLUMNS = [
   'signature', 'stepIndex', 'kind', 'cutterKey', 'prevCutterKey', 'diameterMm', 'prevDiameterMm',
   'addedAreaMm2', 'depthMm', 'levels', 'feed', 'plungeFeed', 'stepOverMm', 'stepDownMm', 'cutSeconds',
-  'bandAreaMm2', 'bandContourLengthMm', 'bandPatches',
+  'restSeconds', 'bandAreaMm2', 'bandContourLengthMm', 'bandPatches',
 ] as const;
 
 function writeStepsCsv(path: string, rows: readonly TraceRow[]): void {

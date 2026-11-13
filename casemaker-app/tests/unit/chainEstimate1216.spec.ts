@@ -138,3 +138,94 @@ describe('#1225 the contour and per-cutter seconds', () => {
     expect(e.perCutter[1]).toEqual({ cutterKey: 'b6', cutSeconds: 0 });
   });
 });
+
+// #1249 stage 2b — the rest step is priced by the band it follows, not the area it could reach.
+// The analyst's three hand-worked cases (#1249 comment, "Tests", 1–3) with zRapid 600 and
+// xyRapid 1,200 mm/min, hopClearance 5 mm, stepDown 1, plungeFeed 200, feed 600, stepOver 0.5,
+// levels 3, depth 3, regionArea 200.
+describe('#1249 stage 2b — the rest term is the band', () => {
+  const BAND_RATES: CutterRates = { feed: 600, plungeFeed: 200, stepDown: 1, stepOver: 0.5 };
+  const P200: PocketArea = {
+    id: 'p200', depthMm: 3, areaMm2: 200,
+    reach: [
+      { diameterMm: 6, reach: [], areaMm2: 80, addedAreaMm2: 80 },
+      { diameterMm: 2, reach: [], areaMm2: 120, addedAreaMm2: 40 },
+    ],
+  };
+  const POCKET: EstimateStep = { kind: 'pocket', cutterKey: 't6', diameterMm: 6, regionIds: ['p200'], rates: BAND_RATES };
+  const REST = (band?: { areaMm2: number; contourLengthMm: number; patches: number }): EstimateStep => ({
+    kind: 'rest', cutterKey: 't2', diameterMm: 2, regionIds: ['p200'], rates: BAND_RATES,
+    ...(band === undefined ? {} : { band }),
+  });
+  const REST_PRICING = { rapid: { xyMmPerMin: 1200, zMmPerMin: 600 }, hopClearanceMm: 5 };
+  const banded = (band?: { areaMm2: number; contourLengthMm: number; patches: number }) =>
+    estimateChain([POCKET, REST(band)], [P200], () => 0, REST_PRICING);
+
+  it('1: a thin band is followed along its line', () => {
+    // path = max(40, 6/0.5) = 40; cut = 3·40/600·60 = 12 s; plunges = 4·3·1/200·60 = 3.6 s;
+    // spacing = √(200/4) = 7.0711; hop = 2·8/600·60 + 7.0711/1200·60 = 1.6 + 0.353553 = 1.953553 s;
+    // seconds = 12 + 3.6 + 5·1.953553 = 25.368 s.
+    const e = banded({ areaMm2: 6, contourLengthMm: 40, patches: 4 });
+    expect(e.stepEstimates[1]!.restSeconds).toBeCloseTo(25.368, 3);
+    expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(25.368, 3);
+    expect(e.stepEstimates[0]!.restSeconds).toBe(0);
+  });
+
+  it('2: a fat band is cleared like a pocket', () => {
+    // path = max(10, 100/0.5) = 200; cut = 3·200/600·60 = 60 s; plunges 3.6 s; hop as case 1;
+    // seconds = 60 + 3.6 + 5·1.953553 = 73.368 s.
+    const e = banded({ areaMm2: 100, contourLengthMm: 10, patches: 4 });
+    expect(e.stepEstimates[1]!.restSeconds).toBeCloseTo(73.368, 3);
+    expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(73.368, 3);
+  });
+
+  it('3: one patch', () => {
+    // cut 12 s; plunges = 1·3·1/200·60 = 0.9 s; spacing = √200 = 14.1421;
+    // hop = 1.6 + 14.1421/1200·60 = 2.30711 s; seconds = 12 + 0.9 + 2·2.30711 = 17.514 s.
+    const e = banded({ areaMm2: 6, contourLengthMm: 40, patches: 1 });
+    expect(e.stepEstimates[1]!.restSeconds).toBeCloseTo(17.514, 3);
+    expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(17.514, 3);
+  });
+
+  it('4: no band keeps today’s term', () => {
+    // added 40 mm², levels 3: per level = 40/0.5/600·60 + 1/200·60 = 8 + 0.3 s; 3 levels = 24.9 s.
+    const e = banded(undefined);
+    expect(e.stepEstimates[1]!.restSeconds).toBe(0);
+    expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(24.9, 9);
+  });
+
+  it('5: pocket and contour steps are untouched', () => {
+    // The pocket is today's area term: 80/0.5/600·60 + 0.3 = 16.3 s per level, 3 levels = 48.9 s.
+    expect(banded(undefined).stepEstimates[0]!.cutSeconds).toBeCloseTo(48.9, 9);
+    const contour: EstimateStep = {
+      kind: 'contour', cutterKey: 't6', diameterMm: 6, regionIds: ['contour'], rates: R6,
+      contour: { perimeterMm: 200, depthMm: 6 },
+    };
+    const e = estimateChain([contour], [P200], () => 0, REST_PRICING);
+    expect(e.cutSeconds).toBeCloseTo(41.2, 5); // the same number as K
+    expect(e.stepEstimates[0]!.restSeconds).toBe(0);
+  });
+
+  it('6: no rapid rates given — the rest step keeps today’s term and nothing throws', () => {
+    const e = estimateChain([POCKET, REST({ areaMm2: 6, contourLengthMm: 40, patches: 4 })], [P200], () => 0);
+    expect(e.stepEstimates[1]!.restSeconds).toBe(0);
+    expect(e.stepEstimates[1]!.cutSeconds).toBeCloseTo(24.9, 9);
+  });
+
+  it('7: the spacing is the pocket set’s whole area, not the step’s share of it', () => {
+    // A second pocket of 100 mm² in the estimate's list, untouched by this chain: regionArea = 300,
+    // spacing = √(300/4) = 8.6603; hop = 1.6 + 8.6603/1200·60 = 2.03301 s; seconds = 12 + 3.6 +
+    // 5·2.03301 = 25.765 s. The rest step's own regionIds still name only p200.
+    const P100: PocketArea = {
+      id: 'p100', depthMm: 3, areaMm2: 100,
+      reach: [{ diameterMm: 2, reach: [], areaMm2: 40, addedAreaMm2: 40 }],
+    };
+    const e = estimateChain(
+      [POCKET, REST({ areaMm2: 6, contourLengthMm: 40, patches: 4 })],
+      [P200, P100],
+      () => 0,
+      REST_PRICING,
+    );
+    expect(e.stepEstimates[1]!.restSeconds).toBeCloseTo(25.765, 3);
+  });
+});

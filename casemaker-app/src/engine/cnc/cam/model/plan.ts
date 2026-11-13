@@ -4326,6 +4326,12 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         regions: shadowRegions,
         offset: opts.offset,
         ...(opts.boolean === undefined ? {} : { subtract: opts.boolean.subtract }),
+        // #1249 stage 2b — the plan's own rapid rates and the height a rest program's RETRACTS
+        // stand at: SAFE_Z (5 above the stock), not the intra-path HOP_Z (1). The posted rest
+        // programs retract to Z5 between patches — tray p3 makes four Z5 moves for P = 3 patches,
+        // the formula's (P+1) — while Z1 only appears inside a patch. The trace-only rest term.
+        rapid: opts.rapid,
+        hopClearanceMm: SAFE_Z,
         contourPerimeterMm: polygonsPerimeter(tree.contour.outline),
         paramsFor: opts.paramsFor,
         changePrice: (precedingSeconds) => bitChangePriceSeconds(shadowRule, precedingSeconds),
