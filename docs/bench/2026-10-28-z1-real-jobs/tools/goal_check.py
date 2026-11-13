@@ -87,6 +87,14 @@ CUT_INTO = 0.01
 # `distance < radius - EDGE_EPS`. `distance <= radius` charged cells centred exactly on the disc
 # edge — zero-measure contact — which is what the 134 contour-tangent tray cells were.
 EDGE_EPS = 1e-6
+# #1251 — THE EDGE BAND, the app's rule (`sweptPoint.ts`'s `edgeBandMm`): a cell within ONE
+# POSTED STEP of the cutter's edge, either side, is an EDGE CELL, lowered only when that does not
+# take it below the goal. The app passes `10 ** -machine.dialect.axisPrecision` — 0.001 on the Z1,
+# which posts at three decimals — so the page must use the same number or the two rulers stop
+# agreeing cell for cell (`goal-check-parity.py`'s own contract). `GOAL_AGREE_EPS` is the app's
+# float slack when comparing the cut with the goal.
+EDGE_BAND = 0.001
+GOAL_AGREE_EPS = 1e-6
 # #996/#1092 — the gate's constants, the app's own (`designCheck.ts`): a cut shallower than the
 # 0.1 mm floor is never judged; a straddling proof keeps 0.005 mm of slack at the design's low
 # side; a > 0.2 mm step between goal cells is a wall (both sides).
@@ -150,7 +158,7 @@ def put(Hf, Wf, CLXf, CLYf, idx, z, tn, cx, cy):
     CLYf[sidx] = cy[sel]
 
 
-def stamp(H, x0, y0, p, nc, who=None, clx=None, cly=None, tn=1, t=None):
+def stamp(H, x0, y0, p, nc, who=None, clx=None, cly=None, tn=1, t=None, goal=None):
     """Stamp one posted program. The cutter is the NC's own `;@MKR|TOOL` header when it has one
     (our posts write it, as Makera's do), so a multi-program run is scored with each program's
     own Tool record — the app's model. `tn` is the number the `who` map records. Returns the
@@ -160,7 +168,12 @@ def stamp(H, x0, y0, p, nc, who=None, clx=None, cly=None, tn=1, t=None):
     Rr, prof, shape = t['R'], t['prof'], t['shape']
     name = t.get('name') or ''
     ny, nx = H.shape
-    n = int(math.ceil(Rr / p)) + 1
+    # #1251 — the disc reaches one posted step past its edge; the cells within that band are edge
+    # cells and are judged by the GOAL grid (H is the swept field, which starts at the stock top).
+    band = EDGE_BAND if goal is not None else 0.0
+    reach = Rr + band
+    Gf = goal.ravel() if goal is not None else None
+    n = int(math.ceil(reach / p)) + 1
     oi, oj = np.meshgrid(np.arange(-n, n + 1), np.arange(-n, n + 1), indexing='xy')
     oi = oi.ravel(); oj = oj.ravel()
     step = p * 0.5
@@ -178,8 +191,14 @@ def stamp(H, x0, y0, p, nc, who=None, clx=None, cly=None, tn=1, t=None):
             cj = np.rint((q[:, 1] - y0) / p).astype(np.int64)[:, None] + oj[None, :]
             ok = (ci >= 0) & (ci < nx) & (cj >= 0) & (cj < ny)
             r = np.hypot(x0 + ci * p - q[:, 0:1], y0 + cj * p - q[:, 1:2])
-            ok &= r < max(Rr - EDGE_EPS, 0.0)
-            z = q[:, 2:3] + prof(r)
+            ok &= r < reach
+            # #1251 — at or beyond the edge the profile is the EDGE's own height (a ball's R).
+            z = q[:, 2:3] + prof(np.minimum(r, Rr))
+            if band > 0:
+                edge = r >= max(Rr - band, 0.0)
+                # The bounds are already in `ok`; the clip only keeps the gather in range.
+                cell_goal = Gf[np.clip(cj, 0, ny - 1) * nx + np.clip(ci, 0, nx - 1)]
+                ok &= ~(edge & (z < cell_goal - GOAL_AGREE_EPS))
             idx = (cj * nx + ci)[ok]; zz = z[ok]
             touches += int(idx.size)
             if who is None:
@@ -297,14 +316,17 @@ def mkr_time(path):
     return None
 
 
-def stamp_mkr(H, who, clx, cly, x0, y0, p, nc, tools, dz, known=None):
+def stamp_mkr(H, who, clx, cly, x0, y0, p, nc, tools, dz, known=None, goal=None):
     """Stamp a Makera Studio program tool by tool; `who` records the tool that cut each cell deepest."""
     ny, nx = H.shape; Hf = H.ravel(); Wf = who.ravel(); Xf = clx.ravel(); Yf = cly.ravel()
+    # #1251 — the edge rule, the same as `stamp`'s: judged against the goal grid, never the field.
+    band = EDGE_BAND if goal is not None else 0.0
+    Gf = goal.ravel() if goal is not None else None
     cache = {}
     touches = 0
     def kernel(t):
         if t['number'] not in cache:
-            n = int(math.ceil(t['R'] / p)) + 1
+            n = int(math.ceil((t['R'] + band) / p)) + 1
             oi, oj = np.meshgrid(np.arange(-n, n + 1), np.arange(-n, n + 1), indexing='xy')
             cache[t['number']] = (oi.ravel(), oj.ravel())
         return cache[t['number']]
@@ -321,8 +343,12 @@ def stamp_mkr(H, who, clx, cly, x0, y0, p, nc, tools, dz, known=None):
             cj = np.rint((s[:, 1] - y0) / p).astype(np.int64)[:, None] + oj[None, :]
             ok = (ci >= 0) & (ci < nx) & (cj >= 0) & (cj < ny)
             r = np.hypot(x0 + ci * p - s[:, 0:1], y0 + cj * p - s[:, 1:2])
-            ok &= r < max(t['R'] - EDGE_EPS, 0.0)
-            zz = s[:, 2:3] + t['prof'](r)
+            ok &= r < t['R'] + band
+            zz = s[:, 2:3] + t['prof'](np.minimum(r, t['R']))
+            if band > 0:
+                edge = r >= max(t['R'] - band, 0.0)
+                cell_goal = Gf[np.clip(cj, 0, ny - 1) * nx + np.clip(ci, 0, nx - 1)]
+                ok &= ~(edge & (zz < cell_goal - GOAL_AGREE_EPS))
             idx = (cj * nx + ci)[ok]; z = zz[ok]
             touches += int(idx.size)
             cx = np.broadcast_to(s[:, 0:1], zz.shape)[ok]
@@ -883,7 +909,7 @@ def run_check(gp, T, out, ncs, *, job=None, mkr=False, dz=0.0, only=None, write=
             tools = allt if only is None else {k: v for k, v in allt.items() if k in only}
             F = np.zeros((ny, nx)); W = np.zeros((ny, nx), np.uint8)
             X = np.zeros((ny, nx)); Y = np.zeros((ny, nx))
-            rep, touched = stamp_mkr(F, W, X, Y, x0, y0, p, nc, tools, dz, set(allt))
+            rep, touched = stamp_mkr(F, W, X, Y, x0, y0, p, nc, tools, dz, set(allt), goal=G)
             tools_used.extend(tools.values())
         else:
             allt = mkr_tools(nc)
@@ -900,7 +926,7 @@ def run_check(gp, T, out, ncs, *, job=None, mkr=False, dz=0.0, only=None, write=
             tools_used.append(t)
             F = np.zeros((ny, nx)); W = np.zeros((ny, nx), np.uint8)
             X = np.zeros((ny, nx)); Y = np.zeros((ny, nx))
-            rep, touched = stamp(F, x0, y0, p, nc, W, X, Y, tn=tn, t=t)
+            rep, touched = stamp(F, x0, y0, p, nc, W, X, Y, tn=tn, t=t, goal=G)
         if touched:
             # the app's fold: the first program's field whole, then a strict '<' per cell
             upd = (F < H) if progs else np.ones((ny, nx), bool)
