@@ -10,7 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '../../src/engine/cnc/cam/engraveJob';
 import { planCurvedForTree } from '../../src/engine/cnc/cam/model/plan';
-import { overrunFootprint, sidesReached, type StockSide } from '../../src/engine/cnc/cam/model/ops/edgeOverrun';
+import { overrunFootprint, sidesReached } from '../../src/engine/cnc/cam/model/ops/edgeOverrun';
+import type { OpenEdgeFacts } from '../../src/engine/cnc/cam/model/openEdges';
 import { layOutsideOnPostedGrid } from '../../src/engine/cnc/cam/model/ops/finish';
 import { footprintIndex } from '../../src/engine/cnc/cam/model/footprintIndex';
 import { dropCutterHeight, profileOf } from '../../src/engine/cnc/cam/model/dropcutter';
@@ -161,7 +162,25 @@ function edgeGeometry() {
   };
 }
 
-function plan(open: ((side: StockSide, lowestTipZ: number, radiusMm: number) => boolean) | undefined, ball: Tool = BALL) {
+/**
+ * #1254 — THE FACTS THAT CLOSE THREE SIDES AND LEAVE THE FRONT OPEN, replacing #1234's callback.
+ * A box stands at the left, the right and the back, each 10 mm above the stock top — above
+ * `lowestTipZ − radius − clearance` at every tip height this spec cuts at — and nothing stands at
+ * the front's strip (y −1…0), so `evaluateOpenEdge` answers exactly what `side === 'front'` did.
+ */
+const CLOSED_EXCEPT_FRONT: OpenEdgeFacts = {
+  boxes: [
+    { minX: 49.5, maxX: 51, minY: 0.5, maxY: 39.5, topZ: 10 }, // right arm
+    { minX: -1, maxX: 0.5, minY: 0.5, maxY: 39.5, topZ: 10 }, // left arm
+    { minX: -1, maxX: 51, minY: 39.5, maxY: 41, topZ: 10 }, // back arm
+  ],
+  uncertaintyMm: 0,
+  clearanceMm: 0,
+  stockLengthMm: 50,
+  stockWidthMm: 40,
+};
+
+function plan(open: OpenEdgeFacts | undefined, ball: Tool = BALL) {
   const geometry = edgeGeometry();
   return planCurvedForTree(edgeTree(), {
     geometry,
@@ -179,13 +198,13 @@ function plan(open: ((side: StockSide, lowestTipZ: number, radiusMm: number) => 
     edgeBreak: { legMm: 0 },
     toolNumberFor: (t) => t.number ?? 1,
     stockMm: { length: 50, width: 40 },
-    ...(open === undefined ? {} : { stockEdgeOpen: open }),
+    ...(open === undefined ? {} : { openEdges: open }),
   });
 }
 
 describe('#1234 the finish op runs past the stock edge and states it', () => {
   it('rows reach y = -1 on an open side, and no feed cuts below the unclipped CL', () => {
-    const result = plan((side) => side === 'front');
+    const result = plan(CLOSED_EXCEPT_FRONT);
     const finishOp = result.ops.find((o) => o.kind === 'finish');
     expect(finishOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
     const moves = finishOp!.outcome.ir.operations.flatMap((o) => o.moves);
@@ -205,7 +224,7 @@ describe('#1234 the finish op runs past the stock edge and states it', () => {
     expect(finishOp!.outcome.edgeOverrun).toEqual({ sides: ['front'], amountMm: 1 });
   });
 
-  it('absent stockEdgeOpen: the rows stop at y = 0 and no fact is stated', () => {
+  it('absent openEdges: the rows stop at y = 0 and no fact is stated', () => {
     const result = plan(undefined);
     const finishOp = result.ops.find((o) => o.kind === 'finish');
     expect(finishOp).toBeDefined();
@@ -227,7 +246,7 @@ const onGrid = (v: number): boolean => Math.abs(v / STEP - Math.round(v / STEP))
 describe('#1234 the fix — overrun points lie on the posted grid at the posted XY', () => {
   it('every overrun point is on the grid and at/above the CL at its own posted XY', () => {
     const geometry = edgeGeometry();
-    const result = plan((side) => side === 'front', BALL3175);
+    const result = plan(CLOSED_EXCEPT_FRONT, BALL3175);
     const finishOp = result.ops.find((o) => o.kind === 'finish');
     expect(finishOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}; notes: ${result.notes.join('; ')}`).toBeDefined();
     const profile = profileOf(BALL3175)!;
@@ -246,7 +265,7 @@ describe('#1234 the fix — overrun points lie on the posted grid at the posted 
 
   it('the posted text, parsed back: no posted point below the CL at its posted XY', () => {
     const geometry = edgeGeometry();
-    const result = plan((side) => side === 'front', BALL3175);
+    const result = plan(CLOSED_EXCEPT_FRONT, BALL3175);
     const finishOp = result.ops.find((o) => o.kind === 'finish')!;
     const posted = postZ1(
       finishOp.outcome.ir,
@@ -324,7 +343,7 @@ describe('#1234 the fix — overrun points lie on the posted grid at the posted 
 describe('#1234 the fix — the overrun chords hold the CL on the posted lattice', () => {
   it('no chord between two overrun feed points dips below the CL by more than the allowance', () => {
     const geometry = edgeGeometry();
-    const result = plan((side) => side === 'front', BALL3175);
+    const result = plan(CLOSED_EXCEPT_FRONT, BALL3175);
     const finishOp = result.ops.find((o) => o.kind === 'finish');
     expect(finishOp, `ops: ${result.ops.map((o) => o.kind).join(', ')}`).toBeDefined();
     const profile = profileOf(BALL3175)!;
