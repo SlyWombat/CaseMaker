@@ -8,11 +8,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { tl } from './helpers/manifoldExec';
-import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
+import { makeClipperOffset, makeClipperSubtract } from '@/engine/cnc/cam/engraveJob';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
-import { flatReach, polygonsArea, polygonsPerimeter } from '@/engine/cnc/cam/fields/flatReach';
+import { flatReach, polygonsArea, polygonsPerimeter, reachBand } from '@/engine/cnc/cam/fields/flatReach';
 
 const offset = makeClipperOffset(tl);
+const subtract = makeClipperSubtract(tl);
 
 const RECT: Polygons = [
   [
@@ -97,5 +98,30 @@ describe('#1225 polygonsPerimeter', () => {
     expect(polygonsPerimeter(RECT)).toBe(60);
     expect(polygonsPerimeter(DUMBBELL)).toBe(88);
     expect(polygonsPerimeter([])).toBe(0);
+  });
+});
+
+// #1249 stage 2a — the band one cutter leaves the next. The figures are the analyst's, worked BY
+// HAND on a 20 × 10 rectangle; this reports what the geometry gives, it does not fit to them.
+describe('#1249 reachBand — the band between two cutters', () => {
+  it('⌀6 then ⌀2: four corner patches, hand figures 6.867 mm² / 41.13 mm', () => {
+    const band = reachBand(RECT, 6, 2, offset, subtract);
+    expect(band.patches).toBe(4);
+    expect(band.areaMm2).toBeGreaterThan(6.867 * 0.98);
+    expect(band.areaMm2).toBeLessThan(6.867 * 1.02);
+    expect(band.contourLengthMm).toBeGreaterThan(41.13 * 0.98);
+    expect(band.contourLengthMm).toBeLessThan(41.13 * 1.02);
+  });
+
+  it('a smaller-then-larger pair and equal diameters have no band', () => {
+    expect(reachBand(RECT, 2, 6, offset, subtract)).toEqual({ areaMm2: 0, contourLengthMm: 0, patches: 0 });
+    expect(reachBand(RECT, 3, 3, offset, subtract)).toEqual({ areaMm2: 0, contourLengthMm: 0, patches: 0 });
+  });
+
+  it('⌀12 cannot fit the 10 mm width: the band is all ⌀6 reaches — hand figures 1 patch / 192.27 mm²', () => {
+    const band = reachBand(RECT, 12, 6, offset, subtract);
+    expect(band.patches).toBe(1);
+    expect(band.areaMm2).toBeGreaterThan(192.27 * 0.98);
+    expect(band.areaMm2).toBeLessThan(192.27 * 1.02);
   });
 });
