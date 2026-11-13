@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#1258 — the tab question, mock-up</title>
+<style>
+  :root {
+    --surface: #0b1326;
+    --surface-low: #131b2e;
+    --surface-container: #17203a;
+    --surface-high: #1d2743;
+    --on-surface: #dae2fd;
+    --on-variant: #a9b4d0;
+    --muted: #7f8aa8;
+    --outline: #2a3448;
+    --primary: #4d8eff;
+    --on-primary: #00214d;
+    --secondary: #4ade80;
+    --tertiary: #f5a524;
+    --error: #f87171;
+    --display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+    --body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #060a14; font-family: var(--body); color: var(--on-surface); }
+  .screen { width: 1440px; height: 900px; background: var(--surface); position: relative; overflow: hidden; }
+  .screen--phone { width: 390px; height: 844px; }
+  /* app chrome */
+  .top { height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--outline); background: var(--surface-low); }
+  .brand { font-family: var(--display); font-weight: 700; letter-spacing: .02em; font-size: 15px; }
+  .brand b { color: var(--primary); }
+  .tabs { margin-left: auto; display: flex; gap: 4px; }
+  .tab { padding: 6px 12px; border-radius: 6px; font-size: 12px; color: var(--on-variant); }
+  .tab--on { background: var(--surface-container); color: var(--on-surface); font-weight: 600; }
+  .body { display: flex; height: calc(100% - 52px); }
+  .left { width: 360px; border-right: 1px solid var(--outline); background: var(--surface-low); padding: 14px; }
+  .left h3 { margin: 0 0 4px; font-family: var(--display); font-size: 16px; }
+  .job { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+  .rowline { display: flex; justify-content: space-between; font-size: 11px; color: var(--on-variant); padding: 7px 0; border-bottom: 1px solid var(--outline); }
+  .rowline b { color: var(--on-surface); font-weight: 500; }
+  .genbtn { margin-top: 18px; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--outline); background: var(--surface-container); color: var(--muted); font: 600 13px var(--body); }
+  .canvas { flex: 1; position: relative; background:
+      radial-gradient(900px 500px at 60% 40%, #101a30 0%, var(--surface) 70%); }
+  .ghostpart { position: absolute; inset: 90px 120px auto 120px; height: 420px; opacity: .25; border: 1px dashed var(--outline); border-radius: 18px; }
+  /* the question card */
+  .qcard { position: absolute; left: 50%; top: 54px; transform: translateX(-50%); width: 820px; border-radius: 14px; overflow: hidden;
+    background: var(--surface-low); border: 1px solid #3a5680; box-shadow: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(77,142,255,.15); }
+  .qhead { background: var(--primary); color: #f4f8ff; padding: 18px 22px 16px; }
+  .eyebrow { font: 700 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; opacity: .85; display: flex; align-items: center; gap: 8px; }
+  .eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffd166; box-shadow: 0 0 0 4px rgba(255,209,102,.25); }
+  .qhead h1 { margin: 8px 0 0; font: 600 22px/1.3 var(--display); text-wrap: balance; max-width: 720px; }
+  .qbody { display: grid; grid-template-columns: 470px 1fr; gap: 16px; padding: 16px 18px 10px; }
+  .diagram { background: #0d1526; border: 1px solid var(--outline); border-radius: 10px; padding: 10px; }
+  .diagram figcaption { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 10.5px; color: var(--on-variant); }
+  .key { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 6px; border-radius: 3px; display: inline-block; }
+  .opts { display: flex; flex-direction: column; gap: 8px; }
+  .opt { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--outline);
+    background: var(--surface-container); cursor: pointer; }
+  .opt--on { border-color: var(--primary); background: #14213a; box-shadow: 0 0 0 2px rgba(77,142,255,.25); }
+  .radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); margin-top: 2px; }
+  .opt--on .radio { border-color: var(--primary); background: radial-gradient(circle at center, var(--primary) 0 5px, transparent 5px); }
+  .opt h4 { margin: 0 0 3px; font: 600 13.5px var(--body); }
+  .opt p { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--on-variant); }
+  .opt .num { font-family: var(--mono); color: var(--on-surface); }
+  .opt .warn { color: var(--tertiary); font-family: var(--mono); }
+  .qfoot { display: flex; align-items: center; gap: 12px; padding: 12px 18px 16px; }
+  .paused { font-size: 12px; color: var(--tertiary); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .paused::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--tertiary); }
+  .spacer { flex: 1; }
+  .btn { padding: 9px 16px; border-radius: 8px; font: 600 12.5px var(--body); border: 1px solid var(--outline); background: transparent; color: var(--on-variant); }
+  .btn--primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .btn--primary[disabled] { opacity: .45; }
+  /* answered state */
+  .answered { position: absolute; left: 50%; top: 54px; transform: translateX(-50%); width: 820px; border-radius: 12px; border: 1px solid #2f5a44;
+    background: #0f2019; display: flex; align-items: center; gap: 12px; padding: 13px 16px; }
+  .check { width: 26px; height: 26px; border-radius: 50%; background: #16351f; border: 1px solid #2f7a4a; display: grid; place-items: center; color: var(--secondary); font-size: 14px; }
+  .answered b { font-size: 13px; }
+  .answered p { margin: 3px 0 0; font-size: 11.5px; color: var(--on-variant); }
+  /* phone */
+  .screen--phone .top { height: 46px; padding: 0 12px; }
+  .screen--phone .tabs { display: none; }
+  .phonebody { padding: 12px; }
+  .qphone { border-radius: 14px; overflow: hidden; border: 1px solid #3a5680; background: var(--surface-low); }
+  .qphone .qhead { padding: 14px 14px 12px; }
+  .qphone .qhead h1 { font-size: 18px; }
+  .qphone .qbody { grid-template-columns: 1fr; padding: 12px; gap: 10px; }
+  .qphone .diagram { padding: 6px; }
+  .qphone .opts { gap: 7px; }
+  .qphone .opt { padding: 10px; }
+  .qphone .qfoot { flex-direction: column; align-items: stretch; gap: 9px; padding: 10px 12px 14px; }
+  .qphone .qfoot .btn--primary { width: 100%; padding: 12px; font-size: 14px; }
+  .qphone .paused { justify-content: center; }
+</style>
+</head>
+<body>
+
+<!-- DESKTOP — the question -->
+<div class="screen" id="desktop-question">
+  <div class="top">
+    <div class="brand">Case <b>Maker</b></div>
+    <div class="tabs"><span class="tab">Home</span><span class="tab tab--on">Cut</span><span class="tab">Parts</span><span class="tab">Docs</span></div>
+  </div>
+  <div class="body">
+    <div class="left">
+      <h3>petit-pot-lid</h3>
+      <div class="job">wood · 3.175 mm flat · 6.0 mm stock</div>
+      <div class="rowline"><span>Cutters</span><b>3.175 mm flat</b></div>
+      <div class="rowline"><span>Holding</span><b>4 tabs · 4 mm wide</b></div>
+      <div class="rowline"><span>Tab rules</span><b>80 mm span · 15 mm corner</b></div>
+      <div class="rowline"><span>Programs</span><b>— held</b></div>
+      <button class="genbtn">Generate — paused</button>
+    </div>
+    <div class="canvas">
+      <div class="ghostpart"></div>
+      <div class="qcard">
+        <div class="qhead">
+          <div class="eyebrow"><span class="dot"></span> Action needed</div>
+          <h1>This part can't be held within both of the shop's tab rules. Choose one.</h1>
+        </div>
+        <div class="qbody">
+          <figure class="diagram" style="margin:0">
+            <svg width="448" height="272" viewBox="0 0 448 272" role="img" aria-label="The part outline with the unsupported stretch, the placed tabs, and the candidate tab near the corner">
+              <defs>
+                <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                  <line x1="0" y1="0" x2="0" y2="6" stroke="#f5a524" stroke-width="2" opacity=".5"/>
+                </pattern>
+              </defs>
+              <!-- part -->
+              <rect x="58" y="42" width="332" height="188" rx="22" fill="#101a2e" stroke="#6b7ba3" stroke-width="1.6"/>
+              <!-- dimension: stretch -->
+              <line x1="286" y1="230" x2="378" y2="230" stroke="#f5a524" stroke-width="5" opacity=".9"/>
+              <line x1="286" y1="223" x2="286" y2="237" stroke="#f5a524" stroke-width="1.4"/>
+              <line x1="378" y1="223" x2="378" y2="237" stroke="#f5a524" stroke-width="1.4"/>
+              <text x="332" y="248" fill="#f5a524" font-family="JetBrains Mono, monospace" font-size="11" text-anchor="middle">92 mm unsupported</text>
+              <!-- corner margin zone -->
+              <path d="M 390 168 A 70 70 0 0 0 320 230 L 390 230 Z" fill="url(#hatch)" opacity=".55"/>
+              <text x="352" y="205" fill="#f5a524" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">15 mm</text>
+              <text x="352" y="217" fill="#f5a524" font-family="JetBrains Mono, monospace" font-size="10" text-anchor="middle">margin</text>
+              <!-- placed tabs (green) -->
+              <rect x="128" y="36" width="26" height="12" rx="3" fill="#4ade80" opacity=".9"/>
+              <rect x="290" y="36" width="26" height="12" rx="3" fill="#4ade80" opacity=".9"/>
+              <rect x="52" y="120" width="12" height="26" rx="3" fill="#4ade80" opacity=".9"/>
+              <rect x="384" y="94" width="12" height="26" rx="3" fill="#4ade80" opacity=".9"/>
+              <!-- candidate tab (blue, dashed) near the corner -->
+              <rect x="356" y="222" width="26" height="12" rx="3" fill="#4d8eff" opacity=".28" stroke="#4d8eff" stroke-width="1.6" stroke-dasharray="4 3"/>
+              <line x1="369" y1="234" x2="390" y2="234" stroke="#4d8eff" stroke-width="1.2" stroke-dasharray="3 3"/>
+              <text x="399" y="238" fill="#8ec2ff" font-family="JetBrains Mono, monospace" font-size="10">8 mm</text>
+              <!-- corner dot -->
+              <circle cx="390" cy="230" r="3.4" fill="#8ec2ff"/>
+              <text x="399" y="252" fill="#8ec2ff" font-family="JetBrains Mono, monospace" font-size="10">corner</text>
+              <text x="120" y="30" fill="#7f8aa8" font-family="JetBrains Mono, monospace" font-size="10">placed tabs</text>
+            </svg>
+            <figcaption>
+              <span class="key"><span class="sw" style="background:#4ade80"></span> placed tabs</span>
+              <span class="key"><span class="sw" style="background:#f5a524"></span> unsupported stretch</span>
+              <span class="key"><span class="sw" style="background:#4d8eff;opacity:.6;border:1px dashed #4d8eff"></span> the tab option 1 would add</span>
+            </figcaption>
+          </figure>
+          <div class="opts">
+            <div class="opt opt--on">
+              <div class="radio"></div>
+              <div>
+                <h4>Put a tab closer to the corner</h4>
+                <p><span class="num">8 mm</span> from the corner — the shop's margin is <span class="num">15 mm</span>.<br>The stretch falls to <span class="num">76 mm</span>.</p>
+              </div>
+            </div>
+            <div class="opt">
+              <div class="radio"></div>
+              <div>
+                <h4>Leave a longer unsupported stretch</h4>
+                <p><span class="num">92 mm</span> with no tab — the shop's limit is <span class="warn">80 mm</span>.<br>The part may flex or lift along it.</p>
+              </div>
+            </div>
+            <div class="opt">
+              <div class="radio"></div>
+              <div>
+                <h4>Change the tabs myself</h4>
+                <p>Opens the tab settings (count and width) with this stretch marked.<br>Generate waits for you.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="qfoot">
+          <span class="paused">Generate is paused until you choose.</span>
+          <span class="spacer"></span>
+          <button class="btn">Cancel</button>
+          <button class="btn btn--primary">Use this choice</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DESKTOP — answered, changeable from the same place -->
+<div class="screen" id="desktop-answered">
+  <div class="top">
+    <div class="brand">Case <b>Maker</b></div>
+    <div class="tabs"><span class="tab">Home</span><span class="tab tab--on">Cut</span><span class="tab">Parts</span><span class="tab">Docs</span></div>
+  </div>
+  <div class="body">
+    <div class="left">
+      <h3>petit-pot-lid</h3>
+      <div class="job">wood · 3.175 mm flat · 6.0 mm stock</div>
+      <div class="rowline"><span>Cutters</span><b>3.175 mm flat</b></div>
+      <div class="rowline"><span>Holding</span><b>4 tabs · 4 mm wide</b></div>
+      <div class="rowline"><span>Tab rules</span><b>80 mm span · 15 mm corner</b></div>
+      <div class="rowline"><span>Programs</span><b>5</b></div>
+      <button class="genbtn" style="background:#4d8eff;color:#00214d;border-color:#4d8eff">Generate</button>
+    </div>
+    <div class="canvas">
+      <div class="ghostpart"></div>
+      <div class="answered">
+        <div class="check">✓</div>
+        <div>
+          <b>Holding: a tab 8 mm from the corner.</b>
+          <p>You chose it, closer than the shop's 15 mm margin. The stretch is 76 mm; the run sheet states this.</p>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn">Change…</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PHONE — the question -->
+<div class="screen screen--phone" id="phone-question">
+  <div class="top"><div class="brand">Case <b>Maker</b></div><div class="tabs"><span class="tab tab--on">Cut</span></div></div>
+  <div class="phonebody">
+    <div class="qphone">
+      <div class="qhead">
+        <div class="eyebrow"><span class="dot"></span> Action needed</div>
+        <h1>This part can't be held within both of the shop's tab rules. Choose one.</h1>
+      </div>
+      <div class="qbody">
+        <figure class="diagram" style="margin:0">
+          <svg width="318" height="196" viewBox="0 0 448 272" role="img" aria-label="The part outline with the stretch, the placed tabs and the candidate tab">
+            <rect x="58" y="42" width="332" height="188" rx="22" fill="#101a2e" stroke="#6b7ba3" stroke-width="2"/>
+            <line x1="286" y1="230" x2="378" y2="230" stroke="#f5a524" stroke-width="7"/>
+            <line x1="286" y1="222" x2="286" y2="238" stroke="#f5a524" stroke-width="2"/>
+            <line x1="378" y1="222" x2="378" y2="238" stroke="#f5a524" stroke-width="2"/>
+            <text x="332" y="252" fill="#f5a524" font-family="JetBrains Mono, monospace" font-size="14" text-anchor="middle">92 mm unsupported</text>
+            <path d="M 390 168 A 70 70 0 0 0 320 230 L 390 230 Z" fill="url(#hatch)" opacity=".55"/>
+            <rect x="128" y="34" width="30" height="14" rx="3" fill="#4ade80"/>
+            <rect x="286" y="34" width="30" height="14" rx="3" fill="#4ade80"/>
+            <rect x="50" y="118" width="14" height="30" rx="3" fill="#4ade80"/>
+            <rect x="384" y="92" width="14" height="30" rx="3" fill="#4ade80"/>
+            <rect x="352" y="220" width="30" height="14" rx="3" fill="#4d8eff" opacity=".28" stroke="#4d8eff" stroke-width="2.2" stroke-dasharray="5 4"/>
+            <circle cx="390" cy="230" r="4" fill="#8ec2ff"/>
+          </svg>
+          <figcaption>
+            <span class="key"><span class="sw" style="background:#4ade80"></span> placed tabs</span>
+            <span class="key"><span class="sw" style="background:#f5a524"></span> unsupported</span>
+            <span class="key"><span class="sw" style="background:#4d8eff;opacity:.6;border:1px dashed #4d8eff"></span> option 1's tab</span>
+          </figcaption>
+        </figure>
+        <div class="opts">
+          <div class="opt opt--on">
+            <div class="radio"></div>
+            <div><h4>Put a tab closer to the corner</h4><p><span class="num">8 mm</span> from the corner · margin <span class="num">15 mm</span>. The stretch falls to <span class="num">76 mm</span>.</p></div>
+          </div>
+          <div class="opt">
+            <div class="radio"></div>
+            <div><h4>Leave a longer unsupported stretch</h4><p><span class="num">92 mm</span> with no tab · limit <span class="warn">80 mm</span>. The part may flex there.</p></div>
+          </div>
+          <div class="opt">
+            <div class="radio"></div>
+            <div><h4>Change the tabs myself</h4><p>Opens the tab settings with this stretch marked.</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="qfoot">
+        <span class="paused">Generate is paused until you choose.</span>
+        <button class="btn btn--primary">Use this choice</button>
+        <button class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- the hatch pattern must be defined once for both diagrams -->
+<svg width="0" height="0" style="position:absolute"><defs>
+  <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#f5a524" stroke-width="2" opacity=".5"/>
+  </pattern>
+</defs></svg>
+</body>
+</html>
