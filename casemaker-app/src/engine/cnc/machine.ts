@@ -1644,7 +1644,8 @@ export interface ClampResult {
  * overage is a table written for a faster machine (Makera's 15 000 RPM rows on a 13 000 RPM
  * spindle are +15 %); a large one means the wrong tool, the wrong material, or garbage.
  *
- * The refusal band's constant (#448). The shop key `clamp.refuseFraction` was WITHDRAWN from #1207's landing (no reader consumed it); follow-up #1256 wires it.
+ * THE LABELLED FALLBACK for the shop's `clamp.refuseFraction` (#448). The key is registered; no product
+ * code reads it yet, so it is on the #1207 landing's unread list — follow-up #1256 wires it.
  * `location.json` and is read through `readDefault`; this is the number used with no house
  * service, and the value `clampToMachine` falls back to when a caller passes none.
  */
@@ -1665,7 +1666,7 @@ export type SizedMachine = Pick<MillProfile, 'name' | 'envelope'>;
  * toolpath. Clamps a modest overage and says so; refuses a gross one; passes `null` through
  * untouched (an unset value is the caller's problem, not a limit violation).
  *
- * `refuseFraction` is the refusal band above the ceiling where a
+ * `refuseFraction` is the shop's `clamp.refuseFraction` — the band above the ceiling where a
  * value is refused rather than clamped. It is threaded in so {@link feedsFor} and
  * {@link catalogueRefusal} (and any other caller) all use the one number; the default is the
  * labelled fallback above.

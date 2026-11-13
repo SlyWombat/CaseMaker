@@ -330,6 +330,12 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "mm",
         "chosen, not measured: the margin the sign preset's proposed plate leaves on every side of its line",
     ),
+    (
+        "tape.stripWidthMm",
+        20.0,
+        "mm",
+        "chosen, not measured: the width of one strip — the house roll is Makera's 20 mm double-sided tape",
+    ),
     // #1102 — the most clamps a bracket job states.
     (
         "clamps.maxCount",
@@ -435,8 +441,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // bounds and fallback. It trades cap height against the clearance the dome and the print want.
     ("engrave.blankBandFill", 0.7, "x", "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"),
     // ── #451 blank band fill (end)
-    // #1207 review — the import.trace* seeds were withdrawn with their registry keys (no consumer
-    // read them); the dialog's rewiring is follow-up #1256.
+    // ── #451 raster trace defaults (begin) — the traced-bitmap dialog's starting numbers (#252):
+    // chosen, not measured. `invert` stays a per-picture toggle, not a shop number. `defaultsClient.ts`
+    // states the same bounds and fallbacks.
+    ("import.traceThreshold", 128.0, "level", "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"),
+    ("import.traceDespecklePx", 8.0, "px", "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"),
+    ("import.traceSimplifyPx", 1.0, "px", "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"),
+    // ── #451 raster trace defaults (end)
     // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
     // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in
     // the probed top's spread plus the margin, or one of these two fallbacks without a probe.
@@ -587,6 +598,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // #1105 — the stock step pre-selects a shelf blank within this of the proposal (both the
     // thickness and the length × width, either orientation).
     ("stock.shelfMatchMm", 1.0, "mm", "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"),
+    ("clamp.refuseFraction", 0.5, "x", "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"),
     // ── #448 (end)
     // ── #1207 (begin) — the checklist's accepted rows, registered together (the analyst's ruling
     // of 2026-11-13). Every seed is exactly the literal the code carried before its key existed,
@@ -991,6 +1003,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (0.0..=10.0).contains(&v)),
             "0 to 10 mm",
         )),
+        "clamp.refuseFraction" => Some(need(
+            n.is_some_and(|v| (0.01..=5.0).contains(&v)),
+            "0.01 to 5, a multiple above the ceiling",
+        )),
         // #1146 — the cleaning pass's two shop defaults (`defaultsClient.ts` states the same).
         "clean.clearanceMm" => Some(need(
             n.is_some_and(|v| (0.5..=50.0).contains(&v)),
@@ -1201,6 +1217,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "stock.signMarginMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
         "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
+        "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
         "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),
         "tools.wearWeight.plastic"
         | "tools.wearWeight.wood"
@@ -1356,6 +1373,21 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "0.05 to 1, the share of the free band the line takes",
         )),
         // ── #451 engrave findings (end)
+        // ── #451 raster trace defaults — `defaultsClient.ts` states the same bounds. threshold is a
+        // luminance, 0 to 255, held to whole numbers; despeckle is a pixel count; simplify is a pixel
+        // tolerance with quarter-pixel steps (any number in the range is accepted).
+        "import.traceThreshold" => Some(need(
+            n.is_some_and(|v| (0.0..=255.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of luminance levels, 0 to 255",
+        )),
+        "import.traceDespecklePx" => Some(need(
+            n.is_some_and(|v| (0.0..=1024.0).contains(&v) && v.fract() == 0.0),
+            "a whole number of pixels, 0 to 1024",
+        )),
+        "import.traceSimplifyPx" => Some(need(
+            n.is_some_and(|v| (0.0..=64.0).contains(&v)),
+            "0 to 64 pixels",
+        )),
         // ── #432 facing — `defaultsClient.ts` states the same bounds. Above 0: a facing depth of
         // zero is the job saying it does not face, not a shop seed for how far a skim goes.
         "facing.roughMm" | "facing.unknownMm" => Some(need(
