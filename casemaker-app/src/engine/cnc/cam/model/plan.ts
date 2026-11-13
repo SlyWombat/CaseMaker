@@ -53,6 +53,7 @@ import { batchSameCutterRuns, chooseSequence, cutterKeyOf, isAbortError, type Cu
 import { documentXY, mapIRToDocument, registerSetupOrigin, rotatedGeometryFor, shiftToStockTop, type SetupRegistration } from './setups';
 import { fullyReachable, pocket } from './ops/pocket';
 import { overrunFootprint, sidesReached, type StockSide } from './ops/edgeOverrun';
+import { evaluateOpenEdge, type OpenEdgeFacts } from './openEdges';
 import { assertOwnPocketMetadata, PlanMetadataInconsistentError } from './planMeta';
 import { roughLeftAbove } from './ops/rough';
 import { clSurface, creaseFits , type ClGridEntry } from './clsurface';
@@ -380,12 +381,14 @@ export interface ModelPlanInput {
    */
   fixture: { mount: Mount; envelope: FixtureEnvelope | null };
   /**
-   * #1234 — WHICH STOCK SIDES A FINISH MAY OVERRUN FROM, as data: the plan never sees the mount
-   * (`RegionRef.obstacles` is not wired), so the job layer that holds the obstacle boxes answers
-   * here. A side is open only when nothing solid stands in the band its radius would leave through.
-   * ABSENT → every side is closed and every plan is byte-identical to the pre-#1234 behaviour.
+   * #1234/#1254 — WHICH STOCK SIDES A FINISH MAY OVERRUN FROM, as PLAIN DATA: the plan never sees
+   * the mount (`RegionRef.obstacles` is not wired), so the job layer that holds the obstacle
+   * boxes answers with the raw facts (box extents/tops, fit, clearance, the blank's dims) and the
+   * planner evaluates the rule itself. #1254 — the input is structured-cloned into rank-pool
+   * workers, so it may carry no function: this replaced #1234's `stockEdgeOpen` callback.
+   * ABSENT → every side is closed, byte-identical to the pre-#1234 behaviour.
    */
-  stockEdgeOpen?: (side: StockSide, lowestTipZ: number, radiusMm: number) => boolean;
+  openEdges?: OpenEdgeFacts;
   cutters: CutterCandidates;
   tolerances: ModelTolerances;
   edgeBreak: EdgeBreakSpec;
@@ -1696,7 +1699,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       offset,
       // #1234 — the finishing edge overrun's inputs: the job layer's fixture answer, the setup's
       // own stock box, and the real boolean the grown footprint is built with.
-      ...(input.stockEdgeOpen === undefined ? {} : { stockEdgeOpen: input.stockEdgeOpen }),
+      ...(input.openEdges === undefined ? {} : { openEdges: input.openEdges }),
       stockMm: { length: setupStockOf(input, spec).length, width: setupStockOf(input, spec).width },
       boolean,
       safeZMm: SAFE_Z,
@@ -4890,11 +4893,11 @@ export interface PlanCurvedOptions {
   geometry: FeatureSource;
   /**
    * #1234 — THE STOCK, for the finishing edge overrun: `sidesReached` measures the region's own
-   * boundary against these two numbers. Absent (with `stockEdgeOpen` absent) → no overrun anywhere.
+   * boundary against these two numbers. Absent (with `openEdges` absent) → no overrun anywhere.
    */
   stockMm?: { length: number; width: number };
-  /** #1234 — the job layer's own answer, carried through from `ModelPlanInput.stockEdgeOpen`. */
-  stockEdgeOpen?: (side: StockSide, lowestTipZ: number, radiusMm: number) => boolean;
+  /** #1234/#1254 — the raw facts, carried through from `ModelPlanInput.openEdges`. */
+  openEdges?: OpenEdgeFacts;
   /** #1234 — the real Clipper2 boolean the overrun's union/subtract needs (the pocket op's contract). */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /**
@@ -5311,11 +5314,11 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       return Math.abs(total);
     };
     const overrunFor = (footprint: Polygons, radiusMm: number): { footprint: Polygons; sides: StockSide[] } => {
-      if (opts.stockEdgeOpen === undefined || opts.stockMm === undefined || opts.boolean === undefined || !(radiusMm > 0)) {
+      if (opts.openEdges === undefined || opts.stockMm === undefined || opts.boolean === undefined || !(radiusMm > 0)) {
         return { footprint, sides: [] };
       }
       const sides = sidesReached(footprint, opts.stockMm, GOAL_FIT_TOLERANCE_MM).filter((side) =>
-        opts.stockEdgeOpen!(side, base.zBottom, radiusMm),
+        evaluateOpenEdge(opts.openEdges!, side, base.zBottom, radiusMm),
       );
       if (sides.length === 0) return { footprint, sides: [] };
       return { footprint: overrunFootprint(footprint, opts.stockMm, radiusMm, sides, opts.offset, opts.boolean), sides };
