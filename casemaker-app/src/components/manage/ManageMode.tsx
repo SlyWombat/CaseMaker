@@ -18,6 +18,7 @@
 
 import { useManageModeStore } from '@/store/manageModeStore';
 import { AccessoriesScope } from './AccessoriesScope';
+import { AllValuesScope } from './AllValuesScope';
 import { ManageRail } from './ManageRail';
 import { MachinesScope } from './MachinesScope';
 import { MaterialsScope } from './MaterialsScope';
@@ -34,6 +35,8 @@ export function ManageMode() {
         <MaterialsScope />
       ) : scope === 'accessories' ? (
         <AccessoriesScope />
+      ) : scope === 'advanced' ? (
+        <AllValuesScope />
       ) : (
         <ToolsScope />
       )}

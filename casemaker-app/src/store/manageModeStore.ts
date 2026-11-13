@@ -17,7 +17,7 @@
 import { create } from 'zustand';
 
 /** The scopes the rail offers. `materials` is the stock shelf (#413); `accessories` is #601. */
-export type ManageScope = 'tools' | 'accessories' | 'materials' | 'machines';
+export type ManageScope = 'tools' | 'accessories' | 'materials' | 'machines' | 'advanced';
 
 /** The filter chips. `all` is the one that shows the list as the tier grouping draws it. */
 export type TierFilter = 'all' | 'owned' | 'yours' | 'catalogue' | 'builtin';
