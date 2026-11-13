@@ -169,7 +169,7 @@ const ALLOWED: Readonly<Record<string, AllowEntry>> = {
   'src/engine/cnc/vCarveGeometry.ts:V_CARVE_STEPOVER_FALLBACK': { reason: "labelled fallback for `vcarve.stepoverRatio`; the gate asserts it equals that key’s recommendation", fallbackOf: 'vcarve.stepoverRatio' },
   'src/engine/cnc/engrave/designCheck.ts:LEFTOVER_BAND_1_FALLBACK_MM': { reason: "labelled fallback for `acceptance.leftoverBand1Mm`; the gate asserts it equals that key’s recommendation", fallbackOf: 'acceptance.leftoverBand1Mm' },
   'src/engine/cnc/engrave/designCheck.ts:LEFTOVER_BAND_2_FALLBACK_MM': { reason: "labelled fallback for `acceptance.leftoverBand2Mm`; the gate asserts it equals that key’s recommendation", fallbackOf: 'acceptance.leftoverBand2Mm' },
-  'src/engine/cnc/goalLimits.ts:GOAL_MAX_CELLS_FALLBACK': { reason: "labelled fallback for `goal.maxCells`; the gate asserts it equals that key’s recommendation", fallbackOf: 'goal.maxCells' },
+  'src/engine/cnc/goalLimits.ts:GOAL_MAX_CELLS': { reason: "an internal compute cap; `goal.maxCells` was withdrawn from #1207's landing — follow-up #1256 wires it from the realm edge" },
   'src/engine/cnc/vProfile.ts:DEG': { reason: "a maths constant (π/180 or a standard thread coefficient), not a shop decision" },
 };
 

@@ -192,8 +192,9 @@ export function checkGoalCutIntoRotary(
   const colDOf = stamped === null ? null : new Float64Array(cells);
   const colSampled = stamped === null ? null : new Uint8Array(cells);
   const deltas: number[] = [];
-  // #1207 — the check reads the registry's recommendation bands (the product's own frozen rule).
-  const leftoverBandsMm = [
+  // #1207 — the shop's bands ride the check when the caller states them (the same option the flat
+  // check reads); the registry recommendation is only the no-shop default.
+  const leftoverBandsMm = opts.leftoverBandsMm ?? [
     readDefault(null, 'acceptance.leftoverBand1Mm').value,
     readDefault(null, 'acceptance.leftoverBand2Mm').value,
     readDefault(null, 'acceptance.leftoverBand3Mm').value,

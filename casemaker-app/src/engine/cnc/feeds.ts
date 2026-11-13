@@ -1107,7 +1107,7 @@ export type FeedsDiagnostic = ClampDiagnostic | CatalogueDiagnostic;
  *     0 mm/min feed is not a slow cut. `feedsFor`'s own `<= 0` refusals below still refuse a
  *     non-positive value someone ASSERTED (an override, a typed feeds-table row — `cncFeeds.spec.ts`
  *     pins that); what changes here is that a vendor table does not get to assert for the user.
- *   - the machine REFUSES it rather than clamping it — more than the shop's `clamp.refuseFraction`
+ *   - the machine REFUSES it rather than clamping it — more than the refusal band (`clamp.refuseFraction`, withdrawn from #1207's landing; follow-up #1256)
  *     past the ceiling. That question is put to `clampToMachine`, the one choke point, so the band is
  *     not restated here. A row within the band is clamped and kept (32 of Makera's rows state 15 000 RPM
  *     on a 13 000 RPM spindle); a row far past it is the vendor's table answering about a machine
@@ -1593,7 +1593,7 @@ export function feedsFor(
    */
   context?: { slotting?: boolean },
   /**
-   * #448 — the shop's `clamp.refuseFraction`: the band above the machine's ceiling where a value
+   * #448 — the refusal band above the machine's ceiling where a value
    * is refused rather than clamped. Threaded in so this resolver and the catalogue screening share
    * one number with `clampToMachine`; defaults to the labelled fallback.
    */

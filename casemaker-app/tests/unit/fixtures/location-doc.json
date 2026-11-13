@@ -1053,13 +1053,6 @@
       "unit": "strips",
       "note": "chosen, not measured: how many strips of tape go under a blank"
     },
-    "tape.stripWidthMm": {
-      "value": 20.0,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "mm",
-      "note": "chosen, not measured: the width of one strip \u2014 the house roll is Makera's 20 mm double-sided tape"
-    },
     "clamps.maxCount": {
       "value": 4.0,
       "source": "seeded",
@@ -1079,7 +1072,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the map a rotary relief's drop-tip fields are planned on when the goal states no surface grid; coarser is conservative and the cost grows with 1/pitch²"
+      "note": "chosen, not measured: the map a rotary relief's drop-tip fields are planned on when the goal states no surface grid; coarser is conservative and the cost grows with 1/pitch\u00b2"
     },
     "rotary.jawKeepOutMm": {
       "value": 3.0,
@@ -1767,27 +1760,6 @@
       "unit": "x",
       "note": "chosen, not measured: how much of a free band the seeded line takes, as a share of it; more fill means a taller cap and less clearance"
     },
-    "import.traceThreshold": {
-      "value": 128.0,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "level",
-      "note": "chosen, not measured: the luminance a traced pixel must be darker than to count as ink; 0 to 255"
-    },
-    "import.traceDespecklePx": {
-      "value": 8.0,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "px",
-      "note": "chosen, not measured: the smallest ink blob or enclosed hole kept, in pixels of the source image; smaller specks are dropped before tracing"
-    },
-    "import.traceSimplifyPx": {
-      "value": 1.0,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "px",
-      "note": "chosen, not measured: how far a traced boundary's pixel staircase may be straightened, in pixels of the source image"
-    },
     "facing.roughMm": {
       "value": 0.5,
       "source": "seeded",
@@ -1842,14 +1814,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival — the house's blanks are drawn in round numbers, not cut to the design's tenths"
-    },
-    "clamp.refuseFraction": {
-      "value": 0.5,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "x",
-      "note": "chosen, not measured: the band above the machine's feed/rpm ceiling where a value is refused rather than clamped"
+      "note": "chosen, not measured: a shelf blank within this of the proposed length, width and thickness (either orientation) is pre-selected on arrival \u2014 the house's blanks are drawn in round numbers, not cut to the design's tenths"
     },
     "clean.clearanceMm": {
       "value": 5.0,
@@ -1897,15 +1862,15 @@
       "value": 0.01,
       "source": "seeded",
       "setAt": null,
-      "unit": "mm²/s",
-      "note": "chosen, not measured: the least top-surface area a rest pass must recover per second of added cutting to be worth taking (0.01 mm²/s = 36 mm² an hour); below this line the rest is floor-polishing"
+      "unit": "mm\u00b2/s",
+      "note": "chosen, not measured: the least top-surface area a rest pass must recover per second of added cutting to be worth taking (0.01 mm\u00b2/s = 36 mm\u00b2 an hour); below this line the rest is floor-polishing"
     },
     "registration.cutBlankPreferredInsetMm": {
       "value": 10.0,
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the preferred inset of a cut blank's first check points from every edge, where the uncut area allows it — chips and burrs collect against the stock's edges"
+      "note": "chosen, not measured: the preferred inset of a cut blank's first check points from every edge, where the uncut area allows it \u2014 chips and burrs collect against the stock's edges"
     },
     "registration.cutBlankMaxPoints": {
       "value": 5,
@@ -1919,7 +1884,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the most a centre-find search may travel — a wrong estimate must not cross the bed"
+      "note": "chosen, not measured: the most a centre-find search may travel \u2014 a wrong estimate must not cross the bed"
     },
     "stock.workMarginMm": {
       "value": 5.0,
@@ -1933,7 +1898,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: the scrap a preset's cut-out or pocket leaves each side — room for the cutter beside the part and for the clamps that hold the offcut"
+      "note": "chosen, not measured: the scrap a preset's cut-out or pocket leaves each side \u2014 room for the cutter beside the part and for the clamps that hold the offcut"
     },
     "vcarve.stepoverRatio": {
       "value": 0.6,
@@ -1947,7 +1912,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: how far below a purchased laminate's cap its floor sits — the supplier's tolerance and the machine's Z resolution, not a printer layer"
+      "note": "chosen, not measured: how far below a purchased laminate's cap its floor sits \u2014 the supplier's tolerance and the machine's Z resolution, not a printer layer"
     },
     "flip.minGainFraction": {
       "value": 0.01,
@@ -1960,14 +1925,14 @@
       "value": 20.0,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
+      "unit": "\u00b0",
       "note": "chosen, not measured: the steepest face still read as the part's top (the mesh's target rim), degrees from horizontal"
     },
     "finish.wallSkipDeg": {
       "value": 80.0,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
+      "unit": "\u00b0",
       "note": "chosen, not measured: a raster row steeper than this is a wall, not finishable by raster, and is skipped with a note"
     },
     "facing.maxDepthMm": {
@@ -2002,8 +1967,8 @@
       "value": 20.0,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
-      "note": "chosen, not measured: the corner angle below which an outline joint is a corner, not an arc joint — a setting is stated in the unit an operator reads; the code converts"
+      "unit": "\u00b0",
+      "note": "chosen, not measured: the corner angle below which an outline joint is a corner, not an arc joint \u2014 a setting is stated in the unit an operator reads; the code converts"
     },
     "finish.moveCap": {
       "value": 5000000,
@@ -2026,13 +1991,6 @@
       "unit": "tip ops",
       "note": "chosen, not measured: the tip evaluations one finish raster row may spend before the plan refuses it"
     },
-    "goal.maxCells": {
-      "value": 4000000,
-      "source": "seeded",
-      "setAt": null,
-      "unit": "cells",
-      "note": "chosen, not measured: the most cells a goal heightfield may hold"
-    },
     "texture.maxStrokes": {
       "value": 4000,
       "source": "seeded",
@@ -2051,14 +2009,14 @@
       "value": 1.93,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
+      "unit": "\u00b0",
       "note": "chosen, not measured: the steepest face still finished as flat (else the ball finishes it)"
     },
     "finish.pencilCreaseDeg": {
       "value": 20,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
+      "unit": "\u00b0",
       "note": "chosen, not measured: the crease angle at which a corner is steep enough for a pencil pass"
     },
     "setups.minHoleSeparationMm": {
@@ -2079,8 +2037,8 @@
       "value": 5,
       "source": "seeded",
       "setAt": null,
-      "unit": "°",
-      "note": "chosen, not measured: the least draft a mould cavity wall needs — stated as 5 degrees of draft; the wall warning reads the wall angle (90 minus this)"
+      "unit": "\u00b0",
+      "note": "chosen, not measured: the least draft a mould cavity wall needs \u2014 stated as 5 degrees of draft; the wall warning reads the wall angle (90 minus this)"
     },
     "reach.marginMm": {
       "value": 1.0,
@@ -2164,7 +2122,7 @@
       "source": "seeded",
       "setAt": null,
       "unit": "mm",
-      "note": "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them — the conservative margin, the model's own uncertainty"
+      "note": "chosen, not measured: a cut ending less than this above the jaw tops is treated as reaching them \u2014 the conservative margin, the model's own uncertainty"
     },
     "registration.guardedFloorMarginMm": {
       "value": 1.0,

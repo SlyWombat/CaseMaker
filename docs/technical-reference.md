@@ -243,7 +243,6 @@ The keys added since v0.2, with their recommendations:
 | `stock.defaultPlateThicknessMm` | 12 mm | 1–100 | The plate a drawing is worked on when the shelf holds none that fits. |
 | `stock.signMarginMm` | 10 mm | 1–50 | The margin around a sign's line when the plate is sized from the text. |
 | `tape.stripCount` | 5 strips | whole, 1–20 | The tape strips the run sheet states under a blank. |
-| `tape.stripWidthMm` | 20 mm | 1–200 | The tape strip width the sheet states (the house roll). |
 | `clamps.maxCount` | 4 clamps | whole, 1–8 | The most clamps one bracket job may state (`too-many-clamps` when exceeded). |
 | `report.statusPollsKept` | 30 polls | whole, 5–500 | How much of the run's `?` status tail its stop report keeps — about a minute at the 2 s poll; every command is kept whole. |
 | `relief.planningPitchMm` | 1 mm | 0.1–2 | The map a rotary relief's drop-tip fields are planned on when the goal states no grid pitch; the 0.1 mm simulation grid is a measurement pitch, not a planning one. |

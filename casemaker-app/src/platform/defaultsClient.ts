@@ -22,7 +22,6 @@ import {
   VISE_MIN_COVERAGE_FRACTION_FALLBACK,
   VISE_UNCERTAINTY_FALLBACK,
 } from '@/engine/cnc/fixture';
-import { CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
@@ -226,12 +225,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(0.05).max(1),
     fallback: VISE_MIN_COVERAGE_FRACTION_FALLBACK,
   },
-  'clamp.refuseFraction': {
-    label: 'overage past the machine ceiling that refuses instead of clamping (chosen)',
-    unit: 'x',
-    rule: z.number().min(0.01).max(5),
-    fallback: CLAMP_REFUSE_FRACTION_FALLBACK,
-  },
   // ── #448 (end)
   // ── #1105 (begin) — the stock step's chosen tolerance: a shelf blank within this of the
   // proposal's length, width and thickness (either orientation) is the same blank for the
@@ -362,7 +355,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   },
   // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
   'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
-  'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },
   // #1102 — the most clamps one bracket job states.
   'clamps.maxCount': { label: 'most clamps on one bracket job (chosen)', unit: 'clamps', rule: z.number().int().min(1).max(8), fallback: 4 },
   // #414 — runtime is weighted by the material cut (the maintainer, 2026-10-16). Chosen, not measured.
@@ -514,16 +506,9 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // BLANK_BAND_FILL_FALLBACK. Bounded above 0: zero would size the line to no band at all.
   'engrave.blankBandFill': { label: 'blank band fill, as a share of the free band (chosen)', unit: 'x', rule: z.number().min(0.05).max(1), fallback: 0.7 },
   // ── #451 blank band fill (end)
-  // ── #451 raster trace defaults (begin) — the traced-bitmap dialog's starting numbers (#252). CHOSEN,
-  // not measured: threshold is where a pixel stops counting as ink, despeckle is the smallest blob or
-  // pinhole kept, and simplify is how much the pixel staircase is straightened. `invert` stays a
-  // per-picture toggle (dark art vs light art), not a shop number. Fallbacks = `rasterOutline.ts`'s
-  // TRACE_DEFAULTS. The panel and dialog still read the compiled fallback; the consumer rewire lands
-  // with the next release (see the #451 comment).
-  'import.traceThreshold': { label: 'raster trace threshold, pixels darker than this are ink (chosen)', unit: 'level', rule: z.number().int().min(0).max(255), fallback: 128 },
-  'import.traceDespecklePx': { label: 'raster trace despeckle, smallest blob or pinhole kept (chosen)', unit: 'px', rule: z.number().int().min(0).max(1024), fallback: 8 },
-  'import.traceSimplifyPx': { label: 'raster trace corner simplify tolerance (chosen)', unit: 'px', rule: z.number().min(0).max(64), fallback: 1 },
-  // ── #451 raster trace defaults (end)
+  // #1207 review — the import.trace* keys were withdrawn from the registry at this landing: no
+  // consumer read them (the dialog still used `rasterOutline.ts`'s compiled fallbacks), so the page
+  // would have shown values that change nothing. The dialog's rewiring is follow-up #1256.
   // ── #432 facing (begin) — the depth a facing pass arrives filled in with. CHOSEN, not measured:
   // the maintainer's decision of 2026-10-17 asks the depth every time facing is on and fills in the
   // probed top's spread plus the margin, or one of these two fallbacks without a probe. General
@@ -789,7 +774,6 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'finish.moveCap': { label: 'the most moves one finish pass may emit (chosen)', unit: 'moves', rule: z.number().int().min(1000).max(100_000_000), fallback: 5_000_000 },
   'finish.maxTipOps': { label: 'the tip evaluations one finish field may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 300_000_000 },
   'finish.maxTipRowOps': { label: 'the tip evaluations one finish raster row may spend (chosen)', unit: 'tip ops', rule: z.number().int().min(1_000_000).max(2_000_000_000), fallback: 150_000_000 },
-  'goal.maxCells': { label: 'the most cells a goal heightfield may hold (chosen)', unit: 'cells', rule: z.number().int().min(10_000).max(100_000_000), fallback: 4_000_000 },
   'texture.maxStrokes': { label: 'the most strokes one texture pattern emits (chosen)', unit: 'strokes', rule: z.number().int().min(10).max(100_000), fallback: 4_000 },
   'job.maxEmbeddedSourceBytes': { label: 'the largest source a job may embed (chosen)', unit: 'bytes', rule: z.number().int().min(1_048_576).max(268_435_456), fallback: 4_194_304 },
   'finish.flatSurfaceMaxSlopeDeg': { label: 'the steepest face still finished as flat (chosen)', unit: '°', rule: z.number().min(0).max(45), fallback: 1.93 },
