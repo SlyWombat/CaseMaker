@@ -57,7 +57,8 @@ import { angleToArc, type RotarySection } from '@/engine/cnc/rotary/wrap';
 import type { GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { surfaceLift, type SurfaceFrame } from '@/engine/cnc/engrave/surfacePlane';
-import { exactSweptFieldTooled, stampProfile, stampRotarySweptFieldDetail, type RotaryStampedTop } from './sweptPoint';
+import { exactSweptFieldTooled, stampProfile, stampRotarySweptFieldDetail, type RotaryStampedTop, type StampGoal } from './sweptPoint';
+import { dialectOf, Z1 } from '@/engine/cnc/machine';
 import type { ManifoldToplevel } from '../geometry/evaluateOp';
 import type { CarriedField } from '../geometry/carriedField';
 
@@ -969,6 +970,9 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    */
   let exactRun: { key: string; field: Float32Array; who: Uint8Array; clX: Float32Array; clY: Float32Array } | null = null;
 
+  // #1251 — THE MACHINE IN HAND'S POSTED STEP, for the stamp's edge band: set from the machine
+  // each load resolves (the Z1's dialect when a program carries no machine).
+  let liveAxisPrecision = dialectOf(Z1).axisPrecision;
   const load = (gcodeText: string, setupArg: Setup, tool: Tool, machineId: string | null, opts?: SimLoadOpts): SimLoadResult => {
     dispose();
     // #623/#625/#628 — a program posted against the blank's fitted surface is judged in its SURFACE
@@ -1055,6 +1059,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
     const { timeline, parserDiagnostics } = ((): { timeline: Timeline; parserDiagnostics: ParseResult['diagnostics'] } => {
       // #845 — READ THE FILE AS ITS MACHINE'S POST WROTE IT: a GRBL file's `M0` pause and `M8`
       // coolant are its own dialect, and the Z1 firmware model refuses them as unknown codes.
+      liveAxisPrecision = machine === undefined ? dialectOf(Z1).axisPrecision : dialectOf(machine).axisPrecision;
       const parse = parseGcode(gcodeText, { dialect: machine === undefined ? 'z1' : postKey(machine) });
       return { timeline: buildTimeline(parse, setupArg, machine), parserDiagnostics: parse.diagnostics };
     })();
@@ -1583,7 +1588,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
    * field, so the edge-break allowance can require the deepest cutter to be the V (the page's
    * `who` rule) instead of excusing every shallow cell near an edge.
    */
-  const sweptStamp = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): { field: Float32Array; who: Uint8Array; clX: Float32Array; clY: Float32Array } | null => {
+  const sweptStamp = (goal: StampGoal): { field: Float32Array; who: Uint8Array; clX: Float32Array; clY: Float32Array } | null => {
     const l = live;
     const source = stampSource();
     if (l === null || source === null) return null;
@@ -1593,7 +1598,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
         ? null
         : { field: exactValue, who: exactWhoValue, clX: exactClValue.clX, clY: exactClValue.clY };
     }
-    const stamp = exactSweptFieldTooled(goal, source.timeline, () => source.tool);
+    const stamp = exactSweptFieldTooled({ ...goal, edgeBandMm: 10 ** -liveAxisPrecision }, source.timeline, () => source.tool);
     exactValue = stamp?.field ?? null;
     exactWhoValue = stamp?.who ?? null;
     exactClValue = stamp === null ? null : { clX: stamp.clX, clY: stamp.clY };
@@ -1631,7 +1636,7 @@ export function createSimSession(tl: ManifoldToplevel, hooks?: SimSessionHooks):
       ? null
       : { field: exactValue, who: exactWhoValue, clX: exactClValue.clX, clY: exactClValue.clY };
   };
-  const sweptFieldExact = (goal: { nx: number; ny: number; x0: number; y0: number; pitch: number }): Float32Array | null =>
+  const sweptFieldExact = (goal: StampGoal): Float32Array | null =>
     sweptStamp(goal)?.field ?? null;
   // #1086 — the rotary stamp, cached on the live sweep and the goal grid (the same one-shot
   // pattern the flat field uses: the goal check calls it once per load per goal).

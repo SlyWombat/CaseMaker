@@ -21,7 +21,6 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '../../src/engine/cnc/cam/engraveJob';
 import { pocket } from '../../src/engine/cnc/cam/model/ops/pocket';
-import { FACING_EDGE_CLEARANCE_MM } from '../../src/engine/cnc/cam/facing';
 import type { PocketNode } from '../../src/engine/cnc/cam/model/features';
 import type { RegionRef } from '../../src/engine/cnc/cam/model/plan';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
@@ -105,12 +104,10 @@ function designTop(x: number, y: number): number {
 }
 
 /**
- * #1227 ruling (analyst): the pocket's wall pass runs one posted step (FACING_EDGE_CLEARANCE_MM)
- * closer to the wall BY DESIGN, so this check is made with a disc of that much smaller radius at
- * the unchanged 1e-6 tolerance — the sideways step is the fixed quantity, while the grazing height
- * depends on the slope (a height threshold would pass or fail by fixture).
+ * #1251 — #1227's one-posted-step inset is reversed: the wall pass is exact again, so the
+ * invariant is checked on the FULL-radius disc at the 1e-6 tolerance, as before #1227.
  */
-const CHECK_R = R - FACING_EDGE_CLEARANCE_MM;
+const CHECK_R = R;
 
 /** The worst design height ANY point of the cutter's disc sweeps above the feed's own z. */
 function worstDiscCut(moves: { kind: string; x: number; y: number; z: number }[]): { over: number; x: number; y: number; z: number; top: number } {

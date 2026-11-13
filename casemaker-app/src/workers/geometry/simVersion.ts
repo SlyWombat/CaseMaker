@@ -60,4 +60,11 @@
 // `shadowOverReliefCells`, `overReliefDeepest`) so the excuse is never silent. The rule's
 // fingerprint is re-pinned in `tests/unit/goalRuleFreeze948.spec.ts`; the red-first case is
 // `tests/unit/designCheckRelief.spec.ts`; the cards are re-scored in the same commit.
-export const SIMULATOR_VERSION = 8;
+// v9 (#1251) — THE STAMP JUDGES A CELL AT THE CUTTER'S EDGE BY THE GOAL, and #1227's wall-pass
+// offset is reversed. A cell whose centre is within one posted step of the cutter's edge (either
+// side) is an edge cell: it is lowered only when that does not take it below the goal. A floor
+// cell at the edge counts as reached (the tray top's fin); a wall cell at the edge is not gouged
+// (the clamp cards). Further inside a cell is always lowered; further outside never. The path is
+// exact again — the pocket's wall pass runs at the plain radius — and the goal check's Python
+// mirror applies the same edge rule cell for cell.
+export const SIMULATOR_VERSION = 9;
