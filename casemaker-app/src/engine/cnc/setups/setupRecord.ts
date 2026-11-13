@@ -42,6 +42,7 @@ import type { Setup } from '@/engine/cnc/setup';
 import type { Tool } from '@/engine/cnc/tool';
 import type { DepthLimit, VerifyContext } from '@/engine/cnc/verify';
 import type { EngraveJob } from '@/types/engraveJob';
+import type { SetupFrame } from '@/engine/cnc/cam/model/features';
 
 /** The twelve facts of a setup, as the verifier's side can state them today. */
 export interface SetupRecord {
@@ -54,8 +55,12 @@ export interface SetupRecord {
    * verifier's `Setup` body is still the job blank until #1247.
    */
   stock: { kind: 'box'; length: number; width: number; thickness: number } | { kind: 'rod'; diameter: number; length: number };
-  /** Fact 2 — slice 2 fills it from the planner's `SetupFrame`; null until then. */
-  frame: null;
+  /**
+   * Fact 2 — the planner's own `SetupFrame` for this setup, stated as itself (no second shape).
+   * Slice 2 fills it from the frame the plan input builds; null when the caller has none (a
+   * restored run has no plan to state one).
+   */
+  frame: SetupFrame | null;
   /**
    * Fact 3 — the stock's top and bottom in the setup frame. A flat job's Z0 is the stock top, so
    * the top is 0 and the bottom is minus the stock's thickness; a rod's Z0 is the axis, so its
@@ -120,6 +125,8 @@ export interface SetupRecordDeps {
   footprint?: readonly FootprintShape[] | null;
   /** The rotary map the site already built, when its context states the rotary frame. */
   rotary?: RotaryMap | null;
+  /** The planner's own `SetupFrame` for this setup (slice 2), stated on the record as itself. */
+  frame?: SetupFrame;
   /**
    * The stock's box when the caller has NO `EngraveJob` — REQUIRED there (the builder throws
    * without it): a restart states the blank it cuts, and a dry run states the box its `Setup`
@@ -241,7 +248,7 @@ export function setupRecordFor(job: EngraveJob | null, setupIndex: number, deps:
   return {
     index: setupIndex,
     stock,
-    frame: null,
+    frame: deps.frame ?? null,
     heights,
     sacrificial,
     holds,
