@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#1258 — the tab question, redraw (v2)</title>
+<style>
+  :root {
+    --surface: #0b1326; --surface-low: #131b2e; --surface-container: #17203a; --surface-high: #1d2743;
+    --on-surface: #dae2fd; --on-variant: #a9b4d0; --muted: #7f8aa8; --outline: #2a3448;
+    --primary: #4d8eff; --on-primary: #00214d; --secondary: #4ade80; --tertiary: #f5a524;
+    --display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+    --body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #060a14; font-family: var(--body); color: var(--on-surface); }
+  .screen { width: 1440px; height: 980px; background: var(--surface); position: relative; overflow: hidden; margin-bottom: 24px; }
+  .screen--phone { width: 390px; height: 1190px; }
+  .top { height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--outline); background: var(--surface-low); }
+  .brand { font-family: var(--display); font-weight: 700; letter-spacing: .02em; font-size: 15px; }
+  .brand b { color: var(--primary); }
+  .tabs { margin-left: auto; display: flex; gap: 4px; }
+  .tab { padding: 6px 12px; border-radius: 6px; font-size: 12px; color: var(--on-variant); }
+  .tab--on { background: var(--surface-container); color: var(--on-surface); font-weight: 600; }
+  .body { display: flex; height: calc(100% - 52px); }
+  .left { width: 330px; flex: none; border-right: 1px solid var(--outline); background: var(--surface-low); padding: 14px; }
+  .left h3 { margin: 0 0 4px; font-family: var(--display); font-size: 16px; }
+  .job { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+  .rowline { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--on-variant); padding: 7px 0; border-bottom: 1px solid var(--outline); }
+  .rowline b { color: var(--on-surface); font-weight: 500; text-align: right; }
+  .genbtn { margin-top: 18px; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--outline); background: var(--surface-container); color: var(--muted); font: 600 13px var(--body); }
+  .genbtn--on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .canvas { flex: 1; position: relative; padding: 28px 0 0; display: flex; justify-content: center; align-items: flex-start;
+      background: radial-gradient(900px 500px at 60% 40%, #101a30 0%, var(--surface) 70%); }
+
+  /* the question card */
+  .qcard { width: 1010px; border-radius: 14px; overflow: hidden; background: var(--surface-low); border: 1px solid #3a5680;
+    box-shadow: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(77,142,255,.15); }
+  .qhead { background: var(--primary); color: #f4f8ff; padding: 16px 22px 14px; }
+  .eyebrow { font: 700 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; opacity: .9; display: flex; align-items: center; gap: 8px; }
+  .eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffd166; box-shadow: 0 0 0 4px rgba(255,209,102,.25); }
+  .qhead h1 { margin: 8px 0 0; font: 600 21px/1.3 var(--display); text-wrap: balance; }
+  .qhead .count { margin: 6px 0 0; font-size: 13px; opacity: .95; }
+  .qbody { display: grid; grid-template-columns: 500px 1fr; gap: 16px; padding: 16px 18px 8px; }
+  .diagram { background: #0d1526; border: 1px solid var(--outline); border-radius: 10px; padding: 8px; margin: 0; align-self: start; }
+  .diagram .focus { font: 600 11px var(--mono); color: var(--on-variant); padding: 2px 4px 6px; }
+  .diagram figcaption { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 10.5px; color: var(--on-variant); }
+  .key { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 14px; height: 6px; border-radius: 3px; display: inline-block; }
+  .opts { display: flex; flex-direction: column; gap: 8px; }
+  .opt { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--outline); background: var(--surface-container); }
+  .opt--on { border-color: var(--primary); background: #14213a; box-shadow: 0 0 0 2px rgba(77,142,255,.25); }
+  .opt--hover { border-color: #3a5680; }
+  .radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); margin-top: 2px; }
+  .opt--on .radio { border-color: var(--primary); background: radial-gradient(circle at center, var(--primary) 0 5px, transparent 5px); }
+  .opt h4 { margin: 0 0 4px; font: 600 13.5px var(--body); }
+  .opt p { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--on-variant); }
+  .opt .cost { margin-top: 5px; }
+  .opt .cost b { color: var(--on-surface); font-weight: 600; }
+  table.nums { border-collapse: collapse; margin: 2px 0 4px; font: 11px var(--mono); color: var(--on-surface); width: 100%; }
+  table.nums th { text-align: left; font-weight: 500; color: var(--muted); padding: 1px 8px 2px 0; }
+  table.nums td { padding: 1px 8px 1px 0; }
+  table.nums td.n { color: #ffd166; font-weight: 700; width: 18px; }
+  table.nums .over { color: var(--tertiary); }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 600 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; margin: 2px 0; }
+  .or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--outline); }
+  .opt--2nd { background: transparent; border-style: dashed; }
+  .opt--2nd h4 { font-weight: 500; color: var(--on-variant); }
+  .note { font-size: 11.5px; color: var(--on-variant); background: #1a2036; border: 1px solid var(--outline); border-radius: 8px; padding: 8px 10px; line-height: 1.45; }
+  .note b { color: var(--tertiary); font-weight: 600; }
+  .qfoot { display: flex; align-items: center; gap: 12px; padding: 10px 18px 14px; }
+  .paused { font-size: 12px; color: var(--tertiary); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .paused::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--tertiary); }
+  .spacer { flex: 1; }
+  .btn { padding: 9px 16px; border-radius: 8px; font: 600 12.5px var(--body); border: 1px solid var(--outline); background: transparent; color: var(--on-variant); }
+  .btn--primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .btn--primary[disabled] { opacity: .4; }
+
+  /* collapsed bar, answered, small states */
+  .bar { width: 1010px; border-radius: 12px; border: 1px solid #7a5a1a; background: #261c08; display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .bar .ico { width: 26px; height: 26px; border-radius: 50%; background: #3a2a0a; border: 1px solid var(--tertiary); display: grid; place-items: center; color: var(--tertiary); font-weight: 800; }
+  .bar b { font-size: 13px; color: #ffe2a8; }
+  .bar p { margin: 3px 0 0; font-size: 11.5px; color: var(--on-variant); }
+  .answered { width: 1010px; border-radius: 12px; border: 1px solid #2f5a44; background: #0f2019; display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .answered--again { border-color: #7a5a1a; background: #261c08; }
+  .check { width: 26px; height: 26px; border-radius: 50%; background: #16351f; border: 1px solid #2f7a4a; display: grid; place-items: center; color: var(--secondary); font-size: 14px; flex: none; }
+  .answered--again .check { background: #3a2a0a; border-color: var(--tertiary); color: var(--tertiary); font-weight: 800; }
+  .answered b { font-size: 13px; }
+  .answered p { margin: 3px 0 0; font-size: 11.5px; color: var(--on-variant); }
+  .small { width: 1010px; padding: 14px; background: var(--surface); margin-bottom: 20px; }
+  .small .cap { font: 600 11px var(--mono); color: var(--muted); margin: 0 0 8px; letter-spacing: .04em; }
+  .holdrow { width: 330px; margin-top: 8px; background: var(--surface-low); border: 1px solid var(--outline); border-radius: 8px; padding: 0 12px; }
+  .holdrow .rowline:last-child { border-bottom: 0; }
+
+  /* phone */
+  .screen--phone .top { height: 46px; padding: 0 12px; }
+  .screen--phone .tabs { display: none; }
+  .phonebody { padding: 12px; }
+  .qphone { border-radius: 14px; overflow: hidden; border: 1px solid #3a5680; background: var(--surface-low); }
+  .qphone .qhead { padding: 14px 14px 12px; }
+  .qphone .qhead h1 { font-size: 18px; }
+  .qphone .qbody { grid-template-columns: 1fr; padding: 12px; gap: 10px; }
+  .qphone .diagram { padding: 6px; }
+  .qphone .opts { gap: 7px; }
+  .qphone .opt { padding: 10px; }
+  .qphone table.nums { font-size: 10.5px; }
+  .qphone .qfoot { flex-direction: column; align-items: stretch; gap: 9px; padding: 10px 12px 14px; }
+  .qphone .qfoot .btn--primary { width: 100%; padding: 12px; font-size: 14px; }
+  .qphone .paused { justify-content: center; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* ---------------- the job, in millimetres ----------------
+   One outline — a 150 x 90 plate with 12 mm corners — and real tab positions along it, so the
+   labels and the picture agree: every length below is measured on the drawn path. */
+const R = 12, W = 150, H = 90, TAB = 4, LIMIT = 80;
+const PATH = `M ${R} 0 H ${W-R} A ${R} ${R} 0 0 1 ${W} ${R} V ${H-R} A ${R} ${R} 0 0 1 ${W-R} ${H} H ${R} A ${R} ${R} 0 0 1 0 ${H-R} V ${R} A ${R} ${R} 0 0 1 ${R} 0 Z`;
+let L = 0;                                   // perimeter, measured from the path itself
+const ARC = Math.PI / 2 * R;
+// the three stretches that exceed the limit, and the tab option 1 would add in each: edge, mm from the corner, edge's margin
+const stretches = [
+  { n: 1, a: 88,  b: 184, edge: 'right',  cornerAt: (W-2*R) + ARC, dist: 5, margin: 8 },
+  { n: 2, a: 205, b: 295, edge: 'bottom', cornerAt: (W-2*R) + ARC + (H-2*R) + ARC, dist: 6, margin: 12.6 },
+  { n: 3, a: 340, b: 428, edge: 'left',   cornerAt: 2*(W-2*R) + (H-2*R) + 3*ARC, dist: 4, margin: 8 },
+];
+/* tab centres, mm along the path from the top edge's left end: 184 is the right-hand tab of stretch 1; tabs 205/295 bound stretch 2; 340/428 bound stretch 3 */
+const allTabs = [26.5, 88, 184, 205, 295, 340, 428, 485.9];
+stretches.forEach((s) => { s.len = s.b - s.a - TAB; s.cand = s.cornerAt + s.dist; });
+stretches.forEach((s) => {
+  s.left = (s.cand - TAB / 2) - (s.a + TAB / 2);
+  s.right = (s.b - TAB / 2) - (s.cand + TAB / 2);
+  s.long = Math.max(s.left, s.right);
+});
+const m = (x) => `${Math.round(x)} mm`;
+
+/* ---------------- drawing ---------------- */
+const SVGNS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function drawing(mode, opts) {
+  // mode: 'none' | 'opt1' | 'opt2'; opts.only = [stretch numbers]; opts.fs = font size in mm; opts.w = pixel width
+  const only = opts.only || [1, 2, 3];
+  const fs = opts.fs || 4.6;
+  const svg = el('svg', { viewBox: '-24 -18 198 138', width: opts.w, role: 'img',
+    'aria-label': 'The part outline to scale, with the stretches that need a choice marked' });
+  const base = el('path', { d: PATH, fill: '#101a2e', stroke: '#6b7ba3', 'stroke-width': 0.9 }, svg);
+  L = base.getTotalLength();
+  const at = (s) => {
+    const t = ((s % L) + L) % L;
+    const p = base.getPointAtLength(t), q = base.getPointAtLength((t + 0.2) % L);
+    const ang = Math.atan2(q.y - p.y, q.x - p.x);
+    return { x: p.x, y: p.y, ang, nx: Math.sin(ang), ny: -Math.cos(ang) };
+  };
+  const seg = (s0, s1, attrs) => {
+    const pts = [];
+    for (let s = s0; s <= s1 + 1e-6; s += 0.5) { const p = at(s); pts.push(`${p.x.toFixed(2)},${p.y.toFixed(2)}`); }
+    return el('polyline', Object.assign({ points: pts.join(' '), fill: 'none', 'stroke-linecap': 'butt', 'stroke-linejoin': 'round' }, attrs), svg);
+  };
+  const tabRect = (s, w, h, attrs) => {
+    const p = at(s);
+    return el('rect', Object.assign({ x: -w / 2, y: -h / 2, width: w, height: h, rx: 0.8,
+      transform: `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) rotate(${(p.ang * 180 / Math.PI).toFixed(2)})` }, attrs), svg);
+  };
+  const text = (x, y, str, attrs) => {
+    const t = el('text', Object.assign({ x, y, 'font-family': 'JetBrains Mono, Cascadia Mono, monospace', 'font-size': fs, 'text-anchor': 'middle' }, attrs), svg);
+    t.textContent = str; return t;
+  };
+  const label = (s, off, str, color, size) => {
+    const p = at(s); const x = p.x + p.nx * off, y = p.y + p.ny * off;
+    const t = text(x, y + (size || fs) * 0.35, str, { fill: color, 'font-size': size || fs, 'font-weight': 600 });
+    return t;
+  };
+  const badge = (s, n, str, out) => {
+    const p = at(s); const sg = out ? 1 : -1; const d = out ? 19 : 13;
+    const x = p.x + sg * p.nx * d, y = p.y + sg * p.ny * d;
+    el('circle', { cx: x, cy: y, r: 4.8, fill: '#ffd166' }, svg);
+    text(x, y + 1.9, String(n), { fill: '#0b1326', 'font-weight': 800, 'font-size': 5.8 });
+    if (str) text(p.x - p.nx * 30, p.y - p.ny * 30 + fs * 0.35, str, { fill: '#ffd166', 'font-weight': 600 });
+  };
+  // the placed tabs
+  allTabs.forEach((s) => tabRect(s, TAB, 7, { fill: '#4ade80' }));
+  stretches.forEach((s) => {
+    if (!only.includes(s.n)) return;
+    const mid = (s.a + s.b) / 2;
+    const near = mode === 'opt1';
+    if (near) {
+      // the two stretches the candidate leaves
+      seg(s.a + TAB / 2, s.cand - TAB / 2, { stroke: '#f5a524', 'stroke-width': 2.4, opacity: 0.55, 'stroke-dasharray': '5 3' });
+      seg(s.cand + TAB / 2, s.b - TAB / 2, { stroke: '#f5a524', 'stroke-width': 2.4, opacity: 0.55, 'stroke-dasharray': '5 3' });
+      label((s.a + s.cand) / 2, 10, m(s.left), '#ffd166');
+      label((s.cand + s.b) / 2 + 2, 10, m(s.right), '#ffd166');
+      tabRect(s.cand, TAB + 1.2, 11, { fill: '#4d8eff', stroke: '#cfe0ff', 'stroke-width': 0.9 });
+      label(s.cand, -19, `${s.dist} mm`, '#8ec2ff', fs);
+    } else {
+      seg(s.a + TAB / 2, s.b - TAB / 2, { stroke: '#f5a524', 'stroke-width': 2.6, opacity: 0.95 });
+      if (mode === 'none') {
+        tabRect(s.cand, TAB, 7, { fill: 'none', stroke: '#4d8eff', 'stroke-width': 0.8, 'stroke-dasharray': '1.6 1.2' });
+      }
+    }
+    if (mode !== 'opt2') {
+      // the corner margin of the edge the candidate sits on: hatched band from the corner
+      seg(s.cornerAt, s.cornerAt + s.margin, { stroke: '#f5a524', 'stroke-width': 5.5, opacity: 0.22 });
+    }
+    badge(mid, s.n, near ? null : m(s.len), near);
+  });
+  return svg;
+}
+
+/* ---------------- pieces ---------------- */
+const h = (html) => { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; };
+function legend(mode) {
+  const common = `<span class="key"><span class="sw" style="background:#4ade80"></span> placed tabs</span>
+    <span class="key"><span class="sw" style="background:#ffd166;width:10px;height:10px;border-radius:50%"></span> numbered stretch with no tab</span>`;
+  if (mode === 'opt1') return common + `<span class="key"><span class="sw" style="background:#4d8eff"></span> the tab option 1 adds</span>
+    <span class="key"><span class="sw" style="background:#f5a524;opacity:.5"></span> the stretches it leaves</span>`;
+  if (mode === 'opt2') return common + `<span class="key"><span class="sw" style="background:#f5a524"></span> the full stretch, left as it is</span>`;
+  return common + `<span class="key"><span class="sw" style="border:1px dashed #4d8eff"></span> where option 1's tab would go</span>
+    <span class="key"><span class="sw" style="background:#f5a524;opacity:.3;height:9px"></span> corner margin</span>`;
+}
+const FOCUS = {
+  none: 'Nothing chosen yet — the stretches, and where option 1 would put a tab',
+  opt1: 'Option 1: the tab it adds, and the stretches it leaves',
+  opt2: 'Option 2: the full stretches, no tab added',
+};
+function opt1Table(S) {
+  return `<table class="nums"><tr><th></th><th>tab from corner · margin</th><th>stretch left</th></tr>` +
+    S.map((s) => `<tr><td class="n">${s.n}</td><td>${s.dist} mm · ${s.margin % 1 ? s.margin.toFixed(1) : s.margin} mm</td><td>${m(s.left)} + ${m(s.right)}</td></tr>`).join('') + `</table>`;
+}
+function opt2Table(S) {
+  return `<table class="nums"><tr><th></th><th>stretch</th><th>shop's limit</th></tr>` +
+    S.map((s) => `<tr><td class="n">${s.n}</td><td class="over">${m(s.len)}</td><td>${LIMIT} mm</td></tr>`).join('') + `</table>`;
+}
+const COST1 = `<p class="cost"><b>What it costs:</b> a tab inside the margin is cut where the cutter changes direction and its load peaks.</p>`;
+const COST2 = `<p class="cost"><b>What it costs:</b> the stretch stays unsupported; an up-cut flute can lift a thin corner.</p>`;
+
+function options(S, sel, o = {}) {
+  const cls = (k) => 'opt' + (sel === k ? ' opt--on' : '');
+  const first = o.noOpt1 ? '' : `
+    <div class="${cls('opt1')}" role="radio" aria-checked="${sel === 'opt1'}"><div class="radio"></div><div>
+      <h4>Put a tab inside the corner margin</h4>
+      ${opt1Table(S)}${COST1}</div></div>`;
+  const note = o.noOpt1 ? `<div class="note"><b>Option 1 is not offered.</b> ${o.noOpt1}</div>` : '';
+  return h(`<div class="opts" role="radiogroup" aria-label="How to hold the part">
+    ${note}${first}
+    <div class="${cls('opt2')}" role="radio" aria-checked="${sel === 'opt2'}"><div class="radio"></div><div>
+      <h4>${S.length > 1 ? 'Leave the longer stretches' : 'Leave the longer stretch'}</h4>
+      ${opt2Table(S)}${COST2}</div></div>
+    <div class="or">or</div>
+    <div class="opt opt--2nd" role="button"><div class="radio" style="border-style:dashed"></div><div>
+      <h4>Change the tabs myself</h4>
+      <p>Opens the tab settings (count and width) beneath this question, with the stretch${S.length > 1 ? 'es' : ''} still marked. Generate stays paused.</p></div></div>
+  </div>`);
+}
+
+function card(mode, S, o = {}) {
+  const sel = o.sel === undefined ? (mode === 'none' ? null : mode) : o.sel;
+  const n = S.length;
+  const c = h(`<section class="qcard ${o.phone ? 'qphone' : ''}" aria-live="polite">
+    <div class="qhead">
+      <div class="eyebrow"><span class="dot"></span> Action needed</div>
+      <h1>This part can't be held within both of the shop's tab rules. Choose one.</h1>
+      <p class="count">${n} stretch${n > 1 ? 'es' : ''} of this outline need${n > 1 ? '' : 's'} a choice${n > 1 ? ' — one answer applies to all of them' : ''}.${o.again ? ' <b>The outline changed since you chose; choose again.</b>' : ''}</p>
+    </div>
+    <div class="qbody"></div>
+    <div class="qfoot">
+      <span class="paused">Generate is paused until you choose.</span><span class="spacer"></span>
+      <button class="btn">Cancel</button>
+      <button class="btn btn--primary" ${sel ? '' : 'disabled'}>Use this choice</button>
+    </div>
+  </section>`);
+  const body = c.querySelector('.qbody');
+  const fig = h(`<figure class="diagram"><div class="focus">${o.focus || FOCUS[mode]}</div><figcaption>${legend(mode)}</figcaption></figure>`);
+  fig.insertBefore(drawing(mode, { only: S.map((s) => s.n), w: o.phone ? '100%' : 482, fs: o.phone ? 6.4 : 4.6 }), fig.querySelector('figcaption'));
+  body.append(fig, options(S, sel, o));
+  if (o.phone) { c.classList.remove('qcard'); }
+  return c;
+}
+
+function leftPanel(o) {
+  return h(`<div class="left"><h3>petit-pot-lid</h3><div class="job">wood · 3.175 mm flat · 6.0 mm stock</div>
+    <div class="rowline"><span>Cutters</span><b>3.175 mm flat</b></div>
+    <div class="rowline"><span>Holding</span><b>${o.holding}</b></div>
+    <div class="rowline"><span>Tab rules</span><b>${LIMIT} mm span · corner margin per edge</b></div>
+    <div class="rowline"><span>Programs</span><b>${o.programs}</b></div>
+    <button class="genbtn ${o.gen ? 'genbtn--on' : ''}">${o.gen ? 'Generate' : 'Generate — paused'}</button></div>`);
+}
+function screen(id, o, content) {
+  const s = h(`<div class="screen" id="${id}"><div class="top"><div class="brand">Case <b>Maker</b></div>
+    <div class="tabs"><span class="tab">Home</span><span class="tab tab--on">Cut</span><span class="tab">Parts</span><span class="tab">Docs</span></div></div>
+    <div class="body"><div class="canvas"></div></div></div>`);
+  s.querySelector('.body').insertBefore(leftPanel(o), s.querySelector('.canvas'));
+  s.querySelector('.canvas').append(content);
+  return s;
+}
+function phone(id, content) {
+  const s = h(`<div class="screen screen--phone" id="${id}"><div class="top"><div class="brand">Case <b>Maker</b></div><div class="tabs"></div></div><div class="phonebody"></div></div>`);
+  s.querySelector('.phonebody').append(content);
+  return s;
+}
+function small(id, cap, content, hold) {
+  const s = h(`<div class="small" id="${id}"><p class="cap">${cap}</p></div>`);
+  s.append(content);
+  if (hold) s.append(h(`<div class="holdrow"><div class="rowline"><span>Holding</span><b>${hold}</b></div></div>`));
+  return s;
+}
+
+/* ---------------- the states ---------------- */
+const root = document.getElementById('root');
+const HELD = { holding: '7 tabs · 4 mm wide', programs: '— held' };
+const S3 = stretches, S1 = [stretches[1]];
+
+root.append(
+  screen('d-none', HELD, card('none', S3)),
+  screen('d-opt1', HELD, card('opt1', S3)),
+  screen('d-opt2', HELD, card('opt2', S3)),
+  phone('p-none', card('none', S3, { phone: true })),
+  screen('d-bar', HELD, h(`<div class="bar" role="alert"><div class="ico">!</div><div style="flex:1"><b>Action needed: choose how this part is held</b>
+    <p>Generate has no programs until you choose.</p></div><button class="btn btn--primary">Choose…</button></div>`)),
+  small('s-ans1', 'Answered with option 1 — the summary line, and the Cut panel’s Holding row',
+    h(`<div class="answered"><div class="check">✓</div><div style="flex:1"><b>Holding: three tabs inside the corner margin.</b>
+      <p>Stretches 1, 2 and 3 each got a tab 5, 6 and 4 mm from a corner — closer than the edge’s margin. The longest stretch left is ${m(Math.max(...S3.map((s) => s.long)))}; the run sheet states this.</p></div><button class="btn">Change…</button></div>`),
+    '10 tabs · 3 by your choice'),
+  small('s-ans2', '(a) Answered with option 2 — the summary line for longer stretches',
+    h(`<div class="answered"><div class="check">✓</div><div style="flex:1"><b>Holding: three stretches left longer than the shop’s ${LIMIT} mm.</b>
+      <p>${m(S3[0].len)}, ${m(S3[1].len)} and ${m(S3[2].len)} have no tab — the operator’s choice. The run sheet states this.</p></div><button class="btn">Change…</button></div>`),
+    '7 tabs · 3 stretches by your choice'),
+  small('s-again', '(b) Asked again — the outline or the tab settings changed since the answer',
+    h(`<div class="answered answered--again"><div class="check">!</div><div style="flex:1"><b>The outline changed since you chose; choose again.</b>
+      <p>Your earlier answer (option 2) no longer applies. Generate is paused.</p></div><button class="btn btn--primary">Choose…</button></div>`)),
+  small('s-nopt1', '(c) Option 1 not possible — one stretch, no place for a tab in it',
+    card('opt2', S1, { sel: null, focus: 'The stretch that needs a choice', noOpt1: 'Stretch 2 has no edge long enough to hold a tab, even in the corner margin.' }))
+);
+</script>
+</body>
+</html>
