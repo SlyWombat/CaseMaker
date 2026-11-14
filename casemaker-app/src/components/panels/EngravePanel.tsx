@@ -57,6 +57,7 @@ import { sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
 import { operatorRunError } from './runErrorWords';
+import { SETTINGS_CHANGED_SENTENCE, SETTINGS_UNREAD_SENTENCE } from '@/engine/cnc/engrave/settingsWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useRendererVerdict } from '@/hooks/useRendererVerdict';
 // #1124 — the press's own re-probe (the landing ruling): only a failure at Generate refuses.
@@ -627,6 +628,8 @@ interface GenerateBlocker {
    * sentence at the button, never a Fix that sends the operator to re-seat the work for our gap.
    */
   fix: PanelFix | null;
+  /** #1276 — a re-read of the shop's settings, offered as a Retry beside the sentence (no Fix to open). */
+  retry?: () => void;
 }
 
 const OVERRIDE_FIELDS: readonly { key: keyof Omit<CutParams, 'air'>; label: string; unit: string }[] = [
@@ -1061,6 +1064,8 @@ export function EngravePanel(): JSX.Element {
   // store reads them (the worker cannot see the location). Without them a taped cut-out over the
   // wasteboard reads "reaches the vise" until the preview lands, and the blocker refuses it.
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
+  // #1276 — the settings store's state: a house is connected but its settings could not be read.
+  const settingsStatus = useShopDefaultsStore((s) => s.status);
   // #730 — the record for THIS job's machine (its `machineId` is a profile id), not the house's
   // first machine: two machines give two beds.
   const locationView = useLocationStore((s) => s.location);
@@ -1839,6 +1844,11 @@ export function EngravePanel(): JSX.Element {
     // the planner's ~454 MiB, and generating anyway dies mid-plan in the ball rank. The verdict
     // starts as 'checking' (no blocker) and lands shortly after the app's first render.
     if (rendererVerdict.refusal !== null) return { sentence: rendererVerdict.refusal.sentence, fix: null };
+    // #1276 — FAIL CLOSED: the shop's settings include safety limits, so with a house connected and its
+    // settings unreadable nothing is planned, and the one control is a re-read. No "plan anyway".
+    if (settingsStatus === 'error') {
+      return { sentence: SETTINGS_UNREAD_SENTENCE, fix: null, retry: () => void useShopDefaultsStore.getState().refresh() };
+    }
     const finding = errors[0];
     if (finding !== undefined) {
       return { sentence: sentenceCase(finding.message), fix: findingFix(finding) };
@@ -2343,7 +2353,9 @@ export function EngravePanel(): JSX.Element {
           flipSetup.flip.method === 'free-then-flip' ? 'free then flip' : 'tabs in blank'
         }`);
   const blockingFindings = jobFindings.filter((f) => f.severity === 'error').length;
-  const checksGroupSummary = `${jobFindings.length - blockingFindings} to confirm · ${blockingFindings} blocking`;
+  // #1276 — Generate refused for unread settings is a blocker too: the tally must not read "0 blocking" beside it.
+  const blockingCount = blockingFindings + (settingsStatus === 'error' ? 1 : 0);
+  const checksGroupSummary = `${jobFindings.length - blockingFindings} to confirm · ${blockingCount} blocking`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   // #1123 item 8 — A CUT ON BORROWED FEEDS SAYS SO ON THE CUTTER LINE, not only in the fold: the
@@ -2951,6 +2963,9 @@ export function EngravePanel(): JSX.Element {
     // #1124 — the blocker at the button says why; this is the belt for the paths that call the
     // press directly (Try again, stale-regenerate) while the verdict is a refusal.
     if (rendererVerdict.refusal !== null) return;
+    // #1276 — the shop's settings first: an unread map is WAITED for (before the cutter pick too, which
+    // plans on them) and an unreadable one stops the press with the blocker's sentence.
+    if (!(await run.awaitShopSettings())) return;
     // #1124 (the landing ruling, 2026-11-09) — A FAILED STARTUP PROBE LEAVES 'checking', NOT a
     // refusal: the press is the deliberate re-check. Only a failure HERE refuses, and that verdict
     // then stands for the page (the blocker below renders its sentence).
@@ -5541,6 +5556,19 @@ export function EngravePanel(): JSX.Element {
               style={{ flex: '1 1 180px', fontSize: 12, lineHeight: 1.45, color: SEVERITY_COLOR.error }}
             >
               {generateBlocker.sentence}
+              {generateBlocker.retry !== undefined && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    data-testid="engrave-generate-settings-retry"
+                    style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: '#8fb8e0', cursor: 'pointer', textDecoration: 'underline' }}
+                    onClick={generateBlocker.retry}
+                  >
+                    Retry
+                  </button>
+                </>
+              )}
               {/* #894 — a press only where the panel can actually open what the fix names. */}
               {generateBlocker.fix !== null && fixIsOffered(generateBlocker.fix) && (
               <>
@@ -5614,7 +5642,9 @@ export function EngravePanel(): JSX.Element {
                   ? 'The machine’s saved frame changed while generating.'
                   : run.staleReason === 'margins'
                     ? 'The depth margins changed while generating.'
-                    : 'The job changed while generating.'}{' '}
+                    : run.staleReason === 'shop'
+                      ? SETTINGS_CHANGED_SENTENCE
+                      : 'The job changed while generating.'}{' '}
                 <button type="button" data-testid="engrave-run-stale-regenerate" onClick={() => void generate()}>
                   Generate again
                 </button>
