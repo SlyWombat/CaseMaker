@@ -84,6 +84,7 @@ function recheck(generated: EngraveGenerated, job = jobWithCutter()) {
     machine,
     mount: null,
     setup: toSetup(job, machine, undefined, null),
+    defaults: null,
   });
 }
 
