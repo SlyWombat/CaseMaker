@@ -8,7 +8,7 @@
 //   3. no dead-end message: whatever the verdict, the panel says what it cut and what is left.
 
 import { fileURLToPath } from 'node:url';
-import { test, expect, openCutterGroup, openSomethingElse, stockNext } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, openSomethingElse, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 const FIGURE = fileURLToPath(new URL('../fixtures/goals/figure.stl', import.meta.url));
 const RELIEF = fileURLToPath(new URL('../fixtures/goals/relief-plate.stl', import.meta.url));
@@ -42,9 +42,11 @@ async function wizardGoal(page: import('@playwright/test').Page, file: string, s
   await page.getByTestId('start-wizard-make-thickness').fill(String(stock.thickness));
   await stockNext(page); // → holding
 
-  // Holding: the vise (the shipped default) is the mount; the last step's button creates the job.
+  // Holding (#1273): nothing is recorded, so the step ASKS; the walk chooses the ledge as its own
+  // assumption, and the last step's button creates the job.
   await expect(page.getByTestId('start-wizard-progress')).toContainText('Holding');
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await pickAssumedMount(page, 'ledge');
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
   await expect(page.getByTestId('engrave-panel')).toBeVisible();

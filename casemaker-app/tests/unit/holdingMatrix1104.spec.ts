@@ -91,6 +91,27 @@ describe('#1104 the holding matrix has no dead ends', () => {
     }
   }
 
+  // #1273 — NOTHING RECORDED IS NOT "A VISE" (was: no record offered only the three vise seats). Every
+  // mount the product knows is listed; the vise seats the blank allows are the operator's to choose,
+  // marked unrecorded; the bed's and the rotary's rows wait for the machine, each with its one action.
+  it('#1273 no machine record: every mount listed, the vise seats choosable and unrecorded, the rest waiting for the machine', () => {
+    const plate = CELLS.find((c) => c.name !== 'rod 150 mm' && c.name !== 'tube 150 mm' && c.stock.thickness >= 6)!;
+    const rows = optionsFor(plate, null);
+    const byMount = new Map(rows.map((r) => [r.mount, r]));
+    for (const m of ['ledge', 'board', 'block'] as const) {
+      const r = byMount.get(m)!;
+      expect(r.disabled, m).toBe(false);
+      expect(r.unrecorded, m).toBe(true);
+    }
+    for (const m of ['bed-bracket', 'rotary'] as const) {
+      const r = byMount.get(m)!;
+      expect(r.disabled, m).toBe(true);
+      expect(r.reason, m).toContain('comes with the machine');
+      expect(r.action?.kind, m).toBe('manage-link');
+      expect(r.action?.label, m).toBe('Add the machine');
+    }
+  });
+
   it('a rod and a tube of the same numbers offer the same rows', () => {
     const rod = CELLS.find((c) => c.name === 'rod 150 mm')!;
     const tube = CELLS.find((c) => c.name === 'tube 150 mm')!;

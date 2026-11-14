@@ -1323,6 +1323,11 @@ export interface ViseParams {
   jawStartY: Mm;
   /** Where these numbers came from. A default is NOT a measurement (decision 28). */
   source: 'default' | 'saved' | 'measured';
+  /**
+   * #1273 — the OPERATOR chose this seat with no machine recorded: the jaws are the app's shipped
+   * model, and the hold is the operator's assumption, not a fact about this shop. Absent otherwise.
+   */
+  assumed?: true;
   /** How far the real jaws may differ from these numbers, mm. Obstacles are inflated by it. */
   uncertainty: Mm;
   /**
