@@ -593,6 +593,18 @@ export interface EngraveRunState {
    * the run — the last generated result is still on screen, marked as before.
    */
   cancelGenerate: () => void;
+  /**
+   * #1270 — THE MEASURED CUTTER PICK IS PART OF THE PRESS. Generate with no cutter chosen first runs
+   * the measured pick, which can take minutes over a large inventory; the run state did not exist
+   * until after it, so the button stayed live and nothing moved. `beginPick` puts the run into
+   * `generating` at once, with a progress line, so the button is disabled and a second press is
+   * refused; it returns the run's token, or null when a run is already in flight. After the pick,
+   * `pickIsCurrent(token)` says whether the press was cancelled meanwhile.
+   */
+  beginPick: () => number | null;
+  /** #1270 — the pick's own words and count, on the run's progress line. */
+  pickProgress: (label: string, done?: number, total?: number) => void;
+  pickIsCurrent: (token: number) => boolean;
   setAcknowledged: (v: boolean) => void;
   /** #797 — the one statement, given for `hash` (the package the tick covers). */
   acknowledgeProgram: (hash: string) => void;
@@ -1751,6 +1763,23 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             : phaseBeforeRun,
       });
     },
+    beginPick: () => {
+      const phase = get().phase;
+      if (phase === 'generating' || phase === 'simulating' || phase === 'checking') return null;
+      phaseBeforeRun = phase;
+      set({
+        ...empty,
+        phase: 'generating',
+        generated: get().generated,
+        progress: { stage: 'prepare', label: 'choosing the cutter from your bits' },
+      });
+      return seq;
+    },
+    pickProgress: (label, done, total) => {
+      if (get().phase !== 'generating') return;
+      set({ progress: { stage: 'prepare', label, ...(done === undefined ? {} : { done }), ...(total === undefined ? {} : { total }) } });
+    },
+    pickIsCurrent: (token) => seq === token && get().phase === 'generating',
     setAcknowledged: (v) => set(v ? { acknowledged: true } : { acknowledged: false, acknowledgedFor: null }),
     acknowledgeProgram: (hash) => set({ acknowledged: true, acknowledgedFor: hash }),
     reportDiagnostic: (diagnostic) =>
