@@ -45,7 +45,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
-import { eligibleByReach, postedDepthMm, postedReachShortfall } from './reach';
+import { eligibleByReach, postedDepthMm, postedReachShortfall, roundedDepthWords } from './reach';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -5534,25 +5534,38 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // caught per region/rim and stated in `unplanned` in `sequence.ts`'s step-failure shape; the
   // other stages and regions still plan. Returns whether the stage planned.
   const unplanned: SequenceStepFailure[] = [];
-  // #1288 — does the outcome's POSTED depth stay within the cutter's usable length (`reach.ts`)? When not,
-  // the region is stated with the existing `goal-finish-unreachable` sentence and nothing is posted.
-  const postedWithinReach = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, outcome: OpOutcome): boolean => {
+  // #1288 — does the outcome's POSTED depth (EXACT) stay within the cutter's usable length (`reach.ts`)?
+  // A rest ball that does not is NOT USED: it says only that, and why (an info statement), and the next
+  // eligible ball is tried. The "nothing reaches — it needs …" clause is written ONCE per region, after the
+  // candidates are exhausted (`reachClauseFor`); a pencil has no candidates to yield to, so it carries it at once.
+  type ReachRefusal = { cutter: Tool; postedMm: number; usable: number };
+  const reachClauseFor = (refused: readonly ReachRefusal[]): string => {
+    const deepest = Math.max(...refused.map((r) => r.postedMm));
+    const diameters = refused.map((r) => cuttingDiameter(r.cutter)).filter((d): d is number => d !== null);
+    const diameter = diameters.length === 0 ? null : Math.min(...diameters);
+    const needMm = Math.ceil(deepest * 10 - 1e-6) / 10;
+    // A reach-only check names no product to buy: the app names one only when a plan with it was evaluated and came out better.
+    return `no cutter on the shelf reaches it — it needs a ⌀${diameter === null ? '?' : Number(diameter.toFixed(2))} mm ball with at least ${needMm} mm of reach`;
+  };
+  const postedWithinReach = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, outcome: OpOutcome, refused?: ReachRefusal[]): boolean => {
     const postedMm = postedDepthMm(outcome.ir.operations);
     const usable = postedReachShortfall(cutter, postedMm);
     if (usable === null) return true;
     const cutterName = cutter.name || cutter.shape;
-    // What would finish it (9b's ruling): the REACH it would take, never a product. A reach-only check
-    // names no cutter to buy: the app names a product only when a plan with it was evaluated and came
-    // out better, and this is not that.
-    const diameter = cuttingDiameter(cutter);
-    const needMm = Math.ceil(postedMm * 10 - 1e-6) / 10;
-    const text =
-      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm; no cutter on the shelf reaches it — it needs a ⌀${diameter === null ? '?' : Number(diameter.toFixed(2))} mm ball with at least ${needMm} mm of reach`;
+    const cut = `its ${kind} cuts ${roundedDepthWords(postedMm)} mm below the stock top, past its usable length ${usable} mm`;
+    if (kind === 'rest' && refused !== undefined) {
+      refused.push({ cutter, postedMm, usable });
+      const text = `"${ref.id}": the ${cutterName} was not used — ${cut}`;
+      notes.push(text);
+      statements.push({ severity: 'info', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: postedMm, usableMm: usable });
+      return false;
+    }
+    const text = `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — ${cut}; ${reachClauseFor([{ cutter, postedMm, usable }])}`;
     notes.push(text);
     statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: postedMm, usableMm: usable });
     return false;
   };
-  const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome): boolean => {
+  const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome, refused?: ReachRefusal[]): boolean => {
     opts.signal?.throwIfAborted();
     opts.onStage?.(kind);
     try {
@@ -5560,7 +5573,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // #1288 — THE POSTED DEPTH IS THE AUTHORITY for every cutter that posts moves: a rest ball or a
       // pencil whose posted moves go deeper than its usable length is not posted (the finisher has
       // the same check below). The region keeps the existing `goal-finish-unreachable` sentence.
-      if ((kind === 'rest' || kind === 'pencil') && !postedWithinReach(kind, cutter, ref, outcome)) return false;
+      if ((kind === 'rest' || kind === 'pencil') && !postedWithinReach(kind, cutter, ref, outcome, refused)) return false;
       pushStage(kind, ref, outcome);
       return true;
     } catch (err) {
@@ -6341,8 +6354,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // The attempt's own contract: a throwing stage does not sink the plan (#959 item 5).
       unplanned.push({ kind: 'finish', cutterKey: cutterKeyOf(finishCutter), regionIds: [ref.id], reason: finishError });
     } else {
-      const cutFloorMm = postedDepthMm(finishOutcome!.ir.operations);
-      const finisherReach = postedReachShortfall(finishCutter, cutFloorMm);
+      const cutFloorExact = postedDepthMm(finishOutcome!.ir.operations);
+      const cutFloorMm = Number(cutFloorExact.toFixed(1));
+      const finisherReach = postedReachShortfall(finishCutter, cutFloorExact);
       if (finisherReach !== null) {
         const cutterName = finishCutter.name || finishCutter.shape;
         const text =
@@ -6366,6 +6380,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const restCandidates: readonly Tool[] = opts.restBalls ?? [];
     let restPosted = false;
     let restPostedTool: Tool | undefined;
+    const restRefused: ReachRefusal[] = [];
     for (const restBallTool of restCandidates) {
       if (restPosted) break;
       const ballMaskRadiusMm = (cuttingDiameter(restBallTool) ?? 0) / 2;
@@ -6411,7 +6426,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (restBallMemo !== undefined) {
         // The crease pass rides this CL; a memo hit must hand it over exactly as the miss does.
         restBallCl = restBallMemo.cl;
-        if (postedWithinReach('rest', restBallTool, ref, restBallMemo.outcome)) {
+        if (postedWithinReach('rest', restBallTool, ref, restBallMemo.outcome, restRefused)) {
           pushStage('rest', ref, restBallMemo.outcome, true);
           restPosted = true;
           restPostedTool = restBallTool;
@@ -6453,11 +6468,17 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           });
           memoStore(restBallKey, withOverrun(out, restOverrun, ballMaskRadiusMm), { cl: restBallCl });
           return withOverrun(out, restOverrun, ballMaskRadiusMm);
-        });
+        }, restRefused);
       }
       if (restPosted) restPostedTool ??= restBallTool;
       // A rest ball that did not post leaves no CL for the crease pass to ride (it rides the finish's).
       if (!restPosted) restBallCl = undefined;
+    }
+    // The candidates are exhausted and none posted: say once, from what is left unreached, what it would take.
+    if (!restPosted && restRefused.length > 0) {
+      const text = `"${ref.id}": not finished by a rest ball — ${restRefused.length} tried, none reaches; ${reachClauseFor(restRefused)}`;
+      notes.push(text);
+      statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: Math.max(...restRefused.map((r) => r.postedMm)), usableMm: Math.max(...restRefused.map((r) => r.usable)) });
     }
 
     // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a

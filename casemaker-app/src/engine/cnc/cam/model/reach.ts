@@ -40,11 +40,16 @@ export function eligibleByReach<T extends Tool>(tools: readonly T[], depthMm: nu
   return { tools: unstated, unstated: unstated.length > 0 };
 }
 
-/** The deepest posted tip below the stock top (0 when nothing is posted), mm — the authority for a cutter's reach. */
+/** The deepest posted tip below the stock top (0 when nothing is posted), mm — EXACT: the authority for a cutter's reach compares this, never a rounded value. */
 export function postedDepthMm(operations: readonly { moves: readonly { z: number }[] }[]): number {
   let deepest = 0;
   for (const operation of operations) for (const move of operation.moves) deepest = Math.min(deepest, move.z);
-  return Number((-deepest).toFixed(1));
+  return -deepest;
+}
+
+/** A depth for a SENTENCE only (0.1 mm); the comparison above never uses it. */
+export function roundedDepthWords(depthMm: number): string {
+  return String(Number(depthMm.toFixed(1)));
 }
 
 /** Null when the posted depth is within the cutter's reach (or it states none); else the usable length it exceeds. */

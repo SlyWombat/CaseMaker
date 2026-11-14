@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { makeClipperOffset } from '../../src/engine/cnc/cam/engraveJob';
 import { planCurvedForTree } from '../../src/engine/cnc/cam/model/plan';
-import { eligibleByReach, postedDepthMm, postedReachShortfall, statedReach, usableLengthMm } from '../../src/engine/cnc/cam/model/reach';
+import { eligibleByReach, postedDepthMm, postedReachShortfall, roundedDepthWords, statedReach, usableLengthMm } from '../../src/engine/cnc/cam/model/reach';
 import type { FeatureTree } from '../../src/engine/cnc/cam/model/features';
 import type { RapidEstimate } from '../../src/engine/cnc/cam/ir';
 import type { Polygons } from '../../src/engine/cnc/cam/pocket';
@@ -135,9 +135,17 @@ describe('#1288 one usable-length function', () => {
     expect(eligibleByReach([four], 5.7)).toEqual({ tools: [], unstated: false });
   });
 
+  it('the authority compares the EXACT posted depth: 4.04 mm with a 4 mm cutter is refused (rounding is for the sentence only)', () => {
+    const exact = postedDepthMm([{ moves: [{ z: -4.04 }] }]);
+    expect(exact, 'the depth is exact, not rounded to 0.1 mm').toBeCloseTo(4.04, 9);
+    expect(postedReachShortfall(ballOf(1, { fluteLength: 4 }), exact), '4.04 past a 4 mm flute').toBe(4);
+    expect(postedReachShortfall(ballOf(1, { fluteLength: 4 }), postedDepthMm([{ moves: [{ z: -4 }] }])), 'exactly at the flute passes').toBeNull();
+    expect(roundedDepthWords(5.732)).toBe('5.7');
+  });
+
   it('the posted depth and the shortfall', () => {
-    expect(postedDepthMm([{ moves: [{ z: 5 }, { z: -5.732 }] }, { moves: [{ z: -2 }] }])).toBe(5.7);
-    expect(postedReachShortfall(ballOf(1, { fluteLength: 4 }), 5.7)).toBe(4);
+    expect(postedDepthMm([{ moves: [{ z: 5 }, { z: -5.732 }] }, { moves: [{ z: -2 }] }])).toBeCloseTo(5.732, 9);
+    expect(postedReachShortfall(ballOf(1, { fluteLength: 4 }), 5.732)).toBe(4);
     expect(postedReachShortfall(ballOf(1, { fluteLength: 6 }), 5.7)).toBeNull();
     expect(postedReachShortfall(ballOf(1, { fluteLength: null }), 5.7)).toBeNull();
   });
@@ -158,6 +166,14 @@ describe('#1288 the rest ball: the posted depth decides', () => {
     expect(rests.some((op) => op.outcome.cutter === longBall.id), 'the long ball did not take the rest').toBe(true);
     expect(rests.some((op) => op.outcome.cutter === shortBall.id)).toBe(false);
     expect(Math.abs(deepestOf(result, 'rest'))).toBeGreaterThan(3);
+    // The yielding ball says only that it was not used, and why — NEVER "no cutter reaches" while a later ball takes the region.
+    const said = result.statements.filter((st) => st.code === 'goal-finish-unreachable');
+    expect(said.length, 'the yielding ball is stated').toBeGreaterThan(0);
+    for (const st of said) {
+      expect(st.text).toMatch(/not used/);
+      expect(st.text, 'false: the long ball took the region').not.toMatch(/no cutter on the shelf reaches it/);
+      expect(st.severity).toBe('info');
+    }
   }, 180_000);
 
   it('an unstated-length ball is tried only when no stated one reaches (the eligibility the model plan feeds this pipeline)', () => {
@@ -176,12 +192,21 @@ describe('#1288 the rest ball: the posted depth decides', () => {
   }, 180_000);
 });
 
-describe('#1288 the refusal says what would finish the region — the reach, never a product', () => {
-  it('it says the reach it would take and names no cutter to buy (a reach-only check recommends no product)', () => {
+describe('#1288 the refusal says what would finish the region — once, after the candidates are exhausted', () => {
+  it('when no rest ball reaches: ONE "needs" clause per region, the reach it would take, no product', () => {
     const result = plan([shortBall]);
-    const said = result.statements.find((s) => s.code === 'goal-finish-unreachable');
-    expect(said?.text).toMatch(/no cutter on the shelf reaches it — it needs a ⌀1 mm ball with at least 4\.1 mm of reach/);
-    // Never a product: not the catalogue, not a cutter's name.
-    expect(said?.text).not.toMatch(/catalogue|buy|add it to the shop/);
+    const said = result.statements.filter((st) => st.code === 'goal-finish-unreachable' && st.severity === 'warning');
+    expect(said, 'one warning for the region').toHaveLength(1);
+    expect(said[0]!.text).toMatch(/no cutter on the shelf reaches it — it needs a ⌀1 mm ball with at least 4\.1 mm of reach/);
+    expect(said[0]!.text).not.toMatch(/catalogue|buy|add it to the shop/);
+  }, 180_000);
+
+  it('two balls both refused: still ONE clause, after both, and each ball is named once as not used', () => {
+    const shorter = ballOf(1, { number: 7, id: 'shorter-1', name: 'shorter ⌀1 × 2', fluteLength: 2 });
+    const result = plan([shortBall, shorter]);
+    const warnings = result.statements.filter((st) => st.code === 'goal-finish-unreachable' && st.severity === 'warning');
+    const infos = result.statements.filter((st) => st.code === 'goal-finish-unreachable' && st.severity === 'info');
+    expect(warnings).toHaveLength(1);
+    expect(infos.map((st) => st.text).join('\n')).toMatch(/short ⌀1 × 3[\s\S]*shorter ⌀1 × 2|shorter ⌀1 × 2[\s\S]*short ⌀1 × 3/);
   }, 180_000);
 });
