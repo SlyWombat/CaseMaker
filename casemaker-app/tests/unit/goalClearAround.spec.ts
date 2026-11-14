@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { BALL_TOOL, BASE_Z, PITCH, STOCK_RECT, goal, job, zOut } from './helpers/goalClearAround';
+import { NO_SHOP } from '../tools/noShop';
 
 describe('#764 — the item goal is cleared around itself', () => {
   it('#982 pin — a ball-only set plans the item through planModelCam (no flat: the ball floor pass)', async () => {
@@ -20,7 +21,7 @@ describe('#764 — the item goal is cleared around itself', () => {
 
   it('“the whole blank” clears the stock’s own rectangle to the base plane', () => {
     const hf = sampleGoalHeightfield(goal(zOut), {
-      pitchMm: PITCH,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: PITCH,
       clear: { kind: 'whole' },
       stockRect: STOCK_RECT,
       baseZ: BASE_Z,

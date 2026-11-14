@@ -34,6 +34,7 @@ import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { buildBinaryStl } from '@/workers/export/stlBinary';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const ORGANIZER = process.env.CM_959_ORGANIZER_STEP;
 const FLAT3175: Tool = flatEndMill(3.175, { number: 1, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 })  // #1195 — reaches the 27.2 mm tray profile;
@@ -147,7 +148,7 @@ async function judge(placed: Placed, output: ModelPlanOutput): Promise<{ counted
     }
   }
   expect(programs.length, 'the plan posted no program').toBeGreaterThan(0);
-  const goal = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+  const goal = sampleGoalHeightfield(placed.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
   const { top, clAt } = topOf(programs, goal);
   const report = checkGoalCutInto(goal, top, {
     passCoverage: 0.95,

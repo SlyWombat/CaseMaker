@@ -33,6 +33,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from './noShop';
 
 const BAND_MM = 0.1;
 
@@ -142,7 +143,7 @@ function main(): void {
   const pics = JSON.parse(readFileSync(args.pics, 'utf8')) as PicsDoc;
   const plan = JSON.parse(readFileSync(args.plan, 'utf8')) as PlanDoc;
   const programs = plan.perSetup[0]?.programs ?? [];
-  const goal = sampleGoalHeightfield(pics.target, { pitchMm: 0.1, stockTopZ: 0 });
+  const goal = sampleGoalHeightfield(pics.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
   const cellArea = goal.pitch * goal.pitch;
 
   const restIndex = programs.findIndex((ir) => (ir.tool.id ?? ir.tool.name) === args.rest);

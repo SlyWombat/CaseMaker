@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 import { tl } from './helpers/manifoldExec';
 import { buildRandomPart, type PartKind, type RandomPart } from '../tools/randomParts';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { NO_SHOP } from '../tools/noShop';
 
 const SEEDS = [1, 2, 3] as const;
 const KINDS: PartKind[] = ['rectilinear', 'filleted', 'sloped', 'filletedFloor', 'scooped', 'figure'];
@@ -87,7 +88,7 @@ describe('#964 the widened seeded parts', () => {
         // bottom, or the figure's apex.
         const expects = part.expects;
         expect(expects?.centreZ, `${kind} seed ${seed}: no centre expectation`).toBeDefined();
-        const field = sampleGoalHeightfield(part.target, { pitchMm: 0.1, stockTopZ: 0 });
+        const field = sampleGoalHeightfield(part.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
         const centre = nearestCell(field, 0, 0);
         expect(centre.covered, `${kind} seed ${seed}: the goal does not cover the centre`).toBe(true);
         expect(

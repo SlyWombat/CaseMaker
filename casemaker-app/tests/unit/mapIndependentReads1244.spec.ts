@@ -106,8 +106,8 @@ describe('#1244 the map-independent reads are identical with no map and with eve
     const job = rod();
     expect(faceWorkOf(job, MOVED)).toEqual(faceWorkOf(job, null));
     expect(faceWorkOf(job, MOVED)).not.toBeNull();
-    expect(planCutters(job, null, [], [], undefined, undefined, null, null, MOVED)).toEqual(
-      planCutters(job, null, [], [], undefined, undefined, null, null, null),
+    expect(planCutters(job, null, [], [], MOVED, undefined, undefined, null, null)).toEqual(
+      planCutters(job, null, [], [], null, undefined, undefined, null, null),
     );
   });
 });

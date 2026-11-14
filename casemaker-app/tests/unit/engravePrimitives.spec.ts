@@ -231,7 +231,7 @@ describe('#435 — setups see the primitives that actually cut', () => {
     const measure = (): LabelEngravability[] => [
       { labelId: 'box', glyphArea: 200, openedArea: 50, ratio: 0.25, emptyChars: [], outsideArea: 0, polygons: [] },
     ];
-    const reach = reachabilityFor(jobWith([box, cyl, sphere]), [tool], [], measure);
+    const reach = reachabilityFor(jobWith([box, cyl, sphere]), [tool], [], null, measure);
     // The refused sphere is not a region; the two cuttable forms are, with the names the findings
     // use, so the run sheet's "cannot enter" sentence can name them rather than print an id.
     expect(reach.items.map((i) => [i.id, i.name, i.depth])).toEqual([

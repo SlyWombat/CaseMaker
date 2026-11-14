@@ -432,7 +432,7 @@ describe('preflight: reach (recommendTool`s verdict)', () => {
   it('surfaces the owner`s reason when no cutter on the bench can take the job', () => {
     const job = defaultEngraveJob();
     // The real owner, given a bench with nothing on it — `recommendTool` answers with `key: null`.
-    const reach = reachabilityFor(job, [], [], () => []);
+    const reach = reachabilityFor(job, [], [], null, () => []);
     expect(reach.recommendation.key).toBeNull();
 
     const row = rowsFor(job, { reach }).find((r) => r.owner === 'reach')!;

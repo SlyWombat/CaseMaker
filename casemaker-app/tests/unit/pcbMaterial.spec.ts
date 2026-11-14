@@ -24,6 +24,7 @@ import { feedsFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { PCB_COPPER_MM, stockFromMade } from '@/engine/cnc/stockStart';
 import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill } from '@/engine/cnc/tool';
+import { NO_SHOP } from '../tools/noShop';
 
 const CATALOGUE = JSON.parse(
   readFileSync(join(process.cwd(), 'tests/unit/fixtures/pcb/catalogue-pcb.json'), 'utf8'),
@@ -57,7 +58,7 @@ describe('PCB, the material and its copper (#743 P-1)', () => {
   });
 
   it("answers Makera's own PCB rows for the engraver: 12 000 / 500 / 200 / 0.1", () => {
-    const feeds = feedsFor(CATALOGUE.feeds, 'pcb', ENGRAVER, Z1);
+    const feeds = feedsFor(CATALOGUE.feeds, 'pcb', ENGRAVER, Z1, NO_SHOP.refuse);
     expect(feeds.ok).toBe(true);
     if (!feeds.ok) return;
     expect(feeds.params.rpm).toBe(12_000);
@@ -68,7 +69,7 @@ describe('PCB, the material and its copper (#743 P-1)', () => {
   });
 
   it('refuses a PCB job with no catalogue, naming the material, rather than inventing numbers', () => {
-    const feeds = feedsFor([], 'pcb', ENGRAVER, Z1);
+    const feeds = feedsFor([], 'pcb', ENGRAVER, Z1, NO_SHOP.refuse);
     expect(feeds.ok).toBe(false);
     if (feeds.ok) return;
     expect(feeds.reason).toContain('PCB');

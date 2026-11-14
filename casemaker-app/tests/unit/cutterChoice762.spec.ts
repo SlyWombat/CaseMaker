@@ -120,7 +120,7 @@ describe('#762 the picker reads the item kind first', () => {
       enabled: true,
       role: 'goal',
     };
-    const plan = planCutters(job, NO_REACH, [FLAT_3, BALL_2], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_3, BALL_2], [], null);
     expect(plan.cutters).toHaveLength(1);
     expect(plan.cutters[0]!.shape).toBe('ball');
     expect(plan.cutters[0]!.key).toBe('ball-2');
@@ -131,14 +131,14 @@ describe('#762 the picker reads the item kind first', () => {
     job.stock.thickness = 20;
     job.shapes = [{ id: 'part', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 4, enabled: true, construction: true, width: 80, height: 40, cornerRadius: 0 }];
     job.cutouts = [{ kind: 'cutout', id: 'cut', enabled: true, of: 'part', side: 'outside', inset: 0, tabs: { count: 0, width: 0, height: 0 } }];
-    const plan = planCutters(job, NO_REACH, [FLAT_SHORT, FLAT_LONG], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_SHORT, FLAT_LONG], [], null);
     expect(plan.cutters[0]!.key).toBe('flat-long');
   });
 
   it('gives a bore a cutter narrower than the hole', () => {
     const job = base();
     job.drills = [{ id: 'b', kind: 'drill', position: { x: 20, y: 20 }, rotation: 0, depth: 5, enabled: true, mode: 'bore', diameter: 2.6, through: false }];
-    const plan = planCutters(job, NO_REACH, [FLAT_3, FLAT_2], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_3, FLAT_2], [], null);
     expect(plan.cutters[0]!.diameter).toBe(2);
   });
 
@@ -146,7 +146,7 @@ describe('#762 the picker reads the item kind first', () => {
     const job = base();
     job.shapes = [{ id: 'part', kind: 'rect', position: { x: 35, y: 25 }, rotation: 0, depth: 6, enabled: true, construction: true, width: 50, height: 30, cornerRadius: 4 }];
     job.chamfers = [{ kind: 'chamfer', id: 'bev', enabled: true, of: 'part', side: 'outside', width: 1 }];
-    const plan = planCutters(job, NO_REACH, [FLAT_3, ENGRAVER, CHAMFER_90], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_3, ENGRAVER, CHAMFER_90], [], null);
     expect(plan.cutters[0]!.key).toBe('chamfer-90');
   });
 
@@ -158,7 +158,7 @@ describe('#762 the picker reads the item kind first', () => {
     // The 10° half-angle cone reaches the 1.5 mm width but would tip 8.5 mm down, past the 5 mm
     // pocket floor; the 90° bit tips 1.5 mm down and reaches the width — `chamfer-too-deep`'s
     // rule, in the pick.
-    const plan = planCutters(job, NO_REACH, [FLAT_LONG, ENGRAVER_6_SHALLOW, CHAMFER_90], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_LONG, ENGRAVER_6_SHALLOW, CHAMFER_90], [], null);
     const cone = plan.cutters.find((c) => c.shape === 'chamfer' || c.shape === 'engraving');
     expect(cone?.key).toBe('chamfer-90');
   });
@@ -166,7 +166,7 @@ describe('#762 the picker reads the item kind first', () => {
   it('gives a thread a thread mill that fits its pilot', () => {
     const job = base();
     job.threads = [{ kind: 'thread', id: 't', position: { x: 20, y: 20 }, enabled: true, size: 'M5', standard: 'metric', classFit: '6H', depth: 5, through: false }];
-    const plan = planCutters(job, NO_REACH, [FLAT_3, THREAD_M5], []);
+    const plan = planCutters(job, NO_REACH, [FLAT_3, THREAD_M5], [], null);
     expect(plan.cutters[0]!.key).toBe('thread-m5');
   });
 
@@ -184,11 +184,11 @@ describe('#762 the picker reads the item kind first', () => {
         reachRow('engraver', 'engraving', { vCarve: true, qualifies: true }),
       ],
     };
-    const plan = planCutters(job, reach, [FLAT_3, ENGRAVER], []);
+    const plan = planCutters(job, reach, [FLAT_3, ENGRAVER], [], null);
     expect(plan.cutters[0]!.shape).toBe('engraving');
     // The same flat, when it DOES keep the text, wins on its larger stated diameter.
     const keeps: Reachability = { ...NO_REACH, cutters: [reachRow('flat-3', 'flat', { qualifies: true }), reachRow('engraver', 'engraving', { vCarve: true })] };
-    const flatPlan = planCutters(job, keeps, [FLAT_3, ENGRAVER], []);
+    const flatPlan = planCutters(job, keeps, [FLAT_3, ENGRAVER], [], null);
     expect(flatPlan.cutters[0]!.key).toBe('flat-3');
   });
 
@@ -213,7 +213,7 @@ describe('#762 the picker reads the item kind first', () => {
     const job = base();
     job.labels = [{ id: 'txt', text: 'X', font: 'sans-default', weight: 'regular', size: 5, position: { x: 50, y: 30 }, rotation: 0, depth: 0.5, enabled: true }];
     const conditions = new Map<string, ConditionSummary>([['flat-3', { usable: 0, note: 'every copy is broken', best: null } as unknown as ConditionSummary]]);
-    const plan = planCutters(job, NO_REACH, [FLAT_3], [], conditions);
+    const plan = planCutters(job, NO_REACH, [FLAT_3], [], null, conditions);
     expect(plan.cutters).toEqual([]);
     expect(plan.unassigned[0]!.reason).toContain('marked broken');
   });
@@ -225,7 +225,7 @@ describe('#762 the reach filter is the generator’s own', () => {
     job.stock.thickness = 20;
     job.shapes = [{ id: 'part', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 4, enabled: true, construction: true, width: 80, height: 40, cornerRadius: 0 }];
     job.cutouts = [{ kind: 'cutout', id: 'cut', enabled: true, of: 'part', side: 'outside', inset: 0, tabs: { count: 0, width: 0, height: 0 } }];
-    const rec = recommendTool(job, [FLAT_SHORT], [], () => []);
+    const rec = recommendTool(job, [FLAT_SHORT], [], null, () => []);
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('reaches this job’s deepest cut');
   });

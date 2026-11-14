@@ -1322,7 +1322,7 @@ export function tapeDefaultsFor(defaults: ShopDefaults | null | undefined): Tape
 }
 
 /** A new taped job's holding: the design's defaults, `source: 'default'`, nothing measured. */
-export function defaultTapeHold(defaults: TapeDefaults = TAPE_DEFAULTS): TapeHold {
+export function defaultTapeHold(defaults: TapeDefaults): TapeHold {
   return {
     width: defaults.widthMm,
     thickness: defaults.thicknessMm,

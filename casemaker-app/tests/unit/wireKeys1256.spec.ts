@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { bedTapeHold } from '@/components/welcome/holdingMounts';
 import { traceStartFrom } from '@/components/panels/traceStart';
 import { TRACE_DEFAULTS } from '@/engine/import/outlineImport';
+import { NO_SHOP } from '../tools/noShop';
 import { TAPE_DEFAULTS, tapeDefaultsFor } from '@/engine/cnc/engrave/jobSetup';
 import { feedCatalogueSnapshot, refuseFractionOf } from '@/engine/cnc/feeds';
 import { engraveFeedsFor } from '@/engine/cnc/engrave/feeds';
@@ -37,7 +38,7 @@ describe('#1256 tape.stripWidthMm — the tape a bed job starts from', () => {
   it('a shop width reaches the hold a bed with no roll starts from; a profile’s own roll still wins', () => {
     expect(tapeDefaultsFor(set('tape.stripWidthMm', 30)).widthMm).toBe(30);
     expect(bedTapeHold(null, null, 2, 30).width).toBe(30);
-    expect(bedTapeHold(null, null).width).toBe(TAPE_DEFAULTS.widthMm);
+    expect(bedTapeHold(null, null, undefined, NO_SHOP.tapeStripWidthMm).width).toBe(TAPE_DEFAULTS.widthMm);
     const roll = { widthMm: 48, thicknessMm: 0.2, provenance: 'house roll' };
     const profile = { consumables: { tape: roll }, placements: [] } as unknown as BedProfile;
     expect(bedTapeHold(profile, null, 2, 30).width).toBe(48);
@@ -53,7 +54,7 @@ describe('#1256 clamp.refuseFraction — one band for the panel, the pick and th
     // A hand-typed feed 20 % past the machine's ceiling: the default band clamps it, a 10 % band refuses it.
     const over = { feed: Z1.maxCutFeed * 1.2 };
     const ask = (defaults: ShopDefaults | null) =>
-      engraveFeedsFor({ defaults }, feedCatalogueSnapshot(), 'softwood', flatEndMill(3.175), Z1, over);
+      engraveFeedsFor({}, feedCatalogueSnapshot(), defaults, 'softwood', flatEndMill(3.175), Z1, over);
     expect(ask(null).ok).toBe(true);
     expect(ask(set('clamp.refuseFraction', 0.1)).ok).toBe(false);
   });

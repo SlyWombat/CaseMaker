@@ -60,17 +60,17 @@ describe('#834 the face work and the cutters that fit it', () => {
 
   it('picks the WIDEST fitting flat end for the hex — not the ⌀1 mm engraver', () => {
     const job = faceJob([hex]);
-    const rec = recommendTool(job, LIB, [], () => []);
+    const rec = recommendTool(job, LIB, [], null, () => []);
     expect(rec.key).toBe('inv:flat-3.175');
     expect(rec.reason).toContain('10 mm faces');
-    const plan = planCutters(job, null, LIB, []);
+    const plan = planCutters(job, null, LIB, [], null);
     expect(plan.cutters.map((c) => c.key)).toEqual(['inv:flat-3.175']);
     expect(plan.cutters[0]!.items).toEqual([]);
   });
 
   it('a cross-hole picks the cutter that drills its diameter, and says so', () => {
     const job = faceJob([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }]);
-    const pick = faceCutterPick(job, LIB, [])!;
+    const pick = faceCutterPick(job, LIB, [], null)!;
     expect(pick.entry.key).toBe('inv:flat-3.175');
     expect(pick.matchedHoles).toBe(true);
     expect(pick.reason).toContain('drills the ⌀3.175 mm cross-hole');
@@ -78,7 +78,7 @@ describe('#834 the face work and the cutters that fit it', () => {
 
   it('when no cutter matches the hole, it picks for the face and says what the hole comes out at', () => {
     const job = faceJob([{ id: 'h', kind: 'cross-hole', a: 90, diameter: 2 }]);
-    const pick = faceCutterPick(job, LIB, [])!;
+    const pick = faceCutterPick(job, LIB, [], null)!;
     expect(pick.matchedHoles).toBe(false);
     expect(pick.reason).toContain('No cutter in the shop matches ⌀2 mm');
     expect(pick.reason).toContain('⌀3.175 mm');
@@ -123,9 +123,9 @@ describe('#834 the face work and the cutters that fit it', () => {
     job.shapes = [
       { id: 's1', kind: 'circle', position: { x: 20, y: Math.PI * 10 }, rotation: 0, depth: 0.5, enabled: true, diameter: 8 },
     ];
-    const plan = planCutters(job, null, LIB, []);
+    const plan = planCutters(job, null, LIB, [], null);
     expect(plan.faceToolKey).toBe('inv:flat-3.175'); // the face rule's pick (widest fitting)
-    const plans = candidatePlans(job, LIB, []);
+    const plans = candidatePlans(job, LIB, [], null);
     expect(new Set(plans.map((p) => p.faceToolKey))).toEqual(new Set(['inv:flat-3.175', 'inv:flat-1']));
     // The evaluator prices the FACE cutter too: the finer one is faster here, so it must win.
     const evaluate = (candidate: { faceToolKey?: string }) => ({
@@ -136,7 +136,7 @@ describe('#834 the face work and the cutters that fit it', () => {
       toolChanges: 0,
       risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
     });
-    const pick = picked(await smartPick(job, LIB, [], evaluate as never));
+    const pick = picked(await smartPick(job, LIB, [], null, evaluate as never));
     expect(pick.chosen.plan.faceToolKey).toBe('inv:flat-1');
     // …and the plan is written where the face program reads it: the first setup's faceToolKey.
     const applied = applyCutterPlanToJob(job, pick.chosen.plan);
@@ -145,7 +145,7 @@ describe('#834 the face work and the cutters that fit it', () => {
 
   it('the search measures every fitting cutter and chooses the fastest at equal fidelity', async () => {
     const job = faceJob([hex]);
-    const plans = candidatePlans(job, LIB, []);
+    const plans = candidatePlans(job, LIB, [], null);
     // The ⌀6 has no feeds row for softwood, so it is not a candidate; the widest priced flat wins.
     expect(plans.map((p) => p.cutters[0]!.key)).toEqual(['inv:flat-3.175', 'inv:flat-1']);
     // A fake evaluator: the faces are exact for both, and the wide cutter's program is faster.
@@ -157,7 +157,7 @@ describe('#834 the face work and the cutters that fit it', () => {
       toolChanges: 0,
       risk: { reachMarginMm: null, holderClearanceMm: null, chipLoadRatio: null },
     });
-    const pick = picked(await smartPick(job, LIB, [], evaluate as never));
+    const pick = picked(await smartPick(job, LIB, [], null, evaluate as never));
     expect(pick.chosen.plan.cutters[0]!.key).toBe('inv:flat-3.175');
     expect(pick.chosen.worstFidelity).toBe(1);
   });

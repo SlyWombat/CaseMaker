@@ -23,6 +23,7 @@
  * (`fullFinalists`, default 3); slice A caches both, so nothing is simulated twice.
  */
 
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EvaluatedItem, PlanEvaluation } from '@/workers/sim/planEvaluate';
 import { memTrace } from '@/engine/cnc/memTrace';
 import type { CandidatePlan, PinchFact } from '@/workers/sim/planEvaluate';
@@ -183,8 +184,6 @@ export interface SmartPickOptions {
    * a Manifold toplevel; a caller with none leaves it absent and reads the old depth.
    */
   floors?: ReadonlyMap<string, number> | null;
-  /** #1256 — the shop's `clamp.refuseFraction`: every refusal the search makes is the cut's own. Absent: the labelled fallback. */
-  refuseFraction?: number;
 }
 
 /** One library cutter the search could not use, and why — the refusal's evidence (#910). */
@@ -264,17 +263,21 @@ export function rulePlanOf(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
   /** #940 — the document's supporting floors (#748); a cone's reach is measured from its floor. */
   floors?: ReadonlyMap<string, number> | null,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): CandidatePlan | null {
   // #1172 item 5 — a bit whose "Use this bit in plans" is OFF is not asked for by any plan (the
   // flag rides on its inventory entry; absent is ON).
   tools = tools.filter((t) => t.useInPlans !== false);
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors, null, refuseFraction);
+  const base = planCutters(job, null, tools, catalogue, defaults, conditions ?? undefined, table ?? undefined, null, floors);
   if (base.cutters.length === 0) return null;
   return planFrom(base.cutters, tools, ownedKeysOf(tools, conditions), base.faceToolKey, base.goalRoughKey);
 }
@@ -313,12 +316,16 @@ export function candidatePlans(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
   /** #940 — the document's supporting floors (#748), as `planCutters` takes them. */
   floors?: ReadonlyMap<string, number> | null,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): CandidatePlan[] {
   // #1172 item 5 — see rulePlanOf: the plans switch removes a bit from every candidate.
   tools = tools.filter((t) => t.useInPlans !== false);
@@ -375,13 +382,13 @@ export function candidatePlans(
   // The kind plan: one cutter per kind, and — when the reach table is absent — no rest pair. It is
   // the rule-based answer; the search treats it as one candidate among the measured ones. A MIXED
   // NAMED job does not take it: that plan would replace the cutter the operator named.
-  const base = planCutters(job, null, tools, catalogue, conditions ?? undefined, table ?? undefined, null, floors, null, refuseFraction);
+  const base = planCutters(job, null, tools, catalogue, defaults, conditions ?? undefined, table ?? undefined, null, floors);
   const basePlan = planFrom(base.cutters, tools, owned, base.faceToolKey);
   // #842 — A MIXED JOB'S FACE CUTTER IS PART OF THE PLAN. The face rule names one; the search
   // also tries the other fitting face cutters, so a human finding a better one is a selector bug
   // no more. Each face variant rides the rule's item plan.
   const mixedFace = jobHasItems(job)
-    ? faceCutterOptions(job, tools, catalogue, conditions ?? undefined, table ?? undefined, true, true, refuseFraction)
+    ? faceCutterOptions(job, tools, catalogue, defaults, conditions ?? undefined, table ?? undefined, true, true)
     : null;
   const defaultFaceKey = base.faceToolKey;
   if (!mixedNamed && basePlan.cutters.length > 0) {
@@ -406,7 +413,7 @@ export function candidatePlans(
   // the search must also measure the narrower ones, because the choice is by simulated TIME at
   // equal fidelity (any fitting width leaves the same face). Each candidate is one cutter owning
   // no items — there are none; its program is the indexed face list.
-  const face = faceCutterOptions(job, tools, catalogue, conditions ?? undefined, table ?? undefined, true, false, refuseFraction);
+  const face = faceCutterOptions(job, tools, catalogue, defaults, conditions ?? undefined, table ?? undefined);
   if (face !== null) {
     for (const entry of face.candidates.slice(0, 6)) {
       add({ cutters: [{ key: entry.key, items: [] }], source: { [entry.key]: sourceOf(entry, owned) } });
@@ -443,7 +450,7 @@ export function candidatePlans(
     };
     const balls = tools
       .filter((t) => t.tool.shape === 'ball' || t.tool.shape === 'bull')
-      .filter((t) => (stated(t.tool) ?? 0) > 0 && materialRefusal(job, t, catalogue, conditions, table ?? undefined, { ownedVouches: true, refuseFraction }) === null)
+      .filter((t) => (stated(t.tool) ?? 0) > 0 && materialRefusal(job, t, catalogue, defaults, conditions, table ?? undefined, { ownedVouches: true }) === null)
       .filter(reachesGoal)
       .sort((a, b) => byDiameter(b, a))
       .slice(0, 6);
@@ -459,10 +466,10 @@ export function candidatePlans(
         job,
         tools,
         catalogue,
+        defaults,
         conditions,
         table ?? undefined,
         stated(ball.tool) ?? 0,
-        refuseFraction,
       );
       return (options?.candidates ?? []).slice(0, count).map((flat) => ({
         cutters: [{ key: ball.key, items: ids }],
@@ -523,7 +530,7 @@ export function candidatePlans(
   const flatItems = flatWork.map((w) => w.id);
 
   const gate = (entry: ToolLibraryEntry): boolean =>
-    materialRefusal(job, entry, catalogue, conditions, table ?? undefined, { ownedVouches: true, refuseFraction }) === null;
+    materialRefusal(job, entry, catalogue, defaults, conditions, table ?? undefined, { ownedVouches: true }) === null;
   const reaches = (entry: ToolLibraryEntry, need: number): boolean => {
     const reach = reachOf(entry);
     return reach === null || need <= reach + 1e-9;
@@ -783,6 +790,12 @@ export async function smartPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   evaluate: Evaluate,
   opts: SmartPickOptions = {},
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
@@ -792,15 +805,15 @@ export async function smartPick(
   const fullFinalists = Math.max(1, opts.fullFinalists ?? 3);
   const margin = opts.buyThisMargin ?? 0.02;
   const notes: string[] = [];
-  const rulePlan = rulePlanOf(job, tools, catalogue, conditions, table, opts.floors, opts.refuseFraction);
+  const rulePlan = rulePlanOf(job, tools, catalogue, defaults, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
   const exactWhenEmpty = faceWorkOf(job, null) !== null;
-  const plans = candidatePlans(job, tools, catalogue, conditions, table, opts.floors, opts.refuseFraction).slice(0, maxCandidates);
+  const plans = candidatePlans(job, tools, catalogue, defaults, conditions, table, opts.floors).slice(0, maxCandidates);
   // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
   // plan). The count first, then one row per simulated candidate, then the end.
   memTrace('pick:start', { candidates: plans.length, finalists: fullFinalists });
   if (plans.length === 0) {
-    const candidates = candidateRefusals(job, tools, catalogue, conditions, table, opts.refuseFraction);
+    const candidates = candidateRefusals(job, tools, catalogue, defaults, conditions, table);
     // The sentence names every cutter of the right shape and why it is out; the wrong-shaped rest
     // are counted (a full library is a hundred drills and flats), and listed in `candidates`.
     const named = candidates.filter((c) => c.shapeOnly !== true);
@@ -988,10 +1001,14 @@ export function candidateRefusals(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): CandidateRefusal[] {
   const work = kindedWork(job);
   const shapes: Record<string, readonly string[]> = { ball: ['ball', 'bull'], flat: ['flat'], thread: ['thread'] };
@@ -1004,7 +1021,7 @@ export function candidateRefusals(
       const kinds = [...new Set(work.map((w) => w.kind))].join(' or ');
       return { key: entry.key, shapeOnly: true, reason: `a ${entry.tool.shape} cutter does none of this job's work (it needs ${kinds || 'no cutter'})` };
     }
-    const material = materialRefusal(job, entry, catalogue, conditions, table ?? undefined, { ownedVouches: true, refuseFraction });
+    const material = materialRefusal(job, entry, catalogue, defaults, conditions, table ?? undefined, { ownedVouches: true });
     if (material !== null) return { key: entry.key, reason: material };
     const need = mine.reduce((m, w) => Math.max(m, w.reachMm), 0);
     const reach = reachOf(entry);

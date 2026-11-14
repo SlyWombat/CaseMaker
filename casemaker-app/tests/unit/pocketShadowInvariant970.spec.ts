@@ -45,6 +45,7 @@ import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { parseGcode, setupFromHeader, stubSetup } from '@/engine/cnc';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { NO_SHOP } from '../tools/noShop';
 
 const TRAY = process.env.CM_959_TRAY_STEP;
 
@@ -99,7 +100,7 @@ function sweptField(goal: GoalHeightfield, programs: readonly { ir: ToolpathIR }
 describe.skipIf(TRAY === undefined)('#970/#1031 the real tray — shadow-on never cuts what shadow-off did not', () => {
   it('the ON run never cuts below the OFF run, and every difference cell has design above its cut level', async () => {
     const { tree, mesh, target } = await placedTree(TRAY!, [110, 140], -1.2);
-    const goal = sampleGoalHeightfield(target, { pitchMm: CELL_MM, stockTopZ: 0 });
+    const goal = sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: CELL_MM, stockTopZ: 0 });
     const offset = makeClipperOffset(tl);
     const withShadow = planPocketsForTree(tree, { offset, ...pocketOptions(mesh) });
     const withoutShadow = planPocketsForTree(tree, { offset, ...pocketOptions(undefined) });

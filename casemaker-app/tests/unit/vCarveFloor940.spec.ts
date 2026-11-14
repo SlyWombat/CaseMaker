@@ -95,7 +95,7 @@ describe('#940 a V-carved item on a pocket floor', () => {
   it('the plan gives the pocket the flat and the initials the V, in that order', () => {
     const job = sampleJob();
     const floors = supportingFloors(tl, toPartPlan(job));
-    const plan = planCutters(job, null, TOOLS, ROWS, undefined, undefined, undefined, floors);
+    const plan = planCutters(job, null, TOOLS, ROWS, null, undefined, undefined, undefined, floors);
     expect(plan.cutters).toHaveLength(2);
     const flat = plan.cutters[0]!;
     const cone = plan.cutters[1]!;
@@ -131,7 +131,7 @@ describe('#940 a V-carved item on a pocket floor', () => {
   it('the real job posts two programs: the pocket, then the V-carved initials on its floor', async () => {
     const job = sampleJob();
     const floors = supportingFloors(tl, toPartPlan(job));
-    const plan = planCutters(job, null, TOOLS, ROWS, undefined, undefined, undefined, floors);
+    const plan = planCutters(job, null, TOOLS, ROWS, null, undefined, undefined, undefined, floors);
     const applied = applyCutterPlanToJob(job, {
       cutters: plan.cutters.map((c) => ({ key: c.key, items: [...c.items] })),
     });

@@ -31,6 +31,7 @@ import { dedupeFindings, jobTool, validateJob } from '@/engine/cnc/engrave/jobSe
 import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import type { EngraveJob } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const NOW = '2026-11-01T12:00:00.000Z';
 const NC = [';@MKR|BEGIN', 'G21 G90', 'G1 Z-2.000 F200', 'G1 X10 Y10 F500', 'M5', 'M30'].join('\n');
@@ -45,7 +46,7 @@ function sheetFor(job: EngraveJob, dialectName?: string) {
   const tool = jobTool(job);
   const generated: RunSheetGenerated = {
     findings: dedupeFindings(validateJob(job)),
-    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc: NC,
     verify: {

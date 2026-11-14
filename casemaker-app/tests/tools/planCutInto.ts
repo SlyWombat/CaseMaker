@@ -13,6 +13,7 @@ import { buildTimeline } from '@/engine/cnc/emulator/timeline';
 import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from './noShop';
 
 export interface CutIntoReport {
   /** 1 − the leftover fraction inside the 0.1 mm band. */
@@ -25,7 +26,7 @@ export interface CutIntoReport {
 
 /** Post, sweep and judge every program of a model plan against the job's goal. */
 export function planCutInto(job: EngraveJob, target: EngraveTargetObject, programs: readonly ToolpathIR[]): CutIntoReport {
-  const field = sampleGoalHeightfield(target, { pitchMm: 0.1, stockTopZ: 0 });
+  const field = sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
   const fields: Float32Array[] = [];
   for (const ir of programs) {
     const ctx: PostContext = {

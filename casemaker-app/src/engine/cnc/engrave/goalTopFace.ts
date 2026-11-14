@@ -65,7 +65,7 @@ export const NO_FACING_TOP_REASON = 'every part of the top is cut away, so there
 export function goalTopFace(
   job: EngraveJob,
   goal: EngraveTargetObject,
-  opts: { tool?: Tool | null; maxCells?: number } = {},
+  opts: { tool?: Tool | null; maxCells: number },
 ): TopFaceFacts | null {
   if ((goal.role ?? 'reference') !== 'goal' || !goal.enabled) return null;
   if (goal.format === 'png') return null; // a picture is cut INTO the top; the top is kept
@@ -80,7 +80,7 @@ export function goalTopFace(
   try {
     hf = sampleGoalHeightfield(goal, {
       pitchMm: FACE_PITCH_MM,
-      ...(opts.maxCells === undefined ? {} : { maxCells: opts.maxCells }),
+      maxCells: opts.maxCells,
       ...(clear === null
         ? {}
         : { clear, stockRect: rect, baseZ: goal.position.z - placedSize(goal).z }),
@@ -124,7 +124,7 @@ export function jobTopFace(
   job: EngraveJob,
   // #1244 — the map from the caller's edge; null: no location, the recommendations.
   defaults: ShopDefaults | null,
-  opts: { tool?: Tool | null; maxCells?: number } = {},
+  opts: { tool?: Tool | null } = {},
 ): TopFaceFacts | null {
   if (rotaryMapOf(job, defaults) !== null) return null;
   const first = jobSetups(job)[0]?.id;

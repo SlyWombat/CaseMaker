@@ -17,6 +17,7 @@ import {
 } from '@/engine/cnc/engrave/primitiveSurface';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveJob } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const base = {
   id: 'p1',
@@ -39,7 +40,7 @@ function zAt(field: NonNullable<ReturnType<typeof primitiveHeightfield>>, x: num
 
 describe('#786 4a-2 the cone field', () => {
   it('follows −d·(R−ρ)/(R−r) from its flat tip disc to the top-face rim', () => {
-    const f = primitiveHeightfield(CONE)!;
+    const f = primitiveHeightfield(CONE, { maxCells: NO_SHOP.goalMaxCells })!;
     expect(f).not.toBeNull();
     expect(zAt(f, 50, 30)).toBeCloseTo(-2, 4); // the floor at the axis
     expect(zAt(f, 51, 30)).toBeCloseTo(-2, 4); // ρ = 1 = r: still the tip's floor
@@ -53,7 +54,7 @@ describe('#786 4a-2 the cone field', () => {
   });
 
   it('is symmetric about the axis in every direction', () => {
-    const f = primitiveHeightfield(CONE)!;
+    const f = primitiveHeightfield(CONE, { maxCells: NO_SHOP.goalMaxCells })!;
     const north = zAt(f, 50, 32)!;
     const east = zAt(f, 52, 30)!;
     const south = zAt(f, 50, 28)!;
@@ -64,7 +65,7 @@ describe('#786 4a-2 the cone field', () => {
 
 describe('#786 4a-2 the sphere field', () => {
   it('follows the cap of the ball from −d at the axis to 0 at ρmax', () => {
-    const f = primitiveHeightfield(SPHERE)!;
+    const f = primitiveHeightfield(SPHERE, { maxCells: NO_SHOP.goalMaxCells })!;
     expect(zAt(f, 50, 30)).toBeCloseTo(-2, 4);
     expect(zAt(f, 52, 30)).toBeCloseTo(-(Math.sqrt(21) - 3), 4); // ρ = 2: −(√(25−4) − 3) = −1.583
     expect(zAt(f, 54, 30)).toBeCloseTo(0, 3); // ρ = 4 = ρmax

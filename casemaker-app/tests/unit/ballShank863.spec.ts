@@ -98,17 +98,17 @@ describe('#863 — a 3D finish on a demo goal can pick the ⌀2 ball', () => {
   const twos = fx.inventory.filter((e) => e.key === 'inv:kz-ball-nose-2-12' || e.key === 'inv:kz-ball-nose-m-2-6');
 
   it('the house ⌀2 ball passes the material gate without an owner’s vouch', () => {
-    expect(materialRefusal(wolf(), house('kz-ball-nose-2-12'), ROWS)).toBeNull();
+    expect(materialRefusal(wolf(), house('kz-ball-nose-2-12'), ROWS, null)).toBeNull();
   });
 
   it('j06 wolf (2 mm ball, PLA) surfaces with the house ⌀2 ball', () => {
-    const plan = planCutters(wolf(), null, twos, ROWS);
+    const plan = planCutters(wolf(), null, twos, ROWS, null);
     expect(plan.unassigned).toEqual([]);
     expect(plan.cutters.map((c) => [c.key, c.diameter])).toEqual([['inv:kz-ball-nose-2-12', 2]]);
   });
 
   it('the measured search offers the ⌀2 ball from the whole house', () => {
-    const keys = candidatePlans(wolf(), fx.inventory, ROWS).flatMap((p) => p.cutters.map((c) => c.key));
+    const keys = candidatePlans(wolf(), fx.inventory, ROWS, null).flatMap((p) => p.cutters.map((c) => c.key));
     expect(keys).toContain('inv:kz-ball-nose-2-12');
   });
 });

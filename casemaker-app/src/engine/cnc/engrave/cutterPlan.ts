@@ -152,11 +152,15 @@ export function goalRoughOptions(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ballDiameter = 0,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): GoalRoughOptions | null {
   const ballWork = kindedWork(job).filter((w) => w.kind === 'ball');
   if (ballWork.length === 0) return null;
@@ -167,7 +171,7 @@ export function goalRoughOptions(
     if (!(sizeOf(entry) > 0)) return false;
     const reach = reachOf(entry);
     if (reach !== null && needed > reach + 1e-9) return false;
-    return materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction }) === null;
+    return materialRefusal(job, entry, catalogue, defaults, conditions, table) === null;
   });
   if (flats.length === 0) return null;
   const nearBall = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
@@ -307,6 +311,12 @@ export function faceCutterOptions(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /** Owned cutters vouch for themselves (#766's rule), as the search does. */
@@ -317,14 +327,12 @@ export function faceCutterOptions(
    * answers for the whole job.
    */
   allowMixed = false,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): FaceCutterOptions | null {
   const facts = faceWorkOf(job);
   if (facts === null) return null;
   if (jobHasItems(job) && !allowMixed) return null;
   const eligible = tools.filter(
-    (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches, refuseFraction }) === null,
+    (entry) => materialRefusal(job, entry, catalogue, defaults, conditions, table, { ownedVouches }) === null,
   );
   const matched = eligible.filter((e) => faceCutterFits(e, facts, true)).sort(widestFirst);
   if (matched.length > 0) return { facts, candidates: matched, matchedHoles: true };
@@ -336,14 +344,18 @@ export function faceCutterPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ownedVouches = true,
   allowMixed = false,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): FaceCutterPick | null {
-  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches, allowMixed, refuseFraction);
+  const options = faceCutterOptions(job, tools, catalogue, defaults, conditions, table, ownedVouches, allowMixed);
   if (options === null) return null;
   const { facts, matchedHoles } = options;
   const pick = options.candidates[0];
@@ -539,6 +551,12 @@ export function materialRefusal(
   job: EngraveJob,
   entry: ToolLibraryEntry,
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /**
@@ -548,7 +566,7 @@ export function materialRefusal(
    * would refuse by material is still a candidate — the simulatio decides — while a CATALOGUE
    * cutter keeps the catalogue's own rule, and a broken or metal-line cutter is still refused.
    */
-  opts?: { ownedVouches?: boolean; /** #1256 — the shop's `clamp.refuseFraction`, from the caller's settings map. */ refuseFraction?: number },
+  opts?: { ownedVouches?: boolean },
 ): string | null {
   const tool = entry.tool;
   const condition = conditions?.get(entry.key) ?? null;
@@ -573,7 +591,7 @@ export function materialRefusal(
   if (tool.shape === 'thread') return null;
   // #910 — the generator's own proxy (`feedsToolForSurface`), which keeps the ball's Makera id, so
   // the gate reads the same row the goal program will: a ⌀6 ball's own hardwood row, not nothing.
-  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), undefined, table, undefined, opts?.refuseFraction);
+  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), refuseFractionOf(defaults), undefined, table);
   if (!feeds.ok) {
     return `no cutting parameters for ${entry.key} in ${MATERIAL_LABELS[job.stock.material]}: ${feeds.reason}`;
   }
@@ -597,6 +615,12 @@ export function planCutters(
   reach: Reachability | null,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /** The shop's `sim.columnFlatPitchYMm` (the goal finish's grid), for the ball's budget check. */
@@ -606,19 +630,11 @@ export function planCutters(
    * cut it makes below its item's floor rather than the stock-top depth. Absent: the old reading.
    */
   floors?: ReadonlyMap<string, number> | null,
-  // #1244 — the map from the caller's edge (a job-decided predicate; see faceWorkOf).
-  defaults: ShopDefaults | null = null,
-  /**
-   * #1256 — the shop's `clamp.refuseFraction`, when the caller holds it apart from `defaults` (the
-   * measured pick passes no map); absent, it is read from `defaults`.
-   */
-  refuseFractionIn?: number,
 ): CutterPlan {
-  const refuseFraction = refuseFractionIn ?? refuseFractionOf(defaults);
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
   // It is answered here so the rule plan, the CLI and the search's baseline are the same cutter.
-  const face = faceCutterPick(job, tools, catalogue, conditions, table, true, false, refuseFraction);
+  const face = faceCutterPick(job, tools, catalogue, defaults, conditions, table);
   if (face !== null) {
     return {
       cutters: [
@@ -637,7 +653,7 @@ export function planCutters(
     };
   }
   // #842 — a MIXED job's face program has its own cutter, chosen by the same face rule.
-  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true, refuseFraction) : null;
+  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, defaults, conditions, table, true, true) : null;
   const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
   // #1051 — THE PANEL'S ADVISORY FOLLOWS THE ENGINE'S TWO RULES.
@@ -670,7 +686,7 @@ export function planCutters(
   const candidates: Candidate[] = [];
   const refusals = new Map<string, string>();
   for (const entry of candidateTools) {
-    const refusal = materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction });
+    const refusal = materialRefusal(job, entry, catalogue, defaults, conditions, table);
     if (refusal !== null) {
       refusals.set(entry.key, refusal);
       continue;
@@ -775,7 +791,7 @@ export function planCutters(
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.
-      const rough = goalRoughOptions(job, candidateTools, catalogue, conditions, table, pick.diameter, refuseFraction);
+      const rough = goalRoughOptions(job, candidateTools, catalogue, defaults, conditions, table, pick.diameter);
       const roughPick = rough?.candidates[0];
       if (roughPick !== undefined) {
         goalRoughKey = roughPick.key;
@@ -1106,16 +1122,20 @@ export function kindOnlyPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
 ): { key: string; reason: string; kind: WorkKind } | null {
   const work = kindedWork(job);
   const kind = work[0]?.kind;
   if (kind !== 'ball' && kind !== 'thread') return null;
   if (!work.every((w) => w.kind === kind)) return null;
-  const plan = planCutters(job, null, tools, catalogue, conditions, table, undefined, undefined, null, refuseFraction);
+  const plan = planCutters(job, null, tools, catalogue, defaults, conditions, table);
   const pick = plan.cutters[0];
   return pick === undefined ? null : { key: pick.key, reason: pick.reason, kind };
 }

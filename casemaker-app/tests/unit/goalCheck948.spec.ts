@@ -60,6 +60,7 @@ import { exactSweptField } from '@/workers/sim/sweptPoint';
 import { clearGoalFieldCache, goalInputFor, GOAL_CHECK_MAX_CELLS, GOAL_CHECK_PITCH_MM } from '@/workers/sim/goalCheckField';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => {
   clearTargetObjectMeshCache();
@@ -680,7 +681,7 @@ describe('#948 the live session’s swept top', () => {
       const surfaceProgram = { setupIndex: 1, toolKey: 'flat-1.0', nc: g.nc as string, frameNc: null, cam: null };
       const sheetTool = jobTool(job);
       if (sheetTool === null) throw new Error('the relief job states no tool');
-      const sheetFeeds = feedsFor([], job.stock.material, sheetTool, Z1, job.cutOverride);
+      const sheetFeeds = feedsFor([], job.stock.material, sheetTool, Z1, NO_SHOP.refuse, job.cutOverride);
       const generated = { findings: [], feeds: sheetFeeds, cam: { operations: 1, cuttingMoves: 100, estimatedSeconds: 60, passes: 1 }, nc: g.nc, verify: null, frameNc: null, frameError: null, surface3d: g.surface3d!, programs: [surfaceProgram] };
       const sheet = buildRunSheet(job, generated, null);
       const sheetText = sheet.sections.flatMap((s) => s.steps.map((st) => st.text)).join('\n');

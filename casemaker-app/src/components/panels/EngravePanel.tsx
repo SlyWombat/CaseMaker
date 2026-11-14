@@ -1274,10 +1274,8 @@ export function EngravePanel(): JSX.Element {
         job.stock.material,
         goalOnly ? feedsToolForSurface(tool) : tool,
         jobMachine(job),
-        job.cutOverride,
-        undefined,
-        undefined,
         refuseFractionOf(shopDefaults ?? null),
+        job.cutOverride,
       )
     : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;

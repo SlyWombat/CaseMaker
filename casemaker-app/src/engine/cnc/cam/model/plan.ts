@@ -964,7 +964,7 @@ export function resolvedCutParams(
   // #1047 — the caller's rows, never this realm's snapshot: the worker and the CLI both hold an
   // empty module state however carefully the main thread filled its own (#324, `feeds.ts`).
   const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
-  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1, undefined, undefined, undefined, refuseFractionOf(input.defaults));
+  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1, refuseFractionOf(input.defaults ?? null));
   if (resolved.ok) return { params: resolved.params, substitution: null };
   const rows = resolvedFeedsTable()
     .table.filter((row) => row.material === input.stock.material && (row.edge ?? 'flat') === 'flat')
@@ -985,7 +985,7 @@ export function resolvedCutParams(
     // row). `feedsToolForSurface`'s flat proxy keeps the id because its diameter IS the cutter's
     // own cutting diameter, so the catalogue's check agrees with the record there.
     const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, name: tool.name });
-    const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1, undefined, undefined, undefined, refuseFractionOf(input.defaults));
+    const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1, refuseFractionOf(input.defaults ?? null));
     if (viaProxy.ok) {
       return {
         params: viaProxy.params,

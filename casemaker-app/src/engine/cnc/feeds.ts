@@ -93,7 +93,7 @@
 import { z } from 'zod';
 import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambiguousCuttingDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
-import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
+import { clampToMachine } from './machine';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 import type { ClampDiagnostic, Mill } from './machine';
@@ -1134,7 +1134,7 @@ export function catalogueRefusal(
   field: CatalogueField,
   value: number,
   machine: Mill,
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number,
 ): string | null {
   if (!Number.isFinite(value) || value <= 0) return 'it is not a positive number';
   if (field === 'stepDown') return null;
@@ -1323,7 +1323,7 @@ function entryFor(
   machine: Mill,
   table: readonly FeedsEntry[],
   edge: 'flat' | 'v',
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number,
 ): EntryChoice {
   const entry = table.find(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
@@ -1598,6 +1598,13 @@ export function feedsFor(
   material: StockMaterial,
   tool: Tool,
   machine: Mill,
+  /**
+   * #448/#1256 — the shop's `clamp.refuseFraction`: the band above the machine's ceiling where a
+   * value is refused rather than clamped. REQUIRED, with no default here: the caller reads it from
+   * the settings map it holds (`refuseFractionOf`), and a site with no shop passes the
+   * recommendation explicitly, so a production caller that forgets it does not compile.
+   */
+  refuseFraction: number,
   override?: Partial<CutParams>,
   table: readonly FeedsEntry[] = resolvedFeedsTable().table,
   /**
@@ -1606,12 +1613,6 @@ export function feedsFor(
    * it asks more of the edge than the contour-parallel pocket the table's row describes.
    */
   context?: { slotting?: boolean },
-  /**
-   * #448 — the shop's `clamp.refuseFraction`: the band above the machine's ceiling where a value
-   * is refused rather than clamped. Threaded in so this resolver and the catalogue screening share
-   * one number with `clampToMachine`; defaults to the labelled fallback.
-   */
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting

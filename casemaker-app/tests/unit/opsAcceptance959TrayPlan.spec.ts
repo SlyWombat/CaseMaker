@@ -16,6 +16,7 @@ import {
   placedTree, sevenVerdicts, writeAcceptance, writeTwoPlans } from './helpers/trayAcceptance';
 
 import { TRAY_STEP, installAcceptanceCatalogue, clearAcceptanceCatalogue } from './helpers/trayAcceptance';
+import { NO_SHOP } from '../tools/noShop';
 
 const TRAY = TRAY_STEP;
 const CATALOGUE = installAcceptanceCatalogue();
@@ -24,7 +25,7 @@ afterAll(() => clearAcceptanceCatalogue());
 describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedOut))('#959 acceptance — tool tray 70, the whole plan through the one entry', () => {
   it('plans the real part through planModelCam — pockets, the curved remainder and the rims — and posts every run', async () => {
     const placed = await placedTree(TRAY!, [110, 140], -1.2);
-    const goalField = sampleGoalHeightfield(placed.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const goalField = sampleGoalHeightfield(placed.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
     const { setup, runs } = await planCard(placed, { length: 110, width: 140 }, goalField);
     expect(setup.ops.length, `unreachable: ${setup.unreachable.join('; ')}`).toBeGreaterThan(0);
     expect(setup.ops.some((op) => op.kind === 'contour'), `unreachable: ${setup.unreachable.join('; ')}`).toBe(true);

@@ -100,7 +100,7 @@ describe('#1213 follow-up — a refusing pick closes its family', () => {
       const evaluate: Evaluate = () => {
         throw new Error('a refused search evaluates nothing');
       };
-      pick = await smartPick(goalJob(), [FLAT_2, FLAT_1], [], evaluate);
+      pick = await smartPick(goalJob(), [FLAT_2, FLAT_1], [], null, evaluate);
     } finally {
       setMemTraceSink(null);
     }

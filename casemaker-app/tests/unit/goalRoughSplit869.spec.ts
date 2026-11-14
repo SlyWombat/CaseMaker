@@ -210,7 +210,7 @@ describe('#869 the goal’s split, generated', () => {
 describe('#869 the goal’s split, chosen by the search', () => {
   it('the candidate plans offer the ball alone AND the ball after a flat', async () => {
     const job = goalJob();
-    const plans = candidatePlans(job, SHOP.tools, []);
+    const plans = candidatePlans(job, SHOP.tools, [], null);
     const splits = plans.filter((p) => p.goalRoughKey !== undefined);
     const alone = plans.filter((p) => p.goalRoughKey === undefined);
     expect(splits.length).toBeGreaterThan(0);
@@ -224,7 +224,7 @@ describe('#869 the goal’s split, chosen by the search', () => {
   });
 
   it('the rule’s plan names a flat rough when the shop owns one', async () => {
-    const plan = rulePlanOf(goalJob(), SHOP.tools, []);
+    const plan = rulePlanOf(goalJob(), SHOP.tools, [], null);
     expect(plan?.goalRoughKey).toBe(ROUGH.key);
   });
 

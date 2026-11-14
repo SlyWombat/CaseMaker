@@ -2069,7 +2069,7 @@ export function engraveRegions(
   /** #940 — the diameter that step-over's row was matched on (a V row's tip, a flat row's base). */
   let requestedRowDiameter: number | null = null;
   if (cone !== null && tool !== null) {
-    const requested = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
+    const requested = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, tool, mill, job.cutOverride);
     if (requested.ok) {
       requestedStepOver = requested.params.stepOver;
       requestedRowDiameter = requested.params.rowDiameter ?? null;
@@ -3616,8 +3616,8 @@ function facingProgram(
    * frame the facing passes are written in.
    */
   topLiftMm = 0,
-  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
-  refuseFraction?: number,
+  /** #1256 — the shop's `clamp.refuseFraction`, required: the caller reads it from `shop.defaults`. */
+  refuseFraction: number,
 ): {
   nc: string | null;
   verify: VerifyReport | null;
@@ -3649,7 +3649,7 @@ function facingProgram(
   // job's ENGRAVING cutter (#205): a person who typed 12 000 rpm for a 1 mm flat has said nothing
   // about the 6 mm mill that skims the top, and handing those numbers over would run the big cutter
   // at a small cutter's feed rate. The facing file's S/F are the row's own for the facing cutter.
-  const feeds = feedsFor(catalogue, job.stock.material, tool, machine, undefined, table, undefined, refuseFraction);
+  const feeds = feedsFor(catalogue, job.stock.material, tool, machine, refuseFraction, undefined, table);
   if (!feeds.ok) {
     return {
       nc: null,
@@ -4387,7 +4387,7 @@ async function generateRestPair(
   // refusal is stated there — where a later cutter with no items of its own is the one asking for
   // a rest pass — rather than guessed from a whole-setup measurement.)
 
-  const roughFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, roughTool, mill, job.cutOverride);
+  const roughFeeds = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, roughTool, mill, job.cutOverride);
   const roughDiameter = cuttingDiameter(roughTool) ?? 0;
   const overlapRead = shop.rest?.overlap ?? {
     value: REST_MACHINING_FALLBACK.overlap,
@@ -4516,7 +4516,7 @@ async function generateRestPair(
     // rests a 6 mm pocket at 1.5375 mm). Raise the shortfall on THIS program, where the run's
     // tagging names it `program 2 (…)`.
     const restDepthFindings = restDepthShortfallFindings(design.plan, restTool);
-    const restFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, restTool, mill, undefined);
+    const restFeeds = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, restTool, mill, undefined);
     const restDiameter = cuttingDiameter(restTool) ?? 0;
     const restCutterRef: SeamCutter = {
       key: restRef.toolKey,
@@ -4834,7 +4834,7 @@ export function generateRotaryGoalProgram(
     );
   }
   const mill = jobMachine(job, calibration);
-  const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride);
+  const resolved = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, feedsToolForSurface(tool), mill, job.cutOverride);
   if (!resolved.ok) return fail('feeds', resolved.reason, resolved);
   const settings = goal.surface ?? {};
   const stockToLeaveMm = settings.stockToLeaveMm ?? shop.finish?.stockToLeaveMm.value ?? undefined;
@@ -7142,7 +7142,7 @@ async function generateFaceProgram(
   }
   if (tool === null) return fail('feeds', 'the job has no usable cutter', { findings: documentFindings });
   const mill = jobMachine(job, calibration);
-  const feeds = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
+  const feeds = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, tool, mill, job.cutOverride);
   if (!feeds.ok) return fail('feeds', feeds.reason, { feeds, findings: documentFindings });
   const map = rotaryMapOf(job, shop.defaults ?? null);
   if (map === null) return fail('findings', 'the face operations need the rotary chuck', { findings: documentFindings });
@@ -7284,7 +7284,7 @@ async function generateFaceProgram(
       if (operations.length === 0) continue;
       let n = 1;
       for (const op of operations) op.number = n++;
-      const fineFeeds = engraveFeedsFor(shop, catalogue, job.stock.material, group.entry.tool, mill, job.cutOverride);
+      const fineFeeds = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, group.entry.tool, mill, job.cutOverride);
       if (!fineFeeds.ok) {
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
@@ -8658,7 +8658,7 @@ async function generateOneProgram(
   } else {
     const usable = cuttingForTrace(tool);
     if (!usable.ok) return stop('feeds', { message: usable.reason });
-    const resolved = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride);
+    const resolved = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, tool, mill, job.cutOverride);
     if (!resolved.ok) return stop('feeds', { feeds: resolved, message: resolved.reason });
     feeds = resolved;
     // #711 — THE TAPE HOLD RULE (#707 BM-4, design §3.4): the tape must cover `holdRatio × the
@@ -8678,7 +8678,7 @@ async function generateOneProgram(
       const hold = readDefault(shop.defaults ?? null, 'tape.holdRatio');
       // #727 F9 — the pieces are freed by the PROFILE pass, which resolves the same row with the
       // slotting context (`feeds.ts`); its step-down is what the released piece's bite is judged at.
-      const slottingRow = engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
+      const slottingRow = engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
       findings.push(
         ...tapeHoldFindings({
           stock: job.stock,
@@ -8699,7 +8699,7 @@ async function generateOneProgram(
     const profileFeeds =
       profiles.length === 0
         ? null
-        : engraveFeedsFor(shop, catalogue, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
+        : engraveFeedsFor(shop, catalogue, shop.defaults ?? null, job.stock.material, tool, mill, job.cutOverride, { slotting: true });
     if (profileFeeds !== null && !profileFeeds.ok) {
       return stop('feeds', { feeds: profileFeeds, message: profileFeeds.reason });
     }

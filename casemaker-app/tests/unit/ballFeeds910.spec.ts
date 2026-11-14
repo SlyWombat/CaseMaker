@@ -25,6 +25,7 @@ import { flatEndMill, vendorId, type Tool } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveJob, EngraveTargetObject, StockMaterial } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -138,7 +139,7 @@ const elephant = (): EngraveJob =>
 const panther = (): EngraveJob =>
   goalJob(figure('panther', { x: 115.7, y: 66.4, z: 50.12 }, { x: 150, y: 75 }), { length: 150, width: 75, thickness: 51 });
 
-const firstKeys = (job: EngraveJob): string[] => candidatePlans(job, LIBRARY, CATALOGUE).map((p) => p.cutters[0]!.key);
+const firstKeys = (job: EngraveJob): string[] => candidatePlans(job, LIBRARY, CATALOGUE, null).map((p) => p.cutters[0]!.key);
 
 describe('#910 1 — a ball is fed from its own catalogue row', () => {
   it('the surface proxy keeps the ball’s Makera id', () => {
@@ -151,7 +152,7 @@ describe('#910 1 — a ball is fed from its own catalogue row', () => {
   for (const ball of [BALL_6x32, BALL_4x32]) {
     it(`${ball.tool.name} resolves its own hardwood row, where the starting table stops at 3.2 mm`, () => {
       const job = elephant();
-      const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(ball.tool), jobMachine(job));
+      const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(ball.tool), jobMachine(job), NO_SHOP.refuse);
       if (!feeds.ok) throw new Error(feeds.reason);
       expect(feeds.catalogue?.cutterId).toBe(ball.tool.id);
       expect(feeds.params.rpm).toBe(12000);
@@ -165,14 +166,14 @@ describe('#910 1 — a ball is fed from its own catalogue row', () => {
     it(`the gate passes Makera’s ⌀4 and ⌀6 balls in ${material}`, () => {
       const job = { ...elephant(), stock: { ...elephant().stock, material } };
       for (const ball of [BALL_6x32, BALL_6x22, BALL_4x32]) {
-        expect(materialRefusal(job, ball, CATALOGUE, null, undefined, { ownedVouches: true })).toBeNull();
+        expect(materialRefusal(job, ball, CATALOGUE, null, null, undefined, { ownedVouches: true })).toBeNull();
       }
     });
   }
 
   it('a ⌀6 ball with no Makera id is still refused, and the refusal says why', () => {
     const anonymous = { key: 'inv:ball-6', tool: { ...BALL_6x32.tool, id: null }, provenance: 'owned' } as ToolLibraryEntry;
-    const why = materialRefusal(elephant(), anonymous, CATALOGUE, null, undefined, { ownedVouches: true });
+    const why = materialRefusal(elephant(), anonymous, CATALOGUE, null, null, undefined, { ownedVouches: true });
     expect(why).toContain('no cutting parameters for inv:ball-6');
     expect(why).toContain('6 mm');
   });
@@ -184,7 +185,7 @@ describe('#910 2 — the search states its refusal', () => {
     // #1037 — THE SHORT BALL NO LONGER BELONGS HERE. This case's subject is a library with NO
     // candidate plan; a ball shorter than the goal's whole depth still builds one (below), so the
     // plan-less library is the unfeedable ball plus a cutter of the wrong shape.
-    const result = await smartPick(panther(), [anonymous, FLAT_6x32], CATALOGUE, () => {
+    const result = await smartPick(panther(), [anonymous, FLAT_6x32], CATALOGUE, null, () => {
       throw new Error('nothing should be evaluated');
     });
     expect(result.refused).toBe(true);
@@ -202,13 +203,13 @@ describe('#910 2 — the search states its refusal', () => {
     // CUT (cam/model/plan's `goal-finish-unreachable`), so a 22 mm ball on the 50 mm-class panther
     // is a plan, never a pre-plan refusal. The plan's own gate states any region it cannot reach.
     const short = { ...BALL_3x22, key: 'cat:short' };
-    const plans = candidatePlans(panther(), [short], CATALOGUE);
+    const plans = candidatePlans(panther(), [short], CATALOGUE, null);
     expect(plans).toHaveLength(1);
     expect(plans[0]!.cutters.map((c) => c.key)).toEqual(['cat:short']);
   });
 
   it('names the shape a cutter lacks', () => {
-    const [flat] = candidateRefusals(elephant(), [{ ...FLAT_6x32 }], CATALOGUE);
+    const [flat] = candidateRefusals(elephant(), [{ ...FLAT_6x32 }], CATALOGUE, null);
     expect(flat!.reason).toBe("a flat cutter does none of this job's work (it needs ball)");
     expect(flat!.shapeOnly).toBe(true);
   });
@@ -234,7 +235,7 @@ describe('#910 3 — a goal’s ball reaches the goal, not the blank', () => {
 describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 ball', () => {
   it('the elephant (90 × 42 × 32 mm) is offered the ⌀6 × 32 ball, roughed by a flat, fed from its own row', () => {
     const job = elephant();
-    const plans = candidatePlans(job, LIBRARY, CATALOGUE);
+    const plans = candidatePlans(job, LIBRARY, CATALOGUE, null);
     // The ⌀6 × 32 is the largest ball that reaches 31.73 mm; the ⌀6 × 22 does not.
     expect(firstKeys(job)).toContain(BALL_6x32.key);
     expect(firstKeys(job)).not.toContain(BALL_6x22.key);
@@ -245,9 +246,9 @@ describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 bal
     // ⌀3.175 × 22 the budget allows — a plan that posts; the old reach-first order preferred an
     // over-budget ball the generator refuses. The SEARCH still builds the ⌀6 × 32 plan (asserted
     // above), and the engine judges the finisher's reach per feature.
-    const rule = planCutters(job, null, LIBRARY, CATALOGUE);
+    const rule = planCutters(job, null, LIBRARY, CATALOGUE, null);
     expect(rule.cutters[0]?.key).toBe(BALL_3x22.key);
-    const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(BALL_6x32.tool), jobMachine(job));
+    const feeds = feedsFor(CATALOGUE, 'hardwood', feedsToolForSurface(BALL_6x32.tool), jobMachine(job), NO_SHOP.refuse);
     expect(feeds.ok && feeds.catalogue?.cutterId).toBe('131032606032');
   });
 
@@ -256,7 +257,7 @@ describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 bal
     // the search refusing without evaluating anything. #1037's ruling (6b) removes that class:
     // the reach is judged per feature by the finisher gate (`goal-finish-unreachable`), so the
     // search has a plan and evaluates it. The ⌀6 × 32 is the ball that builds it.
-    const plans = candidatePlans(panther(), LIBRARY, CATALOGUE);
+    const plans = candidatePlans(panther(), LIBRARY, CATALOGUE, null);
     expect(plans).toHaveLength(1);
     expect(plans[0]!.cutters.map((c) => c.key)).toEqual([BALL_6x32.key]);
   });

@@ -40,7 +40,6 @@
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { targetObjectMesh } from '@/engine/import/targetObject';
 import { targetScale } from '@/engine/cnc/engrave/targetScale';
-import { GOAL_MAX_CELLS } from '@/engine/cnc/goalLimits';
 import { DEFAULT_GRID_PITCH_MM } from '@/engine/cnc/engrave/goalHeightfield';
 
 /**
@@ -74,8 +73,8 @@ export interface GoalRadialField {
 export interface SampleRadialOpts {
   /** The shop's grid pitch in map millimetres; absent → {@link DEFAULT_GRID_PITCH_MM}. */
   pitchMm?: number | null;
-  /** The grid cap; absent → {@link GOAL_MAX_CELLS}. */
-  maxCells?: number | null;
+  /** The grid cap, REQUIRED (#1256): the shop's `goal.maxCells`; this module keeps no fallback. */
+  maxCells: number;
 }
 
 const positive = (v: number | null | undefined): boolean =>
@@ -88,13 +87,13 @@ const positive = (v: number | null | undefined): boolean =>
 export function sampleGoalRadialField(
   target: Pick<EngraveTargetObject, 'sha256' | 'format' | 'data' | 'position' | 'scale'>,
   radius: number,
-  opts: SampleRadialOpts = {},
+  opts: SampleRadialOpts,
 ): GoalRadialField {
   if (!(radius > 0)) throw new Error(`a rotary relief needs a positive stock radius; it was given ${radius} mm`);
   if (target.format === 'png') throw new Error('a picture relief is a flat heightfield; a rotary relief needs a mesh');
   const mesh = targetObjectMesh(target);
   const requestedPitch = positive(opts.pitchMm) ? (opts.pitchMm as number) : DEFAULT_GRID_PITCH_MM;
-  const maxCells = positive(opts.maxCells) ? (opts.maxCells as number) : GOAL_MAX_CELLS;
+  const maxCells = opts.maxCells;
   const scale = targetScale(target);
 
   // The mesh's local X centre is placed at `position.x`; the section's origin stays on the axis.

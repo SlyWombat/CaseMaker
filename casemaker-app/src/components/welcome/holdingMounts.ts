@@ -542,8 +542,8 @@ export interface MountOptionArgs {
    * wizard. Absent is true (the desktop build).
    */
   canReachMachine?: boolean;
-  /** #1256 — the shop's `tape.stripWidthMm`, for the tape row's hint when the job holds no tape yet. */
-  stripWidthMm?: number;
+  /** #1256 — the shop's `tape.stripWidthMm`, REQUIRED: the tape row's hint before the job holds any tape. */
+  stripWidthMm: number;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
@@ -775,7 +775,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       }
       const hint =
         mount === 'bed-tape'
-          ? tapeStripsLine(args.tape ?? defaultTapeHold({ ...TAPE_DEFAULTS, widthMm: args.stripWidthMm ?? TAPE_DEFAULTS.widthMm }), stock)
+          ? tapeStripsLine(args.tape ?? defaultTapeHold({ ...TAPE_DEFAULTS, widthMm: args.stripWidthMm }), stock)
           : bracketHint(now.profile, stock);
       out.push({ ...base, hint, disabled: false, reason: null, escape: null });
       continue;
@@ -903,8 +903,8 @@ export function bedTapeHold(
   profile: BedProfile | null,
   keep: TapeHold | null,
   insetMm: number = TAPE_DEFAULTS.insetMm,
-  /** #1256 — the shop's strip width, for a bed whose profile states no roll. */
-  stripWidthMm: number = TAPE_DEFAULTS.widthMm,
+  /** #1256 — the shop's `tape.stripWidthMm`, REQUIRED: used when the bed's profile states no roll. */
+  stripWidthMm: number,
 ): TapeHold {
   if (keep !== null) return { ...keep, where: keep.where === null ? null : { ...keep.where } };
   const roll = profile?.consumables?.tape ?? null;

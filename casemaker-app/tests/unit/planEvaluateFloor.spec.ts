@@ -103,7 +103,7 @@ describe('#864 the floor a V rest leaves', () => {
   it('the measured pick no longer rests j20 with the V — whatever wins reaches the floor', async () => {
     clearPlanEvaluations();
     const job = j20();
-    const pick = picked(await smartPick(job, [O, C, F], [], async (plan) => await evaluatePlan(job, plan, CTX)));
+    const pick = picked(await smartPick(job, [O, C, F], [], null, async (plan) => await evaluatePlan(job, plan, CTX)));
     // The chamfer as a rest leaves 74 % of the floor's depth standing; the plan with it scores
     // 0.256 on the raised cutaway and cannot win once the floor is in the score.
     expect(pick.chosen.plan.cutters.every((c) => c.key !== C.key)).toBe(true);

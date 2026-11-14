@@ -60,8 +60,6 @@ import { inventoryConditions } from '@/engine/cnc/toolCondition';
  */
 export interface EngraveFeedsShop {
   feeds?: readonly FeedsEntry[] | null;
-  /** #1256 — the shop's settings map; `clamp.refuseFraction` is read from it when no band is passed. */
-  defaults?: ShopDefaults | null;
 }
 
 /**
@@ -73,14 +71,18 @@ export interface EngraveFeedsShop {
 export function engraveFeedsFor(
   shop: EngraveFeedsShop,
   catalogue: readonly FeedCatalogueRow[] | FeedCatalogue,
+  /**
+   * #1256 — the shop's settings map, REQUIRED: `clamp.refuseFraction` is read from it. A caller with
+   * no shop passes `null` explicitly (the recommendation); nothing here defaults it.
+   */
+  defaults: ShopDefaults | null,
   material: StockMaterial,
   tool: Tool,
   machine: Mill,
   override?: Partial<CutParams>,
   context?: { slotting?: boolean },
-  refuseFraction?: number,
 ): FeedsResult {
-  return feedsFor(catalogue, material, tool, machine, override, shop.feeds ?? undefined, context, refuseFraction ?? refuseFractionOf(shop.defaults));
+  return feedsFor(catalogue, material, tool, machine, refuseFractionOf(defaults), override, shop.feeds ?? undefined, context);
 }
 
 /**

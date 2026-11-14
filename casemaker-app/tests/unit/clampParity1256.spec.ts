@@ -10,7 +10,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { materialRefusal } from '@/engine/cnc/engrave/cutterPlan';
 import { engraveFeedsFor } from '@/engine/cnc/engrave/feeds';
 import { candidateRefusals } from '@/engine/cnc/engrave/smartPick';
-import { feedCatalogueRows, refuseFractionOf, type FeedsEntry } from '@/engine/cnc/feeds';
+import { feedCatalogueRows, type FeedsEntry } from '@/engine/cnc/feeds';
 import { CLAMP_REFUSE_FRACTION_FALLBACK, Z1 } from '@/engine/cnc/machine';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
@@ -37,10 +37,10 @@ const catalogue = feedCatalogueRows();
 
 /** What the pick says about the cutter, and what the cut says, under one settings map. */
 function both(defaults: ShopDefaults | null): { pickRefuses: boolean; candidateRefuses: boolean; cutRefuses: boolean } {
-  const rf = refuseFractionOf(defaults);
-  const pick = materialRefusal(job, entry, catalogue, null, table, { ownedVouches: true, refuseFraction: rf });
-  const candidate = candidateRefusals(job, [entry], catalogue, null, table, rf)[0]!;
-  const cut = engraveFeedsFor({ feeds: table, defaults }, catalogue, job.stock.material, tool, Z1, undefined);
+  // The SAME settings map goes to the pick, the candidate list and the cut; nothing is passed apart from it.
+  const pick = materialRefusal(job, entry, catalogue, defaults, null, table, { ownedVouches: true });
+  const candidate = candidateRefusals(job, [entry], catalogue, defaults, null, table)[0]!;
+  const cut = engraveFeedsFor({ feeds: table }, catalogue, defaults, job.stock.material, tool, Z1, undefined);
   return { pickRefuses: pick !== null, candidateRefuses: candidate.reason !== undefined && candidate.shapeOnly !== true && /refuses|ceiling|feed/.test(candidate.reason), cutRefuses: !cut.ok };
 }
 

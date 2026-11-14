@@ -12,6 +12,7 @@ import { isRoundStock } from '@/engine/cnc/stockStart';
 import { LEDGE_STEP } from '@/engine/cnc/fixture';
 import { mountOptions } from '@/components/welcome/holdingMounts';
 import { MachineRecordSchema, type BedProfile, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
@@ -59,7 +60,7 @@ const CELLS: Cell[] = [
 
 function optionsFor(cell: Cell, machine: MachineRecord | null) {
   return mountOptions({
-    machine,
+    stripWidthMm: NO_SHOP.tapeStripWidthMm, machine,
     accessories: [],
     stock: cell.stock,
     round: isRoundStock(cell.form),
@@ -153,7 +154,7 @@ describe('#1104 item 9 — the stated matrix: every cell has an enabled row, a d
         for (const f of FORMS) {
           it(`${f.name} · ${state} · ${owned ? 'accessories owned' : 'accessories not owned'} · ${drive ? 'desktop' : 'web'}`, () => {
             const rows = mountOptions({
-              machine: machineIn(state),
+              stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: machineIn(state),
               accessories: owned ? [...DOC.accessories, ROTARY] : [],
               stock: f.stock,
               round: isRoundStock(f.form),

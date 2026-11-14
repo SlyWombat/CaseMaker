@@ -16,6 +16,7 @@ import type { ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { buildRandomPart } from '../../tools/randomParts';
 import { tl } from './manifoldExec';
+import { NO_SHOP } from '../../tools/noShop';
 
 /** The #966 cluster's ball: ⌀2, catalogue-shaped, numbered 1. */
 export const BALL_2_Q966: Tool = flatEndMill(2, { number: 1, id: 'ball-2', name: 'ball-2', shape: 'ball', typeText: 'Ball Nose' });
@@ -73,6 +74,6 @@ export function slopedInput(targetId: string, house: Tool[] = SLOPED_HOUSE): Mod
     cutters: { house, catalogue: [] },
     tolerances: { finishMm: 0.01 },
     edgeBreak: { legMm: 0 },
-    goal: sampleGoalHeightfield(target, { pitchMm: 0.1, stockTopZ: 0 }),
+    goal: sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 }),
   };
 }

@@ -38,6 +38,7 @@ import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrav
 import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
+import { NO_SHOP } from '../tools/noShop';
 
 const HOUSE: Tool[] = [
   flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
@@ -166,7 +167,7 @@ describe('#964 the cutting ops leave the design standing (#959)', () => {
         const part = buildRandomPart(seed, kind, tl);
         const result = planOf(part);
         const programs = postedPrograms(part, result);
-        const field = sampleGoalHeightfield(part.target, { pitchMm: 0.1, stockTopZ: 0 });
+        const field = sampleGoalHeightfield(part.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
 
         const top = stampedTop(programs, field);
         // The plate's outer band is the contour's own free zone (see this file's header); the

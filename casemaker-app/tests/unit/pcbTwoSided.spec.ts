@@ -39,6 +39,7 @@ import { PROBE_OPEN_REPLY, sentReply as reply } from './helpers/registrationFixt
 import { buildPcbJob, type PcbJobFile } from '../../scripts/lib/casemaker/pcbJob';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import type { EngraveVectorShape } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = join(process.cwd(), 'tests/unit');
 const FIXTURES = join(HERE, 'fixtures/pcb');
@@ -91,7 +92,7 @@ const SET = (): PcbJobFile[] => [
 ];
 
 async function twoSided() {
-  const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: TOOLS, catalogue: ROWS });
+  const built = await buildPcbJob(tl, SET(), { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: TOOLS, catalogue: ROWS });
   if (!built.ok) throw new Error(built.error);
   const job = built.job;
   job.tool = engraver.tool;
@@ -629,7 +630,7 @@ describe('#1140 the shape gates judge the cutter a setup assigns to the item', (
     // No 1 mm drill in the bench: the import bores the 1 mm holes with the 0.8 mm corn bit and
     // assigns them to it. The job's own cutter is still the engraver.
     const bench = [engraver, bit('inv:d08', 'pcb-drill-0-8', 0.8), corn];
-    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    const built = await buildPcbJob(tl, SET(), { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
     if (!built.ok) throw new Error(built.error);
     const job = built.job;
     job.tool = engraver.tool;
@@ -663,7 +664,7 @@ describe('#1140 the shape gates judge the cutter a setup assigns to the item', (
       }),
     };
     const bench = [engraver, shortDrill, bit('inv:d10', 'pcb-drill-1-0', 1.0), corn];
-    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    const built = await buildPcbJob(tl, SET(), { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
     if (!built.ok) throw new Error(built.error);
     const job = built.job;
     job.tool = engraver.tool;
@@ -698,7 +699,7 @@ describe('#1140 the shape gates judge the cutter a setup assigns to the item', (
       }),
     };
     const bench = [engraver, slotMill, bit('inv:d10', 'pcb-drill-1-0', 1.0), corn];
-    const built = await buildPcbJob(tl, SET(), { blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
+    const built = await buildPcbJob(tl, SET(), { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: bench, catalogue: ROWS });
     if (!built.ok) throw new Error(built.error);
     const job = built.job;
     job.tool = engraver.tool;

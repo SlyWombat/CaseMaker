@@ -32,6 +32,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { planCutInto } from '../tools/planCutInto';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -99,7 +100,7 @@ const bowl = (x: number, y: number): number => {
 
 describe('#721 — the mold heightfield', () => {
   it('the dome becomes a bowl: deepest at the centre (the part height), flush at the rim', () => {
-    const item = sampleGoalHeightfield(goal(domeTris(R)), { pitchMm: 0.1 });
+    const item = sampleGoalHeightfield(goal(domeTris(R)), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1 });
     const mold = moldHeightfield(item, 10, -R);
     expect(cellAt(item, 10, 10)).toBeCloseTo(0, 2);
     expect(cellAt(mold, 10, 10)).toBeCloseTo(-R, 2);
@@ -109,7 +110,7 @@ describe('#721 — the mold heightfield', () => {
   });
 
   it('the part is turned over, not reflected: a wedge high at y=20 is deepest at y=0 in the mold', () => {
-    const item = sampleGoalHeightfield(goal(wedgeTris(), { size: { x: 20, y: 20, z: 2 } }), { pitchMm: 0.25 });
+    const item = sampleGoalHeightfield(goal(wedgeTris(), { size: { x: 20, y: 20, z: 2 } }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25 });
     const mold = moldHeightfield(item, 10, -2);
     // Item: high (z≈0) at y=0, low (z≈−2) at y=20. Part height above its base: 2 at y=0, 0 at y=20.
     // Turned over about X, the part's high edge lands at y=20: the cavity is deepest there.

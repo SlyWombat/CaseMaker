@@ -37,6 +37,7 @@ import type {
   EngraveShape,
   EngraveSlotShape,
 } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 /** Area of a profile, with the CrossSection released. */
 function area(p: Profile): number {
@@ -245,7 +246,7 @@ describe('shapes reach the engravability check (#214)', () => {
     expect(engravability(job, m, () => 1)).toHaveLength(0);
 
     const tool = resolveTool('flat-3.175x12-metal')!;
-    const feeds = feedsFor([], job.stock.material, tool, Z1);
+    const feeds = feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse);
     expect(feeds.ok).toBe(true);
     if (!feeds.ok) return;
     const ir = generateEngrave(
