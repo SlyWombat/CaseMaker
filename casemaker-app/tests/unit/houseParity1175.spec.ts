@@ -47,12 +47,18 @@ const SKIP = HAVE_TRAY
 
 /**
  * The package the bench job posts, as MEASURED on 2026-11-10 through the browser door (with the
- * ladder on) against the committed bench pair: 16 programs. The analyst's list said 17 with a
+ * ladder on) against the committed bench pair: 17 programs (16 before #1251's band-driven ⌀2 rest, see EXPECTED_PROGRAMS). The analyst's list said 17 with a
  * p09 frame — that is the LIVE house location/catalogue's package; different inputs post a
  * different package (the Manager's ruling). The comparison still covers every program and every
  * frame THIS package carries, and the frame names are printed for the record.
  */
-const EXPECTED_PROGRAMS = 16;
+// #1251 — 16 -> 17. The stamp's edge band changes the chain's pick on this tray the way it does on the
+// tray top (8 -> 9): a NEW ⌀2 x 8 O-flute REST (inv:kz-o-flute-m-2-8, program 4, seven ops: pocket-6 ..
+// pocket-11) now comes before the ⌀1.5 x 6 rest, which does 14 ops (519 s) where it did 21 (887 s).
+// The job's priced cycle FALLS, 12,032 s -> 11,951 s (cutting +39 s, bit changes -121 s); both doors
+// post the same 17 programs byte for byte. (This job's CLI receipt carries no goal block, so its end
+// state is not measured here; the same pick on the tray top is no worse.)
+const EXPECTED_PROGRAMS = 17;
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-house-1175-'));
 afterAll(() => {

@@ -143,16 +143,18 @@ describe.skipIf(TRAY === undefined)('#970/#1031 the real tray — shadow-on neve
     expect(strays, strays.slice(0, 8).map((c) => `cell ${c.k}: design ${c.design.toFixed(4)} vs cut ${c.offZ.toFixed(4)}`).join('\n')).toEqual([]);
     // (c) THE TRAY'S DIFFERENCE, AS NUMBERS. Reverting 802d2be43's bound makes the count 0, so
     // this pin can tell the exact bound from the old gate; the block case below stays green.
-    // RE-PINNED 2026-11-11 at 6216eaa89: the tray-top group (#1219's step-over, #1227's 0.001
-    // ring inset and #1223's lobe order) leaves 400 difference cells where it left 446 — green at
-    // 88e280183 before the group, unchanged across #1225 (attribution on k3). ALL 400 are now
-    // material cells standing above the cut level: the 25 air-pass cells over the deeper slots are
-    // gone (the closer wall pass no longer differs there), so the air-cell checks above are
-    // vacuously green and stay as guards.
-    expect(differenceCells, 'the tray\'s difference — 0 means the exact bound is not in').toBe(400);
-    expect(materialCells, 'difference cells with material standing above the cut level').toBe(400);
-    expect(airCells.length, 'difference cells over the deeper slots (air passes)').toBe(0);
-    expect(deepestStandMm, 'the deepest material stand above the cut level, mm').toBeCloseTo(0.0371, 3);
+    // RE-PINNED AGAIN BY #1251 (back to the values from before 6b4e8f560): 446 difference cells =
+    // 421 material cells + 25 air-pass cells, deepest material stand 0.0029 mm. 6b4e8f560 (11-11)
+    // had moved them to 400 / 400 / 0 / 0.0371 because the tray-top group's #1227 ring ran 0.001 mm
+    // closer to the wall; #1251 puts the wall pass back at the plain radius, so the figures return
+    // exactly. The 25 AIR-PASS CELLS are not a regression: they are the cells over the tray's deeper
+    // slots, where the shadow-off ring passed over a void (design 3 mm BELOW the floor) and the
+    // shadow-on run's retreat skipped that pass — no material stands there, and the strays check
+    // above pins that each one is exactly the slot's own bottom.
+    expect(differenceCells, 'the tray\'s difference — 0 means the exact bound is not in').toBe(446);
+    expect(materialCells, 'difference cells with material standing above the cut level').toBe(421);
+    expect(airCells.length, 'difference cells over the deeper slots (air passes)').toBe(25);
+    expect(deepestStandMm, 'the deepest material stand above the cut level, mm').toBeCloseTo(0.0029, 3);
   }, 600_000);
 });
 

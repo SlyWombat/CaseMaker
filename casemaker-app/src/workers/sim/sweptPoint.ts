@@ -43,6 +43,29 @@ const STAMP_Z = 0.05;
  */
 const EDGE_EPS_MM = 1e-6;
 
+/**
+ * #1251 — FLOAT SLACK when comparing the cut with the goal: an edge cell is not lowered when the
+ * cut there would stand below the goal by more than this.
+ */
+const GOAL_AGREE_EPS_MM = 1e-6;
+
+/**
+ * The goal grid a stamp is measured on, plus #1251's optional edge rule: the goal's own height at
+ * each cell (`z`, same indexing) and the band — one posted step — either side of the cutter's
+ * edge. Both absent → the strict #964 edge, exactly as before.
+ */
+export interface StampGoal {
+  nx: number;
+  ny: number;
+  x0: number;
+  y0: number;
+  pitch: number;
+  /** The goal's height at each cell, same indexing as the field. */
+  z?: Float32Array;
+  /** The edge band, mm (one posted step): a cell within it either side of the cutter's edge is an edge cell. */
+  edgeBandMm?: number;
+}
+
 interface StampProfile {
   /** The cutting radius the disc stamps at, mm. */
   radius: number;
@@ -102,11 +125,15 @@ export interface StampedTop {
 export type StampToolAt = (tool: ToolState) => Tool | null;
 
 function stampField(
-  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
+  goal: StampGoal,
   timeline: Timeline,
   toolAt: StampToolAt,
 ): StampedTop | null {
   const { nx, ny, x0, y0, pitch } = goal;
+  // #1251 — THE EDGE BAND: a cell within one posted step of the cutter's edge is an edge cell and
+  // is judged by the goal; absent either member the stamp keeps #964's strict edge.
+  const band = goal.z !== undefined && goal.edgeBandMm !== undefined ? goal.edgeBandMm : 0;
+  const goalZ = band > 0 ? goal.z! : undefined;
   const field = new Float32Array(nx * ny);
   const who = new Uint8Array(nx * ny);
   const clX = new Float32Array(nx * ny);
@@ -129,6 +156,11 @@ function stampField(
     // #964 — a cell is cut only while its centre is STRICTLY inside the footprint.
     const Rin = Math.max(R - EDGE_EPS_MM, 0);
     const Rin2 = Rin * Rin;
+    // #1251 — with a band the disc reaches one posted step past its edge, and the cells within
+    // one posted step of the edge (either side) are edge cells.
+    const reach = R + band;
+    const Rout2 = reach * reach;
+    const Rband2 = Math.max(R - band, 0) ** 2;
     for (let m = 0; m < cp.steps.length; m++) {
       const ax = cp.xy[m * 4] as number;
       const ay = cp.xy[m * 4 + 1] as number;
@@ -147,10 +179,10 @@ function stampField(
         if (z >= STAMP_Z) continue;
         const qx = ax + dx * t;
         const qy = ay + dy * t;
-        const iLo = Math.max(0, Math.round((qx - R - x0) / pitch));
-        const iHi = Math.min(nx - 1, Math.round((qx + R - x0) / pitch));
-        const jLo = Math.max(0, Math.round((qy - R - y0) / pitch));
-        const jHi = Math.min(ny - 1, Math.round((qy + R - y0) / pitch));
+        const iLo = Math.max(0, Math.round((qx - reach - x0) / pitch));
+        const iHi = Math.min(nx - 1, Math.round((qx + reach - x0) / pitch));
+        const jLo = Math.max(0, Math.round((qy - reach - y0) / pitch));
+        const jHi = Math.min(ny - 1, Math.round((qy + reach - y0) / pitch));
         if (iLo > iHi || jLo > jHi) continue;
         for (let j = jLo; j <= jHi; j++) {
           const ddy = y0 + j * pitch - qy;
@@ -158,19 +190,53 @@ function stampField(
           for (let i2 = iLo; i2 <= iHi; i2++) {
             const ddx = x0 + i2 * pitch - qx;
             const d2 = ddx * ddx + ddy * ddy;
-            if (d2 >= Rin2) continue;
-            const v = z + stamp.profile(Math.sqrt(d2));
             const k = rowBase + i2;
-            // #964 — TIES GO TO THE LATER STAMP, as `goal_check.py`'s `put` does (`Wf[z <= Hf] =
-            // tn` AFTER `minimum.at`): a cell where the V and a flat cut to the same depth is the
-            // V's, which is what makes the `who`-gated edge-break share match the page's.
-            if (v <= field[k]!) {
-              field[k] = v;
-              who[k] = number;
-              clX[k] = qx;
-              clY[k] = qy;
+            if (band > 0) {
+              if (d2 < Rband2) {
+                // #1251 — THE INTERIOR IS v8's BODY, UNCHANGED: one comparison (the branch above)
+                // and the stamp exactly as the strict edge always did it. The disc is sampled at
+                // the cell's true distance and the cell is taken; interiors are the overwhelming
+                // majority of the stamped cells, so this is the path that decides the plan's cost.
+                const v = z + stamp.profile(Math.sqrt(d2));
+                // #964 — TIES GO TO THE LATER STAMP, as `goal_check.py`'s `put` does (`Wf[z <= Hf] =
+                // tn` AFTER `minimum.at`): a cell where the V and a flat cut to the same depth is the
+                // V's, which is what makes the `who`-gated edge-break share match the page's.
+                if (v <= field[k]!) {
+                  field[k] = v;
+                  who[k] = number;
+                  clX[k] = qx;
+                  clY[k] = qy;
+                }
+                stamped++;
+              } else if (d2 < Rout2) {
+                // #1251 — THE RING, the posted step at the cutter's edge (either side): the only
+                // cells that take the band path. At or beyond the edge the profile is the edge's
+                // own height (a point just outside the disc is given the edge's height, a ball's
+                // R), and an edge cell is not taken below the goal — a floor cell at the edge
+                // counts as reached, a wall cell at the edge is not gouged.
+                const v = z + stamp.profile(Math.min(Math.sqrt(d2), R));
+                if (v < goalZ![k]! - GOAL_AGREE_EPS_MM) continue;
+                // #964 — ties to the later stamp (see the interior path above).
+                if (v <= field[k]!) {
+                  field[k] = v;
+                  who[k] = number;
+                  clX[k] = qx;
+                  clY[k] = qy;
+                }
+                stamped++;
+              }
+            } else if (d2 < Rin2) {
+              // #964 — no band given: the strict edge, exactly as before (a cell is cut only while
+              // its centre is strictly inside the footprint).
+              const v = z + stamp.profile(Math.sqrt(d2));
+              if (v <= field[k]!) {
+                field[k] = v;
+                who[k] = number;
+                clX[k] = qx;
+                clY[k] = qy;
+              }
+              stamped++;
             }
-            stamped++;
           }
         }
       }
@@ -185,7 +251,7 @@ function stampField(
  * Null when the tool is unknown or no move cuts.
  */
 export function exactSweptField(
-  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
+  goal: StampGoal,
   timeline: Timeline,
   tool: Tool | null,
 ): Float32Array | null {
@@ -201,7 +267,7 @@ export function exactSweptField(
  * deepest cutter being the V bit. Null when nothing was stamped.
  */
 export function exactSweptFieldTooled(
-  goal: { nx: number; ny: number; x0: number; y0: number; pitch: number },
+  goal: StampGoal,
   timeline: Timeline,
   toolAt: StampToolAt,
 ): StampedTop | null {
