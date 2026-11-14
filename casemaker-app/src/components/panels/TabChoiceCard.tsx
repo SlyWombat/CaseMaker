@@ -387,7 +387,7 @@ function TabChoiceCardBody(props: TabChoiceCardProps): JSX.Element {
             boxSizing: 'border-box',
             borderRadius: '50%',
             border: `2px solid ${picked === value ? BLUE : '#7f8aa8'}`,
-            background: picked === value ? `radial-gradient(circle at center, ${BLUE} 0 5px, transparent 5px)` : 'transparent',
+            background: picked === value ? `radial-gradient(circle at 50% 50%, ${BLUE} 0 5px, transparent 5px)` : 'transparent',
           }}
         />
       </span>
