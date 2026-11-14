@@ -14,6 +14,11 @@
  *   unaccounted  files on disk that are in none of ran / skipped / no-load — named
  *   extra        files the runner reported that are NOT on disk — a stray file the gate ran
  *
+ * Every skipped file is a STATED decision: census-expected.json's "skipped" map names each one with
+ * the reason it skips and the env var / fixture that enables it. A skipped file with no entry is RED
+ * ("skipped without a stated reason"); an entry whose file did not skip is a note, not red; the
+ * report prints each skip's reason.
+ *
  * RED (exit 1) when any file failed to load, when any file on disk is unaccounted, or when the
  * on-disk count differs from tools/gate/census-expected.json. The expected count moves only with a
  * commit that adds or removes a spec (`--write-expected` rewrites it from the disk).
@@ -131,10 +136,11 @@ export function loneLoads(files: string[]): { file: string; message: string }[] 
   return bad;
 }
 
-export interface Verdict { red: boolean; reasons: string[] }
+export interface Verdict { red: boolean; reasons: string[]; notes: string[] }
 
-export function judge(c: Census, expectedCount: number | null, lone: { file: string; message: string }[]): Verdict {
+export function judge(c: Census, expectedCount: number | null, lone: { file: string; message: string }[], stated: Record<string, string> = {}): Verdict {
   const reasons: string[] = [];
+  const notes: string[] = [];
   if (c.noLoad.length > 0) reasons.push(`${c.noLoad.length} file(s) failed to load`);
   if (lone.length > 0) reasons.push(`${lone.length} file(s) failed to load ALONE`);
   if (c.extra.length > 0) reasons.push(`${c.extra.length} file(s) ran that are not on disk in this checkout`);
@@ -142,20 +148,28 @@ export function judge(c: Census, expectedCount: number | null, lone: { file: str
   if (expectedCount !== null && c.onDisk.length !== expectedCount) {
     reasons.push(`${c.onDisk.length} files on disk, ${expectedCount} expected (a spec was added or removed without moving census-expected.json)`);
   }
-  return { red: reasons.length > 0, reasons };
+  const unstated = c.skipped.filter((f) => (stated[f] ?? '').trim() === '');
+  if (unstated.length > 0) reasons.push(`${unstated.length} file(s) skipped without a stated reason: ${unstated.join(', ')}`);
+  const skippedSet = new Set(c.skipped);
+  for (const f of Object.keys(stated).sort()) {
+    if (!skippedSet.has(f) && f.startsWith(c.runner === 'vitest' ? 'tests/unit/' : 'tests/e2e/')) notes.push(`${f} has a stated skip reason but did not skip in this run`);
+  }
+  return { red: reasons.length > 0, reasons, notes };
 }
 
-export function render(c: Census, v: Verdict, expectedCount: number | null, lone: { file: string; message: string }[] | null): string[] {
+export function render(c: Census, v: Verdict, expectedCount: number | null, lone: { file: string; message: string }[] | null, stated: Record<string, string> = {}): string[] {
   const out: string[] = [];
   out.push(`FILE CENSUS — ${c.runner}`);
   out.push(`  on disk      ${c.onDisk.length}${expectedCount === null ? '' : `  (expected ${expectedCount})`}`);
   out.push(`  ran          ${c.ran.length}`);
   out.push(`  skipped      ${c.skipped.length}${c.skipped.length > 0 ? ` — ${c.skipped.map((f) => f.replace(/^tests\/(unit|e2e)\//, '')).join(', ')}` : ''}`);
+  for (const f of c.skipped) out.push(`     ${f.replace(/^tests\/(unit|e2e)\//, '')}: ${(stated[f] ?? '').trim() || 'NO STATED REASON'}`);
   out.push(`  no-load      ${c.noLoad.length}${c.noLoad.map((n) => `\n     ${n.file}: ${n.message}`).join('')}`);
   const some = (xs: string[]): string => xs.slice(0, 25).map((f) => `\n     ${f}`).join('') + (xs.length > 25 ? `\n     … and ${xs.length - 25} more` : '');
   out.push(`  unaccounted  ${c.unaccounted.length}${some(c.unaccounted)}`);
   out.push(`  extra        ${c.extra.length}${some(c.extra)}`);
   if (lone !== null) out.push(`  load alone   ${c.onDisk.length - lone.length}/${c.onDisk.length}${lone.map((n) => `\n     ${n.file}: ${n.message}`).join('')}`);
+  for (const n of v.notes) out.push(`  note         ${n}`);
   out.push(v.red ? `  RED — ${v.reasons.join('; ')}` : '  GREEN — every file on disk is accounted for');
   return out;
 }
@@ -167,7 +181,8 @@ function main(argv: string[]): number {
     return 2;
   }
   const disk = onDisk(runner);
-  const expectedAll: Record<string, number> = existsSync(EXPECTED) ? (JSON.parse(readFileSync(EXPECTED, 'utf8')) as Record<string, number>) : {};
+  const expectedAll = (existsSync(EXPECTED) ? JSON.parse(readFileSync(EXPECTED, 'utf8')) : {}) as { vitest?: number; playwright?: number; skipped?: Record<string, string> };
+  const stated = expectedAll.skipped ?? {};
   if (second === '--write-expected') {
     writeFileSync(EXPECTED, JSON.stringify({ ...expectedAll, [runner]: disk.length }, null, 2) + '\n');
     console.log(`census-expected.json: ${runner} = ${disk.length}`);
@@ -178,8 +193,8 @@ function main(argv: string[]): number {
   const census = runner === 'vitest' ? vitestCensus(report, disk) : playwrightCensus(report, disk);
   const lone = runner === 'playwright' && rest.includes('--lone') ? loneLoads(disk) : null;
   const expected = expectedAll[runner] ?? null;
-  const verdict = judge(census, expected, lone ?? []);
-  console.log(render(census, verdict, expected, lone).join('\n'));
+  const verdict = judge(census, expected, lone ?? [], stated);
+  console.log(render(census, verdict, expected, lone, stated).join('\n'));
   return verdict.red ? 1 : 0;
 }
 

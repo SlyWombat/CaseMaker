@@ -1,4 +1,14 @@
 {
-  "vitest": 1143,
-  "playwright": 147
+  "vitest": 1144,
+  "playwright": 147,
+  "skipped": {
+    "tests/unit/featureAcceptance958.spec.ts": "describe.skipIf: licensed (NC/ND) Makerables STEP parts are never committed; runs only when CM_958_TRAY_STEP (tool tray 70) and/or CM_958_ORGANIZER_STEP point at the .step files (CM_958_OUT optional output dir)",
+    "tests/unit/columnFlatMeasure.spec.ts": "describe.runIf: env-gated benchmark measurement (#222, #239); runs only with COLUMN_FLAT_MEASURE=1",
+    "tests/unit/gcodeCorpus.spec.ts": "describe.skipIf: Makera's 25 reference .nc files are GPL/unlicensed upstream, git-ignored and never committed; runs once `npm run reference-gcode:fetch` has filled casemaker-app/reference-gcode/",
+    "tests/unit/goldenAttribution.spec.ts": "describe.skipIf: attribution runner (#1011), not a check; runs only when CM_GOLDEN_OUT names an output directory",
+    "tests/unit/pipelineIdentityStick.spec.ts": "describe.skipIf(!HAVE_STICK): needs the shop-owned samples/3d/lfs_elephant.stl (never committed) and the demo full-library location.json (~/casemaker-manager/demo-build/location.json, or CASEMAKER_DEMO_LOCATION)",
+    "tests/unit/primitiveSurfaceProgram.spec.ts": "describe.skip, unconditional: #786 4a-2 cone surface-program test is disabled in source; no env var enables it, re-enable by removing the .skip",
+    "tests/e2e/centrePanel.spec.ts": "test.skip, unconditional: #827 Register-step centre panel is hidden by the #934 batch (engrave-centre-find and the registration entries); restore with that branch, no env var enables it",
+    "tests/e2e/goalCard948.spec.ts": "every case skips without the shop-owned samples/3d/lfs_elephant.stl (never committed) or the demo full-library location.json (~/casemaker-manager/demo-build/location.json, or CASEMAKER_DEMO_LOCATION); the #945 case is also a test.fixme"
+  }
 }
