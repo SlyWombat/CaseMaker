@@ -184,6 +184,7 @@ import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
+import type { ModelPlanOutput, PlanOutcome } from '../../../src/engine/cnc/cam/model/plan';
 import { buildPcbJob, jobDocumentProblem, type PcbJobFile } from './pcbJob';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../../../src/engine/cnc/engrave/fromDesign';
@@ -638,22 +639,33 @@ export interface ResultFileRef {
 }
 
 /**
- * A plan as the result needs it: every field except each setup's ToolpathIR list. The IR is the
- * plan's own posted toolpath — already served as the program's NC — and no browser reader takes it
- * from here (the store reads `outcome`/`statements`; `windowApi` reads `perSetup[].notes`).
+ * #1126 slice 2 (the Manager's ruling) — AN ALLOWLIST, NOT A STRIP LIST.
+ *
+ * The browser reads exactly two things from a plan: `outcome` (the run store's goal input) and
+ * each setup's `notes` (the QA window). Everything else in `ModelPlanOutput` — above all
+ * `perSetup[].programs` (the posted ToolpathIR) and `perSetup[].clGrid` (the sampled CL surfaces),
+ * which together were the 223 MB on the set B tray bottom — is engine-internal. So the result is
+ * BUILT FROM this type: a field the engine adds tomorrow cannot reach the document unless this
+ * summary names it.
  */
-function planWithoutIr(plan: unknown): unknown {
-  if (plan === null || plan === undefined) return plan;
-  const record = plan as { perSetup?: unknown };
-  if (!Array.isArray(record.perSetup)) return plan;
-  return {
-    ...record,
-    perSetup: record.perSetup.map((setup) => {
-      if (setup === null || typeof setup !== 'object') return setup;
-      const { programs: _programs, ...rest } = setup as { programs?: unknown };
-      return rest;
-    }),
-  };
+export interface PlanSummary {
+  outcome: PlanOutcome | null;
+  perSetup: { setupIndex: number; notes: string[] }[];
+}
+
+export function planSummary(plan: ModelPlanOutput | null | undefined): PlanSummary | null {
+  if (plan === null || plan === undefined) return null;
+  const record = plan as { outcome?: PlanOutcome | null; perSetup?: unknown };
+  const perSetup = Array.isArray(record.perSetup)
+    ? record.perSetup.map((setup) => {
+        const fields = (setup ?? {}) as { setupIndex?: unknown; notes?: unknown };
+        return {
+          setupIndex: typeof fields.setupIndex === 'number' ? fields.setupIndex : 0,
+          notes: Array.isArray(fields.notes) ? fields.notes.filter((n): n is string => typeof n === 'string') : [],
+        };
+      })
+    : [];
+  return { outcome: record.outcome ?? null, perSetup };
 }
 
 export function resultDocument(
@@ -685,8 +697,8 @@ export function resultDocument(
   };
   return {
     ...rest,
-    plan: planWithoutIr(generated.plan),
-    planIdeal: planWithoutIr(generated.planIdeal),
+    plan: planSummary(generated.plan),
+    planIdeal: planSummary(generated.planIdeal),
     resultVersion: RESULT_VERSION,
     nc: null,
     frameNc: null,
