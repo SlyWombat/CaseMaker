@@ -1829,13 +1829,15 @@ describe('runSheet — the through cut and its tabs (#218)', () => {
           spans: 3,
           unplaceable: 0,
           added: 1,
-          tight: [{ at: { x: 10.5, y: 4.25 }, stretchMm: 124, cornerMm: 6.1, joins: 3, sharpJoins: 1 }],
+          tight: [{ at: { x: 10.5, y: 4.25 }, stretchMm: 124, cornerMm: 6.1, marginMm: 12, joins: 3, sharpJoins: 1 }],
         },
       ],
     };
     const cut = sectionText(buildRunSheet(job, { ...stubGenerated(job), through: facts }, NO_SIM, NOW), 'cut');
-    // Holding comes before the corner margin: the tab placed inside it is NAMED, with distances.
-    expect(cut).toMatch(/tight tab/i);
+    // The tab placed inside the corner margin is NAMED, with distances and the edge's own margin.
+    expect(cut).toContain('a tab at X 10.5');
+    expect(cut).not.toMatch(/holding the part comes first|tight tab/i);
+    expect(cut).toContain("closer than the edge's 12 mm margin");
     expect(cut).toContain('X 10.5');
     expect(cut).toContain('Y 4.25');
     expect(cut).toContain('124 mm stretch');

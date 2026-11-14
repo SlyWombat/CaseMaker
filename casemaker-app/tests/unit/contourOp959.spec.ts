@@ -210,10 +210,10 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
       rapid,
     });
     const notes = (out.notes ?? []).join('\n');
-    expect(notes).toMatch(/tight tab/i);
-    expect(notes).toMatch(/stretch/i);
-    expect(notes).toMatch(/mm from the nearest corner/i);
-    expect(notes).toMatch(/joins? of the outline/i);
+    // #1258's ruled sentence, one per tab: which tab, how far from a corner, the edge's own margin,
+    // the longest stretch left — and the old wording gone.
+    expect(notes).toMatch(/Tab \d+ sits [\d.]+ mm from a corner, closer than the edge's [\d.]+ mm margin — the operator's choice\. Longest stretch without a tab: [\d.]+ mm\./);
+    expect(notes).not.toMatch(/holding the part comes first|tight tab/i);
   });
 
   it('refuses only when no edge can take a tight tab either', () => {

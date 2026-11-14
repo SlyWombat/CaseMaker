@@ -202,43 +202,64 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           `release tabs: ${asked} asked, ${placed} placed — the remaining edges are too short for another tab clear of the corners`,
         ]
       : [];
-  // #1206 (the analyst's step 2) — A TIGHT TAB IS NAMED, with its distances: it sits inside the
-  // corner margin on purpose, closing a stretch the margin-respecting tabs could not.
-  const tight = placements.flatMap((placement) => placement.tight);
-  for (const tab of tight) {
-    const mm = (v: number): string => String(Number(v.toFixed(1)));
-    tabNotes.push(
-      `a tight tab at X ${mm(tab.at[0])} Y ${mm(tab.at[1])} closes a ${mm(tab.stretchMm)} mm stretch, ` +
-        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)` +
-        `; it spans ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline` +
-        (tab.sharpJoins > 0
-          ? `, ${tab.sharpJoins} of them sharper than the smooth-arc limit`
-          : ''),
-    );
-  }
+  // #1258 (the analyst's ruling, stated ONCE here) — A TAB INSIDE THE CORNER MARGIN IS NAMED, one
+  // sentence per tab: which tab it is, how far from a corner, the margin of ITS OWN edge, and the
+  // longest stretch the outline is left with. A job with several cut-outs names each sentence's.
+  const mm = (v: number): string => String(Number(v.toFixed(1)));
+  const ringOf = (i: number): string => (path.length > 1 ? `Cut-out ${i + 1}: ` : '');
+  const perimeterOf = (ring: readonly (readonly [number, number])[]): number => {
+    let total = 0;
+    for (let k = 0; k < ring.length; k++) {
+      const a = ring[k]!;
+      const b = ring[(k + 1) % ring.length]!;
+      total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+    return total;
+  };
+  placements.forEach((placement, i) => {
+    if (placement.tight.length === 0) return;
+    const centres = placement.spans.map((span) => midpointOfRun(span.points));
+    const longest = longestTabGap(placement.spans, perimeterOf(path[i]!));
+    for (const tab of placement.tight) {
+      let n = 0;
+      let nearest = Infinity;
+      centres.forEach((c, k) => {
+        const d = Math.hypot(c[0] - tab.at[0], c[1] - tab.at[1]);
+        if (d < nearest) {
+          nearest = d;
+          n = k + 1;
+        }
+      });
+      tabNotes.push(
+        `${ringOf(i)}Tab ${n} sits ${mm(tab.cornerMm)} mm from a corner, closer than the edge's ${mm(tab.marginMm)} mm margin — the operator's choice. ` +
+          `Longest stretch without a tab: ${mm(longest)} mm.`,
+      );
+    }
+  });
 
   // #1258 — THE STRETCHES THE MARGIN LEFT, across every ring (re-indexed in ring order), and what
   // the answer did with them. `ask` states nothing here: the plan stops and asks. `insideMargin`'s
   // placed tabs are named above; a stretch no tab fits in, and every stretch the operator chose to
   // leave long, is stated with its length against the limit.
   const stretches: TabStretch[] = placements
-    .flatMap((placement) => placement.stretches ?? [])
+    .flatMap((placement, ring) => (placement.stretches ?? []).map((stretch) => ({ ...stretch, ring })))
     .map((stretch, index) => ({ ...stretch, index }));
   // …and where the tabs already stand, so a card can draw the outline to scale: each placed span's
   // centre (the point half-way along its own centre-path run).
-  const tabsAt: [number, number][] = placements.flatMap((placement) =>
+  const tabsByRing: [number, number][][] = placements.map((placement) =>
     placement.spans.map((span) => midpointOfRun(span.points)),
   );
+  const tabsAt: [number, number][] = tabsByRing.flat();
   if (cut.tabs.tabChoice === 'insideMargin' || cut.tabs.tabChoice === 'longerStretch') {
-    const mm = (v: number): string => String(Number(v.toFixed(1)));
     for (const stretch of stretches) {
+      const where = ringOf(stretch.ring ?? 0);
       if (cut.tabs.tabChoice === 'longerStretch') {
         tabNotes.push(
-          `a ${mm(stretch.spanMm)} mm stretch of the outline stays without a tab, past the shop's ${mm(cut.tabs.maxSpanMm ?? 0)} mm span limit — the operator chose a longer stretch`,
+          `${where}${mm(stretch.spanMm)} mm of the outline has no tab; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm — the operator's choice.`,
         );
       } else if (stretch.candidate === null) {
         tabNotes.push(
-          `a ${mm(stretch.spanMm)} mm stretch of the outline stays without a tab, past the shop's ${mm(cut.tabs.maxSpanMm ?? 0)} mm span limit — no tab fits in it`,
+          `${where}${mm(stretch.spanMm)} mm of the outline has no tab and no tab fits there; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm.`,
         );
       }
     }
@@ -254,7 +275,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
-    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0, path, tabsAt } }),
+    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0, path, tabsAt, tabsByRing } }),
     ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
 }

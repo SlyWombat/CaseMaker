@@ -196,7 +196,7 @@ export interface OpOutcome {
    * Under `ask` the plan stops on it (`ModelPlanOutput.tabChoiceNeeded`); under an answer it is the
    * record of what the answer applied to.
    */
-  tabChoice?: { mode: TabChoiceMode; stretches: TabStretch[]; count: number; widthMm: number; maxSpanMm: number; path: Polygons; tabsAt: [number, number][] };
+  tabChoice?: { mode: TabChoiceMode; stretches: TabStretch[]; count: number; widthMm: number; maxSpanMm: number; path: Polygons; tabsAt: [number, number][]; tabsByRing: [number, number][][] };
   /**
    * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the lip bevel a floor-correct V pocket cuts
    * into the design's top face at its walls, mm: `depth × tan(half)` per side, the V's own
@@ -607,7 +607,7 @@ export interface ModelPlanOutput {
 export interface TabChoiceNeeded {
   limitMm: number;
   marginMm: number;
-  stretches: (TabStretch & { setupIndex: number })[];
+  stretches: (TabStretch & { setupIndex: number; cut: TabCut })[];
   fingerprint: string;
   /**
    * What a card needs to draw the question to scale, per setup that raised it, all in that setup's
@@ -615,7 +615,24 @@ export interface TabChoiceNeeded {
    * on it, one tool radius outside the outline) and `tabsAt`, the centre of every tab already
    * placed at full margins.
    */
-  setups: { setupIndex: number; outline: Polygons; path: Polygons; tabsAt: [number, number][] }[];
+  setups: {
+    setupIndex: number;
+    outline: Polygons;
+    path: Polygons;
+    tabsAt: [number, number][];
+    /** One entry per cut-out (ring of the centre path), each with its own ring and tab centres. */
+    cuts: { cut: TabCut; path: Polygons; tabsAt: [number, number][] }[];
+  }[];
+}
+
+/**
+ * #1258 — WHICH CUT-OUT a stretch or a drawing belongs to: the setup's freeing contour has one ring
+ * of the cutter's centre path per cut-out. `id` is stable for the same plan (`setup-S-cut-K`, from
+ * 1); `name` is the words a row prints ("Cut-out K"); a job with a single cut-out may leave it off.
+ */
+export interface TabCut {
+  id: string;
+  name: string;
 }
 
 /**
@@ -1129,7 +1146,7 @@ function fnv1a(text: string): string {
  * the placement code, #1262; when they become settings they join this).
  */
 function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | null {
-  const stretches: (TabStretch & { setupIndex: number })[] = [];
+  const stretches: (TabStretch & { setupIndex: number; cut: TabCut })[] = [];
   const drawn: TabChoiceNeeded['setups'] = [];
   const parts: unknown[] = [];
   let limitMm = 0;
@@ -1138,8 +1155,17 @@ function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | n
       const tc = op.outcome.tabChoice;
       if (op.kind !== 'contour' || tc === undefined) continue;
       limitMm = tc.maxSpanMm;
-      drawn.push({ setupIndex: setup.setupIndex, outline: setup.features.contour.outline, path: tc.path, tabsAt: tc.tabsAt });
-      for (const s of tc.stretches) stretches.push({ ...s, index: stretches.length, setupIndex: setup.setupIndex });
+      const cutOf = (ring: number): TabCut => ({ id: `setup-${setup.setupIndex + 1}-cut-${ring + 1}`, name: `Cut-out ${ring + 1}` });
+      drawn.push({
+        setupIndex: setup.setupIndex,
+        outline: setup.features.contour.outline,
+        path: tc.path,
+        tabsAt: tc.tabsAt,
+        cuts: tc.path.map((ring, k) => ({ cut: cutOf(k), path: [ring], tabsAt: tc.tabsByRing[k] ?? [] })),
+      });
+      for (const s of tc.stretches) {
+        stretches.push({ ...s, index: stretches.length, setupIndex: setup.setupIndex, cut: cutOf(s.ring ?? 0) });
+      }
       const r = (v: number): number => Math.round(v * 1e4) / 1e4;
       parts.push([
         setup.setupIndex,
