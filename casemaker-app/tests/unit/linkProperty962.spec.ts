@@ -27,6 +27,7 @@ import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import { link, linkIsClear, type LinkOptions, type LinkPoint, type MaterialField } from '@/engine/cnc/cam/model/linking';
 import type { Polygon } from '@/engine/cnc/cam/model/plan';
 import type { CamMove } from '@/engine/cnc/cam/ir';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const HOUSE: Tool[] = [
   flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
@@ -38,7 +39,7 @@ const KINDS: PartKind[] = ['rectilinear', 'filleted'];
 
 function planOf(part: ReturnType<typeof buildRandomPart>) {
   return planPocketsForTree(part.tree, {
-    offset: makeClipperOffset(tl),
+    tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
     houseFlats: HOUSE,
     stepDownMm: 1.5,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

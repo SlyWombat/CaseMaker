@@ -559,6 +559,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // cut-out rather than overriding an existing one.
     ("tabs.count", 4.0, "tabs", "chosen, not measured: holding tabs per cut-out. Four is provisional — the first part cut with tabs replaces it"),
     ("tabs.widthMm", 4.0, "mm", "chosen, not measured: holding-tab width in material. The cutter's centre path stops two tool radii further apart. Provisional until the first tabbed cut"),
+    ("tabs.freeingWidthMm", 6.0, "mm", "chosen, not measured: the width of the tabs that hold a 3D part while its outline is cut free. It is the 6 mm the freeing contour has always used, apart from a cut-out's tab width"),
     ("tabs.heightMm", 1.0, "mm", "chosen, not measured: material a holding tab leaves below the tab top. Provisional; on a 3.81 mm badge blank it leaves 1 mm under a 2.81 mm cut"),
     // #1206 — the longest stretch of outline left between two holding tabs. The recommended value
     // scales with the stock (80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between); the
@@ -890,6 +891,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             "a whole number of tabs from 0 to 64",
         )),
         "tabs.widthMm" => Some(need(
+            n.is_some_and(|v| (0.1..=50.0).contains(&v)),
+            "0.1 to 50 mm",
+        )),
+        "tabs.freeingWidthMm" => Some(need(
             n.is_some_and(|v| (0.1..=50.0).contains(&v)),
             "0.1 to 50 mm",
         )),

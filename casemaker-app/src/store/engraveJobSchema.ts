@@ -1020,6 +1020,16 @@ const targetObjectSchema = z
       .describe('Depth band this side of a split goal cuts, mm from its setup’s work top; omit to cut the whole depth.'),
     // #898 — the goal's UNDERSIDE choice. Optional, so every pre-#898 document round-trips as
     // today's cut; a stored block states the kind and that kind's own numbers.
+    // #1271 — the operator's own freeing tabs: only the typed fields; absent follows the shop.
+    tabs: z
+      .object({
+        count: z.number().int().min(0).max(64).optional().describe('Tabs holding the part while its outline is cut free; omit to follow the shop’s `tabs.count`.'),
+        widthMm: z.number().finite().positive().optional().describe('Width of those tabs in material, mm; omit to follow the shop’s `tabs.freeingWidthMm`.'),
+        heightMm: z.number().finite().positive().optional().describe('Material those tabs leave under their top, mm; omit to follow the shop’s `tabs.heightMm`.'),
+      })
+      .strict()
+      .optional()
+      .describe('The operator’s own freeing tabs (only the fields they typed); omit to follow the shop.'),
     underside: z
       .object({
         kind: z

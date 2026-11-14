@@ -28,6 +28,7 @@ import { HOP_Z, type RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { Tool } from '@/engine/cnc/tool';
 import type { ParsedMesh } from '@/engine/import/stlParser';
 import { assertFixtureMesh } from '../tools/fixtureMesh';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 function parsed(solid: ManifoldInstance): ParsedMesh {
   const m = solid.getMesh();
@@ -71,7 +72,7 @@ function treeOf(solid: ManifoldInstance, stockTop: number): FeatureTree {
 
 function plan(tree: FeatureTree, houseFlats: Tool[]): PlanPocketsResult {
   return planPocketsForTree(tree, {
-    offset,
+    tabs: DEFAULT_RELEASE_TABS, offset,
     houseFlats,
     stepDownMm: 2,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

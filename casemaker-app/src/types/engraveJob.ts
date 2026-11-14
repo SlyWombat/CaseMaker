@@ -761,6 +761,13 @@ export interface EngraveTargetObject {
    */
   underside?: GoalUnderside;
   /**
+   * #1271 — THE TABS THAT HOLD THIS GOAL WHILE ITS OUTLINE IS CUT FREE, only the fields the operator
+   * TYPED. Absent (or a field absent) = follow the shop's `tabs.count` / `tabs.freeingWidthMm` /
+   * `tabs.heightMm`; a typed field is the job's own and stays on the job. The plan input gets the
+   * merged three (`ModelPlanInput.tabsOverride` over the shop's).
+   */
+  tabs?: { count?: number; widthMm?: number; heightMm?: number };
+  /**
    * #672 — a PNG goal's relief map: the depth the darkest (or, inverted, the lightest) tone is cut
    * to and which end of the greys sits at the top face. Absent = the engine's labelled defaults.
    */
