@@ -6,7 +6,7 @@
 // reaches Holding through the same door → stock path every first job takes, measures the SVGs
 // against the slot, reads the two labels, and keeps a screenshot for the eye.
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.setTimeout(120_000);
 
@@ -25,6 +25,9 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-make-thickness').fill('6');
   await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1273 — nothing recorded: the step asks and draws no picture until a seat is chosen.
+  await expect(page.getByTestId('engrave-setup-holding-picture')).toHaveCount(0);
+  await pickAssumedMount(page, 'ledge');
 }
 
 test('#780 — the Holding pictures fit their column, and both axes are labelled inside it', async ({ cm, page }, testInfo) => {

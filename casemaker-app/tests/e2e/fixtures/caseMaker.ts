@@ -1,4 +1,4 @@
-import { test as base, type Page } from '@playwright/test';
+import { test as base, expect, type Page } from '@playwright/test';
 import type { CaseMakerTestApi } from '../../../src/testing/windowApi';
 
 declare global {
@@ -106,6 +106,24 @@ export async function stockNext(
   test.info().annotations.push({ type: 'stock-ask', description: branch });
   console.log(`STOCKASK ${test.info().file.split(/[\\/]/).pop()} :: ${test.info().title.slice(0, 60)} :: ${branch}`);
   await page.getByTestId('start-wizard-stock-next').click();
+}
+
+/**
+ * #1273 — THE ONE WAY A WALK CHOOSES A MOUNT FOR THE OPERATOR WHEN NOTHING IS RECORDED. With no machine
+ * recorded the Holding step asks and selects nothing; Create waits. A walk that needs a job anyway
+ * chooses a vise seat as its own assumption, here, and this helper REFUSES TO DO IT SILENTLY: the ask
+ * must be on the page, the seat one the ask allows and unselected, and Create waiting before the pick;
+ * after it the step must say the hold is the operator's assumption. A walk on a recorded machine (a
+ * preselected seat) fails here and names the cause, so nothing picks a mount behind the step's back.
+ */
+export async function pickAssumedMount(page: Page, seat: 'ledge' | 'board' | 'block'): Promise<void> {
+  await expect(page.getByTestId('engrave-setup-holding-ask'), 'the Holding step must be asking (nothing recorded)').toBeVisible();
+  const radio = page.getByTestId(`engrave-setup-mount-${seat}`);
+  await expect(radio, `the ${seat} seat is not one the ask allows for this blank`).toBeEnabled();
+  await expect(radio, 'nothing may be selected before the operator chooses').not.toBeChecked();
+  await expect(page.getByTestId('engrave-setup-next'), 'Create waits for the choice').toBeDisabled();
+  await radio.check();
+  await expect(page.getByTestId('engrave-setup-holding-assumed'), 'the choice is carried as the operator’s assumption').toBeVisible();
 }
 
 /** #1100 — the sign card, for a flow that types a line of text. */

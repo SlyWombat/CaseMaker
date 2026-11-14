@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, openSomethingElse, openSignCard, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -67,6 +67,7 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-flow')).toHaveCount(0);
+  await pickAssumedMount(page, 'ledge'); // #1273 — nothing recorded: the step asks
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 
