@@ -4,7 +4,7 @@
 // maintainer reviews the wording against.
 import { fileURLToPath } from 'node:url';
 
-import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -37,6 +37,7 @@ test('#1099 — the mesh is drawn on the question, the blank and the hold', asyn
 
   // Step 4 — the same footprint inside the blank in the hold.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  await pickAssumedMount(page, 'ledge'); // #1273 — nothing recorded: the picture follows the choice
   await expect(page.getByTestId('engrave-setup-holding-part-footprint')).toBeVisible();
   await expect(page).toHaveScreenshot('1099-step4-mesh.png');
 });
@@ -62,6 +63,7 @@ test('#1099 — a drawing walks the same three steps, its rings on the blank and
   await stockNext(page);
 
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+  await pickAssumedMount(page, 'ledge'); // #1273
   await expect(page.getByTestId('engrave-setup-holding-part-footprint')).toBeVisible();
   await expect(page).toHaveScreenshot('1099-step4-drawing.png');
 });

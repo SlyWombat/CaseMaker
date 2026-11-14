@@ -6,7 +6,7 @@
 //   CASEMAKER_PORT=5403 npx playwright test tests/e2e/stockOrientation783.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 test.setTimeout(180_000);
@@ -26,6 +26,9 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-make-thickness').fill('12');
   await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1273 — nothing recorded: no hold fold until a seat is chosen.
+  await expect(page.getByTestId('engrave-setup-hold-fold')).toHaveCount(0);
+  await pickAssumedMount(page, 'ledge');
 }
 
 test('#783 the hold is asked, and a pressed hold restates the box', async ({ cm, page }, testInfo) => {
