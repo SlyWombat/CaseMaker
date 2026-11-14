@@ -195,6 +195,12 @@ describe('#1259 — proposeBlank', () => {
     expect(proposeBlank(pocket, ctx([item('ok', 'plate', { length: 200, width: 100, thickness: 20 })], { pocketFloorBodyMm: 10 }))!.source).toEqual({ case: 'shelf', itemId: 'ok' });
   });
 
+  it('#1263 — the app’s boot job keeps its hardwood (the sample); the wizard treats it as stating no material', () => {
+    expect(defaultEngraveJob().stock.material).toBe('hardwood');
+    // Untouched demo + no stock: nothing chosen — the sample never seeds the wizard.
+    expect(proposedMaterialFor(proposeBlank(TEXT, ctx([]))!, defaultEngraveJob())).toBeNull();
+  });
+
   it('work that sizes no blank proposes none, and circuit-board stock is only for board work', () => {
     expect(proposeBlank({ kind: 'none' }, ctx([STICK]))).toBeNull();
     const board = item('fr4', 'plate', { length: 200, width: 100, thickness: 1.6 }, { material: 'pcb' as never });
