@@ -53,7 +53,7 @@ test('#1276 Generate pressed while the settings route is held: it says so, plans
   // 'unknown' (the state a page is in before its first answer), then assert it BEFORE pressing.
   holding = true;
   await page.evaluate(async () => {
-    const m = (await import('/src/store/shopDefaultsStore.ts')) as {
+    const m = (await import('/src/store/shopDefaultsStore.ts' as string)) as {
       useShopDefaultsStore: { setState(p: Record<string, unknown>): void };
     };
     m.useShopDefaultsStore.setState({ status: 'unknown', defaults: null, etag: null, reason: null });
