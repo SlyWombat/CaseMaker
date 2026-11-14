@@ -34,7 +34,7 @@ interface GoalEdgeBreakView {
 /** What `checkGoalCutInto` takes: the allowance, or nothing when the job states none. */
 export type GoalEdgeBreakOptions = Pick<
   GoalCutIntoOptions,
-  'edgeBreak' | 'wallShadowRadiusMm' | 'stockThicknessMm' | 'breakthroughMm'
+  'edgeBreak' | 'wallShadowRadiusMm' | 'stockThicknessMm' | 'breakthroughMm' | 'smallestCutterRadiusMm'
 >;
 
 function statedEdgeBreak(goal: EngraveTargetObject): GoalEdgeBreakView | undefined {
@@ -77,9 +77,13 @@ export function goalEdgeBreakOptions(
     if (tool !== null) tools.push(tool);
   }
   let wallShadowRadiusMm: number | undefined;
+  let smallestCutterRadiusMm: number | undefined;
   for (const tool of tools) {
     const r = cuttingRadius(tool);
-    if (r !== null && (wallShadowRadiusMm === undefined || r > wallShadowRadiusMm)) wallShadowRadiusMm = r;
+    if (r === null) continue;
+    if (wallShadowRadiusMm === undefined || r > wallShadowRadiusMm) wallShadowRadiusMm = r;
+    // #1248 — the smallest cutter's radius, for the tall leftover split's wall-foot band.
+    if (smallestCutterRadiusMm === undefined || r < smallestCutterRadiusMm) smallestCutterRadiusMm = r;
   }
 
   const goal = pureGoalObject(job);
@@ -98,6 +102,7 @@ export function goalEdgeBreakOptions(
     return {
       ...blank,
       ...(wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm }),
+      ...(smallestCutterRadiusMm === undefined ? {} : { smallestCutterRadiusMm }),
     };
   }
 
@@ -124,5 +129,6 @@ export function goalEdgeBreakOptions(
     ...blank,
     ...(allowance === null ? {} : { edgeBreak: allowance }),
     ...(wallShadowRadiusMm === undefined ? {} : { wallShadowRadiusMm }),
+    ...(smallestCutterRadiusMm === undefined ? {} : { smallestCutterRadiusMm }),
   };
 }

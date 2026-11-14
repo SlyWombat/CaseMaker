@@ -302,6 +302,40 @@
                   },
                   "type": "array"
                 },
+                "leftoverTall": {
+                  "description": "#1248 — the cells standing more than the tall band (the shop’s last leftover band, `acceptance.leftoverBand3Mm`) above the goal, split wall line / wall foot / open. Reported only; no rule reads it. Absent on a check that was not told its bands.",
+                  "properties": {
+                    "cellAreaMm2": {
+                      "description": "The goal grid’s cell area, mm².",
+                      "type": "number"
+                    },
+                    "openCells": {
+                      "description": "Every other tall cell: material standing proud away from any wall.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "wallFootCells": {
+                      "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "wallLineCells": {
+                      "description": "Tall cells whose goal height differs by ≥ 1 mm from a 4-neighbour’s: samples on near-vertical faces.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "wallLineCells",
+                    "wallFootCells",
+                    "openCells",
+                    "cellAreaMm2"
+                  ],
+                  "type": "object"
+                },
                 "maxCutIntoAt": {
                   "anyOf": [
                     {
@@ -1035,6 +1069,40 @@
                               "type": "number"
                             },
                             "type": "array"
+                          },
+                          "leftoverTall": {
+                            "description": "#1248 — the cells standing more than the tall band (the shop’s last leftover band, `acceptance.leftoverBand3Mm`) above the goal, split wall line / wall foot / open. Reported only; no rule reads it. Absent on a check that was not told its bands.",
+                            "properties": {
+                              "cellAreaMm2": {
+                                "description": "The goal grid’s cell area, mm².",
+                                "type": "number"
+                              },
+                              "openCells": {
+                                "description": "Every other tall cell: material standing proud away from any wall.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "wallFootCells": {
+                                "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "wallLineCells": {
+                                "description": "Tall cells whose goal height differs by ≥ 1 mm from a 4-neighbour’s: samples on near-vertical faces.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "wallLineCells",
+                              "wallFootCells",
+                              "openCells",
+                              "cellAreaMm2"
+                            ],
+                            "type": "object"
                           },
                           "maxCutIntoAt": {
                             "anyOf": [
