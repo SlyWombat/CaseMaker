@@ -77,7 +77,7 @@ const SPECS: AccessorySpec[] = [
   {
     kind: 'vacuum',
     name: 'Vacuum',
-    meaning: 'Dust collection. M331 before a cut, M332 after; every program carries it.',
+    meaning: 'Dust collection. A cut switches it on (M851) before each program and off (M852) at the end.',
     icon: fanIcon,
   },
   {
@@ -89,7 +89,7 @@ const SPECS: AccessorySpec[] = [
   {
     kind: 'blow',
     name: 'Air blow',
-    meaning: 'The spindle blower (Makera’s Auto Blow). M331.1 on, M332.1 off — it follows the vacuum on a run when run.blowWithVacuum is on (the default).',
+    meaning: 'The spindle blower. M811 on, M812 off. A cut switches it with the vacuum while Air blow with the vacuum is on (the default).',
     icon: airIcon,
   },
   {

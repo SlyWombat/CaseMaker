@@ -256,11 +256,11 @@ describe('#421 the machine strip', () => {
     const v = get({}, 'vacuum');
     expect(v).toMatchObject({ shown: true, available: false, defaultOn: true, on: true, overridden: false });
     expect(v.reason).toContain('every cut');
-    expect(v.note).toContain('job flow');
-    // An override cannot turn it off: the runner sends M331 regardless, so the plan must not claim otherwise.
+    expect(v.note).toContain('a cut always switches the vacuum on');
+    // An override cannot turn it off: the runner sends M851 regardless, so the plan must not claim otherwise.
     expect(get({ overrides: { vacuum: false } }, 'vacuum')).toMatchObject({ on: true, overridden: false });
     const plan = planRun(input({ overrides: { vacuum: false } }));
-    expect(plan.phases.find((p) => p.kind === 'cut')!.title).toContain('M331');
+    expect(plan.phases.find((p) => p.kind === 'cut')!.title).toContain('M851');
   });
 
   it('air run (Q14): on for a program this machine has not finished, off for an identical repeat', () => {
