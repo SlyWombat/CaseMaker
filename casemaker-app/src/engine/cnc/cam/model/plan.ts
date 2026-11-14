@@ -1266,7 +1266,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
       const part = setupFromHeader(parsed.header).patch.part;
       if (part !== undefined && part.kind === 'prism' && part.outline.kind === 'p-rect') {
         const setup = stubSetup(part, { kind: 'tape-down', contact: part.outline }, { startingTool: 1 }, Z1);
-        const stamp = exactSweptFieldTooled(coverageGoal!, buildTimeline(parsed, setup, Z1), () => ir.tool);
+        const stamp = exactSweptFieldTooled({ ...coverageGoal!, edgeBandMm: 10 ** -axisPrecision }, buildTimeline(parsed, setup, Z1), () => ir.tool);
         if (stamp !== null) field = stamp.field;
       }
     }
