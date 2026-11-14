@@ -91,7 +91,8 @@ import { catalogueValueSentence, withCatalogueEntries, withCatalogueValues } fro
 import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
-import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { adjudicatedCellCount, asGoalHeightfield } from '@/workers/sim/goalChainCutInto';
 import { memTrace } from '@/engine/cnc/memTrace';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -6463,11 +6464,14 @@ export async function generateGoalProgram(
     // owns the check's call and options; the planner folds the chain's stamp with the cache it
     // already has and hands this function the field, so one call is the check's classification
     // pass. The goal field is the same sample the plan stamps against (`input.goal`, the
-    // `sampleGoalHeightfield` result itself — `GoalCellField` is its structural subset).
+    // `sampleGoalHeightfield` result itself — `GoalCellField` is its structural subset, so
+    // `asGoalHeightfield` checks the fields the check reads before they are trusted).
     const planGoalCutInto = input.goal === undefined
       ? undefined
       : (field: Float32Array, irs: readonly ToolpathIR[]): { adjudicatedCells: number; maxMm: number; areaMm2: number } | null => {
-          const goalField = input.goal as unknown as GoalHeightfield;
+          // The plan's goal is the full sampled field, or the check did not run (review 3: no bare cast).
+          const goalField = asGoalHeightfield(input.goal);
+          if (goalField === null) return null;
           const verdictTop = (x: number, y: number): number | null => {
             const i = Math.round((x - goalField.x0) / goalField.pitch);
             const j = Math.round((y - goalField.y0) / goalField.pitch);
@@ -6479,7 +6483,8 @@ export async function generateGoalProgram(
           const chainKeys = irs.map((ir) => cutterKeyOf(ir.tool));
           const options = goalEdgeBreakOptions(job, (key) => checkTools.get(key) ?? null, chainKeys);
           const report = checkGoalCutInto(goalField, null, { leftoverTop: verdictTop, ...options });
-          const cells = Math.round(report.adjudicatedFraction * goalField.coveredCount);
+          const cells = adjudicatedCellCount(report.adjudicatedFraction, goalField.coveredCount);
+          if (cells === null) return null;
           return { adjudicatedCells: cells, maxMm: report.adjudicatedMaxMm, areaMm2: cells * goalField.pitch * goalField.pitch };
         };
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
@@ -6495,7 +6500,7 @@ export async function generateGoalProgram(
             onProgress: (p: ModelPlanProgress) =>
               onProgress({
                 stage: 'plan',
-                label: `planning: ${p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
+                label: `planning: ${p.note ?? p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
               }),
           }),
       ...(signal === undefined ? {} : { signal }),

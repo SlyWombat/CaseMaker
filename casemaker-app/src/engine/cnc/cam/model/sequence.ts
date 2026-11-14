@@ -269,6 +269,14 @@ export interface SequenceOptions {
    */
   adjudicate?: (steps: readonly SequenceStep[]) => { adjudicatedCells: number; maxMm: number; areaMm2: number } | null;
   /**
+   * #1252 (review 4) — A TICK BEFORE EVERY ADJUDICATION CALL: `done` calls already made, `total` the
+   * feasible chains that could still be asked. The usual run asks one chain and never ticks twice;
+   * the all-dirty path asks EVERY feasible chain (no cap — a cap would be a chosen limit that
+   * decides a pick), up to seconds a call, and the caller turns this into the #1038 progress line
+   * "checking set N of M against the model" so a long all-dirty pick does not look like a hang.
+   */
+  onAdjudicate?: (done: number, total: number) => void;
+  /**
    * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
    * simulated. The simulated outcome can be seconds per candidate and a plan is minutes; between
    * the plan's stage reports the run's silence watchdog hears nothing. One callback per candidate
@@ -1399,8 +1407,15 @@ export function chooseSequence(
       let setAside = 0;
       for (const r of feasible) {
         const asked = chainSignature(r.steps);
+        opts.onAdjudicate?.(adjudicatedCells.size + 1, feasible.length);
         const t0 = performance.now();
-        const v = opts.adjudicate(r.steps) ?? null;
+        const answer = opts.adjudicate(r.steps) ?? null;
+        // #1252 (review 3) — A COUNT THAT IS NOT A NUMBER IS NOT AN ANSWER. `NaN === 0` is false, so
+        // a non-finite count would set every chain aside and print "NaN" on the sheet; it is read
+        // as the check not having run (`null`), exactly like an adjudicator that declined.
+        const v = answer !== null && Number.isFinite(answer.adjudicatedCells) && Number.isFinite(answer.maxMm) && Number.isFinite(answer.areaMm2)
+          ? answer
+          : null;
         const ms = Math.round(performance.now() - t0);
         const cells = v === null ? -1 : v.adjudicatedCells;
         memTrace('chain:adjudicate', { signature: asked, adjudicatedCells: cells, ms });
