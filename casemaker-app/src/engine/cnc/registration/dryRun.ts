@@ -286,6 +286,8 @@ function depsFor(console_: ReturnType<typeof recordingConsole>, liveClearanceZ: 
     // person at the machine who proceeds.
     operator: () => Promise.resolve(true),
     stopRequested: () => false,
+    // #1286 — a dry run talks to a simulated console: no real machine's offsets change, nothing to mark.
+    onFirstSend: () => undefined,
     // #1199 item 2 / #1202 — the guard is built from the SAME live clearance the real run passes,
     // so the shown verdicts and the wire's verdicts are one guard, not two readings. The field is
     // REQUIRED (1e5ecb4aa): every caller here names the machine's clearance (the live reading when

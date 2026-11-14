@@ -346,6 +346,14 @@ export function setupRegistrationFor(
  *   registration-missing · registration-unusable · registration-other-blank · registration-other-hold ·
  *   registration-superseded · registration-unstamped · registration-no-machine · registration-no-setup
  */
+/** The `latest` owner of a machine whose offsets a bed-setup measurement (a tap, a centre find) touched: no job's. */
+export const MACHINE_SETUP_OWNER = '(machine setup)';
+
+/** A run that is not a job's registration (a bed-setup measurement, a retouch) changed the machine's offsets. */
+export function markMachineChanged(target: { host: string; port: number }): void {
+  useEngraveRegistrationStore.getState().markWriting(target, MACHINE_SETUP_OWNER, null);
+}
+
 export type RegistrationGateCode =
   | 'registration-missing'
   | 'registration-unusable'

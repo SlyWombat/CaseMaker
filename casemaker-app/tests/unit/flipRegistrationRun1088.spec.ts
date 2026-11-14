@@ -150,6 +150,7 @@ function fakeMachine(sent: string[], opts: FakeOpts = {}) {
 const deps = (console: ReturnType<typeof fakeMachine>) => ({
   console,
   operator: async () => true,
+  onFirstSend: () => undefined, // #1286 — required by the executor; no real machine behind this fake
 });
 
 /** The carried Z0, as the job states it: side 2's top at the fake's surface, ± 0.3 mm. */

@@ -17,7 +17,9 @@ import { holdKeyOf, resetEngraveRegistrationStore, setupRunGate, useEngraveRegis
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
 import type { EngraveJob } from '@/types/engraveJob';
-import { registerForTest } from '../tools/registeredJob';
+import { runRegistration } from '@/engine/cnc/registration/execute';
+import { markMachineChanged } from '@/store/engraveRegistrationStore';
+import { registerForTest, testPlan } from '../tools/registeredJob';
 
 const TARGET = { host: '192.0.2.10', port: 2222 };
 const OTHER = { host: '192.0.2.99', port: 2222 };
@@ -138,6 +140,35 @@ describe('#1286 setupRunGate', () => {
     useEngraveRegistrationStore.getState().markWriting(TARGET, 'job-B', null); // B's G10 is going out; no record ever follows
     expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
     expect(gate(jobB, 1, null)?.code).toBe('registration-missing');
+  });
+
+  it('B2 — the RUN marks the machine itself on its FIRST send: A registered, B\u2019s run starts and is stopped before any origin write → A refused', async () => {
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null)).toBeNull();
+    const order: string[] = [];
+    let sent = 0;
+    const r = await runRegistration(testPlan(), {
+      console: {
+        send: async (line: string) => {
+          order.push(`send ${line}`);
+          sent += 1;
+          return { kind: 'sent', line, text: 'ok', frames: 1, elapsedMs: 1 } as never;
+        },
+      },
+      operator: async () => true,
+      // The operator presses Stop the moment the first line has gone: B never reaches an origin write.
+      stopRequested: () => sent >= 1,
+      liveClearanceZ: -3,
+      onFirstSend: () => {
+        order.push('mark');
+        markMachineChanged(TARGET);
+      },
+    });
+    expect(r.ok).toBe(false);
+    expect(order[0], 'the mark comes BEFORE the first line goes out').toBe('mark');
+    expect(order.filter((o) => o === 'mark')).toHaveLength(1);
+    expect(order.some((o) => o.includes('G10 L2'))).toBe(false); // no origin write happened
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
   });
 
   it('a record restored from the house’s note carries no blank stamp and never satisfies the gate', () => {

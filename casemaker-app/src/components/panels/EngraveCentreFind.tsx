@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react';
+import { markMachineChanged } from '@/store/engraveRegistrationStore';
 import { attachConsole } from '@/platform/machineConsole';
 import {
   applyCorrection,
@@ -200,6 +201,7 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
         console: { send: (line, timing) => handle.send(line, timing) },
         operator,
         liveClearanceZ: centreOptions.seekFromMachineZ,
+        onFirstSend: () => markMachineChanged(target),
       });
       if (!alive.current) return;
       if (!r.ok) {
@@ -243,7 +245,7 @@ export function EngraveCentreFind({ target, plan, settings, probe }: EngraveCent
     try {
       const a = await applyCorrection(
         result.outcome,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: result.outcome.machineClearanceZ ?? Number.NaN },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator, liveClearanceZ: result.outcome.machineClearanceZ ?? Number.NaN, onFirstSend: () => markMachineChanged(target) },
         { confirmed: true },
       );
       if (!alive.current) return;

@@ -603,6 +603,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           console: { send: (line, timing) => handle.send(line, timing) },
           operator: (step) => askOperator(machine, step),
           liveClearanceZ,
+          // #1286 — the post-facing retouch writes the origin again: the machine is this job's.
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(rec.target, rec.jobId, null),
         },
         { confirmed: true },
       );

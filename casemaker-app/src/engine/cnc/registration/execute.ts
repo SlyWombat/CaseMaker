@@ -194,6 +194,15 @@ export function mountConfirmText(plan: RegistrationPlan): string {
 
 export interface ExecDeps {
   console: RegistrationConsole;
+  /**
+   * #1286 (SAFETY) — REQUIRED: called ONCE, immediately before the FIRST line this run sends. A run's
+   * first lines (`G92.1`, `G10 L20 P0 A0`, the homing) change the offsets the machine holds, so from
+   * that moment every earlier registration on the machine describes an origin that is gone — whether
+   * or not this run goes on to write an origin, is stopped, or fails. The run makes the call itself
+   * (in `session`, around every send), so no surface can forget it; a caller with no real machine
+   * behind the console (a dry run against a simulated one) passes a no-op on purpose.
+   */
+  onFirstSend: () => void;
   operator: (step: OperatorStep) => Promise<boolean>;
   /** #587 — the latest step narration, so the section shows what is running, not a blanket "Talking…". */
   onStep?: (sentence: string) => void;
@@ -326,7 +335,7 @@ class Stop extends Error {}
  * silent −3 that could send the head somewhere the machine does not call clear.
  */
 function session(
-  deps: ExecDeps,
+  depsIn: ExecDeps,
   seekFromMachineZ: number,
   idlePollLimit: number = MAX_IDLE_POLLS,
   /**
@@ -342,6 +351,21 @@ function session(
    */
   guardOptions: MotionOrderGuardOptions = {},
 ) {
+  // #1286 — the run's FIRST send of any kind raises `onFirstSend` once, before the line goes out.
+  let firstSent = false;
+  const deps: ExecDeps = {
+    ...depsIn,
+    console: {
+      ...depsIn.console,
+      send: (line, timing) => {
+        if (!firstSent) {
+          firstSent = true;
+          depsIn.onFirstSend();
+        }
+        return depsIn.console.send(line, timing);
+      },
+    },
+  };
   // A bounded wait whatever the location says: a whole number of polls, at least one (#449).
   const idlePolls = Number.isInteger(idlePollLimit) && idlePollLimit >= 1 ? idlePollLimit : MAX_IDLE_POLLS;
   const transcript: Transcript[] = [];

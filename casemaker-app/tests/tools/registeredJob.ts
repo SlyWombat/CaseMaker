@@ -44,3 +44,21 @@ export function registerForTest(
   const sid = setupId === null || setupId === 'setup-1' || setupId === firstId ? firstId : setupId;
   useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, sid, { blankId: null, holdKey: holdKeyOf(job) });
 }
+
+/** The approved registration plan these specs share (a vise job on the shipped sizes). */
+export function testPlan() {
+  const { settings } = registrationSettings(null);
+  const planned = planRegistration(
+    {
+      stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 },
+      mount: 'vise',
+      expectedSurface: { machineZ: -56.172, from: 'a test registration' },
+      seekFromMachineZ: -3,
+      fixtureBelowSurfaceMm: 0.72,
+      cutCentre: { x: 24, y: 43 },
+    },
+    settings,
+  );
+  if (!planned.ok) throw new Error(planned.reason);
+  return planned.plan;
+}

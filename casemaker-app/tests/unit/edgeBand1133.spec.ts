@@ -195,7 +195,7 @@ describe('#1133 the edge-find band', () => {
     const bore: Box = { xMin: 10, yMin: 2.5, xMax: 28, yMax: 9 };
     const z1 = fakeZ1({ actual: BLANK, bore });
     const p = plan('tape');
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
 
     // The front edge is the stock's own edge — the offset is zero, not the bore's far wall at 9 mm.
@@ -228,7 +228,7 @@ describe('#1133 the edge-find band', () => {
     const inward: ExpectedStock = { ...BLANK, yMin: 6, yMax: 82.2 };
     const z1 = fakeZ1({ actual: inward, ballR: 0.7 });
     const p = plan('vise', { mountDatum: JAW, fixtureBelowSurfaceMm: undefined });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const front = r.outcome.edges.find((e) => e.edge === 'front')!;
     expect(front.foundAt).toBeNull();
@@ -240,7 +240,7 @@ describe('#1133 the edge-find band', () => {
     expect(r.outcome.usable).toBe(false);
     // No origin from a measurement that is not whole: the correction is refused before any write.
     const before = z1.lines.length;
-    const applied = await applyCorrection(r.outcome, { liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
+    const applied = await applyCorrection(r.outcome, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes }, { confirmed: true });
     expect(applied.ok).toBe(false);
     expect(z1.lines.length).toBe(before);
     expect(z1.lines.some((l) => l.startsWith('G10 L2'))).toBe(false);
@@ -254,7 +254,7 @@ describe('#1133 the edge-find band', () => {
     expect(p.notes.join(' ')).toContain(`±${S.edgeBandMm} mm`);
 
     const z1 = fakeZ1({ actual: SHIFTED, ballR: 0.7 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     // No sideways move at all: every edge keeps the Z-only bracket-and-bisect.
     expect(z1.lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(0);
@@ -274,7 +274,7 @@ describe('#1133 the edge-find band', () => {
   it('a vise WITH the measured jaw top seeks the free front edge sideways, at the wired probe’s rim', async () => {
     const p = plan('vise', { mountDatum: JAW, fixtureBelowSurfaceMm: undefined });
     const z1 = fakeZ1({ actual: SHIFTED, ballR: 0.7 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const side = z1.lines.filter((l) => /^G38\.3 [XY]-?[\d.]+ F/.test(l));
     // The front edge only: a vise's X edges are the jaws' own faces and stay Z-only.
@@ -328,7 +328,7 @@ describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
     const p = cornerPlan(3);
     p.probe = { ...(p.probe as ProbeSpec), touches: 'z-only' };
     const z1 = fakeZ1({ actual: SHIFTED, ballR: 1.5 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(z1.lines.filter((l) => /^G38\.3 [XY]/.test(l))).toHaveLength(0);
   });
@@ -344,7 +344,7 @@ describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
     }
 
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     // BOTH axes now seek sideways — the X lines are #827's, restored and banded.
     const sideX = z1.lines.filter((l) => /^G38\.3 X-?[\d.]+ F/.test(l));
@@ -372,7 +372,7 @@ describe('#827 the vise corner keeps its stock-own-X-face side touch', () => {
     expect(p.notes.join(' ')).toContain("X is taken from the fixed jaw's face");
 
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     // The X lines are Z-only (no sideways move); the free front edge still seeks sideways.
     expect(z1.lines.filter((l) => /^G38\.3 X-?[\d.]+ F/.test(l))).toHaveLength(0);
@@ -395,7 +395,7 @@ describe('#1143 the touch estimate’s predicate is the executor’s dispatch', 
   it('every side record is a scan the predicate names — tape, and a datum’d vise', async () => {
     const tape = plan('tape');
     const z1 = fakeZ1({ actual: BLANK });
-    const r = await runRegistration(tape, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(tape, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     for (const rec of r.data.scans) {
       expect(rec.touches.some((t) => t.sideContact === true), rec.scan.edge).toBe(sideTouchSelected(tape, rec.scan.edge));
@@ -403,7 +403,7 @@ describe('#1143 the touch estimate’s predicate is the executor’s dispatch', 
 
     const vise = plan('vise', { mountDatum: JAW, fixtureBelowSurfaceMm: undefined });
     const z2 = fakeZ1({ actual: BLANK });
-    const r2 = await runRegistration(vise, { liveClearanceZ: -3, console: z2.console, operator: yes });
+    const r2 = await runRegistration(vise, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z2.console, operator: yes });
     if (!r2.ok) throw new Error(r2.reason);
     const byEdge = r2.data.scans.map((rec) => [rec.scan.edge, rec.touches.some((t) => t.sideContact === true)]);
     expect(byEdge).toEqual([

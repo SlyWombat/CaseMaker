@@ -991,6 +991,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         { ctx: attempt.attempt.ctx, z0: attempt.attempt.z0 },
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1286 — the run's first line marks the machine (G92.1 and the homing change the offsets).
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, selectedSetup?.id ?? null),
           // #1199 item 2 — the LIVE machine's clearance, so the plan is proven against the machine
           // as it is now, not only against the value it was planned with.
           liveClearanceZ: seekFromMachineZ,
@@ -1148,6 +1150,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1286 — the run's first line marks the machine, before any origin write.
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, job.setups?.[0]?.id ?? null),
           // #1199 item 2 — the LIVE machine's clearance at run time.
           liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop: checked before every line, and the flag outlives the
@@ -1386,6 +1390,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         result.outcome,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, flipRun ? (selectedSetup?.id ?? null) : (job.setups?.[0]?.id ?? null)),
           operator: askOperator,
           // #1199 — the live machine's clearance, even for the origin write's session.
           liveClearanceZ: seekFromMachineZ,

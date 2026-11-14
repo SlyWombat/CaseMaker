@@ -77,7 +77,7 @@ describe('#1202 — the guarded top seek’s dry list is the whole sequence', ()
       console: { send: (line, timing) => console_.send(line, timing) },
       operator: () => Promise.resolve(true),
       stopRequested: () => false,
-      liveClearanceZ: plan.seek.fromMachineZ,
+      onFirstSend: () => undefined, liveClearanceZ: plan.seek.fromMachineZ,
     });
     expect(run.ok).toBe(true);
     expect(dry.lines.map((l) => l.line)).toEqual(console_.lines);
@@ -133,7 +133,7 @@ describe('#1202 — the scripted M491 answers the plan’s own reference', () =>
       console: { send: (line, timing) => console_.send(line, timing) },
       operator: () => Promise.resolve(true),
       stopRequested: () => false,
-      liveClearanceZ: plan.seek.fromMachineZ,
+      onFirstSend: () => undefined, liveClearanceZ: plan.seek.fromMachineZ,
     });
     expect(run.ok).toBe(true);
     expect(dry.lines.map((l) => l.line)).toEqual(console_.lines);

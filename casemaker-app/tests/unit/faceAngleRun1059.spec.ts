@@ -103,7 +103,7 @@ const yes = async () => true;
 describe('#1059 runFaceAngle on a bench square', () => {
   it('a level stock takes ONE pair, writes the A zero, and never turns', async () => {
     const fake = fakeStock(0);
-    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.readings).toHaveLength(1);
     expect(r.residualMm).toBeCloseTo(0, 6);
@@ -118,7 +118,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
 
   it('a tilted stock turns A by −θ FROM THE ENVELOPE CLEARANCE, then reads level', async () => {
     const fake = fakeStock(2);
-    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(r.readings).toHaveLength(2);
     expect(r.readings[0]!.thetaDeg).toBeCloseTo(2, 2);
@@ -136,7 +136,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
     // A band wide enough for both touches to land, so the reading is the thing under test — a
     // 12° tilt on this face would miss the narrow band first, and that refusal is tested below.
     const fake = fakeStock(12);
-    const r = await runFaceAngle({ plan: plan({ parkAboveSurfaceMm: 8, bandAllowanceMm: 6 }), touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: plan({ parkAboveSurfaceMm: 8, bandAllowanceMm: 6 }), touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('wrong touch or a wrong mounting, not a turn');
     expect(fake.aWords).toHaveLength(0);
@@ -149,7 +149,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
     const fake = fakeStock(0);
     const high = plan();
     const raised = { ...high, faceTopZ: high.faceTopZ + 30, bandFloorZ: high.bandFloorZ + 30, parkZ: high.parkZ + 30 };
-    const r = await runFaceAngle({ plan: raised, touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: raised, touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('found no face');
     expect(fake.aWords).toHaveLength(0);
@@ -158,7 +158,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
 
   it('an alarm stops the run with no A word and the supply off', async () => {
     const fake = fakeStock(2, { alarmOn: 'G53 G0 X' });
-    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: plan(), touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     expect(fake.aWords).toHaveLength(0);
     expect(fake.lines.at(-1)).toBe('M832');
@@ -171,7 +171,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
     // A doctored plan: X inside the jaws' keep-out (jaw face + anything under the band). The
     // traverse to it happens at the clearance, so #1199 alone would wave it through.
     const inside = { ...p, x: inputs().jawFaceX + 1 };
-    const r = await runFaceAngle({ plan: inside, touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: inside, touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('keep-out');
     expect(fake.lines.some((l) => l.startsWith('G38.3'))).toBe(false);
@@ -187,7 +187,7 @@ describe('#1059 runFaceAngle on a bench square', () => {
       yPlus: AXIS.axisY + p.envelopeRadiusMm + 5,
       yMinus: AXIS.axisY - p.envelopeRadiusMm - 5,
     };
-    const r = await runFaceAngle({ plan: beside, touchFeed: 60 }, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runFaceAngle({ plan: beside, touchFeed: 60 }, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('footprint');
     expect(fake.lines.some((l) => l.startsWith('G38.3 Z'))).toBe(false);

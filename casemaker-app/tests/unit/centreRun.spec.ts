@@ -152,7 +152,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
     const r = await runCentreFind(
       options({ kind: 'bore', radiusMm: 8.88 / 2 }, { probeTouches: 'z-only' }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('side');
@@ -161,7 +161,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
 
   it('finds the centre and ⌀8.88 from the four walls, and releases every touch before any G0', async () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
-    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }), { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }), { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     // The centre, work and machine: the bench's own figure.
     expect(result.centreWork.x).toBeCloseTo(10, 2);
@@ -215,7 +215,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
     if (!made.ok) throw new Error(made.reason);
     const result = await runCentreFind(
       { ...options({ kind: 'bore', radiusMm: 8.88 / 2 }), plan: made.plan, topTouchAt: { x: 24, y: 19.5 } },
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     if (!result.ok) throw new Error(result.reason);
     expect(result.centreWork.x).toBeCloseTo(10, 2);
@@ -228,7 +228,7 @@ describe('#827 runCentreFind on the bench counterbore', () => {
 describe('#827 runCentreFind on a round part', () => {
   it('measures a ⌀30 boss centre from outside, with the top at its own centre', async () => {
     const fake = fakeMachine({ kind: 'boss', radiusMm: 15 });
-    const result = await runCentreFind(options({ kind: 'boss', radiusMm: 15 }), { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const result = await runCentreFind(options({ kind: 'boss', radiusMm: 15 }), { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     if (!result.ok) throw new Error(result.reason);
     expect(result.centreWork.x).toBeCloseTo(10, 2);
     expect(result.centreWork.y).toBeCloseTo(20, 2);
@@ -252,7 +252,7 @@ describe('#827 runCentreFind on a round part', () => {
     if (!made.ok) throw new Error(made.reason);
     const result = await runCentreFind(
       { ...options({ kind: 'boss', radiusMm: 15 }), plan: made.plan },
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/increase the search radius/);
@@ -273,7 +273,7 @@ describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is 
     const fake = fakeMachine({ kind: 'bore', radiusMm: 4.44 });
     const bare = { ...options({ kind: 'bore', radiusMm: 4.44 }) } as Partial<CentreFindOptions>;
     delete bare.hold;
-    const r = await runCentreFind(bare as CentreFindOptions, { liveClearanceZ: -3, console: fake.console, operator: yes });
+    const r = await runCentreFind(bare as CentreFindOptions, { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('not stated');
     expect(fake.lines).toHaveLength(0);
@@ -286,7 +286,7 @@ describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is 
     const hold = { ...HOLD, footprint: { xMin: 24, xMax: 60, yMin: 10, yMax: 30 } };
     const r = await runCentreFind(
       options({ kind: 'bore', radiusMm: 4.44 }, { hold }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('top touch');
@@ -299,7 +299,7 @@ describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is 
     // plan's starts sit 20 mm out.
     const r = await runCentreFind(
       options({ kind: 'boss', radiusMm: 15 }, { hold: { ...HOLD, expectedRadiusMm: 5 } }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain('window');
@@ -312,7 +312,7 @@ describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is 
     // The +X start sits at (30, 20) — inside the clamp box.
     const r = await runCentreFind(
       options({ kind: 'boss', radiusMm: 15 }, { hold }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/clamp|arm|jaw/);
@@ -327,7 +327,7 @@ describe('#1211 field 5 — the centre find joins field 7’s rows (the hold is 
 describe('#932 a zero release distance', () => {
   it('stops the run before a G38.5 is sent, naming the travel', async () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
-    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }, { releaseMm: 0 }), { liveClearanceZ: -3,
+    const result = await runCentreFind(options({ kind: 'bore', radiusMm: 8.88 / 2 }, { releaseMm: 0 }), { onFirstSend: () => undefined, liveClearanceZ: -3,
       console: fake.console,
       operator: yes,
     });
@@ -363,7 +363,7 @@ describe('#1211 field 5 — the centre find’s rotary region', () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
     const r = await runCentreFind(
       options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion, jawFaceX: -200 } }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -376,7 +376,7 @@ describe('#1211 field 5 — the centre find’s rotary region', () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
     const r = await runCentreFind(
       options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion, freeEndMm: 20 } }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     expect(r.ok).toBe(false);
     if (r.ok) return;
@@ -389,7 +389,7 @@ describe('#1211 field 5 — the centre find’s rotary region', () => {
     const fake = fakeMachine({ kind: 'bore', radiusMm: 8.88 / 2 });
     const r = await runCentreFind(
       options({ kind: 'bore', radiusMm: 8.88 / 2 }, { rotaryRegion: { ...baseRegion } }),
-      { liveClearanceZ: -3, console: fake.console, operator: yes },
+      { onFirstSend: () => undefined, liveClearanceZ: -3, console: fake.console, operator: yes },
     );
     if (!r.ok) throw new Error(r.reason);
     expect(r.centreWork.x).toBeCloseTo(10, 2);
