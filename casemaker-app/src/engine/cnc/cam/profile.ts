@@ -57,7 +57,7 @@ export interface ProfileCut {
   /** The blank's thickness, mm. The tab top is `-(thickness - tabs.height)`. */
   thickness: number;
   /** The cut-out's tab spec. `count: 0` cuts the part free. */
-  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number; /** #1258 — what the operator chose for a stretch the margin leaves too long; absent = the pre-#1258 placement (a tight tab). */ tabChoice?: TabChoiceMode };
+  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number; /** #1262 — the shop's `tabs.cornerMarginTabWidths`. */ cornerMarginTabWidths?: number; /** #1262 — the shop's `tabs.cornerMarginEdgeFraction`. */ cornerMarginEdgeFraction?: number; /** #1258 — what the operator chose for a stretch the margin leaves too long; absent = the pre-#1258 placement (a tight tab). */ tabChoice?: TabChoiceMode };
 }
 
 /** A tab span on one contour, by work XY and by arc length along the contour. */
@@ -199,6 +199,16 @@ export interface TabPlacementOptions {
   cornerDeg?: number;
   /** #1258 — what to do with a stretch the margin leaves too long (see {@link TabChoiceMode}). */
   tabChoice?: TabChoiceMode;
+  /** #1262 — `tabs.cornerMarginTabWidths`: the corner margin in tab widths. Absent: the registry's recommendation. */
+  cornerMarginTabWidths?: number;
+  /** #1262 — `tabs.cornerMarginEdgeFraction`: the corner margin as a share of the edge. Absent: the recommendation. */
+  cornerMarginEdgeFraction?: number;
+}
+
+/** #1262 — the corner margin's rule: the larger of `tabWidths` × the tab's width and `edgeFraction` × the edge. */
+export interface CornerMarginRule {
+  tabWidths: number;
+  edgeFraction: number;
 }
 
 /** One cut's tab facts, for the run sheet and the `tab-unplaceable` finding. */
@@ -637,6 +647,12 @@ export function placeTabs(
     return { spans: [], unplaceable: count > 0 ? count : 0, added: 0, tight: [] };
   }
   const targets = options?.targets;
+  // #1262 — the corner margin's two numbers are the shop's; a caller that states none reads the
+  // registry's recommendations here (never an ambient source — `readDefault(null, …)`).
+  const margin: CornerMarginRule = {
+    tabWidths: options?.cornerMarginTabWidths ?? readDefault(null, 'tabs.cornerMarginTabWidths').value,
+    edgeFraction: options?.cornerMarginEdgeFraction ?? readDefault(null, 'tabs.cornerMarginEdgeFraction').value,
+  };
   // #1207 — the corner angle is the shop's `tabs.cornerDeg`; a caller that states none reads the
   // registry's recommendation here (never an ambient source — `readDefault(null, …)`).
   const cornerRad = (options?.cornerDeg ?? readDefault(null, 'tabs.cornerDeg').value) * (Math.PI / 180);
@@ -657,11 +673,11 @@ export function placeTabs(
     const sorted = placed.spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc })).sort((a, b) => a.startArc - b.startArc);
     const stretches =
       limit !== undefined && Number.isFinite(limit) && limit > 0
-        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit)
+        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit, margin)
         : [];
     return { ...placed, stretches };
   }
-  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad, options?.tabChoice);
+  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad, options?.tabChoice, margin);
 }
 
 /**
@@ -745,26 +761,26 @@ interface SideEdge {
  * corners as the edge allows; long edges keep the full margin.
  */
 /**
- * The corner margin of an edge of this length: the usual rule, `max(2 × tab width, 10 % of the
+ * The corner margin of an edge of this length: the shop's rule, `max(tabWidths × tab width, edgeFraction × the
  * edge)`, capped so it never empties an edge that fits a tab. An edge shorter than one centre-path
  * span takes no tab at all under the rule, so its margin is the rule's own, uncapped.
  */
-function edgeMargin(length: number, widthMm: number, spanLength?: number): number {
-  const rule = Math.max(2 * widthMm, 0.1 * length);
+function edgeMargin(length: number, widthMm: number, margin: CornerMarginRule, spanLength?: number): number {
+  const rule = Math.max(margin.tabWidths * widthMm, margin.edgeFraction * length);
   if (spanLength !== undefined && length < spanLength - 1e-9) return rule;
   return Math.min(rule, (length - widthMm) / 2);
 }
 
-function sideEdges(edges: readonly Edge[], widthMm: number, spanLength: number): SideEdge[] {
+function sideEdges(edges: readonly Edge[], widthMm: number, spanLength: number, margin: CornerMarginRule): SideEdge[] {
   const out: SideEdge[] = [];
   for (const edge of edges) {
     const length = edge.end - edge.start;
     if (!(length > 0)) continue;
-    const margin = edgeMargin(length, widthMm);
+    const edgeMarginMm = edgeMargin(length, widthMm, margin);
     // `spanLength` still gates the edge: a span longer than the edge cannot sit on it at all.
     if (length < spanLength - 1e-9) continue;
-    const maxTabs = Math.floor(length / (margin + widthMm / 2) + 1e-9) - 1;
-    if (maxTabs >= 1) out.push({ start: edge.start, end: edge.end, length, margin, maxTabs });
+    const maxTabs = Math.floor(length / (edgeMarginMm + widthMm / 2) + 1e-9) - 1;
+    if (maxTabs >= 1) out.push({ start: edge.start, end: edge.end, length, margin: edgeMarginMm, maxTabs });
   }
   return out.sort((a, b) => b.length - a.length || a.start - b.start);
 }
@@ -864,8 +880,9 @@ function placeMidSide(
   maxSpanMm: number | undefined,
   cornerRad: number,
   tabChoice: TabChoiceMode | undefined,
+  margin: CornerMarginRule,
 ): TabPlacement {
-  const sides = sideEdges(edges, widthMm, spanLength);
+  const sides = sideEdges(edges, widthMm, spanLength, margin);
   const counts = new Map<SideEdge, number>(sides.map((side) => [side, 0] as const));
   let remaining = count;
   let progress = sides.length > 0;
@@ -906,7 +923,7 @@ function placeMidSide(
   let stretches: TabStretch[] | undefined;
   if (limited && tabChoice !== undefined) {
     spans.sort((x, y) => x.startArc - y.startArc);
-    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!);
+    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, margin);
   }
   if (limited && (tabChoice === undefined || tabChoice === 'insideMargin')) {
     for (let guard = 0; guard < 512; guard++) {
@@ -950,7 +967,7 @@ function placeMidSide(
         at: pointAt(segments, perimeter, centre),
         stretchMm: worst,
         cornerMm: Math.min(centre - pick.start, pick.end - centre),
-        marginMm: edgeMargin(pick.end - pick.start, widthMm, spanLength),
+        marginMm: edgeMargin(pick.end - pick.start, widthMm, margin, spanLength),
         joins,
         sharpJoins,
       });
@@ -1047,6 +1064,7 @@ function stretchesOf(
   widthMm: number,
   spanLength: number,
   maxSpanMm: number,
+  margin: CornerMarginRule,
 ): TabStretch[] {
   const out: TabStretch[] = [];
   if (spans.length === 0) return out;
@@ -1075,7 +1093,7 @@ function stretchesOf(
         atXY: pointAt(segments, perimeter, centre),
         fromCornerMm: length / 2,
         cornerXY: pointAt(segments, perimeter, toNearStart ? pick.start : pick.end),
-        marginMm: edgeMargin(length, widthMm, spanLength),
+        marginMm: edgeMargin(length, widthMm, margin, spanLength),
         leavesSpansMm: [centre - spanLength / 2 - from, to - (centre + spanLength / 2)],
       };
     }
@@ -1228,6 +1246,8 @@ export function generateProfile(
           ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
           ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
           ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
+          ...(cut.tabs.cornerMarginTabWidths === undefined ? {} : { cornerMarginTabWidths: cut.tabs.cornerMarginTabWidths }),
+          ...(cut.tabs.cornerMarginEdgeFraction === undefined ? {} : { cornerMarginEdgeFraction: cut.tabs.cornerMarginEdgeFraction }),
         });
         // Count once per cut, not once per pass: the report is about the tabs, not the Z levels.
         if (z === passes[0]) {

@@ -784,6 +784,22 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'tabs.cornerClearanceMm': { label: 'holding tab, clearance from the part’s corners (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 15 },
   'tabs.pinClearanceMm': { label: 'holding tab, clearance from a locating bore (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
   'tabs.bridgeOvershootMm': { label: 'holding tab bridge, overshoot past the cutter’s radius (chosen)', unit: 'mm', rule: z.number().min(0).max(2), fallback: 0.05 },
+  // #1262 — the corner margin of a holding tab: no tab's span comes within the LARGER of this many tab
+  // widths and this share of the edge's length of a corner (a tab near a corner is cut where the cutter
+  // changes direction and its load is highest). Two shop settings, so the question #1258 asks states the
+  // shop's own rule rather than a number written in code.
+  'tabs.cornerMarginTabWidths': {
+    label: 'holding tab, the corner margin in tab widths (chosen)',
+    unit: 'tab widths',
+    rule: z.number().min(0).max(10),
+    fallback: 2,
+  },
+  'tabs.cornerMarginEdgeFraction': {
+    label: 'holding tab, the corner margin as a share of the edge (chosen)',
+    unit: 'x',
+    rule: z.number().min(0).max(0.5),
+    fallback: 0.1,
+  },
   'tabs.cornerDeg': { label: 'holding tab, the corner angle a tab does not cross (chosen)', unit: '°', rule: z.number().min(0).max(90), fallback: 20 },
   // #1207 (the final ruling's caps and feature keys) — six caps and five feature thresholds.
   'finish.moveCap': { label: 'the most moves one finish pass may emit (chosen)', unit: 'moves', rule: z.number().int().min(1000).max(100_000_000), fallback: 5_000_000 },

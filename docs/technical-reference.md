@@ -259,7 +259,9 @@ The keys added since v0.2, with their recommendations:
 | `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
 | `plan.leftoverEquivalencePct` | 0.5 % | 0–5 | The cutter-chain rank (#1217): sets of cutters whose leftover differs by no more than this share of the covered surface count as equal on that key, and the faster set is chosen. |
 | `plan.leftoverTallMm` | 1 mm | 0.1–50 | The same rank (#1224): material standing taller than this is never given up for a faster set, however much time the trade would save. |
-| `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch still too long gets a named tight tab before the job is ever refused. |
+| `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch the corner margin leaves too long is put to the operator — a tab closer to a corner, or a longer stretch — before the job is ever refused. |
+| `tabs.cornerMarginTabWidths` | 2 tab widths | 0–10 | How far a holding tab's span must stand from a corner, in tab widths; the larger of this and the edge share applies. A tab near a corner is cut where the cutter changes direction and its load is highest. |
+| `tabs.cornerMarginEdgeFraction` | 0.1 | 0–0.5 | How far a holding tab's span must stand from a corner, as a share of the edge's length; the larger of this and the tab-width margin applies. The margin never empties an edge that fits a tab. |
 
 The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
 into the rotary-chuck workholding, and the verifier and both simulators read the setup's copy, so

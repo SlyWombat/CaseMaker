@@ -622,6 +622,8 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("tabs.cornerClearanceMm", 15.0, "mm", "chosen, not measured: how far a holding tab's span must stand from the part's own corners (the analyst's ruling); an edge too short keeps none"),
     ("tabs.pinClearanceMm", 10.0, "mm", "chosen, not measured: how far a holding tab's span must stand from a locating bore's centre (the analyst's ruling)"),
     ("tabs.bridgeOvershootMm", 0.05, "mm", "chosen, not measured: how far a tab bridge overshoots the cutter's radius past the tab's edge, so the bridge takes the wall cleanly"),
+    ("tabs.cornerMarginTabWidths", 2.0, "tab widths", "chosen, not measured: how many tab widths a holding tab's span must stand from a corner (the larger of this and the edge share applies) — a tab near a corner is cut where the cutter changes direction and its load is highest"),
+    ("tabs.cornerMarginEdgeFraction", 0.1, "x", "chosen, not measured: the share of an edge's length a holding tab's span must stand from a corner (the larger of this and the tab-width margin applies) — a tab near a corner is cut where the cutter changes direction and its load is highest"),
     ("tabs.cornerDeg", 20.0, "°", "chosen, not measured: the corner angle below which an outline joint is a corner, not an arc joint — a setting is stated in the unit an operator reads; the code converts"),
     ("finish.moveCap", 5000000.0, "moves", "chosen, not measured: the most moves one finish pass may emit before the plan refuses it"),
     ("finish.maxTipOps", 300000000.0, "tip ops", "chosen, not measured: the tip evaluations one finish field may spend before the plan refuses it"),
@@ -1588,6 +1590,14 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tabs.bridgeOvershootMm" => Some(need(
             n.is_some_and(|v| (0.0..=2.0).contains(&v)),
             "0 to 2 mm",
+        )),
+        "tabs.cornerMarginTabWidths" => Some(need(
+            n.is_some_and(|v| (0.0..=10.0).contains(&v)),
+            "0 to 10 tab widths",
+        )),
+        "tabs.cornerMarginEdgeFraction" => Some(need(
+            n.is_some_and(|v| (0.0..=0.5).contains(&v)),
+            "0 to 0.5 (a fraction of the edge)",
         )),
         "tabs.cornerDeg" => Some(need(
             n.is_some_and(|v| (0.0..=90.0).contains(&v)),

@@ -2442,6 +2442,9 @@ export function engraveRegions(
   const tabMaxSpanMm = readDefault(shop.defaults ?? null, 'tabs.maxSpanMm').value;
   // #1207 — the tab corner angle and the bridge's overshoot, read once beside the span limit.
   const tabCornerDeg = readDefault(shop.defaults ?? null, 'tabs.cornerDeg').value;
+  // #1262 — the corner margin's two numbers, the shop's.
+  const tabMarginWidths = readDefault(shop.defaults ?? null, 'tabs.cornerMarginTabWidths').value;
+  const tabMarginFraction = readDefault(shop.defaults ?? null, 'tabs.cornerMarginEdgeFraction').value;
   const tabBridgeOvershootMm = readDefault(shop.defaults ?? null, 'tabs.bridgeOvershootMm').value;
   const profiles: ProfileCut[] = [];
   const cutoutMask: MaskCutout[] = [];
@@ -2524,7 +2527,7 @@ export function engraveRegions(
       let placed = 0;
       let unplaceable = 0;
       for (const contour of path) {
-        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg });
+        const placement = placeTabs(contour, c.tabs.count, c.tabs.width, radius, { maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, cornerMarginTabWidths: tabMarginWidths, cornerMarginEdgeFraction: tabMarginFraction });
         spans.push(placement.spans);
         placed += placement.spans.length;
         unplaceable += placement.unplaceable;
@@ -2566,7 +2569,7 @@ export function engraveRegions(
         path,
         depth: c.depth,
         thickness: c.thickness,
-        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg },
+        tabs: { count: c.tabs.count, width: c.tabs.width, height: c.tabs.height, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, cornerMarginTabWidths: tabMarginWidths, cornerMarginEdgeFraction: tabMarginFraction },
       });
       cutoutMask.push({ path, spans, toolRadius: radius, tabHeight: c.tabs.height });
       if (unplaceable > 0) {

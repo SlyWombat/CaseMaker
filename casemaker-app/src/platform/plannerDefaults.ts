@@ -78,6 +78,9 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'vcarve.stepoverRatio',
   'tabs.pinClearanceMm',
   'tabs.cornerDeg',
+  // #1262 — the corner margin's two numbers (read by planModelCam from its input).
+  'tabs.cornerMarginTabWidths',
+  'tabs.cornerMarginEdgeFraction',
   'tabs.cornerClearanceMm',
   'tabs.bridgeOvershootMm',
   // #1206 — the freeing contour's unsupported-span limit (read by planModelCam from its input).
