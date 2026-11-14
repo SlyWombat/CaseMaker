@@ -91,6 +91,10 @@ function proveStoredContext(job: EngraveJob, programs: readonly EngraveProgram[]
     expect(rechecked!.minRapidZ).toBe(original!.minRapidZ);
     expect([...(rechecked!.outsideAllowancesMm ?? [])]).toEqual([...(original!.outsideAllowancesMm ?? [])]);
     expect(rechecked!.itemProgram).toBe(original!.itemProgram);
+    // What the job, the shop and the machine state is DERIVED again, by the same functions: the
+    // footprint and the mount's obstacles the verifier is handed must equal the first verification's.
+    expect(rechecked!.footprint, `${label}: footprint`).toEqual(original!.footprint);
+    expect(rechecked!.mountObstacles, `${label}: mount obstacles`).toEqual(original!.mountObstacles);
     expect(rechecked!.limitReasonAt === undefined).toBe(original!.limitReasonAt === undefined);
     for (let i = 0; i <= 12; i++) {
       for (let j = 0; j <= 12; j++) {

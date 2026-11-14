@@ -21,7 +21,8 @@
 
 import { depthLimitFromStored } from '@/engine/cnc/engrave/storedDepthLimit';
 import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
-import { setupFootprint } from '@/engine/cnc/footprint';
+import { jobFootprint, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { jobForSetup } from '@/engine/cnc/engrave/programs';
 import { postKey } from '@/engine/cnc/post';
 import { verifyProgram, type VerifyFinding, type VerifyReport } from '@/engine/cnc/verify';
 import type { PlanStatement } from '@/engine/cnc/cam/model/types';
@@ -71,6 +72,23 @@ export interface StoredProgramRecheck {
  * Re-run this build's verifier over every stored program (and its frame file). Pure: no worker,
  * no store, no wasm.
  */
+/**
+ * The footprint a program was first verified against, derived again. The two posting conventions
+ * are kept exactly as they were:
+ *  - a MODEL-PLAN program is judged against its setup's footprint on the whole job (`setupFootprint`);
+ *  - an ITEM-PIPELINE program (and its frame trace and facing skim) was posted from the sub-job
+ *    `jobForSetup` builds, and judged against `jobFootprint` OF THAT SUB-JOB — the setup's own stated
+ *    box, with the job's sacrificial pieces still placed around it. The re-check builds the same
+ *    sub-job and asks the same function.
+ * (A model-plan result carries a plan; an item-pipeline result does not.)
+ */
+function footprintOf(job: EngraveJob, program: EngraveProgram, planned: boolean): FootprintShape[] {
+  if (!planned) {
+    return jobFootprint(jobForSetup(job, { setupIndex: program.setupIndex, setupId: program.setupId, toolKey: program.toolKey, itemIds: [] }));
+  }
+  return setupFootprint(job, program.setupIndex - 1);
+}
+
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
   const { job, generated, machine, mount, setup, defaults } = input;
   // GREENFIELD: no tolerant reader. A plan that exists but has no entry for a program's setup is not
@@ -130,9 +148,9 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       ...(limitFrom?.limitReasonAt === undefined ? {} : { limitReasonAt: limitFrom.limitReasonAt }),
       ...(stored.topLiftMm === undefined ? {} : { topLiftMm: stored.topLiftMm }),
       ...(stored.itemProgram === undefined ? {} : { itemProgram: stored.itemProgram }),
-      // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
-      // above describes (#1082): a flipped setup's stated box, else the job's blank.
-      footprint: setupFootprint(job, setupIndex),
+      // #1235 stage 2 — DERIVED FROM THE JOB, never stored, by the very function the program's first
+      // verification asked (see `footprintOf`).
+      footprint: footprintOf(job, program, !noStoredPlan),
       outsideAllowancesMm,
       mount,
       clearanceMm: job.jawClearance,
