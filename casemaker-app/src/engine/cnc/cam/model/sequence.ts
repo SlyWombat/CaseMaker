@@ -258,6 +258,25 @@ export interface SequenceOptions {
     tallCells?: number;
   } | null;
   /**
+   * #1252 — THE GOAL CHECK'S OWN ADJUDICATED CUT-INTO, INJECTED (the check's code lives in the
+   * caller; the picker imports nothing from it). The picker ranks exactly as it always has, then
+   * asks this of the chain that ranks FIRST: `adjudicatedCells === 0` means clean and the chain is
+   * chosen (one call); otherwise it is set aside and the next-ranked chain is asked, until a clean
+   * one is found. If every chain is set aside the fewest adjudicated cells wins (ties by the rank)
+   * and the choice carries its figures for the sheet. `null` = the check could not run for this
+   * job: the chain is treated as clean and the choice says the check did not run. Absent =
+   * today's behaviour exactly (the rank's first chain is chosen, nothing is said).
+   */
+  adjudicate?: (steps: readonly SequenceStep[]) => { adjudicatedCells: number; maxMm: number; areaMm2: number } | null;
+  /**
+   * #1252 (review 4) — A TICK BEFORE EVERY ADJUDICATION CALL: `done` calls already made, `total` the
+   * feasible chains that could still be asked. The usual run asks one chain and never ticks twice;
+   * the all-dirty path asks EVERY feasible chain (no cap — a cap would be a chosen limit that
+   * decides a pick), up to seconds a call, and the caller turns this into the #1038 progress line
+   * "checking set N of M against the model" so a long all-dirty pick does not look like a hang.
+   */
+  onAdjudicate?: (done: number, total: number) => void;
+  /**
    * #1038 — a tick at every CANDIDATE's boundary, once before its chain is priced and its outcome
    * simulated. The simulated outcome can be seconds per candidate and a plan is minutes; between
    * the plan's stage reports the run's silence watchdog hears nothing. One callback per candidate
@@ -397,6 +416,23 @@ export interface SequenceChoice {
    * states it so a longer job has a reason on it.
    */
   tallGuard?: { extraTallCells: number; cellAreaMm2: number; givenUpSeconds: number };
+  /**
+   * #1252 — set only when EVERY chain was set aside and the fewest adjudicated cells was chosen:
+   * that chain's own figures from the check (cells, its deepest adjudicated cut, the area those
+   * cells cover). The sheet states "Every set of cutters cuts into the part; ...".
+   */
+  cutInto?: { cells: number; maxMm: number; areaMm2: number };
+  /**
+   * #1252 — set only when the injected adjudicator answered `null` for the chain being asked
+   * (the check could not run for this job): the chain is treated as clean and the sheet says the
+   * cut-into check did not run.
+   */
+  cutIntoNotRun?: boolean;
+  /**
+   * #1252 — set only when one or more chains were set aside and a clean one was chosen: how many
+   * were passed over. The sheet notes it once.
+   */
+  passedOver?: number;
 }
 
 const EPS = 1e-9;
@@ -1214,22 +1250,8 @@ export function chooseSequence(
     const coverage = price === null || opts.coverage === undefined ? null : opts.coverage(price.steps);
     return { sequence, priced: price, coverage };
   });
-  // planner v3 C1 — trace-only: what the real planner priced, per cutter, for every chain. With
-  // no trace file this block does not run.
-  if (memTraceEnabled()) {
-    for (const p of priced) {
-      if (p.priced === null) continue;
-      const round = (x: number): number => Math.round(x * 1000) / 1000;
-      memTrace('chain:price', {
-        signature: p.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+'),
-        totalSeconds: round(p.priced.cost.totalSeconds),
-        estimateSeconds: round(p.priced.cost.estimateSeconds),
-        changeSeconds: round(p.priced.cost.changeSeconds),
-        toolChanges: p.priced.cost.toolChanges,
-        entries: JSON.stringify(p.priced.cost.entries.map((e) => [e.cutterKey, round(e.estimateSeconds), round(e.changeSeconds)])),
-      });
-    }
-  }
+  // planner v3 C1 — the chain:price rows are emitted AFTER the rank and the adjudication (below),
+  // so a chain the check was asked about carries its `adjudicatedCells`.
   // No local threshold between the two freeing-cut options: both are priced on the real steps
   // (the return change included) and the cheaper wins. plan v2's 3× stop rule is a package-vs-
   // vendor line on the reference card, not a per-profile gate here.
@@ -1362,9 +1384,84 @@ export function chooseSequence(
     };
   const compareRanked = compareRankedWith(leftoverFloor, true);
   feasible.sort(compareRanked);
+  // #1252 — THE CHECK'S ADJUDICATION, ASKED OF THE CHAIN ABOUT TO WIN. The rank above is exactly
+  // today's; the adjudicator is injected by the caller (the check's own code and options) and is
+  // asked only of the chains the pick is actually considering, in rank order. The first chain the
+  // check calls clean (0 adjudicated cells) is chosen; every chain it calls dirty is set aside. If
+  // every chain is set aside the fewest adjudicated cells wins (ties go to the rank's earlier
+  // chain — the loop only replaces on strictly fewer), and the sheet states it. `null` = the check
+  // could not run: the chain is treated as clean and the sheet says the check did not run.
+  const chainSignature = (steps: readonly SequenceStep[]): string => steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+  const adjudicatedCells = new Map<string, number>();
+  let chosenByAdjudication: RankedSequence | undefined;
+  let cutInto: SequenceChoice['cutInto'];
+  let cutIntoNotRun: boolean | undefined;
+  let passedOver: number | undefined;
+  if (feasible.length > 0) {
+    if (opts.adjudicate === undefined) {
+      chosenByAdjudication = feasible[0];
+    } else {
+      let clean: RankedSequence | undefined;
+      let fewest: { r: RankedSequence; v: NonNullable<ReturnType<NonNullable<SequenceOptions['adjudicate']>>> } | undefined;
+      let notKnown: RankedSequence | undefined;
+      let setAside = 0;
+      for (const r of feasible) {
+        const asked = chainSignature(r.steps);
+        opts.onAdjudicate?.(adjudicatedCells.size + 1, feasible.length);
+        const t0 = performance.now();
+        const answer = opts.adjudicate(r.steps) ?? null;
+        // #1252 (review 3) — A COUNT THAT IS NOT A NUMBER IS NOT AN ANSWER. `NaN === 0` is false, so
+        // a non-finite count would set every chain aside and print "NaN" on the sheet; it is read
+        // as the check not having run (`null`), exactly like an adjudicator that declined.
+        const v = answer !== null && Number.isFinite(answer.adjudicatedCells) && Number.isFinite(answer.maxMm) && Number.isFinite(answer.areaMm2)
+          ? answer
+          : null;
+        const ms = Math.round(performance.now() - t0);
+        const cells = v === null ? -1 : v.adjudicatedCells;
+        memTrace('chain:adjudicate', { signature: asked, adjudicatedCells: cells, ms });
+        adjudicatedCells.set(asked, cells);
+        if (v === null) { notKnown = r; break; }
+        if (v.adjudicatedCells === 0) { clean = r; break; }
+        setAside++;
+        if (fewest === undefined || v.adjudicatedCells < fewest.v.adjudicatedCells) fewest = { r, v };
+      }
+      if (clean !== undefined) {
+        chosenByAdjudication = clean;
+        if (setAside > 0) passedOver = setAside;
+      } else if (notKnown !== undefined) {
+        chosenByAdjudication = notKnown;
+        cutIntoNotRun = true;
+      } else if (fewest !== undefined) {
+        chosenByAdjudication = fewest.r;
+        cutInto = { cells: fewest.v.adjudicatedCells, maxMm: fewest.v.maxMm, areaMm2: fewest.v.areaMm2 };
+      } else {
+        chosenByAdjudication = feasible[0];
+      }
+    }
+  }
+  // planner v3 C1 — trace-only: what the real planner priced, per cutter, for every chain; a chain
+  // the check was asked about carries its `adjudicatedCells` (absent when it was not asked). With
+  // no trace file this block does not run.
+  if (memTraceEnabled()) {
+    for (const p of priced) {
+      if (p.priced === null) continue;
+      const round = (x: number): number => Math.round(x * 1000) / 1000;
+      const signature = p.sequence.steps.map((s) => `${s.kind}:${s.cutter.key}`).join('+');
+      const askedCells = adjudicatedCells.get(signature);
+      memTrace('chain:price', {
+        signature,
+        totalSeconds: round(p.priced.cost.totalSeconds),
+        ...(askedCells === undefined ? {} : { adjudicatedCells: askedCells }),
+        estimateSeconds: round(p.priced.cost.estimateSeconds),
+        changeSeconds: round(p.priced.cost.changeSeconds),
+        toolChanges: p.priced.cost.toolChanges,
+        entries: JSON.stringify(p.priced.cost.entries.map((e) => [e.cutterKey, round(e.estimateSeconds), round(e.changeSeconds)])),
+      });
+    }
+  }
   // planner v3 A1 — did the tolerance change the pick? Compare with the order the old rule gives.
   let leftoverTolerance: SequenceChoice['leftoverTolerance'];
-  const chosenRanked = feasible[0];
+  const chosenRanked = chosenByAdjudication ?? feasible[0];
   if (leftoverFloor !== null && bestLeftover !== null && chosenRanked !== undefined && chosenRanked.coverage !== null && chosenRanked.coverage > bestLeftover) {
     const strict = [...feasible].sort((a, b) => {
       const ra = rankOf(a);
@@ -1452,7 +1549,7 @@ export function chooseSequence(
     }
   }
 
-  const best = feasible[0]!;
+  const best = chosenByAdjudication ?? feasible[0]!;
   // #960 — the steps the ops actually planned; a failed step is not posted (its regions are
   // stated in `unreachable`/`unplanned` instead).
   const steps = best.steps;
@@ -1490,6 +1587,9 @@ export function chooseSequence(
     ...(pickNote === null ? {} : { pickNote }),
     ...(leftoverTolerance === undefined ? {} : { leftoverTolerance }),
     ...(tallGuard === undefined ? {} : { tallGuard }),
+    ...(cutInto === undefined ? {} : { cutInto }),
+    ...(cutIntoNotRun === undefined ? {} : { cutIntoNotRun }),
+    ...(passedOver === undefined ? {} : { passedOver }),
   };
 }
 
