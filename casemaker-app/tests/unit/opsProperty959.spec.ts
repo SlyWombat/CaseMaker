@@ -39,6 +39,7 @@ import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { ToolpathIR } from '@/engine/cnc/cam/ir';
 import { NO_SHOP } from '../tools/noShop';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const HOUSE: Tool[] = [
   flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 }),
@@ -50,7 +51,7 @@ const KINDS: PartKind[] = ['rectilinear', 'filleted'];
 
 function planOf(part: RandomPart): PlanPocketsResult {
   return planPocketsForTree(part.tree, {
-    offset: makeClipperOffset(tl),
+    tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
     houseFlats: HOUSE,
     stepDownMm: 1.5,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
