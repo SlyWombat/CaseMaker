@@ -35,6 +35,7 @@ import {
   TAB_QUESTION,
   answeredSummary,
   insideMarginOffered,
+  CHANGE_TABS_GOAL_LINE,
   CHANGE_TABS_LINE,
   insideMarginRow,
   longerStretchRow,
@@ -77,6 +78,8 @@ export interface TabChoiceCardProps {
    * has none — its tabs are the planner's own — so option 3 is not offered there.
    */
   canChangeTabs?: boolean;
+  /** #1271 — the tabs live in the goal row's own group, so the option's line says "below". */
+  goalJob?: boolean;
 }
 
 type Focus = TabChoiceAnswer | null;
@@ -465,7 +468,7 @@ function TabChoiceCardBody(props: TabChoiceCardProps): JSX.Element {
           >
             <span style={{ display: 'block', fontSize: 14, fontWeight: 500 }}>Change the tabs myself</span>
             <span style={{ display: 'block', fontSize: 13, lineHeight: 1.45 }}>
-              {CHANGE_TABS_LINE}
+              {props.goalJob === true ? CHANGE_TABS_GOAL_LINE : CHANGE_TABS_LINE}
             </span>
           </button>
             </>

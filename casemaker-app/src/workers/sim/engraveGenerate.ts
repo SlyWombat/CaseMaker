@@ -5596,6 +5596,8 @@ export async function buildModelPlanInputForGoal(
               ? { count: 0, widthMm: freeingTabsFrom(shop.defaults ?? null).widthMm, heightMm: freeingTabsFrom(shop.defaults ?? null).heightMm }
               : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
         }),
+    // #1271 — the operator's own freeing tabs (only the fields they typed) lie over the shop's three keys.
+    ...(goal.tabs === undefined ? {} : { tabsOverride: goal.tabs }),
     // #1246 slice 2 — the record's stock kind and a rod's diameter, stated rather than dropped
     // here. Nothing reads them in this slice (the planner's geometry is still the box; track E is
     // the rod path), but the fact no longer disappears at this interface.

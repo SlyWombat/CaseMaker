@@ -96,4 +96,18 @@ describe('#1271 the freeing contour reads the shop’s three keys', () => {
     expect((await contourOf({ 'tabs.count': 8 })).counts).toEqual({ asked: 8, placed: 4, added: 0, unplaceable: 4 });
     expect((await contourOf({ 'tabs.count': 2, 'tabs.maxSpanMm': 20 })).counts).toEqual({ asked: 2, placed: 4, added: 2, unplaceable: 0 });
   });
+
+  it('the operator’s own tabs lie over the shop’s: only the typed fields, in every branch', async () => {
+    const base = await contourOf({});
+    // count typed; width and height keep following the shop (width 30 shop-side still limits it).
+    const two = await contourOf({}, { tabsOverride: { count: 2 } });
+    expect(two.counts).toEqual({ asked: 2, placed: 2, added: 0, unplaceable: 0 });
+    expect((await contourOf({ 'tabs.count': 2 })).moves).toBe(two.moves);
+    // a typed width wins over the shop's, and the untouched count still follows the shop.
+    const typedWidth = await contourOf({ 'tabs.freeingWidthMm': 30 }, { tabsOverride: { widthMm: 6 } });
+    expect(typedWidth.moves).toBe(base.moves);
+    // it lies over a job-stated underside too.
+    const stated = await contourOf({}, { freeingTabs: { count: 4, widthMm: 6, heightMm: 1 }, tabsOverride: { count: 2 } });
+    expect(stated.counts?.asked).toBe(2);
+  });
 });

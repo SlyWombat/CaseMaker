@@ -39,7 +39,7 @@ import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { ProfileSpan, TabChoiceMode, TabStretch } from '@/engine/cnc/cam/profile';
-import { TAB_FREEING_WIDTH_FALLBACK_MM, TAB_SETTINGS_FALLBACK, freeingTabsFrom } from '@/engine/cnc/cam/tabSettings';
+import { freeingTabsFrom } from '@/engine/cnc/cam/tabSettings';
 import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
@@ -332,6 +332,11 @@ export interface ModelPlanInput {
    * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
    */
   freeingTabs?: { count: number; widthMm: number; heightMm: number };
+  /**
+   * #1271 — THE OPERATOR'S OWN FREEING TABS, only the fields they typed, laid over the shop's three
+   * keys (and over `freeingTabs` when the job states an underside). Absent = the shop's values.
+   */
+  tabsOverride?: { count?: number; widthMm?: number; heightMm?: number };
   /**
    * #1258 — THE OPERATOR'S ANSWER to "the tab rules cannot both be met" (plain data, cloned to the
    * rank pool). `insideMargin`: each over-long stretch gets the tab #1206's step 2 places.
@@ -2242,7 +2247,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // #1271 — THE SHOP'S FREEING TABS, not a constant: `tabs.count`, `tabs.freeingWidthMm`,
     // `tabs.heightMm` from the input's defaults map (each recommendation equals the old constant,
     // 4 × 6 × 1, so nothing moves for a shop that changed nothing).
-    const freeing = freeingTabsFrom(input.defaults ?? null);
+    const freeing = { ...freeingTabsFrom(input.defaults ?? null), ...definedFields(input.tabsOverride) };
     const releaseTabs = { count: freeing.count, width: freeing.widthMm, height: freeing.heightMm };
     const tabs =
       input.setups.length > 1 && bandReachesBottom
@@ -2251,7 +2256,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           : releaseTabs
         : input.freeingTabs === undefined
           ? undefined
-          : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
+          : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm, ...tabsOverrideAsSpec(input.tabsOverride) };
     // #1206 — the shop's span limit rides whichever spec the plan uses; a job that states its
     // own tabs is not exempt from "no unsupported stretch longer than the limit", and a job that
     // states none still gets the DEFAULT release tabs' span checked (condition 3 is on the tabs
@@ -3777,11 +3782,29 @@ export interface PlanPocketsOptions {
  * through every cut that follows. `{count: 0}` is no longer the default; it still frees the part
  * outright when the caller states it explicitly.
  */
-export const DEFAULT_RELEASE_TABS = {
-  count: TAB_SETTINGS_FALLBACK.count,
-  width: TAB_FREEING_WIDTH_FALLBACK_MM,
-  height: TAB_SETTINGS_FALLBACK.heightMm,
-};
+// #1271 — the labelled fallback of `tabs.count` / `tabs.freeingWidthMm` / `tabs.heightMm`: a LITERAL, because
+// this module is in an import cycle with the registry and cannot read the registry's constants at
+// load; `freeingTabs1271.spec.ts` pins each equal to its key's fallback.
+export const DEFAULT_RELEASE_TABS = { count: 4, width: 6, height: 1 };
+
+/** #1271 — the fields an override states (a key set to `undefined` states nothing). */
+function definedFields(o: ModelPlanInput['tabsOverride']): Partial<{ count: number; widthMm: number; heightMm: number }> {
+  const out: Partial<{ count: number; widthMm: number; heightMm: number }> = {};
+  if (o?.count !== undefined) out.count = o.count;
+  if (o?.widthMm !== undefined) out.widthMm = o.widthMm;
+  if (o?.heightMm !== undefined) out.heightMm = o.heightMm;
+  return out;
+}
+
+/** #1271 — the same override in the pocket chain's own `{count, width, height}` spelling. */
+function tabsOverrideAsSpec(o: ModelPlanInput['tabsOverride']): Partial<{ count: number; width: number; height: number }> {
+  const f = definedFields(o);
+  return {
+    ...(f.count === undefined ? {} : { count: f.count }),
+    ...(f.widthMm === undefined ? {} : { width: f.widthMm }),
+    ...(f.heightMm === undefined ? {} : { height: f.heightMm }),
+  };
+}
 
 export interface PlanPocketsResult {
   ops: PlannedOp[];
