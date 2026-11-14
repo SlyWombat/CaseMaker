@@ -9,7 +9,6 @@ import {
   holdingChoiceSuffix,
   insideMarginRow,
   longerStretchRow,
-  sheetSentence,
   TAB_QUESTION,
 } from '@/components/panels/tabChoiceWords';
 import { FIXTURE_NEEDED, TAB_WIDTH_MM } from '../tools/tabChoiceFixture';
@@ -118,7 +117,7 @@ describe('#1258 — the question', () => {
   });
 
   it('option 1 is not offered when no stretch has a place for a tab, and says why', () => {
-    const none = { ...FIXTURE_NEEDED, stretches: FIXTURE_NEEDED.stretches.map((s) => ({ ...s, candidate: null })) };
+    const none = { ...FIXTURE_NEEDED, stretches: FIXTURE_NEEDED.stretches.map((s) => ({ ...s, candidates: [], leavesSpansMm: [s.spanMm], stillOverLimit: false })) };
     render(<TabChoiceCard {...props({ needed: none })} />);
     expect(screen.queryByTestId('tab-choice-option-insideMargin')).toBeNull();
     expect(screen.getByTestId('tab-choice-no-place').textContent).toContain('Option 1 is not offered.');
@@ -127,12 +126,26 @@ describe('#1258 — the question', () => {
   it('a mixed case: the stretch with no place reads "no place for a tab — stays N mm"', () => {
     const mixed = {
       ...FIXTURE_NEEDED,
-      stretches: FIXTURE_NEEDED.stretches.map((s, i) => (i === 1 ? { ...s, candidate: null } : s)),
+      stretches: FIXTURE_NEEDED.stretches.map((s, i) => (i === 1 ? { ...s, candidates: [], leavesSpansMm: [s.spanMm], stillOverLimit: false } : s)),
     };
     render(<TabChoiceCard {...props({ needed: mixed })} />);
     const one = screen.getByTestId('tab-choice-option-insideMargin').textContent!;
     expect(one).toContain('Stretch 2: no place for a tab — stays 86 mm.');
     expect(one).toContain('Stretch 1: a tab 5 mm from the corner');
+  });
+
+  it('several tabs in one stretch read as one sentence with the lengths the engine leaves', () => {
+    const s0 = FIXTURE_NEEDED.stretches[0]!;
+    const many = {
+      ...FIXTURE_NEEDED,
+      stretches: [{ ...s0, candidates: [s0.candidates[0]!, { ...s0.candidates[0]!, fromCornerMm: 30, marginMm: 12 }], leavesSpansMm: [30, 20, 25], stillOverLimit: false }],
+    };
+    expect(insideMarginRow(many.stretches[0]!)).toBe(
+      'Stretch 1: 2 tabs, 5 and 30 mm from their corners (margins 8 and 12 mm), leave 30 mm, 20 mm and 25 mm.',
+    );
+    expect(holdingChoiceSuffix('insideMargin', many)).toBe('2 by your choice');
+    const over = { ...s0, stillOverLimit: true, leavesSpansMm: [90, 2] };
+    expect(insideMarginRow(over)).toContain('A stretch of 90 mm is still past the limit.');
   });
 
   it('one stretch says "1 stretch", with no "applies to all"', () => {
@@ -192,7 +205,7 @@ describe('#1258 — the bar, the summary, the sheet', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it('the summaries, the Holding row and the sheet sentences carry the engine’s numbers', () => {
+  it('the summaries and the Holding row carry the engine’s numbers', () => {
     const inside = answeredSummary('insideMargin', FIXTURE_NEEDED);
     expect(inside.headline).toBe('Holding: 3 tabs inside the corner margin.');
     expect(inside.detail).toContain('5, 6, 4 mm from a corner');
@@ -200,13 +213,6 @@ describe('#1258 — the bar, the summary, the sheet', () => {
     expect(holdingChoiceSuffix('longerStretch', FIXTURE_NEEDED)).toBe('3 stretches by your choice');
     const one = { ...FIXTURE_NEEDED, stretches: [FIXTURE_NEEDED.stretches[0]!] };
     expect(holdingChoiceSuffix('longerStretch', one)).toBe('92 mm stretch by your choice');
-    const s0 = FIXTURE_NEEDED.stretches[0]!;
-    expect(sheetSentence('insideMargin', s0, 80, 1)).toBe(
-      'Tab 1 sits 5 mm from a corner, closer than the shop\'s 8 mm margin — the operator\'s choice. Longest stretch without a tab: 61 mm.',
-    );
-    expect(sheetSentence('longerStretch', s0, 80)).toBe(
-      "92 mm of the outline has no tab; the shop's limit is 80 mm — the operator's choice.",
-    );
-    for (const t of [inside.headline, inside.detail, sheetSentence('insideMargin', s0, 80, 1)]) expectCleanText(t);
+    for (const t of [inside.headline, inside.detail]) expectCleanText(t);
   });
 });

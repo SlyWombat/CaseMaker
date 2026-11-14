@@ -19,7 +19,7 @@
  * Focus moves to the card when it opens, the stop is announced (`aria-live`), the options are a
  * radio group a keyboard reaches, and colour never carries meaning alone.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 
 import type { TabChoiceNeeded } from '@/engine/cnc/cam/model/plan';
@@ -105,7 +105,7 @@ export function TabChoiceDrawing({
   const maxY = Math.max(...ys);
   const size = Math.max(maxX - minX, maxY - minY);
   const pad = size * 0.16;
-  const fs = size * 0.03;
+  const fs = size * 0.042;
   // Work Y points up; the screen's points down.
   const px = (x: number): number => x - minX;
   const py = (y: number): number => maxY - y;
@@ -151,33 +151,45 @@ export function TabChoiceDrawing({
         const loop = loopNearest(loops, s.startXY);
         const { from, to } = stretchSpan(loop, s);
         const mid = loop.at((from + to) / 2);
-        const c = s.candidate;
+        const cands = s.candidates;
         return (
           <g key={s.index}>
-            {focus === 'insideMargin' && c !== null ? (
+            {focus === 'insideMargin' && cands.length > 0 ? (
               (() => {
-                const at = loop.project(c.atXY);
-                const pa = loop.at((from + at) / 2);
-                const pb = loop.at((at + to) / 2);
+                // The stretch is cut at each candidate; the lengths left are the engine's own.
+                const rel = (p: { atXY: readonly [number, number] }): number => (((loop.project(p.atXY) - from) % loop.length) + loop.length) % loop.length;
+                const ats = cands.map((c) => ({ s: from + rel(c), c })).sort((x, y) => x.s - y.s);
+                const cuts = [from, ...ats.flatMap((t) => [t.s - tabWidthMm / 2, t.s + tabWidthMm / 2]), to];
+                const pieces: [number, number][] = [];
+                for (let i = 0; i < cuts.length; i += 2) pieces.push([cuts[i]!, cuts[i + 1]!]);
                 return (
                   <>
-                    <polyline points={pts(loop, from, at - tabWidthMm / 2)} fill="none" stroke={AMBER} strokeOpacity={0.55} strokeWidth={fs * 0.55} strokeDasharray={`${fs} ${fs * 0.6}`} />
-                    <polyline points={pts(loop, at + tabWidthMm / 2, to)} fill="none" stroke={AMBER} strokeOpacity={0.55} strokeWidth={fs * 0.55} strokeDasharray={`${fs} ${fs * 0.6}`} />
-                    {tabMark(loop.at(at), tabWidthMm + fs * 0.3, fs * 2.2, { fill: BLUE, stroke: '#cfe0ff', strokeWidth: fs * 0.18 })}
-                    <text x={px(pa.x) + Math.sin(pa.ang) * fs * 2.4} y={py(pa.y) + Math.cos(pa.ang) * fs * 2.4 + fs * 0.35} fill={AMBER_TEXT} fontSize={fs} fontWeight={600} textAnchor="middle">
-                      {mm(c.leavesSpansMm[0])}
-                    </text>
-                    <text x={px(pb.x) + Math.sin(pb.ang) * fs * 2.4} y={py(pb.y) + Math.cos(pb.ang) * fs * 2.4 + fs * 0.35} fill={AMBER_TEXT} fontSize={fs} fontWeight={600} textAnchor="middle">
-                      {mm(c.leavesSpansMm[1])}
-                    </text>
+                    {pieces.map(([p0, p1], i) => {
+                      const pm = loop.at((p0 + p1) / 2);
+                      return (
+                        <g key={`p${i}`}>
+                          <polyline points={pts(loop, p0, p1)} fill="none" stroke={AMBER} strokeOpacity={0.55} strokeWidth={fs * 0.55} strokeDasharray={`${fs} ${fs * 0.6}`} />
+                          {s.leavesSpansMm[i] !== undefined ? (
+                            <text x={px(pm.x) + Math.sin(pm.ang) * fs * 2.4} y={py(pm.y) + Math.cos(pm.ang) * fs * 2.4 + fs * 0.35} fill={AMBER_TEXT} fontSize={fs} fontWeight={600} textAnchor="middle">
+                              {mm(s.leavesSpansMm[i]!)}
+                            </text>
+                          ) : null}
+                        </g>
+                      );
+                    })}
+                    {ats.map((t, i) => (
+                      <g key={`c${i}`}>{tabMark(loop.at(t.s), tabWidthMm + fs * 0.3, fs * 2.2, { fill: BLUE, stroke: '#cfe0ff', strokeWidth: fs * 0.18 })}</g>
+                    ))}
                   </>
                 );
               })()
             ) : (
               <>
                 <polyline points={pts(loop, from, to)} fill="none" stroke={AMBER} strokeWidth={fs * 0.6} />
-                {focus === null && c !== null
-                  ? tabMark(loop.at(loop.project(c.atXY)), tabWidthMm, fs * 1.5, { fill: 'none', stroke: BLUE, strokeWidth: fs * 0.14, strokeDasharray: `${fs * 0.4} ${fs * 0.3}` })
+                {focus === null
+                  ? cands.map((c, i) => (
+                      <g key={`d${i}`}>{tabMark(loop.at(loop.project(c.atXY)), tabWidthMm, fs * 1.5, { fill: 'none', stroke: BLUE, strokeWidth: fs * 0.14, strokeDasharray: `${fs * 0.4} ${fs * 0.3}` })}</g>
+                    ))
                   : null}
               </>
             )}
@@ -241,9 +253,38 @@ const BTN: React.CSSProperties = {
   color: MUTED,
   cursor: 'pointer',
 };
-const PRIMARY: React.CSSProperties = { ...BTN, background: BLUE, borderColor: BLUE, color: '#00214d' };
+const PRIMARY: React.CSSProperties = { ...BTN, background: BLUE, border: `1px solid ${BLUE}`, color: '#00214d' };
+
+/**
+ * Whether the card's own box is narrow. The card lives in the Job panel (a few hundred pixels) as
+ * often as in a wide page, so its stacked layout follows ITS width, not the window's.
+ */
+function useNarrow(ref: React.RefObject<HTMLElement | null>, below: number): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const read = (): void => setNarrow(el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().width < below);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, below]);
+  return narrow;
+}
 
 export function TabChoiceCard(props: TabChoiceCardProps): JSX.Element {
+  const holder = useRef<HTMLDivElement | null>(null);
+  const narrow = useNarrow(holder, 640);
+  return (
+    <div ref={holder} data-testid="tab-choice-holder">
+      <TabChoiceCardBody {...props} phone={props.phone === true || narrow} />
+    </div>
+  );
+}
+
+function TabChoiceCardBody(props: TabChoiceCardProps): JSX.Element {
   const { needed, mode, stale = false, phone = false } = props;
   const [picked, setPicked] = useState<TabChoiceAnswer | null>(null);
   const [hover, setHover] = useState<TabChoiceAnswer | null>(null);

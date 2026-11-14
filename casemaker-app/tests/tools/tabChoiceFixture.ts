@@ -58,19 +58,14 @@ export const FIXTURE_NEEDED: TabChoiceNeeded = (() => {
       spanMm: b - a - TAB_WIDTH_MM,
       startXY: at(a + TAB_WIDTH_MM / 2),
       endXY: at(b - TAB_WIDTH_MM / 2),
-      candidate: {
-        atXY: at(cand),
-        fromCornerMm: dist,
-        cornerXY: at(cornerS),
-        marginMm: margin,
-        leavesSpansMm: [left, right] as [number, number],
-      },
+      candidates: [{ atXY: at(cand), fromCornerMm: dist, cornerXY: at(cornerS), marginMm: margin }],
+      leavesSpansMm: [left, right],
+      stillOverLimit: false,
     };
   };
   const bottomRightCorner = BOTTOM_END + ARC_LEN; // end of the arc: the right edge begins
   return {
     limitMm: 80,
-    marginMm: 8,
     fingerprint: 'fixture-1258',
     setups: [
       {

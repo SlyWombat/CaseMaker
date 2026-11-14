@@ -74,12 +74,22 @@ export const COST_INSIDE_MARGIN =
   'A tab inside the margin is cut where the cutter changes direction and its load is highest.';
 export const COST_LONGER_STRETCH = 'The stretch has no tab; the part may flex or lift along it.';
 
+/** "2, 3 and 5": a short list in words. */
+function listWords(items: readonly string[]): string {
+  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 /** Option 1's sentence for one stretch — a row of the choice, at body size. */
 export function insideMarginRow(s: TabStretchOf, several = false): string {
-  const c = s.candidate;
   const head = `${cutPrefix(s, several)}Stretch ${stretchNumber(s)}`;
-  if (c === null) return `${head}: no place for a tab — stays ${mm(s.spanMm)}.`;
-  return `${head}: a tab ${mm(c.fromCornerMm)} from the corner (margin ${mmOne(c.marginMm)} mm) leaves ${mm(c.leavesSpansMm[0])} and ${mm(c.leavesSpansMm[1])}.`;
+  const cs = s.candidates;
+  if (cs.length === 0) return `${head}: no place for a tab — stays ${mm(s.spanMm)}.`;
+  const still = s.stillOverLimit ? ` A stretch of ${mm(Math.max(...s.leavesSpansMm))} is still past the limit.` : '';
+  if (cs.length === 1) {
+    const c = cs[0]!;
+    return `${head}: a tab ${mm(c.fromCornerMm)} from the corner (margin ${mmOne(c.marginMm)} mm) leaves ${listWords(s.leavesSpansMm.map(mm))}.${still}`;
+  }
+  return `${head}: ${cs.length} tabs, ${listWords(cs.map((c) => mm(c.fromCornerMm).replace(' mm', '')))} mm from their corners (margins ${listWords(cs.map((c) => mmOne(c.marginMm)))} mm), leave ${listWords(s.leavesSpansMm.map(mm))}.${still}`;
 }
 
 /** Option 2's sentence for one stretch. */
@@ -89,25 +99,15 @@ export function longerStretchRow(s: TabStretchOf, limitMm: number, several = fal
 
 /** Whether the first option can be offered: at least one stretch has a place for a tab. */
 export function insideMarginOffered(n: TabChoiceNeeded): boolean {
-  return n.stretches.some((s) => s.candidate !== null);
+  return n.stretches.some((s) => s.candidates.length > 0);
 }
 
 /** Why it is not, when it is not. */
 export const NO_PLACE_LINE = 'No stretch has room for a tab, even inside the corner margin.';
 
-/** The line the run sheet carries for a stretch under each answer (ruled wording; numbers from the plan). */
-export function sheetSentence(choice: TabChoiceAnswer, s: TabStretchOf, limitMm: number, tabNumber?: number): string {
-  if (choice === 'insideMargin' && s.candidate !== null) {
-    const c = s.candidate;
-    const longest = Math.max(c.leavesSpansMm[0], c.leavesSpansMm[1]);
-    return `Tab${tabNumber === undefined ? '' : ` ${tabNumber}`} sits ${mm(c.fromCornerMm)} from a corner, closer than the shop's ${mmOne(c.marginMm)} mm margin — the operator's choice. Longest stretch without a tab: ${mm(longest)}.`;
-  }
-  return `${mm(s.spanMm)} of the outline has no tab; the shop's limit is ${mm(limitMm)} — the operator's choice.`;
-}
-
 /** The Cut panel's Holding row suffix, so the choice stays visible once the card is scrolled away. */
 export function holdingChoiceSuffix(choice: TabChoiceAnswer, n: TabChoiceNeeded): string {
-  if (choice === 'insideMargin') return `${n.stretches.filter((s) => s.candidate !== null).length} by your choice`;
+  if (choice === 'insideMargin') return `${n.stretches.reduce((t, s) => t + s.candidates.length, 0)} by your choice`;
   if (n.stretches.length === 1) return `${mm(n.stretches[0]!.spanMm)} stretch by your choice`;
   return `${n.stretches.length} stretches by your choice`;
 }
@@ -115,15 +115,12 @@ export function holdingChoiceSuffix(choice: TabChoiceAnswer, n: TabChoiceNeeded)
 /** The answered summary: a headline and one line of numbers. */
 export function answeredSummary(choice: TabChoiceAnswer, n: TabChoiceNeeded): { headline: string; detail: string } {
   if (choice === 'insideMargin') {
-    const placed = n.stretches.filter((s) => s.candidate !== null);
-    const longest = Math.max(
-      0,
-      ...n.stretches.map((s) => (s.candidate === null ? s.spanMm : Math.max(...s.candidate.leavesSpansMm))),
-    );
-    const dists = placed.map((s) => mmOne(s.candidate!.fromCornerMm)).join(', ');
-    const one = placed.length === 1;
+    const cands = n.stretches.flatMap((s) => s.candidates);
+    const longest = Math.max(0, ...n.stretches.map((s) => Math.max(...s.leavesSpansMm)));
+    const dists = cands.map((c) => mmOne(c.fromCornerMm)).join(', ');
+    const one = cands.length === 1;
     return {
-      headline: one ? 'Holding: a tab inside the corner margin.' : `Holding: ${placed.length} tabs inside the corner margin.`,
+      headline: one ? 'Holding: a tab inside the corner margin.' : `Holding: ${cands.length} tabs inside the corner margin.`,
       detail: `You chose it: ${one ? 'the tab sits' : 'the tabs sit'} ${dists} mm from a corner, closer than the edge's margin. The longest stretch left is ${mm(longest)}; the run sheet states this.`,
     };
   }
