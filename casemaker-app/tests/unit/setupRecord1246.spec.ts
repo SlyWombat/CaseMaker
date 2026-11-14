@@ -14,11 +14,7 @@
  * its pin. The record's `verifierSetup` field is `null` here for the same reason.
  */
 
-import { HOP_Z } from '@/engine/cnc/cam/ir';
-import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
-
-/** The context a standard-hop program with no allowances and no through kerf was verified with. */
-const STORED_CONTEXT: ProgramVerifyContext = { minRapidZ: HOP_Z, outsideAllowancesMm: [], throughKerf: [] };
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateOpenEdge } from '@/engine/cnc/cam/model/openEdges';
@@ -439,7 +435,7 @@ describe('#1246 slice 2 pair (c) — a restored run without a stored plan says s
       frameNc: null,
       frameVerify: null,
       programHash: 'h-1246c',
-      verifyContext: STORED_CONTEXT,
+      ...PROGRAM_CONTEXT,
       cam: null,
     }) as unknown as EngraveProgram;
   const generatedWith = (p: EngraveProgram): EngraveGenerated =>

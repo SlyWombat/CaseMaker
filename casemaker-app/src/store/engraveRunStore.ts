@@ -41,7 +41,7 @@ import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
 import type { SimStatus } from './simStore';
 import { jobMountObstacles, jobSetups, jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
-import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
+import { carriesVerifyContexts, recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
 import { appendRunLog, type RunLogEntry } from '@/engine/cnc/engrave/runLog';
 import type { MountObstacles } from '@/engine/cnc/mounts/bracket';
 import { carrySeedsForSetup, carriedMaps, orient, type CarrySetup } from '@/engine/cnc/setups';
@@ -1701,6 +1701,12 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         job.breakthrough + 1,
         { length: job.stock.length, width: job.stock.width },
       );
+      // #1126 — stored JSON is read here: a run that carries no contexts is planned again, not guessed at.
+      if (!carriesVerifyContexts(generated)) {
+        markStale('job');
+        set({ restoreNote: RESTORED_RUN_REGENERATE, restoreChecking: false });
+        return;
+      }
       const check = recheckStoredPrograms({
         job,
         generated,

@@ -23,11 +23,17 @@ vi.mock('@/engine/cnc/verify', async (importOriginal) => {
 
 import { jobMachine } from '@/engine/cnc/calibration';
 import { defaultEngraveJob, newEngraveLabelId } from '@/engine/cnc/engrave/defaults';
+import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
+import type { VerifyContext } from '@/engine/cnc/verify';
 import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
+import { badgeBlankFor } from '@/engine/cnc/engrave/fromBadge';
+import { viseForNewJob } from '@/engine/cnc/fixture';
+import { presetPartOnBoard } from '@/engine/cnc/sacrificial';
+import { defaultBadgeParams } from '@/types/badge';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import {
   generateGoalProgram,
@@ -69,27 +75,43 @@ function proveStoredContext(job: EngraveJob, programs: readonly EngraveProgram[]
   expect(out.regenerate).toBe(false);
   const again = firstContexts(afterGeneration);
   let compared = 0;
-  programs.forEach((program, index) => {
-    const original = first.get(program.nc);
-    if (original === undefined) return; // a surface program runs no verifier
-    const context = restored.programs[index]!.verifyContext;
-    expect(context, `program ${index + 1} stores its context`).toBeDefined();
-    expect(context!.minRapidZ).toBe(original.minRapidZ);
-    expect(context!.outsideAllowancesMm).toEqual([...(original.outsideAllowancesMm ?? [])]);
-    expect(context!.itemProgram).toBe(original.itemProgram);
-    const rechecked = again.get(program.nc);
-    expect(rechecked, `program ${index + 1} is re-verified`).toBeDefined();
-    expect(rechecked!.minRapidZ).toBe(original.minRapidZ);
-    expect([...(rechecked!.outsideAllowancesMm ?? [])]).toEqual([...(original.outsideAllowancesMm ?? [])]);
-    expect(rechecked!.itemProgram).toBe(original.itemProgram);
-    for (let i = 0; i <= 6; i++) {
-      for (let j = 0; j <= 6; j++) {
-        const x = (job.stock.length * i) / 6;
-        const y = (job.stock.width * j) / 6;
-        expect(rechecked!.depthLimit(x, y), `depth limit at ${x},${y}`).toBe(original.depthLimit(x, y));
+  const sameContext = (
+    label: string,
+    stored: ProgramVerifyContext | null | undefined,
+    original: VerifyContext | undefined,
+    rechecked: VerifyContext | undefined,
+  ): void => {
+    expect(original, `${label}: first verification`).toBeDefined();
+    expect(stored, `${label} stores its context`).toBeTruthy();
+    expect(stored!.minRapidZ).toBe(original!.minRapidZ);
+    expect(stored!.outsideAllowancesMm).toEqual([...(original!.outsideAllowancesMm ?? [])]);
+    expect(stored!.itemProgram).toBe(original!.itemProgram);
+    expect(stored!.topLiftMm ?? 0).toBe(original!.mountObstacles?.topLift ?? 0);
+    expect(rechecked, `${label} is re-verified`).toBeDefined();
+    expect(rechecked!.minRapidZ).toBe(original!.minRapidZ);
+    expect([...(rechecked!.outsideAllowancesMm ?? [])]).toEqual([...(original!.outsideAllowancesMm ?? [])]);
+    expect(rechecked!.itemProgram).toBe(original!.itemProgram);
+    expect(rechecked!.limitReasonAt === undefined).toBe(original!.limitReasonAt === undefined);
+    for (let i = 0; i <= 12; i++) {
+      for (let j = 0; j <= 12; j++) {
+        const x = (job.stock.length * i) / 12;
+        const y = (job.stock.width * j) / 12;
+        expect(rechecked!.depthLimit(x, y), `${label}: depth limit at ${x},${y}`).toBe(original!.depthLimit(x, y));
+        if (original!.limitReasonAt !== undefined) {
+          expect(rechecked!.limitReasonAt!(x, y), `${label}: reason at ${x},${y}`).toBe(original!.limitReasonAt(x, y));
+        }
       }
     }
+  };
+  programs.forEach((program, index) => {
+    if (!first.has(program.nc)) return; // a surface program runs no verifier
+    const label = `program ${index + 1}`;
+    sameContext(label, restored.programs[index]!.verifyContext, first.get(program.nc), again.get(program.nc));
     compared++;
+    if (program.frameNc !== null) {
+      sameContext(`${label}'s frame`, restored.programs[index]!.frameVerifyContext, first.get(program.frameNc), again.get(program.frameNc));
+      compared++;
+    }
   });
   return compared;
 }
@@ -100,6 +122,59 @@ describe('#1126 — the stored verify context is the context the first verificat
     const from = seen.length;
     const g: EngraveGeneratedFull = await generate(tl, job);
     expect(g.ok).toBe(true);
+    expect(proveStoredContext(job, g.programs, trimGenerated(g), from)).toBeGreaterThan(0);
+  });
+
+  it('frame trace: the frame file carries its own context, and the re-check uses it', async () => {
+    const job: EngraveJob = { ...defaultEngraveJob(), toolKey: 'flat-1.0' };
+    const from = seen.length;
+    const g = await generate(tl, job);
+    expect(g.ok).toBe(true);
+    expect(g.programs.some((p) => p.frameNc !== null), 'the flat job posts a frame').toBe(true);
+    const compared = proveStoredContext(job, g.programs, trimGenerated(g), from);
+    // At least the program AND its frame were compared.
+    expect(compared).toBeGreaterThanOrEqual(2);
+  });
+
+  it('layer stack: a printed blank stores its sliced solid and the re-check rebuilds the same limit', async () => {
+    const badge = defaultBadgeParams({ print: { layerHeight: 0.2, firstLayerHeight: 0.2 } });
+    const blank = badgeBlankFor(badge);
+    const job: EngraveJob = {
+      ...defaultEngraveJob(viseForNewJob(undefined, blank.stock)),
+      toolKey: 'flat-1.0',
+      stock: blank.stock,
+      keepOuts: blank.pocket ? [blank.pocket] : [],
+      labels: [],
+      shapes: [{ id: 'a', name: 'A', kind: 'rect', position: { x: 19.05, y: 38.1 }, rotation: 0, depth: 0.5, enabled: true, width: 10, height: 10, cornerRadius: 0 }],
+    };
+    const from = seen.length;
+    const g = await generate(tl, job);
+    expect(g.ok, JSON.stringify(g.errors)).toBe(true);
+    const restoredLimit = trimGenerated(g).programs[0]!.verifyContext.depthLimit;
+    expect(restoredLimit?.stack, 'the stack is stored').not.toBeNull();
+    expect(restoredLimit!.stack!.z1.length).toBeGreaterThan(5);
+    expect(proveStoredContext(job, g.programs, trimGenerated(g), from)).toBeGreaterThan(0);
+  });
+
+  it('through mask: a through cut-out and drill store the mask geometry, rebuilt not approximated', async () => {
+    const base = defaultEngraveJob();
+    const job: EngraveJob = {
+      ...base,
+      toolKey: 'flat-1.0',
+      stock: { ...base.stock, material: 'pla' },
+      sacrificial: presetPartOnBoard(),
+      breakthrough: 0.3,
+      labels: [],
+      shapes: [],
+      drills: [{ kind: 'drill', id: 'drill-1', position: { x: base.stock.length * 0.8, y: base.stock.width * 0.5 }, rotation: 0, depth: base.stock.thickness + 1, through: true, enabled: true }],
+      cutouts: [{ kind: 'cutout', id: 'cut-1', name: 'Part', enabled: true, of: 'stock-inset', side: 'inside', inset: 5, tabs: { count: 4, width: 4, height: 1 } }],
+    } as EngraveJob;
+    const from = seen.length;
+    const g = await generate(tl, job);
+    expect(g.ok, JSON.stringify(g.errors) + JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
+    const stored = trimGenerated(g).programs[0]!.verifyContext.depthLimit;
+    expect(stored?.through, 'the mask geometry is stored').not.toBeNull();
+    expect((stored!.through!.cutouts ?? []).length + (stored!.through!.drills ?? []).length).toBeGreaterThan(0);
     expect(proveStoredContext(job, g.programs, trimGenerated(g), from)).toBeGreaterThan(0);
   });
 

@@ -4,11 +4,7 @@
 // The pure report replacement is `restoredRun1191.spec.ts`; here the store action is exercised:
 // a stored program this build's verifier refuses leaves the run blocked with the finding (no Load,
 // Generate is the way forward), and the programs are still build A's bytes.
-import { HOP_Z } from '@/engine/cnc/cam/ir';
-import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
-
-/** The context a standard-hop program with no allowances and no through kerf was verified with. */
-const STORED_CONTEXT: ProgramVerifyContext = { minRapidZ: HOP_Z, outsideAllowancesMm: [], throughKerf: [] };
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -42,7 +38,7 @@ function programFor(nc: string, hash = 'h-flat-1.0'): EngraveProgram {
     frameNc: null,
     frameVerify: null,
     programHash: hash,
-    verifyContext: STORED_CONTEXT,
+    ...PROGRAM_CONTEXT,
     cam: null,
   } as EngraveProgram;
 }

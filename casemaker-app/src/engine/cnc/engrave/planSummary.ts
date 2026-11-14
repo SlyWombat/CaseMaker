@@ -20,6 +20,7 @@
  */
 import type { ModelPlanOutput, PlanOutcome } from '@/engine/cnc/cam/model/plan';
 import type { PlannedOpKind } from '@/engine/cnc/cam/model/sequence';
+import type { StoredDepthLimit } from '@/engine/cnc/engrave/storedDepthLimit';
 import type { SetupRecordDeps, VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 
 type TabCounts = NonNullable<ModelPlanOutput['perSetup'][number]['ops'][number]['outcome']['tabCounts']>;
@@ -60,28 +61,36 @@ export function planSummary(plan: PlanSummary | null | undefined): PlanSummary |
  * THE CONTEXT A PROGRAM WAS VERIFIED WITH, as plain data beside it (#1191). The posting path that
  * built the program states the very inputs its first verification used (`verifyContextOfFacts`
  * takes the facts object that path handed to `verifyContextFrom`); `recheckStoredPrograms` reads
- * this and nothing of the plan. The depth limit itself is a function and is not stored: what it was
- * composed from is (the through kerfs and the boundary margin). `boundaryMarginMm` is absent where
- * the path composed its limit without one, `itemProgram` where it did not state the flag.
+ * this and nothing of the plan.
+ *
+ * `depthLimit` is the one thing a function cannot carry, so it carries what the function was
+ * composed from (see `StoredDepthLimit`: the boundary margin, the wasteboard, the through mask's
+ * GEOMETRY and the layer stack's sliced solid — all plain numbers, rebuilt exactly, nothing
+ * sampled). It is ABSENT only on a path whose limit the record composes itself from `throughKerf`
+ * (the model plan), and on a program no verifier ran on (a surface program).
  */
 export interface ProgramVerifyContext {
   minRapidZ: number;
   /** Posted toolpath number → the op's outside allowance, mm. Empty when the program states none. */
   outsideAllowancesMm: [number, number][];
   throughKerf: ThroughKerf[];
-  boundaryMarginMm?: number;
+  depthLimit?: StoredDepthLimit;
+  /** The fitted top's lift the mount's boxes were grown by (#727), when the path stated one. */
+  topLiftMm?: number;
   itemProgram?: boolean;
 }
 
 export function verifyContextOfFacts(
   facts: Pick<VerifyPerProgram, 'minRapidZ' | 'outsideAllowancesMm' | 'itemProgram'> &
-    Pick<SetupRecordDeps, 'throughKerf' | 'boundaryMarginMm'>,
+    Pick<SetupRecordDeps, 'throughKerf' | 'topLiftMm'>,
+  depthLimit?: StoredDepthLimit,
 ): ProgramVerifyContext {
   return {
     minRapidZ: facts.minRapidZ,
     outsideAllowancesMm: [...(facts.outsideAllowancesMm ?? new Map<number, number>())],
     throughKerf: [...(facts.throughKerf ?? [])],
-    ...(facts.boundaryMarginMm === undefined ? {} : { boundaryMarginMm: facts.boundaryMarginMm }),
+    ...(depthLimit === undefined ? {} : { depthLimit }),
+    ...(facts.topLiftMm === undefined ? {} : { topLiftMm: facts.topLiftMm }),
     ...(facts.itemProgram === undefined ? {} : { itemProgram: facts.itemProgram }),
   };
 }

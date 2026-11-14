@@ -19,7 +19,7 @@
  * than a silent pass from an older report.
  */
 
-import { HOP_Z } from '@/engine/cnc/cam/ir';
+import { depthLimitFromStored } from '@/engine/cnc/engrave/storedDepthLimit';
 import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
@@ -73,13 +73,11 @@ export interface StoredProgramRecheck {
  */
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
   const { job, generated, machine, mount, setup, defaults } = input;
-  // GREENFIELD: no tolerant reader. A program with no stored context, or a plan that exists but has
-  // no entry for a program's setup, is not re-checked from a guess: the run is planned again.
+  // GREENFIELD: no tolerant reader. A plan that exists but has no entry for a program's setup is not
+  // re-checked from a guess: the run is planned again. (A stored run with no contexts never gets
+  // here: `carriesVerifyContexts` refuses it where the JSON is read.)
   const plan = generated.plan;
-  if (
-    generated.programs.some((program) => program.verifyContext === undefined) ||
-    (plan !== undefined && plan !== null && generated.programs.some((program) => plan.perSetup[program.setupIndex - 1] === undefined))
-  ) {
+  if (plan !== undefined && plan !== null && generated.programs.some((program) => plan.perSetup[program.setupIndex - 1] === undefined)) {
     return { generated, errors: [], unresolved: [], regenerate: true };
   }
   // #1247 — THE VERIFIER'S BODY IS THE SETUP'S OWN (#1082). A job that states per-setup stocks
@@ -113,12 +111,12 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     // #1235 (second ruling) / #1126 — the program's own stored context: its hop, its outside
     // allowances (posted toolpath number → mm) and its setup's through kerfs.
     const stored = program.verifyContext;
-    if (stored === undefined) return program; // unreachable: a program without one asked to be regenerated above
     const outsideAllowancesMm = stored.outsideAllowancesMm.length === 0 ? undefined : new Map(stored.outsideAllowancesMm);
     // #1246 slice 1 — the context comes from the setup record. The record's limit is the setup's
     // own (#1082/#943), composed from the through kerfs and boundary margin the posting path stored.
     const setupIndex = program.setupIndex - 1;
     const body = setupFor(setupIndex);
+    const limitFrom = stored.depthLimit === undefined ? undefined : depthLimitFromStored(job, stored.depthLimit);
     const facts: SetupRecordDeps & VerifyPerProgram = {
       setup: body,
       machine,
@@ -126,7 +124,11 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       tool,
       minRapidZ: stored.minRapidZ,
       throughKerf: stored.throughKerf,
-      ...(stored.boundaryMarginMm === undefined ? {} : { boundaryMarginMm: stored.boundaryMarginMm }),
+      // The limit the first verification ran under, rebuilt from what it was composed from; absent
+      // only where the record composes it from the through kerfs (the model plan).
+      ...(limitFrom === undefined ? {} : { depthLimit: limitFrom.limit }),
+      ...(limitFrom?.limitReasonAt === undefined ? {} : { limitReasonAt: limitFrom.limitReasonAt }),
+      ...(stored.topLiftMm === undefined ? {} : { topLiftMm: stored.topLiftMm }),
       ...(stored.itemProgram === undefined ? {} : { itemProgram: stored.itemProgram }),
       // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
       // above describes (#1082): a flipped setup's stated box, else the job's blank.
@@ -145,10 +147,21 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       if (finding.severity === 'error') errors.push({ programIndex: index, frame: false, finding });
     }
     let frameVerify: VerifyReport | null = program.frameVerify;
-    if (program.frameNc !== null) {
-      // A frame is traced from the same run but its own IR's hop is not stored; the standard hop
-      // is the safe reading (a frame that trip this build shows it, which is the point).
-      frameVerify = verifyProgram(program.frameNc, { ...ctx, minRapidZ: HOP_Z });
+    if (program.frameNc !== null && program.frameVerifyContext !== null) {
+      // The frame trace's own context: its hop and the facts ITS first verification used.
+      const traced = program.frameVerifyContext;
+      const tracedLimit = traced.depthLimit === undefined ? undefined : depthLimitFromStored(job, traced.depthLimit);
+      // The trace states what ITS verification stated: not the program's item flag, reason words or rotary frame.
+      const { limitReasonAt: _words, itemProgram: _item, rotary: _rotary, depthLimit: _limit, ...shared } = facts;
+      const frameFacts: SetupRecordDeps & VerifyPerProgram = {
+        ...shared,
+        minRapidZ: traced.minRapidZ,
+        throughKerf: traced.throughKerf,
+        outsideAllowancesMm: traced.outsideAllowancesMm.length === 0 ? undefined : new Map(traced.outsideAllowancesMm),
+        ...(tracedLimit === undefined ? {} : { depthLimit: tracedLimit.limit }),
+        ...(traced.topLiftMm === undefined ? {} : { topLiftMm: traced.topLiftMm }),
+      };
+      frameVerify = verifyProgram(program.frameNc, verifyContextFrom(setupRecordFor(job, setupIndex, frameFacts), frameFacts));
       for (const finding of frameVerify.findings) {
         if (finding.severity === 'error') errors.push({ programIndex: index, frame: true, finding });
       }
@@ -169,4 +182,20 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     unresolved,
     regenerate: false,
   };
+}
+
+/**
+ * Where stored JSON is read (a restored run, the house's assembled result): does every program
+ * carry the context its first verification used, and its frame's when one was verified? The type
+ * says it always does; a run written before the contexts existed does not, and it is planned again
+ * rather than re-checked from a guess.
+ */
+export function carriesVerifyContexts(generated: EngraveGenerated): boolean {
+  const record = (value: unknown): boolean => typeof value === 'object' && value !== null && !Array.isArray(value);
+  return generated.programs.every(
+    (program) =>
+      record(program.verifyContext) &&
+      (program.frameVerifyContext === null || record(program.frameVerifyContext)) &&
+      (program.frameVerify === null || program.frameVerifyContext !== undefined),
+  );
 }

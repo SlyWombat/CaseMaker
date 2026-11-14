@@ -80,6 +80,8 @@ describe('#1126 — is the house able to generate?', () => {
   });
 });
 
+const CONTEXT = { minRapidZ: 1, outsideAllowancesMm: [], throughKerf: [] };
+
 /** A v2 result document: no NC text, no camIr; the text lives in `fetchRunProgram`. */
 function v2Result(): Record<string, unknown> {
   return {
@@ -94,8 +96,8 @@ function v2Result(): Record<string, unknown> {
     frameProgram: 0,
     facingProgram: null,
     programs: [
-      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null },
-      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null },
+      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null, verifyContext: CONTEXT, frameVerifyContext: null },
+      { name: 'Tray', stage: 'done', ok: true, kind: 'engrave', nc: null, frameNc: null, cam: null, verifyContext: CONTEXT, frameVerifyContext: null },
     ],
     files: [
       { name: 'Tray-p1.nc', what: 'program', index: 0 },
@@ -217,6 +219,18 @@ describe('#1126 — following a house run', () => {
         margins: {} as never,
       }),
     ).rejects.toThrow('no such program in this run');
+  });
+
+  it('refuses a result whose programs carry no verify context: it is planned again, not read', async () => {
+    mocked.submitRun.mockResolvedValue({ kind: 'ok', runId: 'run-9', queuePosition: 0, key: { jobSha: 'abc', build: 'b1' } });
+    mocked.readRun.mockResolvedValue({ kind: 'ok', run: { id: 'run-9', state: 'done', programs: [], receipt: {}, finding: null } });
+    const doc = v2Result();
+    const programs = (doc.programs as Record<string, unknown>[]).map(({ verifyContext: _v, ...rest }) => rest);
+    mocked.readRunResult.mockResolvedValue({ kind: 'ok', result: { ...doc, programs } });
+    mocked.fetchRunProgram.mockResolvedValue({ kind: 'ok', text: 'G0\n' });
+    await expect(
+      houseEngraveGenerate({ job: JOB as never, tool: null, catalogue: [], calibration: null, margins: {} as never }),
+    ).rejects.toThrow('generate again');
   });
 
   it('reports a queued run, so the silence watchdog does not time a run that is waiting', async () => {

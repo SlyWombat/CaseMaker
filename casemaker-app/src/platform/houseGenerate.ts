@@ -40,6 +40,7 @@ import type {
   EngraveProgress,
   EngraveShopOpts,
 } from '@/workers/sim/engraveGenerate';
+import { carriesVerifyContexts } from '@/engine/cnc/engrave/restoredRun';
 import type { EngraveResultFiles } from '@/engine/cnc/engrave/resultShape';
 
 /** The stages the engine's own progress objects use; anything else is relayed as a note. */
@@ -172,13 +173,18 @@ export async function assembleResult(id: string, doc: Record<string, unknown>): 
     facingProgram,
     ...rest
   } = doc;
-  return {
+  const assembled: EngraveGenerated = {
     ...rest,
     nc: programNc(ncProgram),
     frameNc: programFrame(frameProgram),
     facingNc: programNc(facingProgram),
     programs,
   };
+  // The document is JSON from the wire: the contexts the re-check needs must be on it.
+  if (!carriesVerifyContexts(assembled)) {
+    throw new Error('the house result carries no verify context for its programs; generate again');
+  }
+  return assembled;
 }
 
 export interface HouseGenerateArgs {

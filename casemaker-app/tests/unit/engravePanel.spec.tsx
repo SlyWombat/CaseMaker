@@ -68,6 +68,7 @@ import type {
 } from '@/types/engraveJob';
 import type { EngravePreview } from '@/workers/sim/engravePreview';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 // The save path is the thing under test (#207): mock it so a test can read the files the panel
 // hands it, without a real download. EngravePanel imports only `saveEngraveProgram` from here.
@@ -1303,6 +1304,7 @@ function readyGenerated(nc: string): EngraveGenerated {
         frameNc: `${nc}\n;frame\n`,
         frameVerify: null,
         programHash: '00000000',
+        ...PROGRAM_CONTEXT,
         cam: { operations: 1, cuttingMoves: 10, estimatedSeconds: 5, passes: 2 },
       },
     ],
@@ -3241,6 +3243,7 @@ describe('EngravePanel — the release step routing (#469)', () => {
       frameNc: null,
       frameVerify: null,
       programHash: `hash-${index}`,
+      ...PROGRAM_CONTEXT,
       cam: null,
     };
   }

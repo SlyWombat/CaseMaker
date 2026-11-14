@@ -35,6 +35,7 @@ import {
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { ProjectFileHandle, SaveTextOutcome } from '@/store/persistence';
 import type { EngraveJob, RotaryChuck } from '@/types/engraveJob';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 const CHUCK: RotaryChuck = {
   stickout: 30,
@@ -104,6 +105,7 @@ function rotaryProgram(): EngraveProgram {
     frameNc: null,
     frameVerify: null,
     programHash: 'abcd1234',
+    ...PROGRAM_CONTEXT,
     cam: null,
     frame: 'rotary',
   };

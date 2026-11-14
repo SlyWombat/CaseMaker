@@ -10,11 +10,7 @@
  * Fixture: `perSetupStock1082.spec.ts:34-48` — blank 120 × 160 × 28, setup 2 states 106 × 136 × 25.
  */
 
-import { HOP_Z } from '@/engine/cnc/cam/ir';
-import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
-
-/** The context a standard-hop program with no allowances and no through kerf was verified with. */
-const STORED_CONTEXT: ProgramVerifyContext = { minRapidZ: HOP_Z, outsideAllowancesMm: [], throughKerf: [] };
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -91,7 +87,7 @@ const storedProgram = (move: string, setupIndex = 2): EngraveProgram =>
     frameNc: null,
     frameVerify: null,
     programHash: 'h-1247',
-    verifyContext: STORED_CONTEXT,
+    ...PROGRAM_CONTEXT,
     cam: null,
   }) as unknown as EngraveProgram;
 

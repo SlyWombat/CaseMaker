@@ -49,9 +49,10 @@
 import type { EngraveJob } from '@/types/engraveJob';
 import type { Mm } from '@/types/units';
 import { buildLayerStack, printedLayerGridOf } from '@/engine/cnc/layerStack';
-import { defaultBoundaryMargin, splitDepthOf, voidFloor } from '@/engine/cnc/engrave/depthBounds';
+import { defaultBoundaryMargin, splitDepthOf } from '@/engine/cnc/engrave/depthBounds';
 import type { PartPlan } from '@/engine/cnc/engrave/partPlan';
-import { sacrificialDepthLimit, type DepthLimit, type ThroughMask } from '@/engine/cnc/verify';
+import { composeStackLimit, type LayerSolid } from '@/engine/cnc/engrave/storedDepthLimit';
+import type { DepthLimit, ThroughMask } from '@/engine/cnc/verify';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 
 /** Why the limit at a point is what it is, in the two states a value can be in. */
@@ -68,11 +69,11 @@ export interface StackDepthLimit {
    * sacrificial height) and nothing in the blank is in the way.
    */
   reasonAt(x: Mm, y: Mm): DepthLimitReason;
+  /** The sliced solid as plain data, for the stored depth limit (#1126). Read it before `dispose()`. */
+  solid(): LayerSolid;
   /** Free the stack's cross-sections. Idempotent; call it as soon as the verifier is done. */
   dispose(): void;
 }
-
-const EPS = 1e-9;
 
 /**
  * The layer grid the plan carries for a PRINTED job that states a layer height, or `null` for a job
@@ -155,40 +156,14 @@ export function stackDepthLimit(
     grid.firstLayerHeight,
   );
 
-  const sacrificial = sacrificialDepthLimit(job.stock, job.sacrificial, {
-    minFloor: job.minFloor,
-    breakthrough: job.breakthrough,
-    ...(through === undefined ? {} : { through }),
-    ...(bedBoardMm === undefined || bedBoardMm === null ? {} : { bedBoardMm }),
-  });
+  const composed = composeStackLimit(job, (x, y) => stack.maxDepthAt(x, y), margin, through, bedBoardMm);
 
   let disposed = false;
   return {
-    limit(x, y) {
-      const base = sacrificial(x, y);
-      // #218 — inside a through region or kerf the board is the floor, so the SOLID cannot bind:
-      // the layer stack models the blank's material and knows nothing about cutting past it.
-      if (through !== undefined && through(x, y) !== null) return base;
-      const solid = stack.maxDepthAt(x, y);
-      // Outside the PART the stack reports nothing — it models the blank's outline and the voids
-      // in it, and has never been told about sacrificial material. `0` there means "no material",
-      // not "no cutting": the sacrificial limit deliberately puts a strip or a board beside the
-      // part and lets the cutter onto it, so a point the stack is empty at must not tighten
-      // anything. Where the sacrificial limit is genuinely 0 (over air) it is returned as it was.
-      if (solid <= EPS) return base;
-      // #345 — the ceiling is a bound like any other: the floor keeps the margin clear of it, and
-      // the clamp at 0 (a ceiling nearer the face than the margin) says "do not cut here".
-      return Math.min(base, voidFloor(solid, margin));
-    },
+    limit: composed.limit,
     boundary: stack.colourBoundaryDepth,
-    reasonAt(x, y) {
-      const solid = stack.maxDepthAt(x, y);
-      // Below the sacrificial height means the SOLID stopped the cutter, not the setup: the stack
-      // is shallower there than `thickness − minFloor` (or the strip's height) because a void took
-      // the material out. That is the honest test — asking `keepOutLimitAt` instead would name a
-      // void that a deeper one overlaps, or one that does not bind this point at all.
-      return solid > EPS && solid < sacrificial(x, y) - EPS ? 'void' : 'stock';
-    },
+    reasonAt: composed.reasonAt,
+    solid: () => stack.solid(),
     dispose() {
       if (disposed) return;
       disposed = true;

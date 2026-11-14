@@ -16,6 +16,7 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 const ROTARY_PROGRAM: EngraveProgram = {
   setupIndex: 1,
@@ -26,6 +27,7 @@ const ROTARY_PROGRAM: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: 'abcd1234',
+  ...PROGRAM_CONTEXT,
   cam: null,
   frame: 'rotary',
 };

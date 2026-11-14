@@ -53,6 +53,7 @@ import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
 import { beforeEach as beforeEachSettled } from 'vitest';
 import { settleShopSettings } from '../tools/settledShop';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 // #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
 beforeEachSettled(() => settleShopSettings());
@@ -125,6 +126,7 @@ function clean(): EngraveGenerated {
         frameNc: null,
         frameVerify: null,
         programHash: 'clean-program',
+        ...PROGRAM_CONTEXT,
         cam: null,
       },
     ],
@@ -702,6 +704,7 @@ describe('engraveRunStore (#206)', () => {
             frameNc: null,
             frameVerify: null,
             programHash: 'abcd1234',
+            ...PROGRAM_CONTEXT,
             cam: null,
           },
         ],
@@ -836,6 +839,7 @@ describe('engraveRunStore (#206)', () => {
               frameNc: null,
               frameVerify: null,
               programHash: 'abcd1234',
+              ...PROGRAM_CONTEXT,
               cam: null,
             },
           ],
@@ -988,6 +992,7 @@ describe('engraveRunStore (#206)', () => {
       frameNc: null,
       frameVerify: null,
       programHash: `hash-${setupIndex}`,
+      ...PROGRAM_CONTEXT,
       cam: null,
     });
     const v = view({
@@ -1666,6 +1671,7 @@ describe('#642 the run watches every input it stamps', () => {
         frameNc: null,
         frameVerify: null,
         programHash: `hash-${nc}`,
+        ...PROGRAM_CONTEXT,
         cam: null,
         ...extra,
       };

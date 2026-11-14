@@ -21,6 +21,7 @@ import { freezePackage } from '@/engine/cnc/engrave/package';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 const IDENTITY = {
   top: 'top',
@@ -66,6 +67,7 @@ function program(setupIndex: number, toolKey: string, nc: string, verify: Verify
     frameNc: null,
     frameVerify: null,
     programHash: `hash-${setupIndex}-${toolKey}`,
+    ...PROGRAM_CONTEXT,
     cam: null,
   };
 }

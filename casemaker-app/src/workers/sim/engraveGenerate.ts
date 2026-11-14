@@ -95,7 +95,7 @@ import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { adjudicatedCellCount, asGoalHeightfield } from '@/workers/sim/goalChainCutInto';
 import { memTrace } from '@/engine/cnc/memTrace';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
-import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
+import { toPartPlan, labelProfile, jobDepthLimit, type PartPlan } from '@/engine/cnc/engrave/partPlan';
 import {
   dedupeFindings,
   goalSides,
@@ -143,6 +143,7 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { depthLimitReason, type StoredDepthLimit } from '@/engine/cnc/engrave/storedDepthLimit';
 import { planSummary, verifyContextOfFacts, type PlanSummary, type ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { setupRecordFor, verifyContextFrom, type OpenEdgeFacts, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
@@ -172,7 +173,7 @@ import {
   type ProfileCut,
   type ProfileSpan,
 } from '@/engine/cnc/cam/profile';
-import { buildThroughMask, type MaskCutout } from '@/engine/cnc/engrave/throughMask';
+import { buildThroughMask, type MaskCutout, type MaskGeometry } from '@/engine/cnc/engrave/throughMask';
 import { tapeHoldFindings, type TapedPiece } from '@/engine/cnc/engrave/tapeHold';
 import type { BedUnderFacts } from '@/engine/cnc/engrave/jobSetup';
 import { generateChamfer, type ChamferCut } from '@/engine/cnc/cam/chamfer';
@@ -219,7 +220,7 @@ import {
   type PerCharGlyph,
   type RaisedTextMeasurement,
 } from './engraveGeometry';
-import { colourBoundaryFor, stackDepthLimit, type StackDepthLimit } from './stackDepthLimit';
+import { colourBoundaryFor, stackDepthLimit } from './stackDepthLimit';
 import { rotaryJobFindings } from '@/engine/cnc/rotary/findings';
 import {
   ROTARY_NECK_EDGE_GRID_MM,
@@ -239,7 +240,7 @@ import { faceCutIntoNeck, faceJobRefusal, planFaceCuts, processedSectionOf } fro
 import { rotaryMapOf, toRotaryIR } from '@/engine/cnc/rotary/wrap';
 import { rotaryFreeSpan, freeEndSentence, tailstockSentence, throughCentreSentence } from '@/engine/cnc/rotary/wrap';
 import { generateRotaryReliefIR, reliefKeepOutX, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
-import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
+import { effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
 import { checkGoalCutInto, designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
@@ -548,7 +549,9 @@ export interface EngraveProgram {
    * stored run is re-verified from this, never from a plan's IR (which no result carries). It is
    * the context its own first verification was built from — the path that posted it records it.
    */
-  verifyContext?: ProgramVerifyContext;
+  verifyContext: ProgramVerifyContext;
+  /** #1126 — the frame file's own context (its hop and facts); null when no frame was verified. */
+  frameVerifyContext: ProgramVerifyContext | null;
   cam: EngraveCamSummary | null;
   /**
    * #844 — THIS PROGRAM'S OWN PREDICTIONS, the ones its generation produced (`OneProgram.predicted`).
@@ -1234,6 +1237,8 @@ export interface EngraveRegions {
    * limit exactly as it was before.
    */
   throughMask: ThroughMask | null;
+  /** #1126 — the geometry `throughMask` is built from, which a stored run keeps instead of the function. */
+  throughGeometry: MaskGeometry;
   /**
    * EVERY cut the program makes, in cutting order, one entry per item (#288): the region CAM's own
    * list above, then the single-line traces, which are CAM'd separately (`generateTrace`) and so are
@@ -3137,7 +3142,7 @@ export function engraveRegions(
             throughDepth,
         )
       : 0;
-  const throughMask = buildThroughMask({
+  const throughGeometry: MaskGeometry = {
     thickness: plan.stock.thickness,
     breakthrough: job.breakthrough,
     regions: regions
@@ -3147,7 +3152,8 @@ export function engraveRegions(
         ...(r.drill === undefined ? {} : { extraDepth: drillExtraDepth }),
       })),
     cutouts: cutoutMask,
-  });
+  };
+  const throughMask = buildThroughMask(throughGeometry);
 
   // #218 — what the through cuts disconnect: the check runs here, where Manifold is loaded, and
   // reads the SAME polygons the cut classes above were built from. A job with no through work is
@@ -3166,6 +3172,7 @@ export function engraveRegions(
     regions,
     profiles,
     throughMask,
+    throughGeometry,
     cuts,
     chamfers: chamferCuts,
     cores,
@@ -3510,11 +3517,13 @@ function frameProgram(
   clearanceMm: number,
   /** #1235 stage 2 — the job's cuttable footprint, stated for the trace's own verifier report. */
   footprint: readonly FootprintShape[],
+  /** #1126 — what `limit` was composed from, stored beside the trace's own context. */
+  storedLimit: StoredDepthLimit,
   /** #1246 — the job whose setup record the trace's verifier context reads. */
   job: EngraveJob,
   /** #727 F2 — the fitted top's highest lift: the frame trace rides above the lifted clamps too. */
   topLiftMm = 0,
-): { nc: string; verify: VerifyReport; z: Mm } | { error: string } {
+): { nc: string; verify: VerifyReport; verifyContext: ProgramVerifyContext; z: Mm } | { error: string } {
   // #747 — the trace height is computed HERE, once, for the file, the sheet and the receipt. The
   // design's `FRAME_Z` is the minimum air clearance; `frameTraceZ` raises it to clear the mount
   // wherever the setup's WCS can reach, and refuses only when even that top cannot.
@@ -3578,7 +3587,7 @@ function frameProgram(
     topLiftMm,
   };
   const verify = verifyProgram(posted.text, verifyContextFrom(setupRecordFor(job, 0, facts), facts));
-  return { nc: posted.text, verify, z };
+  return { nc: posted.text, verify, verifyContext: verifyContextOfFacts(facts, storedLimit), z };
 }
 
 /**
@@ -3604,6 +3613,8 @@ function facingProgram(
   machine: Mill,
   setup: Setup,
   limit: DepthLimit,
+  /** #1126 — what `limit` was composed from, stored beside the skim's own context. */
+  storedLimit: StoredDepthLimit,
   mount: MountObstacles | null | undefined,
   tools: readonly ToolLibraryEntry[],
   /**
@@ -3753,30 +3764,14 @@ function facingProgram(
         cam: null,
       };
     }
-    return { nc: posted.text, verify, verifyContext: verifyContextOfFacts(facts), toolKey, error: null, cam };
+    return { nc: posted.text, verify, verifyContext: verifyContextOfFacts(facts, storedLimit), toolKey, error: null, cam };
   } catch (e) {
     return { nc: null, verify: null, toolKey, error: e instanceof Error ? e.message : String(e), cam: null };
   }
 }
 
-/**
- * The tail of the `cut-too-deep` sentence: WHICH plane the limit at (x, y) is (#285, #345).
- *
- * Two answers, and the difference is what the operator acts on. Over a void the solid itself
- * stopped the cutter, so the sentence names the plane the floor would have crossed — the void's
- * ceiling, named by the same `ceilingName` the bound model uses, so the sentence and the per-item
- * finding cannot describe one plane two ways. Everywhere else the limit is the job's own floor
- * under the stock (or the sacrificial height), and naming a ceiling there would send the operator
- * looking for a pocket that is not there.
- *
- * Exported so the branch is directly testable: over solid stock nothing can reach the verifier
- * today — `validateJob` refuses the same depth first — so only the void half is reachable through
- * the pipeline, and the floor half would otherwise be an unverified string.
- */
-export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm, y: Mm): string {
-  if (stack.reasonAt(x, y) === 'stock') return '— the floor the job keeps under the stock';
-  return `— ${ceilingName(keepOutNameAt(job, x, y) ?? '')}`;
-}
+// The words for the depth limit's binding plane live beside the stored limit (`depthLimitReason`).
+export { depthLimitReason };
 
 /**
  * One program's result, before the list is assembled. `generateOneProgram`'s return shape.
@@ -3824,6 +3819,8 @@ type OneProgram = Omit<EngraveGeneratedFull, 'programs'> & {
   verifyContext?: ProgramVerifyContext;
   /** #1126 — the same for the facing skim, which is verified on its own. */
   facingVerifyContext?: ProgramVerifyContext;
+  /** #1126 — and for the frame trace, whenever one was verified (its report is attached). */
+  frameVerifyContext?: ProgramVerifyContext | null;
 };
 
 /**
@@ -5072,6 +5069,7 @@ export function generateRotaryGoalProgram(
     // No verifier ran on a surface program (its check is the material sweep): the context states the
     // hop the IR was posted with and nothing else.
     verifyContext: verifyContextOfFacts({ minRapidZ: relief.ir.hopZ }),
+    frameVerifyContext: null,
     cam,
   };
   return {
@@ -6064,6 +6062,7 @@ export async function postModelPlan(
         frameVerify: null,
         programHash: programHash(posted.text),
         verifyContext: verifyContextOfFacts(facts),
+        frameVerifyContext: null,
         cam: summarize(ir, mill.rapidEstimate),
         // #1073 — the release is the LAST program of the LAST setup; its bridges ride with it so
         // the sheet's last step prints the positions the file was cut with.
@@ -7375,7 +7374,6 @@ async function generateFaceProgram(
         // A rest pass is cut on the same machine, in the same post's words.
         dialect: postKey(mill),
         depthLimit: jobDepthLimit(job, margins.boundaryMargin),
-        boundaryMarginMm: margins.boundaryMargin,
         minRapidZ: fineIr.hopZ,
         footprint: null,
         rotary: map,
@@ -7395,7 +7393,7 @@ async function generateFaceProgram(
         nc: postedFine.text,
         frame: 'rotary',
         verify: fineVerify,
-        verifyContext: verifyContextOfFacts(fineFacts),
+        verifyContext: verifyContextOfFacts(fineFacts, plainStoredLimit(margins.boundaryMargin)),
         predicted: finePredicted,
         errors: [],
       };
@@ -7470,7 +7468,6 @@ async function generateFaceProgram(
     tool,
     dialect: postKey(mill),
     depthLimit: limit,
-    boundaryMarginMm: margins.boundaryMargin,
     minRapidZ: ir.hopZ,
     footprint: null,
     rotary: map,
@@ -7497,7 +7494,7 @@ async function generateFaceProgram(
     nc,
     frame: 'rotary',
     verify,
-    verifyContext: verifyContextOfFacts(faceFacts),
+    verifyContext: verifyContextOfFacts(faceFacts, plainStoredLimit(margins.boundaryMargin)),
     predicted,
     errors: [],
   };
@@ -8264,6 +8261,11 @@ function withOwnDesignItems(programs: readonly EngraveProgram[], designItems: re
 }
 
 /** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
+/** The limit a rotary face/rest pass composes: the job's own, with the boundary margin and nothing else. */
+function plainStoredLimit(marginMm: number): StoredDepthLimit {
+  return { marginMm, bedBoardMm: null, through: null, stack: null };
+}
+
 function requireVerifyContext(context: ProgramVerifyContext | undefined): ProgramVerifyContext {
   if (context === undefined) throw new Error('a posted program has no verify context: its posting path did not record one');
   return context;
@@ -8286,6 +8288,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameError: one.frameError ?? null,
     programHash: programHash(nc),
     verifyContext: requireVerifyContext(one.verifyContext),
+    frameVerifyContext: one.frameVerifyContext ?? null,
     cam: one.cam,
     // #865 — this file's own findings, for the run's tagged list and the receipt.
     findings: one.findings,
@@ -8333,6 +8336,7 @@ function facingProgramOf(
     frameVerify: null,
     programHash: programHash(one.facingNc),
     verifyContext: requireVerifyContext(one.facingVerifyContext),
+    frameVerifyContext: null,
     cam: null,
   };
 }
@@ -8432,7 +8436,7 @@ async function generateOneProgram(
   // which is the only post this app has; a second mill is a second post, and this line is where a
   // job naming it would have to be refused until there is one.
   const mill = jobMachine(job, calibration);
-  const { plan, regions, profiles, throughMask, cuts, chamfers, cores, floors: floorById, predicted, designItems, findings, releasedPieces, neck } = engraveRegions(
+  const { plan, regions, profiles, throughMask, throughGeometry, cuts, chamfers, cores, floors: floorById, predicted, designItems, findings, releasedPieces, neck } = engraveRegions(
     tl,
     job,
     tool,
@@ -9186,6 +9190,13 @@ async function generateOneProgram(
       : null;
   const stack = stackDepthLimit(tl, plan, job, margins.boundaryMargin, throughMask ?? undefined, bedBoardMm);
   const limit: DepthLimit = stack?.limit ?? jobDepthLimit(job, margins.boundaryMargin, throughMask ?? undefined, bedBoardMm);
+  // #1126 — what `limit` was composed from, as plain data (read off the stack before it is freed).
+  const storedLimit: StoredDepthLimit = {
+    marginMm: margins.boundaryMargin,
+    bedBoardMm,
+    through: throughMask === null ? null : throughGeometry,
+    stack: stack === null ? null : stack.solid(),
+  };
   const limitReasonAt = stack
     ? (x: number, y: number): string => depthLimitReason(stack, job, x, y)
     : undefined;
@@ -9232,6 +9243,7 @@ async function generateOneProgram(
           mill,
           setup,
           limit,
+          storedLimit,
           shop.mount,
           shop.tools ?? [],
           shop.conditions ?? null,
@@ -9290,7 +9302,6 @@ async function generateOneProgram(
       tool,
       dialect: postKey(mill),
       depthLimit: limit,
-      boundaryMarginMm: margins.boundaryMargin,
       minRapidZ,
       // #1235 stage 2 — the footprint rule's own facts: this sub-job's blank (its rectangle, or
       // the circle of round stock) plus every sacrificial piece, and whether any of its items was
@@ -9343,7 +9354,6 @@ async function generateOneProgram(
         tool,
         dialect: postKey(mill),
         depthLimit: limit,
-        boundaryMarginMm: margins.boundaryMargin,
         minRapidZ: neckIr.hopZ,
         footprint: rotaryMap === null ? jobFootprint(job) : null,
         outsideAllowancesMm: rotaryMap === null ? neckAllowances : undefined,
@@ -9368,7 +9378,7 @@ async function generateOneProgram(
         nc: postedNeck.text,
         frame: neckIr.frame,
         verify: neckVerify,
-        verifyContext: verifyContextOfFacts(neckFacts),
+        verifyContext: verifyContextOfFacts(neckFacts, storedLimit),
         predicted: neckPredicted,
         errors: [],
         neck: neckProgram,
@@ -9379,16 +9389,18 @@ async function generateOneProgram(
 
     let frameNc: string | null = null;
     let frameVerify: VerifyReport | null = null;
+    let frameVerifyContext: ProgramVerifyContext | null = null;
     let frameZ: Mm | null = null;
     let frameError: string | null = null;
     if (rotaryMap === null) {
-      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, jobFootprint(job), job, liftOverStock);
+      const frame = frameProgram(ir, ctx, mill, setup, tool, limit, shop.mount, job.jawClearance, jobFootprint(job), storedLimit, job, liftOverStock);
       if ('error' in frame) {
         // `withPeriod` rather than `+ '.'` (review, 2026-10-28): a cause that already ends in a
         // full stop used to print "..".
         frameError = `The frame file could not be produced: ${withPeriod(frame.error)}`;
       } else {
         frameVerify = frame.verify;
+        frameVerifyContext = frame.verifyContext;
         const frameErrors = frame.verify.findings.filter((f) => f.severity === 'error');
         if (frameErrors.length > 0) {
           // The posted frame is withheld: no unchecked program is handed over (#432's rule, and
@@ -9422,9 +9434,10 @@ async function generateOneProgram(
       // #240 — the frame the post actually wrote, carried to the run and the frozen package.
       frame: postIr.frame,
       verify,
-      verifyContext: verifyContextOfFacts(facts),
+      verifyContext: verifyContextOfFacts(facts, storedLimit),
       frameNc,
       frameVerify,
+      frameVerifyContext,
       // #747 — the height the frame was actually traced at (work Z), and, when the frame was
       // withheld despite a good program, why. Both travel to the sheet and the receipt.
       frameZ,

@@ -24,6 +24,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob } from '@/types/engraveJob';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -66,6 +67,7 @@ function generatedFor(job: EngraveJob): EngraveGenerated {
         frameNc: null,
         frameVerify: null,
         programHash: '00000000',
+        ...PROGRAM_CONTEXT,
         cam: null,
       },
     ],

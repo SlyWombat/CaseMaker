@@ -49,6 +49,7 @@ import { LOCATION_POLL_MS } from '@/hooks/useLocationPoll';
 import { resetManageMode, useManageModeStore } from '@/store/manageModeStore';
 import { resetStockStore, useStockStore } from '@/store/stockStore';
 import type { EngraveJob } from '@/types/engraveJob';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -71,6 +72,7 @@ const P1: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: programHash(NC1),
+  ...PROGRAM_CONTEXT,
   cam: null,
 };
 const P2: EngraveProgram = {
@@ -82,6 +84,7 @@ const P2: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: programHash(NC2),
+  ...PROGRAM_CONTEXT,
   cam: null,
 };
 

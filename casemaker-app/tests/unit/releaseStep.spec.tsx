@@ -66,6 +66,7 @@ import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { MachineStopReport } from '@/platform/machineStopReport';
 import { __resetMachineStopReportStoreForTests, setStopReportSendIO } from '@/store/machineStopReportStore';
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -87,6 +88,7 @@ const P1: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: programHash(NC1),
+  ...PROGRAM_CONTEXT,
   cam: null,
 };
 const P2: EngraveProgram = {
@@ -98,6 +100,7 @@ const P2: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: programHash(NC2),
+  ...PROGRAM_CONTEXT,
   cam: null,
 };
 const NC_FACE = 'M331\nG1 Z-0.5\nM02\n';
@@ -111,6 +114,7 @@ const FACE: EngraveProgram = {
   frameNc: null,
   frameVerify: null,
   programHash: programHash(NC_FACE),
+  ...PROGRAM_CONTEXT,
   cam: null,
 };
 
@@ -1270,6 +1274,7 @@ describe('#491 the release step names the cutter’s case', () => {
       frameNc: null,
       frameVerify: null,
       programHash: programHash(nc),
+      ...PROGRAM_CONTEXT,
       cam: null,
     };
     const made = freezePackage(job, [surfaceProgram], '2026-10-17T14:02:00.000Z');

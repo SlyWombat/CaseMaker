@@ -78,6 +78,14 @@ describe('#1258 casemaker cut, flag to planner', () => {
     expect(asked.tabChoiceNeeded?.stretches.length).toBeGreaterThan(0);
     expect(asked.tabChoiceNeeded?.setups.length).toBeGreaterThan(0);
     expect(asked.tabChoiceNeeded?.fingerprint).toMatch(/^[0-9a-f]{8}$/);
+    // #1126 — the SAME trimmed document a finished run writes: v2, no files (none were written), and
+    // the plan is the allowlisted summary — the question rides it through `tabChoiceNeeded`, and no
+    // plan internals (setups' IR, sampled surfaces) are on disk.
+    const doc = run.generated as { resultVersion?: number; files?: unknown[]; plan?: { tabChoiceNeeded?: unknown; perSetup: Record<string, unknown>[] } };
+    expect(doc.resultVersion).toBe(2);
+    expect(doc.files).toEqual([]);
+    expect(doc.plan?.tabChoiceNeeded).toBeDefined();
+    for (const setup of doc.plan?.perSetup ?? []) expect(Object.keys(setup).sort()).toEqual(['notes', 'ops', 'setupIndex']);
   }, 300_000);
 
   for (const [flag, sentence] of [

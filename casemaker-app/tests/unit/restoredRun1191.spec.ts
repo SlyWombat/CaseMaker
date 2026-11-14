@@ -5,11 +5,7 @@
 // wrote is replaced by what THIS build reads from the same `.nc`; the programs themselves are
 // untouched. A program whose cutter this build cannot resolve keeps its stored report and is
 // reported as unresolved (the sweep refuses it by name).
-import { HOP_Z } from '@/engine/cnc/cam/ir';
-import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
-
-/** The context a standard-hop program with no allowances and no through kerf was verified with. */
-const STORED_CONTEXT: ProgramVerifyContext = { minRapidZ: HOP_Z, outsideAllowancesMm: [], throughKerf: [] };
+import { PROGRAM_CONTEXT } from './helpers/programContext';
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -53,7 +49,7 @@ function programFor(nc: string, verify: VerifyReport, toolKey: string): EngraveP
     frameNc: null,
     frameVerify: null,
     programHash: `h-${toolKey}`,
-    verifyContext: STORED_CONTEXT,
+    ...PROGRAM_CONTEXT,
     cam: null,
   } as EngraveProgram;
 }

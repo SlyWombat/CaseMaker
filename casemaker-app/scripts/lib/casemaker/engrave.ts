@@ -639,7 +639,12 @@ export type { ResultFileRef };
 // `src/engine/cnc/engrave/planSummary.ts`, with each field's reader.
 export { planSummary, type PlanSummary };
 
-export function resultDocument(jobName: string, generated: EngraveGeneratedFull): EngraveResultFiles {
+export function resultDocument(
+  jobName: string,
+  generated: EngraveGeneratedFull,
+  /** A failed run writes no program files: its document names none. */
+  options: { filesWritten: boolean } = { filesWritten: true },
+): EngraveResultFiles {
   const names = programFileNames(jobName, generated.programs);
   const files: ResultFileRef[] = [];
   const programs = generated.programs.map((program, index) => {
@@ -677,7 +682,7 @@ export function resultDocument(jobName: string, generated: EngraveGeneratedFull)
     frameProgram: frameNc === null ? null : match((p) => engraving(p) && p.frameNc === frameNc),
     facingProgram: facingNc === null ? null : match((p) => p.nc === facingNc),
     programs,
-    files,
+    files: options.filesWritten ? files : [],
   };
 }
 
@@ -2062,9 +2067,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     );
     if (!prepared.ok) {
       // #1258 — a run that STOPPED TO ASK still writes its generated document: a house-backed run
-      // draws the card from it. (Every other failure writes none, as before.)
+      // draws the card from it. It is the SAME trimmed document a finished run writes (plans reduced
+      // to their summary — `tabChoiceNeeded` is on the allowlist), naming no files because none were
+      // written. (Every other failure writes none, as before.)
       if (opts.generatedFile !== undefined && prepared.failure.generated !== undefined) {
-        writeFileSync(opts.generatedFile, JSON.stringify(prepared.failure.generated));
+        writeFileSync(opts.generatedFile, JSON.stringify(resultDocument(job.name, prepared.failure.generated, { filesWritten: false })));
       }
       return prepared;
     }

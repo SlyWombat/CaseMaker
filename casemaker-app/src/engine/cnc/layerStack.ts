@@ -93,6 +93,12 @@ export interface LayerStack {
   cuttableAt(depth: Mm): CrossSection;
   /** Max depth below the engraved face a cutter may reach at (x, y). 0 = no cutting allowed. */
   maxDepthAt(x: Mm, y: Mm): Mm;
+  /**
+   * The sliced solid as plain data (#1126): each layer's far edge and the polygons still solid down
+   * to it. `maxDepthAt` is a point-in-polygon walk over exactly this, so a limit rebuilt from it
+   * (`engrave/storedDepthLimit.ts`) answers the same. Read it before `dispose()`.
+   */
+  solid(): { z1: number[]; running: Vec2[][][] };
   /** Free every `CrossSection` the stack owns. Idempotent; the stack is unusable afterwards. */
   dispose(): void;
 }
@@ -359,6 +365,12 @@ export function buildLayerStack(
         }
       }
       return last.z1;
+    },
+    solid() {
+      return {
+        z1: layers.map((l) => l.z1),
+        running: running.map((r, i) => polys[i] ?? (polys[i] = r.toPolygons())),
+      };
     },
     dispose(): void {
       if (disposed) return;

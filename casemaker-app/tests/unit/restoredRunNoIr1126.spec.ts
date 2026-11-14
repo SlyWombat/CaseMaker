@@ -11,7 +11,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { planSummary, type ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
-import { recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
+import { carriesVerifyContexts, recheckStoredPrograms } from '@/engine/cnc/engrave/restoredRun';
 import type { ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
@@ -24,7 +24,7 @@ const CLEAN: VerifyReport = {
 /** Z is established at 5, then an XY rapid runs at 5: clean at a 1 mm hop, too low under a 6 mm one. */
 const NC = 'G90 G21\nG0 Z5\nG0 X0 Y0\nM5\nM02\n';
 
-function stored(context: ProgramVerifyContext | undefined): EngraveGenerated {
+function stored(context: ProgramVerifyContext): EngraveGenerated {
   const program = {
     setupIndex: 1,
     setupId: 'setup-1',
@@ -35,7 +35,8 @@ function stored(context: ProgramVerifyContext | undefined): EngraveGenerated {
     frameVerify: null,
     programHash: 'h',
     cam: null,
-    ...(context === undefined ? {} : { verifyContext: context }),
+    verifyContext: context,
+    frameVerifyContext: null,
   } as EngraveProgram;
   // The plan as the page holds it: the summary, built from a plan that DID carry an IR.
   const withIr = {
@@ -85,11 +86,14 @@ describe('#1126 — the re-check reads verifyContext, not the plan', () => {
     expect(out.generated).toBe(missingSetup);
   });
 
-  it('a result with no verifyContext is not re-checked: it asks to be planned again, unchanged', () => {
-    const generated = stored(undefined);
-    const out = recheck(generated);
-    expect(out.regenerate).toBe(true);
-    expect(out.errors).toEqual([]);
-    expect(out.generated).toBe(generated);
+  it('a stored run whose programs carry no verifyContext is refused where the JSON is read', () => {
+    const generated = stored({ minRapidZ: 1, outsideAllowancesMm: [], throughKerf: [] });
+    expect(carriesVerifyContexts(generated)).toBe(true);
+    const { verifyContext: _gone, ...bare } = generated.programs[0]!;
+    expect(carriesVerifyContexts({ ...generated, programs: [bare as EngraveProgram] })).toBe(false);
+    // A frame that was verified must carry its own context too.
+    expect(carriesVerifyContexts({ ...generated, programs: [{ ...generated.programs[0]!, frameVerify: CLEAN, frameVerifyContext: null }] })).toBe(true);
+    const { frameVerifyContext: _frame, ...noFrameKey } = generated.programs[0]!;
+    expect(carriesVerifyContexts({ ...generated, programs: [{ ...noFrameKey, frameVerify: CLEAN } as EngraveProgram] })).toBe(false);
   });
 });
