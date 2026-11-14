@@ -4,8 +4,9 @@
  *
  * The rank is exactly today's (there is no cut-into key). The picker then asks the injected
  * adjudicator about the first-ranked chain: clean (0 adjudicated cells) → chosen, one call; not →
- * set aside and the next is asked, until a clean one is found (the note "A faster set of cutters
- * was passed over because it cuts into the part."). If every chain is set aside, the fewest
+ * set aside and the next is asked, until a clean one is found (the note "A set of cutters that would
+ * otherwise have been chosen was passed over because it cuts into the part." — no "faster": the rank
+ * is leftover-first, so the set passed over may be the slower one). If every chain is set aside, the fewest
  * adjudicated cells wins (ties by today's rank) and the plan states it. `null` from the
  * adjudicator = not known: the chain is treated as clean and the plan says the check did not run;
  * no adjudicator at all = today's behaviour.
@@ -22,7 +23,7 @@ import {
   type SequenceDemand,
   type SequenceStep,
 } from '@/engine/cnc/cam/model/sequence';
-import { cutIntoAllSentence, goalCoverageCounts } from '@/engine/cnc/cam/model/plan';
+import { cutIntoAllSentence, goalCoverageCounts, adjudicationStatements } from '@/engine/cnc/cam/model/plan';
 import { readDefault } from '@/platform/defaultsClient';
 
 const RAPID: RapidEstimate = {
@@ -74,6 +75,7 @@ interface Case {
 
 const choose = (c: Case) => {
   const calls: string[] = [];
+  const ticks: Array<[number, number]> = [];
   const verdictFor = (steps: readonly SequenceStep[]): Verdict => {
     const chain = sig(steps);
     calls.push(chain);
@@ -93,8 +95,9 @@ const choose = (c: Case) => {
     ...(c.leftoverPct === undefined ? {} : { leftoverEquivalencePct: c.leftoverPct }),
     ...(c.allowPrimary === undefined ? {} : { allowPrimary: c.allowPrimary }),
     ...(c.withAdjudicate === false ? {} : { adjudicate: verdictFor }),
+    onAdjudicate: (done, total) => ticks.push([done, total]),
   });
-  return { choice, calls };
+  return { choice, calls, ticks };
 };
 
 describe('#1252 the rank is today’s: no cut-into key', () => {
@@ -156,6 +159,54 @@ describe('#1252 the adjudication search', () => {
     expect(choice.cutIntoNotRun).toBe(true);
     expect(choice.cutInto).toBeUndefined();
     expect(choice.passedOver).toBeUndefined();
+  });
+});
+
+describe('#1252 review 1-4: the statements, the non-finite answer, the progress tick', () => {
+  it('review 1 — the passed-over sentence says only what is known (no "faster"), a sheet line', () => {
+    const [passed] = adjudicationStatements({ passedOver: 1 });
+    expect(passed).toEqual({
+      severity: 'sheet',
+      code: 'plan-run',
+      text: 'A set of cutters that would otherwise have been chosen was passed over because it cuts into the part.',
+      count: 1,
+    });
+    expect(passed!.text).not.toMatch(/faster|slower/);
+  });
+
+  it('review 2 — every chain cutting in is a FINDING at the goal check\'s own severity: goal-overcut, an error, same sentence', () => {
+    const cutInto = { cells: 20, maxMm: 2.5, areaMm2: 0.2 };
+    const [statement] = adjudicationStatements({ cutInto });
+    expect(statement).toEqual({ severity: 'error', code: 'goal-overcut', text: cutIntoAllSentence(cutInto), count: 1 });
+    // the check not running stays a sheet line; nothing to say stays silent
+    expect(adjudicationStatements({ cutIntoNotRun: true }).map((x) => x.severity)).toEqual(['sheet']);
+    expect(adjudicationStatements({})).toEqual([]);
+  });
+
+  it('review 3 — a non-finite answer is the check not running: no chain is set aside, no NaN reaches the choice', () => {
+    for (const bad of [
+      { adjudicatedCells: Number.NaN, maxMm: 0, areaMm2: 0 },
+      { adjudicatedCells: 5, maxMm: Number.POSITIVE_INFINITY, areaMm2: 0 },
+      { adjudicatedCells: 5, maxMm: 1, areaMm2: Number.NaN },
+    ]) {
+      const { choice, calls } = choose({ verdicts: { 'pocket:t6+rest:t3': bad } });
+      expect(sig(choice.steps)).toBe('pocket:t6+rest:t3');
+      expect(calls).toEqual(['pocket:t6+rest:t3']);
+      expect(choice.cutIntoNotRun).toBe(true);
+      expect(choice.cutInto).toBeUndefined();
+      expect(choice.passedOver).toBeUndefined();
+    }
+  });
+
+  it('review 4 — one tick before each call: a clean pick ticks once, the all-dirty pick ticks for EVERY feasible chain, uncapped', () => {
+    expect(choose({}).ticks).toEqual([[1, 3]]);
+    const dirty = { adjudicatedCells: 10, maxMm: 1, areaMm2: 0.1 };
+    const all = choose({
+      verdicts: { 'pocket:t6+rest:t3': dirty, 'pocket:t6': { ...dirty, adjudicatedCells: 5 }, 'pocket:t3': dirty },
+    });
+    expect(all.ticks).toEqual([[1, 3], [2, 3], [3, 3]]);
+    expect(all.calls.length).toBe(3);
+    expect(sig(all.choice.steps)).toBe('pocket:t6');
   });
 });
 
