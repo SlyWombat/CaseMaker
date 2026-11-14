@@ -157,7 +157,10 @@ const FROZEN = {
   // v8 (#1092) — excuses are proofs bounded by the goal's own relief: B (the border cell, 0.6 mm)
   // is counted instead of excused, so the adjudicated maximum is 0.6 mm at the border, not 0.4 at
   // F. The over-relief counters pin the class that was counted instead.
-  version: 8,
+  // #1251 — v9: the stamp judges a cell at the cutter's edge by the goal and #1227's wall-pass
+  // offset is reversed. `checkGoalCutInto`'s own rule is unchanged; this fingerprint is re-stated
+  // at the new version deliberately (the freeze's own instruction).
+  version: 9,
   constants: {
     cutIntoFloorMm: 0.01,
     leftoverBandsMm: [0.1, 0.3, 1],
