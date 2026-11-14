@@ -35,7 +35,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { goalCheckForProgram, type SimGoalCheck } from '@/engine/cnc/engrave/goalCheckInput';
 import { pureGoalObject } from '@/engine/cnc/engrave/jobKind';
 import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
-import { goalPassCoverage, liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { goalCheckShopOptions, liveShopDefaults } from '@/platform/defaultsClient';
 import type { ProgramOracle } from './engraveRunGate';
 import type { SimDiagnostic } from '@/workers/sim/session';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -1459,13 +1459,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
             job,
             pureGoalObject(job) !== null,
             {
-              passCoverage: goalPassCoverage(shopDefaults),
-              // #1207 — the shop's own three goal bands ride the check with the pass line.
-              leftoverBandsMm: [
-                readDefault(shopDefaults ?? null, 'acceptance.leftoverBand1Mm').value,
-                readDefault(shopDefaults ?? null, 'acceptance.leftoverBand2Mm').value,
-                readDefault(shopDefaults ?? null, 'acceptance.leftoverBand3Mm').value,
-              ],
+              // #1207 — the pass line and the shop's own three goal bands, from the one place every
+              // caller of the check reads them (`goalCheckShopOptions`).
+              ...goalCheckShopOptions(shopDefaults ?? null),
               // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
               ...(generated.plan?.outcome?.predictedCutIntoMm == null
                 ? {}
