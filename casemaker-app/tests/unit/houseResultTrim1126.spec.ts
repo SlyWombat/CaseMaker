@@ -28,6 +28,21 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * #1126 slice 2 — THE PLAN'S TOOLPATH IR IS NOT A BROWSER INPUT EITHER (the 223 MB field).
+ *
+ * `resultDocument` strips `plan.perSetup[].programs` from both plans. The consumers the Manager
+ * named, and why none of them reads it:
+ *   - #1132 re-freeze: `freezePackage` takes `PackageProgramInput[]` built from the FROZEN
+ *     PACKAGE's own programs (`engravePackageStore.frozenProgramInputs`), never from a plan.
+ *   - #1123-11 stored-run restore: IndexedDB stores the settled `generated` opaquely and hands it
+ *     back; the sim walk reads its nc/oracle fields, not a plan.
+ *   - #1136 partial regen (F's branch): it carries frozen programs from the PACKAGE as well, so a
+ *     plan without IR does not reach it — stated as the expected shape; that branch is not in this
+ *     tree to scan.
+ *   - #1134 reuse: house-side (the CLI's own pick cache), where the full plan still exists in
+ *     memory; the result's plan is the browser's copy only.
+ */
 describe('#1126 — camIr is not a browser input', () => {
   it('every camIr reference under src/ is inside engraveGenerate.ts', () => {
     const offenders: string[] = [];
@@ -41,6 +56,27 @@ describe('#1126 — camIr is not a browser input', () => {
       if (code.includes('camIr')) offenders.push(`src/${name}`);
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('nothing in the browser reads a plan’s toolpath IR (perSetup[].programs)', () => {
+    // Allowed to name `perSetup` in code: the engine that produces the plan, and the QA window,
+    // which reads NOTES from it (`windowApi` below — pinned so a change to `.programs` fails here).
+    const allowed = (path: string): boolean =>
+      path.startsWith('src/workers/sim/') ||
+      path.startsWith('src/engine/cnc/cam/model/') ||
+      path === 'src/testing/windowApi.ts';
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC)) {
+      const name = relative(SRC, file).split('\\').join('/');
+      if (allowed(`src/${name}`)) continue;
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+      if (/\bperSetup\b/.test(code)) offenders.push(`src/${name}`);
+    }
+    expect(offenders).toEqual([]);
+    const windowApi = readFileSync(join(SRC, 'testing', 'windowApi.ts'), 'utf8');
+    expect(windowApi).toContain('perSetup.flatMap((setup) => setup.notes)');
   });
 
   it('a result without camIr still freezes (#1132): the package takes nc, frames and hashes', () => {
