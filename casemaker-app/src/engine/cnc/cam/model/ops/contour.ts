@@ -20,7 +20,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
-import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabPlacement } from '@/engine/cnc/cam/profile';
+import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabChoiceMode, type TabPlacement, type TabStretch } from '@/engine/cnc/cam/profile';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import { cutterKeyOf } from '../sequence';
 import type { FeatureTree } from '../features';
@@ -35,7 +35,7 @@ export interface ContourOpOptions {
   /** The blank's own thickness, mm (for the tab top: `-(thickness - tabs.height)`); absent → `depthMm` (no separate skin). */
   thicknessMm?: number;
   /** `{count: 0}` cuts the part free with no tabs. `maxSpanMm` is the shop's `tabs.maxSpanMm` (#1206). */
-  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; /** #1258 — the operator's answer for a stretch the corner margin leaves too long (`ask` when none). Absent: the pre-#1258 step-2 tab. */ tabChoice?: TabChoiceMode };
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
@@ -148,6 +148,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
             ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
             ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
+            ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
           }),
         )
       : [];
@@ -156,7 +157,10 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   // that leaves a stretch of outline longer than the shop's limit is a REFUSAL with its reason,
   // never a quieter program. (The limit is what `placeTabs` tried to meet; it can fail when the
   // edges' corner margins leave no room for the tabs the gaps ask for.)
-  if (cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
+  // #1258 — with a choice mode stated the stretches the margin leaves are REPORTED (and, per the
+  // answer, tabbed or left long and stated), never a refusal: a stretch with no place for a tab is
+  // the operator's question, not an error.
+  if (cut.tabs.tabChoice === undefined && cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
     path.forEach((ring, i) => {
       const spans = placements[i]!.spans;
       if (spans.length === 0) return;
@@ -213,6 +217,28 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     );
   }
 
+  // #1258 — THE STRETCHES THE MARGIN LEFT, across every ring (re-indexed in ring order), and what
+  // the answer did with them. `ask` states nothing here: the plan stops and asks. `insideMargin`'s
+  // placed tabs are named above; a stretch no tab fits in, and every stretch the operator chose to
+  // leave long, is stated with its length against the limit.
+  const stretches: TabStretch[] = placements
+    .flatMap((placement) => placement.stretches ?? [])
+    .map((stretch, index) => ({ ...stretch, index }));
+  if (cut.tabs.tabChoice === 'insideMargin' || cut.tabs.tabChoice === 'longerStretch') {
+    const mm = (v: number): string => String(Number(v.toFixed(1)));
+    for (const stretch of stretches) {
+      if (cut.tabs.tabChoice === 'longerStretch') {
+        tabNotes.push(
+          `a ${mm(stretch.spanMm)} mm stretch of the outline stays without a tab, past the shop's ${mm(cut.tabs.maxSpanMm ?? 0)} mm span limit — the operator chose a longer stretch`,
+        );
+      } else if (stretch.candidate === null) {
+        tabNotes.push(
+          `a ${mm(stretch.spanMm)} mm stretch of the outline stays without a tab, past the shop's ${mm(cut.tabs.maxSpanMm ?? 0)} mm span limit — no tab fits in it`,
+        );
+      }
+    }
+  }
+
   const clampedTabHeightMm =
     tabHeightMm < opts.tabs.height ? { wanted: opts.tabs.height, cut: tabHeightMm } : undefined;
 
@@ -223,6 +249,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0 } }),
     ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
 }

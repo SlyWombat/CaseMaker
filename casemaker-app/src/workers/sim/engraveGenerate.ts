@@ -251,6 +251,7 @@ import {
   type RankMeasureRequest,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type TabChoiceNeeded,
   type PlanTiming,
   type PlannedOp,
   type SetupSpec,
@@ -260,6 +261,7 @@ import { bandHalfThicknessMm, planTabRelease, tabReleaseIr, type TabReleaseProgr
 import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
 import { planOwnedOnly, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { tabChoiceSentence } from '@/engine/cnc/cam/model/tabChoice';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
@@ -837,6 +839,14 @@ export interface EngraveGenerated {
    * Never part of the job fingerprint or a re-freeze: it is a fact about this result, not the job.
    */
   idealDeferred?: boolean;
+  /**
+   * #1258 — THE RUN STOPPED AND ASKS: tabs at full corner margins cannot bring every stretch under
+   * the shop's span limit, and the job carries no (current) answer. Its own outcome — `ok` is false
+   * and no program posted, but this is not a refusal: the operator answers and generates again.
+   * `tabChoiceStale` — an answer was given for an outline or tab settings that have since changed.
+   */
+  tabChoiceNeeded?: TabChoiceNeeded;
+  tabChoiceStale?: true;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -6246,9 +6256,15 @@ export async function generateGoalProgram(
      * reference run). Absent/false: the pre-#1046 plan, byte-identical.
      */
     restLadder?: boolean;
+    /**
+     * #1258 — the operator's answer to the tab question, as plain data on the plan's input (see
+     * `ModelPlanInput.tabChoice`). Absent: a job whose corner margin leaves a stretch too long stops
+     * and asks (`EngraveGenerated.tabChoiceNeeded`).
+     */
+    tabChoice?: ModelPlanInput['tabChoice'];
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder, tabChoice } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6417,6 +6433,7 @@ export async function generateGoalProgram(
   let input: ModelPlanInput;
   try {
     input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools, feedCatalogue);
+    if (tabChoice !== undefined) input = { ...input, tabChoice };
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -6487,6 +6504,15 @@ export async function generateGoalProgram(
     }
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // #1258 — THE PLAN ASKED. No program posted; the run's status is its own outcome, with the
+  // question's sentence and the numbers. It is not a refusal: the answer is a flag away.
+  if (output.tabChoiceNeeded !== undefined) {
+    return {
+      ...fail('cam', tabChoiceSentence(output.tabChoiceNeeded, output.tabChoiceStale === true), null, output, []),
+      tabChoiceNeeded: output.tabChoiceNeeded,
+      ...(output.tabChoiceStale === true ? { tabChoiceStale: true as const } : {}),
+    };
   }
   // #1117 — THE FREEING CONTOUR AGAINST THE VISE'S JAWS, BEFORE ANYTHING POSTS. A vise job whose
   // contour follows a silhouette closer to the stock's edge than the cutter's SHANK radius drives

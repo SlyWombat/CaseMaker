@@ -103,6 +103,8 @@ export async function planTwoOutcomes(
     ? null
     : rebindToolsToHouse(two.reusedOwned, input.cutters.house);
   const owned = reused ?? await planOwnedOnly(input, opts);
+  // #1258 — a plan that asked has no programs; the ideal would ask the same question.
+  if (owned.tabChoiceNeeded !== undefined) return { owned, ideal: null, defaultPlan: 'owned' };
   if (two.ownedOnly === true) return { owned, ideal: null, defaultPlan: 'owned' };
   const ideal = await planIdealOnly(input, opts);
   if (ideal === null) return { owned, ideal: null, defaultPlan: 'owned' };
