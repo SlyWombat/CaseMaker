@@ -2353,7 +2353,9 @@ export function EngravePanel(): JSX.Element {
           flipSetup.flip.method === 'free-then-flip' ? 'free then flip' : 'tabs in blank'
         }`);
   const blockingFindings = jobFindings.filter((f) => f.severity === 'error').length;
-  const checksGroupSummary = `${jobFindings.length - blockingFindings} to confirm · ${blockingFindings} blocking`;
+  // #1276 — Generate refused for unread settings is a blocker too: the tally must not read "0 blocking" beside it.
+  const blockingCount = blockingFindings + (settingsStatus === 'error' ? 1 : 0);
+  const checksGroupSummary = `${jobFindings.length - blockingFindings} to confirm · ${blockingCount} blocking`;
   // #807 — "no cutter chosen" only when nothing can choose: while the measured search runs (or
   // its answer is waiting to be applied), the line says the app is choosing.
   // #1123 item 8 — A CUT ON BORROWED FEEDS SAYS SO ON THE CUTTER LINE, not only in the fold: the
