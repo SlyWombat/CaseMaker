@@ -167,7 +167,7 @@ const ALLOWED: Readonly<Record<string, AllowEntry>> = {
   'src/engine/cnc/toolCondition.ts:MAX_COPIES': { reason: "a UI field/display bound, not a cut decision" },
   'src/engine/cnc/toolCondition.ts:MAX_RUNTIME_MINUTES': { reason: "a UI field/display bound, not a cut decision" },
   'src/engine/cnc/toolCondition.ts:MAX_WARN_MINUTES': { reason: "a UI field/display bound, not a cut decision" },
-  'src/engine/cnc/vCarveGeometry.ts:V_CARVE_STEPOVER_FALLBACK': { reason: "labelled fallback for `vcarve.stepoverRatio`; the gate asserts it equals that key’s recommendation", fallbackOf: 'vcarve.stepoverRatio' },
+  'src/engine/cnc/vCarveFallback.ts:V_CARVE_STEPOVER_FALLBACK': { reason: "labelled fallback for `vcarve.stepoverRatio`; the gate asserts it equals that key’s recommendation", fallbackOf: 'vcarve.stepoverRatio' },
   'src/engine/cnc/engrave/designCheck.ts:LEFTOVER_BAND_1_FALLBACK_MM': { reason: "labelled fallback for `acceptance.leftoverBand1Mm`; the gate asserts it equals that key’s recommendation", fallbackOf: 'acceptance.leftoverBand1Mm' },
   'src/engine/cnc/engrave/designCheck.ts:LEFTOVER_BAND_2_FALLBACK_MM': { reason: "labelled fallback for `acceptance.leftoverBand2Mm`; the gate asserts it equals that key’s recommendation", fallbackOf: 'acceptance.leftoverBand2Mm' },
   'src/engine/cnc/goalLimits.ts:GOAL_MAX_CELLS': { reason: "labelled fallback for `goal.maxCells`; the gate asserts it equals that key’s recommendation", fallbackOf: 'goal.maxCells' },

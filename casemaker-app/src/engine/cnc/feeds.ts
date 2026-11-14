@@ -98,7 +98,7 @@ import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 import type { ClampDiagnostic, Mill } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
-import { V_CARVE_STEPOVER_FALLBACK } from './vCarveGeometry';
+import { V_CARVE_STEPOVER_FALLBACK } from './vCarveFallback';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
 
 /**
