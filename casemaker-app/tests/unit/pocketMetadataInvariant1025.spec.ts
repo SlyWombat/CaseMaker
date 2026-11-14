@@ -20,6 +20,7 @@ import type { FeatureTree, PocketNode } from '@/engine/cnc/cam/model/features';
 import { makeClipperOffset } from '@/engine/cnc/cam/engraveJob';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const RAPID = Z1.rapidEstimate;
 
@@ -117,7 +118,7 @@ describe('#1025 — a corrupt record refuses the whole plan, never a dropped reg
     let thrown: unknown = null;
     try {
       planPocketsForTree(twoPocketTree(), {
-        offset: makeClipperOffset(tl),
+        tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
         houseFlats: [FLAT],
         stepDownMm: 1,
         feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

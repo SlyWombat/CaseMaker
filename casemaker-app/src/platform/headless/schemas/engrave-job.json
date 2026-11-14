@@ -7397,6 +7397,31 @@
           },
           "type": "object"
         },
+        "tabs": {
+          "additionalProperties": false,
+          "description": "The operator’s own freeing tabs (only the fields they typed); omit to follow the shop.",
+          "properties": {
+            "count": {
+              "description": "Tabs holding the part while its outline is cut free; omit to follow the shop’s `tabs.count`.",
+              "maximum": 64,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "heightMm": {
+              "description": "Material those tabs leave under their top, mm; omit to follow the shop’s `tabs.heightMm`.",
+              "maximum": 20,
+              "minimum": 0.1,
+              "type": "number"
+            },
+            "widthMm": {
+              "description": "Width of those tabs in material, mm; omit to follow the shop’s `tabs.freeingWidthMm`.",
+              "maximum": 50,
+              "minimum": 0.1,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
         "underside": {
           "additionalProperties": false,
           "description": "Where the part's underside comes from (flat on the stock bottom, flipped with tabs, or a plinth); omit for today's cut (#898).",
@@ -7754,6 +7779,31 @@
                 "description": "Roughing allowance left on the goal surface, in millimetres; omit for the shop’s finish stock-to-leave.",
                 "maximum": 2,
                 "minimum": 0,
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "tabs": {
+            "additionalProperties": false,
+            "description": "The operator’s own freeing tabs (only the fields they typed); omit to follow the shop.",
+            "properties": {
+              "count": {
+                "description": "Tabs holding the part while its outline is cut free; omit to follow the shop’s `tabs.count`.",
+                "maximum": 64,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "heightMm": {
+                "description": "Material those tabs leave under their top, mm; omit to follow the shop’s `tabs.heightMm`.",
+                "maximum": 20,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              "widthMm": {
+                "description": "Width of those tabs in material, mm; omit to follow the shop’s `tabs.freeingWidthMm`.",
+                "maximum": 50,
+                "minimum": 0.1,
                 "type": "number"
               }
             },

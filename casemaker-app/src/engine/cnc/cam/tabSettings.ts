@@ -50,6 +50,31 @@ export const TAB_SETTINGS_FALLBACK: TabSettings = {
 };
 
 /**
+ * #1271 — THE WIDTH OF THE TABS THAT HOLD A 3D PART WHILE ITS OUTLINE IS CUT FREE, mm, when there is
+ * NO LOCATION TO READ. It is NOT a cut-out's tab width (`TAB_SETTINGS_FALLBACK.widthMm`, 4): the
+ * freeing contour of a goal has always held its part with 6 mm tabs, and the key
+ * `tabs.freeingWidthMm` keeps that number (the recommendation equals this fallback, so nothing
+ * moves). Count and height are the shared `tabs.count` / `tabs.heightMm`.
+ */
+export const TAB_FREEING_WIDTH_FALLBACK_MM = 6;
+
+/** The tabs a goal's freeing contour holds its part with, from the shop's three keys. */
+export interface FreeingTabs {
+  count: number;
+  widthMm: number;
+  heightMm: number;
+}
+
+/** #1271 — the freeing tabs from a settings map the caller holds (`null` = the recommendations). */
+export function freeingTabsFrom(defaults: ShopDefaults | null): FreeingTabs {
+  return {
+    count: readDefault(defaults, 'tabs.count').value,
+    widthMm: readDefault(defaults, 'tabs.freeingWidthMm').value,
+    heightMm: readDefault(defaults, 'tabs.heightMm').value,
+  };
+}
+
+/**
  * #1206 — the longest stretch of outline allowed between two holding tabs, mm, when there is NO
  * LOCATION TO READ. Chosen, not measured: 80 mm on stock 6 mm or thicker, 40 mm under 3 mm, linear
  * between. `defaults.rs` seeds the same number; the location's own value wins, and the planner

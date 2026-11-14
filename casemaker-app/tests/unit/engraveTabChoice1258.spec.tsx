@@ -75,13 +75,29 @@ describe('#1258 — the question where Generate stopped', () => {
     expect(useEngraveJobStore.getState().job.tabChoice?.choice).toBe('longerStretch');
   });
 
-  it('a goal job has no tab count to go to, so "Change the tabs myself" is not offered on it', () => {
+  it('a job with no cut-out row and no goal has no tab count to go to, so "Change the tabs myself" is not offered', () => {
     useEngraveRunStore.setState({ generated: asking() });
     render(<EngraveTabChoice onGenerate={vi.fn()} />);
     expect(screen.queryByTestId('tab-choice-change-tabs')).toBeNull();
     expect(screen.getByTestId('tab-choice-option-insideMargin')).toBeTruthy();
     expect(screen.getByTestId('tab-choice-option-longerStretch')).toBeTruthy();
     expect(screen.queryByTestId('tab-choice-or')).toBeNull();
+  });
+
+  it('#1271 — on a GOAL job "Change the tabs myself" is offered again and goes to the goal row’s own tab count; it answers nothing', () => {
+    useEngraveJobStore.setState((st) => ({ job: { ...st.job, targetObject: { id: 'goal-1', role: 'goal' } as unknown as EngraveJob['targetObject'] } }));
+    const count = document.createElement('input');
+    count.setAttribute('data-testid', 'engrave-goal-tabs-count');
+    count.scrollIntoView = vi.fn();
+    document.body.appendChild(count);
+    useEngraveRunStore.setState({ generated: asking() });
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    expect(screen.getByTestId('tab-choice-change-tabs').textContent).toContain('tab count and width below');
+    fireEvent.click(screen.getByTestId('tab-choice-change-tabs'));
+    expect(screen.getByTestId('tab-choice-bar')).toBeTruthy();
+    expect(document.activeElement).toBe(count);
+    expect(useEngraveJobStore.getState().job.tabChoice).toBeUndefined();
+    count.remove();
   });
 
   it('"Change the tabs myself" collapses the card to the bar and goes to the cut-out’s tab count; it answers nothing', () => {

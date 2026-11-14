@@ -194,9 +194,9 @@ nothing this tool can see is running. One line is printed per poll (to stderr; s
 bench on 2026-10-12 (#303) — so the machine is not left cutting unwatched, and exits 130; a second
 Ctrl-C leaves at once. \`abort\` stops the SPINDLE at once, but the controller finishes the moves it had
 already queued before it answers (~18 s in that observation), and that reply is what \`run\` waits for
-before it sends \`M332\` — the one line it sends that the program did not ask for — because an aborted
-program never ran its own vacuum-off; if the abort goes unanswered, \`M332\` waits for a status poll to
-read \`Idle\` instead, and is NOT sent if none does. Three polls (\`run.missLimit\`) in a row with no reply at all end it
+before it sends \`M852\` and \`M812\` (vacuum off, air off) — the only lines it sends that the program did not ask for — because an aborted
+program never ran its own vacuum-off; if the abort goes unanswered, they wait for a status poll to
+read \`Idle\` instead, and are NOT sent if none does. Three polls (\`run.missLimit\`) in a row with no reply at all end it
 too, non-zero: the socket is gone, and this tool cannot claim it stopped anything. The physical stop
 is still the stop.
 
@@ -455,7 +455,7 @@ async function main() {
   // cannot tell this tool that a `play` did nothing, so `run` stops asking. It is a flag so the bound
   // itself is testable without a 30-second wait.
   const noProgressMs = num(flags['no-progress'], shopValue('run.noProgressMs'));
-  // After an abort: its reply window, then the Idle polls before `M332` — never under the 2 s floor.
+  // After an abort: its reply window, then the Idle polls before `M852` — never under the 2 s floor.
   const abortReplyMs = shopValue('stop.abortReplyMs');
   const abortIdlePolls = shopValue('stop.idlePolls');
   const missLimit = shopValue('run.missLimit');
@@ -589,7 +589,7 @@ async function main() {
       const session = P.openConsole(transport, conn);
       let stopAsked = 0;
       // Set the moment `abort` has gone out, so a SECOND Ctrl-C can say what is true at that moment
-      // rather than the reassuring thing: the spindle is stopping, and `M332` — the vacuum-off the
+      // rather than the reassuring thing: the spindle is stopping, and `M852` — the vacuum-off the
       // aborted program never ran — has NOT been sent yet, so the vacuum is still on (#386 review).
       let abortSent = false;
       // Ctrl-C does not kill the process: it asks for the play to be aborted, which is a single line
@@ -600,7 +600,7 @@ async function main() {
         if (stopAsked === 1) {
           console.error(
             abortSent
-              ? '\nleaving now. `abort` was already sent and the controller is draining its queue, but `M332` has NOT been sent — the vacuum is still on. Turn it off at the machine.'
+              ? '\nleaving now. `abort` was already sent and the controller is draining its queue, but `M852` has NOT been sent — the vacuum is still on. Turn it off at the machine.'
               : '\nleaving now. The machine was NOT stopped — the physical stop is the stop.',
           );
           process.exit(130);
@@ -775,7 +775,7 @@ async function main() {
                 } else {
                   process.stderr.write(`  \`abort\` was not answered (${aborted.detail}).\n`);
                 }
-                // Then the vacuum, because the program's own tail — its `M332` (§11.10) — never ran. This
+                // Then the vacuum, because the program's own tail — its `M852` (§11.10) — never ran. This
                 // is the one line `run` sends that the program did not ask for, and it goes out only once
                 // something says the controller has finished draining: the abort's own reply, or a status
                 // poll that reads `Idle`. A vacuum line into a controller that is still moving is one more
@@ -791,11 +791,14 @@ async function main() {
                   if (q.ok && P.readJobProgress(q.text).state === 'Idle') drained = true;
                 }
                 if (drained) {
-                  const vacuumOff = await sendTraced(session, file, 'M332', flags, { echo: false });
-                  if (!vacuumOff.ok) console.error(`the vacuum: \`M332\` went unanswered (${vacuumOff.detail}) — check the machine.`);
+                  const vacuumOff = await sendTraced(session, file, 'M852', flags, { echo: false });
+                  if (!vacuumOff.ok) console.error(`the vacuum: \`M852\` went unanswered (${vacuumOff.detail}) — check the machine.`);
+                  // The air too (9b, 2026-11-14): `M812` is the spindle air's direct off, harmless when it is already off.
+                  const airOff = await sendTraced(session, file, 'M812', flags, { echo: false });
+                  if (!airOff.ok) console.error(`the air: \`M812\` went unanswered (${airOff.detail}) — check the machine.`);
                 } else {
                   console.error(
-                    `the vacuum: \`M332\` was NOT sent — nothing confirmed the controller had finished draining (${abortIdlePolls} polls ` +
+                    `the vacuum: \`M852\` (and the air-off \`M812\`) was NOT sent — nothing confirmed the controller had finished draining (${abortIdlePolls} polls ` +
                       'after the abort did not read `Idle`). Check the machine and the vacuum.',
                   );
                 }
@@ -855,7 +858,7 @@ async function main() {
             if (outcome === 'aborted') {
               console.error(
                 '`abort` was sent: the spindle stops at once, but the controller finishes the moves it had already queued ' +
-                  '(~18 s on 2026-10-12) before it answers. `M332` follows once that answer — or a status poll — says it has ' +
+                  '(~18 s on 2026-10-12) before it answers. `M852` follows once that answer — or a status poll — says it has ' +
                   'drained, because an aborted program never ran its own vacuum-off.',
               );
             }

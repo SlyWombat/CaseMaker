@@ -316,6 +316,8 @@ probing here is **`G38.2`**. Two different probes, two different codes.
 
 ### 11.3 A mode family: `M331`, and one silent code
 
+> **Note, 2026-11-09 — at the nozzle:** bare `M331` / `M331.1` follow the spindle and switched nothing with it off; the direct outputs are `M851`/`M852` (vacuum) and `M811`/`M812` (air).
+
 Toggling the wizard's five "assist" switches sent these, each with Studio's own description:
 
 | Studio's description | Code |

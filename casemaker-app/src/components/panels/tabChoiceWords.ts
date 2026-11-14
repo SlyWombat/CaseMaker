@@ -141,4 +141,7 @@ export const TAB_BAR_SUB = 'Generate has no programs until you choose.';
 /** Option 3: it is not an answer, and it goes to the cut-out's own tab settings. */
 export const CHANGE_TABS_LINE =
   "Takes you to this cut-out's tab count and width. Generate asks again if the new tabs still leave a stretch too long.";
+/** #1271 — the same option on a goal job, which states its tabs in its own row (below the card). */
+export const CHANGE_TABS_GOAL_LINE =
+  'Takes you to the tab count and width below. Generate asks again if the new tabs still leave a stretch too long.';
 export const TAB_PAUSED_LINE = 'Generate is paused until you choose.';

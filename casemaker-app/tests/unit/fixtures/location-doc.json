@@ -618,6 +618,13 @@
       "unit": "mm",
       "note": "chosen, not measured: holding-tab width in material. The cutter's centre path stops two tool radii further apart. Provisional until the first tabbed cut"
     },
+    "tabs.freeingWidthMm": {
+      "value": 6.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the width of the tabs that hold a 3D part while its outline is cut free. It is the 6 mm the freeing contour has always used, apart from a cut-out's tab width"
+    },
     "tabs.heightMm": {
       "value": 1.0,
       "source": "seeded",

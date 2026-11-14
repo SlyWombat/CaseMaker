@@ -21,9 +21,14 @@ import { TabChoiceCard } from './TabChoiceCard';
 import { cutPosition, withCutNames } from './tabChoiceWords';
 
 /** The tab settings are the cut-out row's count and width; bring the first such row's into view and focus it. */
-function showTabSettings(row: number | null): void {
+function showTabSettings(row: number | null, goalJob = false): void {
+  // #1271 — a goal job states its tabs in the goal row's own group, not in a cut-out row.
   const el = document.querySelector<HTMLElement>(
-    row === null ? '[data-testid^="engrave-cutout-tabs-count-"]' : `[data-testid="engrave-cutout-tabs-count-${row}"]`,
+    goalJob
+      ? '[data-testid="engrave-goal-tabs-count"]'
+      : row === null
+        ? '[data-testid^="engrave-cutout-tabs-count-"]'
+        : `[data-testid="engrave-cutout-tabs-count-${row}"]`,
   );
   if (el === null) return;
   el.scrollIntoView({ block: 'center' });
@@ -55,11 +60,13 @@ export function EngraveTabChoice({
     ui.settle();
     onGenerate();
   };
-  // Option 3 goes to a cut-out's tab count; a goal job has no such row, so it is not offered there.
-  const canChangeTabs = useEngraveJobStore((s) => (s.job.cutouts?.length ?? 0) > 0);
+  // Option 3 goes to a cut-out's tab count, or (#1271) to the goal row's own "Tabs holding the part".
+  const goalJob = useEngraveJobStore((s) => (s.job.cutouts?.length ?? 0) === 0 && s.job.targetObject?.role === 'goal');
+  const canChangeTabs = useEngraveJobStore((s) => (s.job.cutouts?.length ?? 0) > 0 || s.job.targetObject?.role === 'goal');
   const common = {
     phone,
     canChangeTabs,
+    goalJob,
     ...(tabWidthMm === undefined ? {} : { tabWidthMm }),
     onUse: use,
     onCancel: () => ui.collapse(),
@@ -70,7 +77,7 @@ export function EngraveTabChoice({
     onChangeTabs: () => {
       ui.collapse();
       const first = (needed ?? applied)?.stretches[0];
-      showTabSettings(first === undefined ? null : cutPosition(first));
+      showTabSettings(first === undefined ? null : cutPosition(first), goalJob);
     },
   };
   if (needed !== undefined) {
