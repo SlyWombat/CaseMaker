@@ -115,12 +115,16 @@ async function main() {
       }],
       ['wizard-stock', async () => {
         await page.getByTestId('start-wizard-progress').filter({ hasText: 'Step 3 of 4' }).waitFor({ timeout: opts.timeout });
+        // #1263 — a job that states no material is ASKED for one; the walk answers with hardwood.
+        if ((await page.getByTestId('start-wizard-stock-ask').count()) > 0) {
+          await page.getByTestId('start-wizard-stock-material').selectOption('hardwood');
+        }
         const material = await page.getByTestId('start-wizard-stock-material').inputValue();
         const length = await page.getByTestId('start-wizard-make-length').inputValue();
         const width = await page.getByTestId('start-wizard-make-width').inputValue();
         const thickness = await page.getByTestId('start-wizard-make-thickness').inputValue();
         await tap('start-wizard-stock-next');
-        return `defaults kept · ${material} ${length} × ${width} × ${thickness} mm`;
+        return `defaults kept (material asked, hardwood chosen) · ${material} ${length} × ${width} × ${thickness} mm`;
       }],
       ['wizard-holding', async () => {
         await page.getByTestId('start-wizard-progress').filter({ hasText: 'Step 4 of 4' }).waitFor({ timeout: opts.timeout });
