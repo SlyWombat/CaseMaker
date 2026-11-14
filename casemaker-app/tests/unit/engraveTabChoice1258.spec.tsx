@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
+import type { EngraveJob } from '@/types/engraveJob';
 import { EngraveTabChoice } from '@/components/panels/EngraveTabChoice';
 import { useTabChoiceSuffix } from '@/components/panels/useTabChoiceSuffix';
 import type { JSX } from 'react';
@@ -24,6 +25,11 @@ beforeEach(() => {
   useTabChoiceStore.getState().reset();
 });
 afterEach(cleanup);
+
+/** A job with one cut-out row — the only kind of job that has a tab count to go to. */
+function withCutout(): void {
+  useEngraveJobStore.setState((st) => ({ job: { ...st.job, cutouts: [{ id: 'cut-1' }] as unknown as EngraveJob['cutouts'] } }));
+}
 
 describe('#1258 — the question where Generate stopped', () => {
   it('nothing is drawn while nothing is asked', () => {
@@ -67,7 +73,17 @@ describe('#1258 — the question where Generate stopped', () => {
     expect(useEngraveJobStore.getState().job.tabChoice?.choice).toBe('longerStretch');
   });
 
+  it('a goal job has no tab count to go to, so "Change the tabs myself" is not offered on it', () => {
+    useEngraveRunStore.setState({ generated: asking() });
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    expect(screen.queryByTestId('tab-choice-change-tabs')).toBeNull();
+    expect(screen.getByTestId('tab-choice-option-insideMargin')).toBeTruthy();
+    expect(screen.getByTestId('tab-choice-option-longerStretch')).toBeTruthy();
+    expect(screen.queryByTestId('tab-choice-or')).toBeNull();
+  });
+
   it('"Change the tabs myself" collapses the card to the bar and goes to the cut-out’s tab count; it answers nothing', () => {
+    withCutout();
     const count = document.createElement('input');
     count.setAttribute('data-testid', 'engrave-cutout-tabs-count-0');
     count.scrollIntoView = vi.fn();
@@ -94,6 +110,7 @@ describe('#1258 — the question where Generate stopped', () => {
   });
 
   it('several cut-outs: each row names its cut-out as the operation list does, and option 3 goes to the first such row', () => {
+    withCutout();
     const second = FIXTURE_NEEDED.stretches.map((s, i) => ({ ...s, cut: { id: `setup-1-cut-${i === 0 ? 1 : 2}`, name: `Cut-out ${i === 0 ? 1 : 2}` } }));
     useEngraveRunStore.setState({ generated: { ok: false, stage: 'cam', tabChoiceNeeded: { ...FIXTURE_NEEDED, stretches: second } } as unknown as EngraveGenerated });
     const mk = (n: number): HTMLInputElement => {

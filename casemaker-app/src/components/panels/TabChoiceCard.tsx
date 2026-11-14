@@ -72,6 +72,11 @@ export interface TabChoiceCardProps {
   onChange(): void;
   /** "Change the tabs myself": the tab settings open beneath the question, the stretches still marked. */
   onChangeTabs(): void;
+  /**
+   * Whether the job has a control for the tab count and width to go to. A goal job (a mesh to make)
+   * has none — its tabs are the planner's own — so option 3 is not offered there.
+   */
+  canChangeTabs?: boolean;
 }
 
 type Focus = TabChoiceAnswer | null;
@@ -445,7 +450,9 @@ function TabChoiceCardBody(props: TabChoiceCardProps): JSX.Element {
             needed.stretches.map((s) => longerStretchRow(s, needed.limitMm, severalCuts(needed.stretches))),
             COST_LONGER_STRETCH,
           )}
-          <div aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#7f8aa8', fontSize: 10, fontWeight: 600, letterSpacing: '.16em', textTransform: 'uppercase' }}>
+          {props.canChangeTabs === false ? null : (
+            <>
+          <div aria-hidden data-testid="tab-choice-or" style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#7f8aa8', fontSize: 10, fontWeight: 600, letterSpacing: '.16em', textTransform: 'uppercase' }}>
             <span style={{ flex: 1, height: 1, background: LINE }} />
             or
             <span style={{ flex: 1, height: 1, background: LINE }} />
@@ -461,6 +468,8 @@ function TabChoiceCardBody(props: TabChoiceCardProps): JSX.Element {
               {CHANGE_TABS_LINE}
             </span>
           </button>
+            </>
+          )}
         </div>
       </div>
       <footer style={{ display: 'flex', flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: phone ? 9 : 12, padding: phone ? '10px 12px 14px' : '10px 18px 14px' }}>

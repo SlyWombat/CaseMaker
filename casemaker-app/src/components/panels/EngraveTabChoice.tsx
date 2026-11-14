@@ -58,8 +58,11 @@ export function EngraveTabChoice({
     ui.settle();
     onGenerate();
   };
+  // Option 3 goes to a cut-out's tab count; a goal job has no such row, so it is not offered there.
+  const canChangeTabs = useEngraveJobStore((s) => (s.job.cutouts?.length ?? 0) > 0);
   const common = {
     phone,
+    canChangeTabs,
     ...(tabWidthMm === undefined ? {} : { tabWidthMm }),
     onUse: use,
     onCancel: () => ui.collapse(),
