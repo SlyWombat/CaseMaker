@@ -31,7 +31,7 @@ function tsFiles(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (p.endsWith('.ts')) out.push(p);
+    else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
   }
   return out;
 }
@@ -53,25 +53,51 @@ function tsFiles(dir: string): string[] {
  *     `code: rotary ? 'rotary-stock' : 'flat-stock'`) — the literal pattern above cannot see
  *     either arm, so both are read by the last two (#470).
  *
+ * Plus the ways a code is declared that the pattern above cannot see, which hid
+ * `goal-mesh-unclosable` (a class field, `readonly code = '…'`) from this gate:
+ *   - `code = '…'` assignments and class fields;
+ *   - `const …CODE = '…'` constants, whether exported or not;
+ *   - a union of codes (`code: 'a' | 'b'`, `type …Code = 'a' | 'b'`), every member read;
+ *   - a code written as the head of a message (`` `goal-mesh-non-finite: …` ``), the form a
+ *     refusal takes when the code travels inside its sentence.
+ * The scan reads every `.ts` and `.tsx` under `src/`, minus `src/engine/compiler` (the case
+ * geometry's own checks, which the CNC guide does not describe).
+ *
  * `custom` is Zod's own issue code (`toolLibrary.ts`), not a diagnostic a user sees.
  */
 function sourceCodes(): string[] {
   const codes = new Set<string>();
-  const patterns = [
-    /code:\s*'([a-z0-9-]+)'/g,
+  // The call-shaped patterns (`push(`, `warn(`, …) are read in the engine and the workers only: in a
+  // component or a store `push('x')` is a class list or a label list, not a diagnostic.
+  const callPatterns = [
     /diag\(\s*'(?:error|warning|info)'\s*,\s*'([a-z0-9-]+)'/g,
     /warn\([^,()]+,\s*'([a-z0-9-]+)'/g,
     /push\(\s*'([a-z0-9-]+)'/g,
     /refuse\(\s*'([a-z0-9-]+)'/g,
     /refuse\(\s*\n\s*'([a-z0-9-]+)'/g,
+  ];
+  const patterns = [
+    /code:\s*'([a-z0-9-]+)'/g,
     /code:\s*[^,;\n]*?\?\s*'([a-z0-9-]+)'/g,
     /code:\s*[^,;\n]*?\?\s*'[a-z0-9-]+'\s*:\s*'([a-z0-9-]+)'/g,
+    /\bcode\s*=\s*'([a-z0-9]+(?:-[a-z0-9]+)+)'/g,
+    /\b[A-Za-z_]*CODE\s*(?::[^=\n]+)?=\s*'([a-z0-9]+(?:-[a-z0-9]+)+)'/g,
   ];
-  for (const dir of [join(APP, 'src/engine/cnc'), join(APP, 'src/workers')]) {
-    for (const file of tsFiles(dir)) {
-      const text = readFileSync(file, 'utf8');
-      for (const pattern of patterns) {
-        for (const m of text.matchAll(pattern)) codes.add(m[1]!);
+  // The head of a message, read outside `src/components` (where `'flex-wrap: '` is a style, not a code).
+  const messageHeads = [/[`'"]([a-z]+(?:-[a-z]+)+): /g];
+  // A union: the whole `'a' | 'b' | 'c'` run after `code:` or `Code =` is captured, then split.
+  const unions = [/\bcode\??:\s*((?:'[a-z0-9-]+'\s*\|\s*)+'[a-z0-9-]+')/g, /Code\s*=\s*((?:'[a-z0-9-]+'\s*\|\s*)+'[a-z0-9-]+')/g];
+  for (const file of tsFiles(join(APP, 'src'))) {
+    if (file.includes(join('src', 'engine', 'compiler'))) continue;
+    const text = readFileSync(file, 'utf8');
+    const callShaped = file.endsWith('.ts') && (file.includes(join('src', 'engine', 'cnc')) || file.includes(join('src', 'workers')));
+    const inComponents = file.includes(join('src', 'components'));
+    for (const pattern of [...patterns, ...(callShaped ? callPatterns : []), ...(inComponents ? [] : messageHeads)]) {
+      for (const m of text.matchAll(pattern)) codes.add(m[1]!);
+    }
+    for (const pattern of unions) {
+      for (const m of text.matchAll(pattern)) {
+        for (const member of m[1]!.matchAll(/'([a-z0-9-]+)'/g)) codes.add(member[1]!);
       }
     }
   }
