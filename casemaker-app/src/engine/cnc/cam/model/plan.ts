@@ -45,6 +45,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
+import { eligibleByReach, postedDepthMm, postedReachShortfall } from './reach';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -1710,10 +1711,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           : best,
         undefined,
       );
-    const restBallFor = (chosen: Tool | undefined): Tool | undefined => {
-      const reaches = (t: Tool): boolean => (t.fluteLength ?? 0) >= deepestRemainderMm - 1e-9;
-      const candidates = balls.filter((t) => t !== chosen && reaches(t));
-      const rest = bestOf(candidates, deepestRemainderMm);
+    // #1288 — THE REST BALLS, IN THE ORDER THEY ARE TRIED. Eligibility is the ONE usable-length rule
+    // (`reach.ts`: shoulder, else flute): the stated balls that reach the remainder, the best first
+    // (the pick's own comparator); an unstated-length ball only when no stated one reaches. The
+    // first is the rest ball; the others are what it yields to when its POSTED depth turns out
+    // deeper than its length (the remainder's depth is a proxy; the posted moves decide).
+    const restBallsFor = (chosen: Tool | undefined): Tool[] => {
+      const candidates = eligibleByReach(balls.filter((t) => t !== chosen), deepestRemainderMm).tools;
+      const ordered = [...candidates].sort(
+        (a, b) => -pickAmongEquals(pickKeysOf(a, deepestRemainderMm), pickKeysOf(b, deepestRemainderMm), reachMarginMm),
+      );
+      const rest = ordered[0];
       // A second ball of the rest ball's diameter that also reaches: the row states what decided.
       if (rest !== undefined) {
         noteSameDiameter(
@@ -1722,8 +1730,9 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
           deepestRemainderMm,
         );
       }
-      return rest;
+      return ordered;
     };
+    const restBallFor = (chosen: Tool | undefined): Tool | undefined => restBallsFor(chosen)[0];
     // #1114/#1115 — THE CURVED PIPELINE'S PRIMARY IS A PICK, NOT A LIST HEAD: among the flats whose
     // own stated reach covers the deepest remainder, the gate → the shortest sufficient flute →
     // the LARGER DIAMETER (stiffer) → the lower priced stage → the key. The pool stays every flat
@@ -1735,11 +1744,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // behaviour, unchanged). The row states the decider whenever a same-diameter rival was passed.
     const primary = ((): Tool => {
       if (flats.length === 0) return firstRound;
-      const reaches = (t: Tool): boolean => {
-        const usable = t.shoulderLength ?? t.fluteLength;
-        return usable === null || usable + 1e-9 >= deepestRemainderMm;
-      };
-      const candidates = flats.filter(reaches);
+      // #1288 — the ONE rule: stated cutters that reach; an unstated one only when none does.
+      const candidates = eligibleByReach(flats, deepestRemainderMm).tools;
       const chosen = bestOf(candidates, deepestRemainderMm) ?? firstRound;
       noteSameDiameter(
         chosen,
@@ -1950,7 +1956,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ? {}
             : { flat: input.curvedRoughTool }),
       ...(b === undefined ? {} : { ball: b }),
-      ...(restBallFor(b) === undefined ? {} : { restBall: restBallFor(b) }),
+      ...(restBallFor(b) === undefined ? {} : { restBall: restBallFor(b), restBalls: restBallsFor(b) }),
       // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
       // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
       ...(b === undefined ? { finishFlat: finishFlat ?? primary } : {}),
@@ -5326,6 +5332,8 @@ export interface PlanCurvedOptions {
    * band, at its own radius' footprint — the sequence's rest rule, no new op.
    */
   restBall?: Tool;
+  /** #1288 — every rest ball eligible for the remainder, in the order they are tried (`restBall` is the first); a ball whose posted depth is past its length yields to the next. */
+  restBalls?: readonly Tool[];
   /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
    * all (the property specs' house holds no V and asks for none). */
   vbit?: Tool;
@@ -5527,11 +5535,29 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
   // caught per region/rim and stated in `unplanned` in `sequence.ts`'s step-failure shape; the
   // other stages and regions still plan. Returns whether the stage planned.
   const unplanned: SequenceStepFailure[] = [];
+  // #1288 — does the outcome's POSTED depth stay within the cutter's usable length (`reach.ts`)? When not,
+  // the region is stated with the existing `goal-finish-unreachable` sentence and nothing is posted.
+  const postedWithinReach = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, outcome: OpOutcome): boolean => {
+    const postedMm = postedDepthMm(outcome.ir.operations);
+    const usable = postedReachShortfall(cutter, postedMm);
+    if (usable === null) return true;
+    const cutterName = cutter.name || cutter.shape;
+    const text =
+      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm — use a longer-flute cutter, or let a ball finish it`;
+    notes.push(text);
+    statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: postedMm, usableMm: usable });
+    return false;
+  };
   const attempt = (kind: PlannedOp['kind'], cutter: Tool, ref: RegionRef, plan: () => OpOutcome): boolean => {
     opts.signal?.throwIfAborted();
     opts.onStage?.(kind);
     try {
-      pushStage(kind, ref, plan());
+      const outcome = plan();
+      // #1288 — THE POSTED DEPTH IS THE AUTHORITY for every cutter that posts moves: a rest ball or a
+      // pencil whose posted moves go deeper than its usable length is not posted (the finisher has
+      // the same check below). The region keeps the existing `goal-finish-unreachable` sentence.
+      if ((kind === 'rest' || kind === 'pencil') && !postedWithinReach(kind, cutter, ref, outcome)) return false;
+      pushStage(kind, ref, outcome);
       return true;
     } catch (err) {
       unplanned.push({ kind, cutterKey: cutterKeyOf(cutter), regionIds: [ref.id], reason: err instanceof Error ? err.message : String(err) });
@@ -6311,11 +6337,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // The attempt's own contract: a throwing stage does not sink the plan (#959 item 5).
       unplanned.push({ kind: 'finish', cutterKey: cutterKeyOf(finishCutter), regionIds: [ref.id], reason: finishError });
     } else {
-      let deepestZ = 0;
-      for (const operation of finishOutcome!.ir.operations) for (const move of operation.moves) deepestZ = Math.min(deepestZ, move.z);
-      const finisherReach = finishCutter.shoulderLength ?? finishCutter.fluteLength;
-      const cutFloorMm = Number((-deepestZ).toFixed(1));
-      if (finisherReach !== null && cutFloorMm - finisherReach > 1e-6) {
+      const cutFloorMm = postedDepthMm(finishOutcome!.ir.operations);
+      const finisherReach = postedReachShortfall(finishCutter, cutFloorMm);
+      if (finisherReach !== null) {
         const cutterName = finishCutter.name || finishCutter.shape;
         const text =
           `"${region.id}": not finished — floor ${cutFloorMm} mm below the stock top, the ${cutterName}'s usable length ${finisherReach} mm, no cutter in the set reaches it — use a longer-flute cutter, or let a ball finish it`;
@@ -6333,8 +6357,12 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // radius cannot enter — a smaller ball whose stated reach covers this region runs the same
     // finish machinery at its own CL, restricted to that mask and to its own radius' footprint.
     // The sequence's rest rule, no new op; the reach is the one that qualified it.
-    if (opts.restBall !== undefined) {
-      const restBallTool = opts.restBall;
+    // #1288 — the rest balls in the order they are tried: the first whose POSTED depth is within its
+    // length takes the region; one that is not yields to the next (its refusal is stated).
+    const restCandidates: readonly Tool[] = opts.restBalls ?? (opts.restBall === undefined ? [] : [opts.restBall]);
+    let restPosted = false;
+    for (const restBallTool of restCandidates) {
+      if (restPosted) break;
       const ballMaskRadiusMm = (cuttingDiameter(restBallTool) ?? 0) / 2;
       // #1234 — the ball rest overruns with ITS OWN radius; the finish's open sides and the rest's
       // can differ (a fixture box or a region boundary reaches one edge and not the other).
@@ -6378,10 +6406,15 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       if (restBallMemo !== undefined) {
         // The crease pass rides this CL; a memo hit must hand it over exactly as the miss does.
         restBallCl = restBallMemo.cl;
-        pushStage('rest', ref, restBallMemo.outcome, true);
+        if (postedWithinReach('rest', restBallTool, ref, restBallMemo.outcome)) {
+          pushStage('rest', ref, restBallMemo.outcome, true);
+          restPosted = true;
+        } else {
+          restBallCl = undefined;
+        }
       } else {
         memTrace('curved:stage', { stage: 'rest-ball', cutter: cutterKeyOf(restBallTool), region: roughRegion.id });
-        attempt('rest', restBallTool, ref, () => {
+        restPosted = attempt('rest', restBallTool, ref, () => {
           // The crease pass reads `restBallCl` (the mask's own CL, unchanged by #1234); the rest's
           // OWN surface is the grown gate when a side opened, and the same object otherwise.
           restBallCl = clSurface(opts.geometry, roughRegion, restBallTool, cuts.stepOver, opts.minSampleSpacingMm ?? null);
@@ -6416,6 +6449,8 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           return withOverrun(out, restOverrun, ballMaskRadiusMm);
         });
       }
+      // A rest ball that did not post leaves no CL for the crease pass to ride (it rides the finish's).
+      if (!restPosted) restBallCl = undefined;
     }
 
     // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a

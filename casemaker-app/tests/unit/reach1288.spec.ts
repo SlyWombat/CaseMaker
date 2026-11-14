@@ -160,12 +160,14 @@ describe('#1288 the rest ball: the posted depth decides', () => {
     expect(Math.abs(deepestOf(result, 'rest'))).toBeGreaterThan(3);
   }, 180_000);
 
-  it('an unstated-length rest ball is eligible only when no stated one reaches', () => {
-    const withStated = plan([unstatedBall, longBall]);
-    expect(restOps(withStated).every((op) => op.outcome.cutter !== unstatedBall.id), 'an unstated ball beat a stated one that reaches').toBe(true);
-    const alone = plan([unstatedBall, shortBall]);
-    expect(restOps(alone).some((op) => op.outcome.cutter === unstatedBall.id), 'no stated cutter reaches, so the unstated one is eligible').toBe(true);
-  }, 360_000);
+  it('an unstated-length ball is tried only when no stated one reaches (the eligibility the model plan feeds this pipeline)', () => {
+    // The pick side of the rule is `eligibleByReach`, which `planModelCam` calls for the rest balls
+    // and for the primary flat; this pipeline then tries the list in the order it is given.
+    expect(eligibleByReach([unstatedBall, longBall], 5).tools).toEqual([longBall]);
+    expect(eligibleByReach([unstatedBall, shortBall], 5)).toEqual({ tools: [unstatedBall], unstated: true });
+    // And given an unstated ball alone, the pipeline posts it (nothing states it cannot reach).
+    expect(restOps(plan([unstatedBall])).some((op) => op.outcome.cutter === unstatedBall.id)).toBe(true);
+  }, 180_000);
 
   it('a rest ball that reaches is unchanged (the #965 slot, in range)', () => {
     const result = plan([longBall]);
