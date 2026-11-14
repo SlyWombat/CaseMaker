@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 import { installFakeConsole, type FakeConsole } from './fixtures/fakeConsole';
 
 test.use({ baseURL: `http://127.0.0.1:${lanServerPort()}` });
@@ -171,7 +171,7 @@ async function typePlate(page: Page, dims: [number, number, number]): Promise<vo
   await page.getByTestId('start-wizard-make-length').fill(String(dims[0]));
   await page.getByTestId('start-wizard-make-width').fill(String(dims[1]));
   await page.getByTestId('start-wizard-make-thickness').fill(String(dims[2]));
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 }
 

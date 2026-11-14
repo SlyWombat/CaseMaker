@@ -56,6 +56,42 @@ export async function openSomethingElse(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-preset-something-else').click();
 }
 
+/**
+ * #1263 — THE STOCK STEP'S ASK, ANSWERED THE WAY AN OPERATOR DOES. The app assumes no material, so a
+ * walk that reaches Next on the Stock step with the ask still showing first answers it: a piece of
+ * the shelf when the step lists several that hold the work, otherwise the material (and a size when
+ * the step still waits for one). Nothing is preselected for it; this is the walk choosing.
+ */
+export async function answerStockAsk(page: Page, material = 'hardwood'): Promise<void> {
+  const ask = page.getByTestId('start-wizard-stock-ask');
+  if ((await ask.count()) === 0) return;
+  const sentence = (await page.getByTestId('start-wizard-stock-ask-sentence').textContent()) ?? '';
+  if (sentence.startsWith('Several pieces')) {
+    // A piece of the material the walk wants, when the shelf has one; otherwise the walk chooses the
+    // material and types the size.
+    const rows = page.locator('[data-testid^="start-wizard-shelf-item-"]:not([data-testid$="-reason"]):not([disabled])');
+    const mine = rows.filter({ hasText: new RegExp(material, 'i') });
+    if ((await mine.count()) > 0) {
+      await mine.first().click();
+      return;
+    }
+  }
+  const select = page.getByTestId('start-wizard-stock-material');
+  if ((await select.inputValue()) === '') await select.selectOption(material);
+  if ((await ask.count()) > 0) {
+    // The size is still to enter: a small plate, as an operator would type.
+    await page.getByTestId('start-wizard-make-length').fill('60');
+    await page.getByTestId('start-wizard-make-width').fill('40');
+    await page.getByTestId('start-wizard-make-thickness').fill('8');
+  }
+}
+
+/** Next on the Stock step, after answering the ask if it is showing. */
+export async function stockNext(page: Page): Promise<void> {
+  await answerStockAsk(page);
+  await page.getByTestId('start-wizard-stock-next').click();
+}
+
 /** #1100 — the sign card, for a flow that types a line of text. */
 export async function openSignCard(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-preset-sign').click();

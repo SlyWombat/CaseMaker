@@ -4,6 +4,7 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { materialOptionsFor } from '@/engine/cnc/engrave/setupFlow';
+import { SEVERAL_HOLD_SENTENCE } from '@/engine/cnc/stockProposal';
 import type { Mill } from '@/engine/cnc/machine';
 import { MATERIAL_LABELS, isPrintedBlankMaterial, materialFamilyOf } from '@/engine/cnc/materials';
 import {
@@ -79,7 +80,8 @@ export type PendingStock =
  */
 export interface StartStockSeed {
   form: JobStockForm;
-  material: StockMaterial;
+  /** The piece's material, or null — not chosen (#1263): the app assumes none. */
+  material: StockMaterial | null;
   length: number;
   width: number;
   thickness: number;
@@ -141,6 +143,9 @@ const SIZE_FIELDS: CSSProperties = { display: 'grid', gap: 10, margin: '6px 0', 
 const SIZE_FIELD: CSSProperties = { ...MUTED, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 2 };
 const SIZE_UNIT_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4 };
 const SIZE_INPUT: CSSProperties = { width: '100%', boxSizing: 'border-box' };
+
+/** #1263 — the amber that marks what the ask is still waiting for (the question cards' colour). */
+const NEEDED = '2px solid #f5a524';
 
 /** #870 — a stock file's one fact beside its name: the box (or rim) it measures. */
 function fileFact(read: StockFileRead): string | null {
@@ -291,23 +296,24 @@ function aroundLine(form: JobStockForm, dims: DimState): string | null {
 }
 
 /**
- * The house's material, as the step opens (#683, A4). A fresh profile must not open on some
- * other shop's last choice: the house's own material is hardwood — the app's flagship blank is a
- * hardwood name plate and cutting printed plastic is not where a person starts. A job the person
- * has actually made states the house's last material; the untouched demo does not.
+ * THE MATERIAL THE STEP OPENS ON (#1263) — or null, NOT CHOSEN. The app assumes none. In order:
+ * (a) the seed's material (the shelf piece that answered, a board's, the job's own on a re-entry);
+ * (b) the material a job that STATES one carries (a dropped file, a saved job, a starter);
+ * otherwise nothing, and the step asks. The untouched demo job is the app's own sample and states
+ * nothing, so it never seeds the step.
  */
-function houseMaterial(
+function openingMaterial(
   options: readonly { value: StockMaterial }[],
   job: { material: StockMaterial; labels: Parameters<typeof isShippedDemoLabelSet>[0]['labels'] },
   seed?: StartStockSeed,
-): StockMaterial {
+): StockMaterial | null {
   const offered = (m: StockMaterial): boolean => options.some((o) => o.value === m);
-  if (seed !== undefined && offered(seed.material)) return seed.material;
+  if (seed !== undefined && seed.material !== null && offered(seed.material)) return seed.material;
+  if (seed !== undefined && seed.computed === true) return null;
   const shipped = defaultEngraveJob();
   const untouchedDemo = isShippedDemoLabelSet(job) && job.material === shipped.stock.material;
   if (!untouchedDemo && offered(job.material)) return job.material;
-  if (offered('hardwood')) return 'hardwood';
-  return options[0]?.value ?? shipped.stock.material;
+  return null;
 }
 
 interface MaterialGroup {
@@ -408,6 +414,7 @@ export function StartStockStep({
   seed,
   part = null,
   presetFile,
+  several = null,
 }: {
   /** #1098 item 6 — a file the question step recognised; read once on arrival, as if picked here. */
   presetFile?: File;
@@ -417,6 +424,8 @@ export function StartStockStep({
   seed?: StartStockSeed;
   /** #1099 — the part the drawings show on this blank; null when the work has no footprint. */
   part?: PartFootprint | null;
+  /** #1263 — the holding pieces (least waste first) when they span more than one material and the job states none. */
+  several?: readonly string[] | null;
 }): JSX.Element {
   // #875 — the step's phone layout: four form columns and the thickness on its own size row.
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -431,8 +440,8 @@ export function StartStockStep({
 
   const materials = useMemo(() => materialOptionsFor(machine), [machine]);
   const groups = useMemo(() => groupMaterials(materials), [materials]);
-  const [material, setMaterial] = useState<StockMaterial>(() =>
-    houseMaterial(materials, { material: jobMaterial, labels: jobLabels }, seed),
+  const [material, setMaterial] = useState<StockMaterial | null>(() =>
+    openingMaterial(materials, { material: jobMaterial, labels: jobLabels }, seed),
   );
   const [form, setForm] = useState<JobStockForm>(seed?.form ?? 'plate');
   const [dims, setDims] = useState<DimState>(() => dimsFromSeed(seed));
@@ -456,6 +465,9 @@ export function StartStockStep({
   const [summaryOpen, setSummaryOpen] = useState(false);
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const arrivalMatched = useRef(false);
+  // The operator chose the material themselves (never overwritten by a late proposal).
+  const materialTouched = useRef(false);
+  const dimsTouched = useRef(false);
   // #1109 — the provenance sentence survives typing; it goes only when a DIFFERENT valid number is
   // committed on blur (or another source — a shelf entry, a file, a form — takes the numbers over).
   const [seedDropped, setSeedDropped] = useState(false);
@@ -469,6 +481,25 @@ export function StartStockStep({
     setSeedSeen({ sentence: seed.sentence ?? null });
     setSeedDropped(false);
   }, [seed?.computed, seed?.sentence]);
+  // #1263 — THE PROPOSAL CAN CHANGE UNDER THE STEP: the shelf loads after the step opens, and the
+  // blank the work proposes (a piece of the shelf, or none and a recommendation) follows it. While
+  // the operator has taken nothing over, the step follows the proposal; a material they chose
+  // themselves is never overwritten.
+  useEffect(() => {
+    // Several pieces of different materials hold the work: there is no proposal, so no size is
+    // proposed either — the fields are empty until the operator picks a piece or types one.
+    if (several !== null && several.length > 0 && !dimsTouched.current && shelfId === null && fileRead === null) {
+      setDims(EMPTY_DIMS);
+      setSeedSeen(null); // the early recommendation's sentence ("No stock is recorded…") no longer holds
+      return;
+    }
+    if (seed?.computed !== true || seedDropped || shelfId !== null || fileRead !== null) return;
+    if (!materialTouched.current) setMaterial(seed.material);
+    setForm(seed.form);
+    setDims(dimsFromSeed(seed));
+    setFinish(seed.finish);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the proposal's values only
+  }, [seed?.computed, seed?.material, seed?.form, seed?.length, seed?.width, seed?.thickness, seed?.finish, several]);
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
   const [reading, setReading] = useState(false);
@@ -488,16 +519,22 @@ export function StartStockStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetFile]);
 
-  const shelf = useMemo(() => shelfFor(items, material), [items, material]);
+  const shelf = useMemo(() => (material === null ? [] : shelfFor(items, material)), [items, material]);
   const shelfOk = shelfStatus === 'present';
+  // #1263 — the pieces that hold the work come first, least waste first (the wizard's order); the rest follow in the shelf's own.
+  const orderedItems = useMemo(() => {
+    if (several === null) return items;
+    const first = several.map((id) => items.find((i) => i.id === id)).filter((i): i is StockItem => i !== undefined);
+    return [...first, ...items.filter((i) => !several.includes(i.id))];
+  }, [items, several]);
   // #1105 — the cards show EVERY shelf row; the ones in another material are greyed, not hidden.
-  const shelfOther = useMemo(() => items.filter((i) => i.material !== material), [items, material]);
+  const shelfOther = useMemo(() => (material === null ? [] : items.filter((i) => i.material !== material)), [items, material]);
 
   // #1105 item 5 — THE SHELF BLANK THAT IS THE PROPOSAL IS PRE-SELECTED on arrival, once: the
   // selected material, its thickness and its length × width within `stock.shelfMatchMm` in either
   // orientation. No such blank leaves the proposal card selected, exactly as before.
   useEffect(() => {
-    if (arrivalMatched.current || seed?.computed !== true || !shelfOk || items.length === 0) return;
+    if (arrivalMatched.current || seed?.computed !== true || !shelfOk || items.length === 0 || material === null) return;
     arrivalMatched.current = true;
     const match = matchShelf(
       { length: seed.length, width: seed.width, thickness: seed.thickness },
@@ -557,6 +594,8 @@ export function StartStockStep({
           ],
         };
       }
+      // A file is a size, not a material: with none chosen the step waits for it (the ask says so).
+      if (material === null) return { pending: null, problem: null, notes: [] };
       const r = stockFromFile({ ...read, material, finish }, machine);
       return r.ok
         ? { pending: { kind: 'choice', choice: r.choice, saveToShelf: null }, problem: null, notes: r.choice.notes }
@@ -565,6 +604,8 @@ export function StartStockStep({
     // Typed. Nothing filled in is not an answer and not a refusal: the step waits for one number.
     const filled = STOCK_SIZE_FIELDS[form].some((key) => dims[key].trim() !== '');
     if (!filled) return { pending: null, problem: null, notes: [] };
+    // No material chosen is no answer (#1263): the ask above says which is missing.
+    if (material === null) return { pending: null, problem: null, notes: [] };
     const size = toSize(dims);
     // A rod past the vise's grip is the rotary's (§3.3). The form's own sentence says so; the
     // answer still stands, so Next goes on.
@@ -623,6 +664,7 @@ export function StartStockStep({
 
   /** Typing a number makes the piece the person's own, not the shelf entry's. */
   function editDim(key: StockSizeKey, value: string): void {
+    dimsTouched.current = true;
     setDims((d) => ({ ...d, [key]: value }));
     setShelfId(null);
     setFileRead(null);
@@ -682,6 +724,8 @@ export function StartStockStep({
   /** A shelf entry fills the form, its numbers and its finish; the fields stay editable. */
   function pickShelf(item: StockItem): void {
     setShelfId(item.id);
+    // The piece carries its material (#1263): picking it answers the material too.
+    setMaterial(item.material);
     setFileRead(null);
     setSeedDropped(true);
     setForm(item.form as JobStockForm);
@@ -709,7 +753,7 @@ export function StartStockStep({
           : f === 'tube'
             ? `${d.diameter} Ø × ${d.wall} wall × ${d.length}`
             : `${d.length} × ${d.width} × ${d.thickness}`;
-    return `${name} — ${size} mm ${MATERIAL_LABELS[material]}`;
+    return `${name} — ${size} mm${material === null ? '' : ` ${MATERIAL_LABELS[material]}`}`;
   }
 
   /** #1105 — the step-2 proposal is a card like a shelf row: picking it returns to the app's own
@@ -744,10 +788,10 @@ export function StartStockStep({
           setForm('disc');
           setDims({ ...EMPTY_DIMS, diameter: text(read.length), thickness: text(read.thickness) });
         } else {
-          setForm(isPrintedBlankMaterial(material) ? 'printed-blank' : 'block');
+          setForm(material !== null && isPrintedBlankMaterial(material) ? 'printed-blank' : 'block');
           setDims({ ...EMPTY_DIMS, length: text(read.length), width: text(read.width), thickness: text(read.thickness) });
         }
-        if (isPrintedBlankMaterial(material)) setFinish('printed');
+        if (material !== null && isPrintedBlankMaterial(material)) setFinish('printed');
       }
       if (read.kind === 'design') setFinish('printed');
     } finally {
@@ -773,8 +817,67 @@ export function StartStockStep({
     return [length, width, thickness].every((v) => Number.isFinite(v) && v > 0) ? { length, width, thickness } : null;
   }, [dims.length, dims.width, dims.thickness]);
 
+  // #1263 — THE ASK: one prominent question at the top of the step while the piece is not yet
+  // answered — what it is made of, and its size. It names only the ways this shop has, and its
+  // chips are controls that take the operator to what is still missing.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+  const sizeEntered =
+    shelfId !== null || fileRead !== null || STOCK_SIZE_FIELDS[form].some((key) => dims[key].trim() !== '');
+  const materialMissing = material === null;
+  const askShown = materialMissing || !sizeEntered;
+  const shelfOffered = shelfOk && items.length > 0;
+  const askSentence = (): string => {
+    if (several !== null && several.length > 0) return SEVERAL_HOLD_SENTENCE;
+    const needs = [...(materialMissing ? ['choose the material'] : []), ...(sizeEntered ? [] : ["enter the piece's size"])].join(' and ');
+    if (shelfOffered && !sizeEntered) return `Pick a piece from your shelf, or ${needs}.`;
+    return `${needs.charAt(0).toUpperCase()}${needs.slice(1)}.`;
+  };
+  const focusFirstEmptySize = (): void => {
+    const keys = STOCK_SIZE_FIELDS[form];
+    const empty = keys.find((key) => dims[key].trim() === '') ?? keys[0]!;
+    rootRef.current?.querySelector<HTMLInputElement>(`[data-testid="start-wizard-make-${empty}"]`)?.focus();
+  };
+
   return (
-    <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }}>
+    <div data-testid="start-wizard-step-stock" style={{ marginTop: 8 }} ref={rootRef}>
+      {askShown && (
+        <div
+          data-testid="start-wizard-stock-ask"
+          role="group"
+          aria-label="What this will be cut from"
+          style={{ borderLeft: '5px solid #f5a524', background: '#201a0c', borderRadius: 6, padding: '10px 12px', marginBottom: 10 }}
+        >
+          <h3 style={{ margin: 0, font: '700 18px/1.3 var(--cm-font-display, inherit)', color: '#ffe2a8' }}>What will this be cut from?</h3>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#c8d3de' }} data-testid="start-wizard-stock-ask-sentence">
+            {askSentence()}
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {materialMissing && (
+              <button
+                type="button"
+                className="sw-btn"
+                data-testid="start-wizard-ask-chip-material"
+                onClick={() => selectRef.current?.focus()}
+                style={{ border: '1px solid #f5a524', color: '#ffe2a8', borderRadius: 12, padding: '2px 10px', fontSize: 11 }}
+              >
+                material — not chosen
+              </button>
+            )}
+            {!sizeEntered && (
+              <button
+                type="button"
+                className="sw-btn"
+                data-testid="start-wizard-ask-chip-size"
+                onClick={focusFirstEmptySize}
+                style={{ border: '1px solid #f5a524', color: '#ffe2a8', borderRadius: 12, padding: '2px 10px', fontSize: 11 }}
+              >
+                size — not entered
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {/* #1105 — PICK A BLANK FIRST. The step-2 proposal is a card; the shelf's rows are cards
           across ALL materials, the ones that do not match the selected material greyed rather than
           hidden (a PLA user still learns the shelf holds hardwood). */}
@@ -804,7 +907,7 @@ export function StartStockStep({
                   <div style={{ fontSize: 12, color: '#cfe' }}>
                     <strong>From your design</strong> — {formLabel(seed.form).toLowerCase()}{' '}
                     {fmt(seed.length)} × {fmt(seed.width)} × {fmt(seed.thickness)} mm{' '}
-                    {MATERIAL_LABELS[seed.material]}
+                    {seed.material === null ? '' : MATERIAL_LABELS[seed.material]}
                   </div>
                   {seed.sentence !== undefined && (
                     // The card is a button, whose text does not wrap; the sentence carries the size the work
@@ -817,8 +920,8 @@ export function StartStockStep({
               </li>
             )}
             {shelfOk &&
-              items.map((item) => {
-                const matches = item.material === material;
+              orderedItems.map((item) => {
+                const matches = material === null || item.material === material;
                 const why = matches
                   ? shelfPickProblem(item, machine)
                   : `a ${MATERIAL_LABELS[item.material]} blank — choose ${MATERIAL_LABELS[item.material]} above to use it`;
@@ -889,15 +992,22 @@ export function StartStockStep({
         <select
           data-testid="start-wizard-stock-material"
           aria-label="Stock material"
-          value={material}
+          value={material ?? ''}
           onChange={(e) => {
+            materialTouched.current = true;
             setMaterial(e.target.value as StockMaterial);
             setShelfId(null);
             // A different material is an explicit edit: no picked blank remains to summarise.
             setSummaryOpen(false);
           }}
-          style={{ display: 'block', width: '100%', marginTop: 2 }}
+          ref={selectRef}
+          style={{ display: 'block', width: '100%', marginTop: 2, ...(material === null ? { border: NEEDED } : {}) }}
         >
+          {material === null && (
+            <option value="" disabled>
+              Choose a material
+            </option>
+          )}
           {groups.map((group) => (
             <optgroup key={group.label} label={group.label}>
               {group.options.map((m) => (
@@ -1014,7 +1124,7 @@ export function StartStockStep({
                     min={0}
                     step="any"
                     placeholder="0"
-                    style={SIZE_INPUT}
+                    style={sizeEntered ? SIZE_INPUT : { ...SIZE_INPUT, border: NEEDED }}
                     data-testid={`start-wizard-make-${key}`}
                     aria-label={`Stock ${SIZE_LABELS[key]}`}
                     value={shownDim(key)}
@@ -1112,7 +1222,7 @@ export function StartStockStep({
         </select>
       </div>
       <p style={MUTED} data-testid="start-wizard-stock-finish-hint">
-        {finishHintFor(material)}
+        {material === null ? null : finishHintFor(material)}
       </p>
 
       {canKeep && (

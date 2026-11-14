@@ -6,7 +6,7 @@
 // reaches Holding through the same door → stock path every first job takes, measures the SVGs
 // against the slot, reads the two labels, and keeps a screenshot for the eye.
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(120_000);
 
@@ -23,7 +23,7 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-make-width').fill('60');
   await page.getByTestId('start-wizard-make-thickness').fill('6');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 }
 

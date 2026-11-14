@@ -11,7 +11,7 @@
 //   CASEMAKER_PORT=5402 npx playwright test tests/e2e/rotaryGeometry782.spec.ts
 
 import type { TestInfo } from '@playwright/test';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 import { fakeRotaryHouse } from './fixtures/rotaryHouse';
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -42,7 +42,7 @@ test('#782 the Holding front view shows the module and a rod in the four-jaw chu
 
   await page.getByTestId('start-wizard-make-diameter').fill('20');
   await page.getByTestId('start-wizard-make-length').fill('100');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible({ timeout: 30_000 });
   // A round rod on a machine that carries the rotary: the chuck is the recommended mount.
   await expect(page.getByTestId('engrave-setup-mount-rotary')).toBeChecked();

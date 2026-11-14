@@ -7,7 +7,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetStockStore } from '@/store/stockStore';
-import { seedTestShopShelf } from '../tools/testShopStock';
+import { seedTestShopShelf, testShopStickRecord } from '../tools/testShopStock';
+import { useStockStore } from '@/store/stockStore';
+import type { StockItem } from '@/platform/stockClient';
 import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -533,6 +535,8 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
 describe('#681 — the wizard with nothing to lean on', () => {
   /** A typed 60 × 40 × 8 mm piece, with the house's opening material. */
   function typePiece(): void {
+    // #1263 — no material is assumed: the operator chooses it, as they type the piece.
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-width'), { target: { value: '40' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-thickness'), { target: { value: '8' } });
@@ -643,10 +647,16 @@ describe('#681 — the wizard with nothing to lean on', () => {
     skipToStockStep();
     const said = screen.getByTestId('engrave-setup-stock-provenance').textContent ?? '';
     expect(said.startsWith('No stock is recorded for this shop yet. It needs a blank of at least ')).toBe(true);
+    expect(said).not.toMatch(/hardwood/); // #1263 — the app assumes no material: the sentence states the size only
     expect(said).toContain('Sized from the text:');
-    // Next is never blocked by it, and no built-in stick appears.
-    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    // The size is proposed, the material is not: the ask says so, and Next waits for the material.
+    expect(screen.getByTestId('start-wizard-stock-ask-sentence').textContent).toBe('Choose the material.');
+    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).not.toBe('36');
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-stock-ask')).toBeNull();
 
     // #1109 — the sentence survives typing: a slip must not lose where the numbers came from.
     typePiece();
@@ -664,6 +674,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     render(<WizardHost />);
     skipToStockStep();
 
+    // The operator chooses the material (none is assumed), then edits the proposed size.
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
     const length = screen.getByTestId('start-wizard-make-length') as HTMLInputElement;
     const seed = length.value;
     fireEvent.change(length, { target: { value: '3' } });
@@ -674,6 +686,93 @@ describe('#681 — the wizard with nothing to lean on', () => {
     fireEvent.change(length, { target: { value: String(Number(seed) + 10) } });
     fireEvent.blur(length);
     expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
+  });
+
+  /** Our location's four pieces (as the house records them), all of which hold a short sign. */
+  function seedFourPieces(): void {
+    const piece = (id: string, form: string, material: string, size: Record<string, number>, finish = 'rough'): StockItem =>
+      ({ ...testShopStickRecord(), id, form, material, size: { diameter: null, wall: null, ...size }, finish }) as unknown as StockItem;
+    useStockStore.setState({
+      status: 'present',
+      items: [
+        piece('sheet', 'sheet', 'plastic', { length: 25.35, width: 76, thickness: 1.5 }, 'finished'),
+        piece('soft', 'block', 'softwood', { length: 100, width: 100, thickness: 100 }),
+        piece('plate', 'plate', 'hardwood', { length: 120, width: 75, thickness: 50 }),
+        piece('stick', 'block', 'hardwood', { length: 36, width: 100, thickness: 36 }, 'finished'),
+      ],
+    });
+  }
+
+  it('#1263 — pieces of several materials hold the sign: the step asks, lists them least waste first, preselects nothing', () => {
+    seedFourPieces();
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+    expect(screen.getByTestId('start-wizard-stock-ask-sentence').textContent).toBe(
+      "Several pieces on your shelf hold this. Pick one, or choose the material and enter the piece's size.",
+    );
+    const rows = ['sheet', 'stick', 'plate', 'soft'].map((id) => screen.getByTestId(`start-wizard-shelf-item-${id}`));
+    // Least waste first, in the DOM order.
+    const order = [...screen.getByTestId('start-wizard-blank-cards').querySelectorAll('[data-testid^="start-wizard-shelf-item-"]')].map((e) => e.getAttribute('data-testid'));
+    expect(order.filter((t) => !t!.endsWith('-reason'))).toEqual(['sheet', 'stick', 'plate', 'soft'].map((id) => `start-wizard-shelf-item-${id}`));
+    for (const r of rows) expect(r.getAttribute('aria-pressed')).toBe('false'); // nothing preselected or marked
+    expect(screen.queryByTestId('start-wizard-blank-card-design')).toBeNull(); // no proposal card
+    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(true);
+    // Picking the stick's row answers the size AND the material.
+    fireEvent.click(screen.getByTestId('start-wizard-shelf-item-stick'));
+    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId('start-wizard-stock-ask')).toBeNull();
+  });
+
+  it('#1263 — a job that states hardwood is held only by hardwood: the stick is proposed, and the ask is not shown', () => {
+    seedFourPieces();
+    const base = defaultEngraveJob();
+    useEngraveJobStore.setState({ job: { ...base, labels: [], stock: { ...base.stock, material: 'hardwood' } } });
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+    expect(screen.queryByTestId('start-wizard-stock-ask')).toBeNull();
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('36 × 100 × 36 mm');
+  });
+
+  it('#1263 — the ask names only the ways this shop has, and its chips take the operator to what is missing', () => {
+    const bare = (): void => {
+      act(() => {
+        useStartWizardStore.getState().openWizard();
+      });
+      render(<WizardHost />);
+      fireEvent.click(screen.getByTestId('start-wizard-next'));
+      fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
+      fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+      fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    };
+    // No stock recorded: no shelf in the sentence.
+    bare();
+    expect(screen.getByTestId('start-wizard-stock-ask-sentence').textContent).toBe("Choose the material and enter the piece's size.");
+    fireEvent.click(screen.getByTestId('start-wizard-ask-chip-material'));
+    expect(document.activeElement).toBe(screen.getByTestId('start-wizard-stock-material'));
+    fireEvent.click(screen.getByTestId('start-wizard-ask-chip-size'));
+    expect(document.activeElement).toBe(screen.getByTestId('start-wizard-make-length'));
+    // Choosing the material removes its chip; entering a size removes the other and the ask with it.
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'softwood' } });
+    expect(screen.queryByTestId('start-wizard-ask-chip-material')).toBeNull();
+    expect(screen.getByTestId('start-wizard-ask-chip-size')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '60' } });
+    expect(screen.queryByTestId('start-wizard-stock-ask')).toBeNull();
+    cleanup();
+    // A shelf that holds nothing for the work: the pick rows are on offer, so the sentence says so.
+    resetStockStore();
+    seedTestShopShelf();
+    bare();
+    expect(screen.getByTestId('start-wizard-stock-ask-sentence').textContent).toBe(
+      "Pick a piece from your shelf, or choose the material and enter the piece's size.",
+    );
   });
 
   it('#1264 — a step opens at its top: the scroll the last step was left at does not carry over', () => {

@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard, stockNext } from './fixtures/caseMaker';
 import { testShopStickRecord } from '../tools/testShopStock';
 
 test.setTimeout(300_000);
@@ -115,16 +115,18 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   }
   await page.getByTestId('start-wizard-operation-next').click();
 
-  // Step 3 — the shop's recorded stick. A line of text is held by it, so it is the proposal
-  // (#1259); a bare pocket states no size, so the operator picks the stick from the shelf.
+  // Step 3 — the shop's recorded stick. Our location's shelf holds the work in more than one
+  // material, so the step asks (#1263: the app does not choose the material); a bare pocket states no
+  // size either. The operator picks the stick's row.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-  if (kind === 'pocket') await page.getByTestId('start-wizard-shelf-item-stock-test-shop-stick').click();
+  await expect(page.getByTestId('start-wizard-stock-ask')).toBeVisible();
+  await page.getByTestId('start-wizard-shelf-item-stock-test-shop-stick').click();
   // The stick is the answer either way (a picked card says so in the summary line).
   await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('start-wizard-stock-summary')).toContainText('36 × 100 × 36 mm');
   await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
   expectCleanText(`${kind} stock`, await page.getByTestId('start-wizard-body').innerText());
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   // Step 4 — the stick on the vise's body, and Create offered: no disabled hold left the flow with
   // nothing selected.
@@ -206,7 +208,7 @@ test('#930 — a saved ledge the stock cannot sit in arrives on the waste board,
   await page.getByTestId('start-wizard-make-length').fill('60.3');
   await page.getByTestId('start-wizard-make-width').fill('20.1');
   await page.getByTestId('start-wizard-make-thickness').fill('1.5');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   // Step 4 — the board is selected, the ledge still states its cost, and Create is live.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');

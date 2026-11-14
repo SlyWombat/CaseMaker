@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
 import { MachineRecordSchema, type FixtureRecord } from '@/platform/locationClient';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, stockNext } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(240_000);
@@ -133,7 +133,7 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
   await expect(page.getByTestId('start-wizard-form-rod')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('start-wizard-make-diameter')).toHaveValue('20');
   await page.screenshot({ path: 'test-results/1107-stock-rod.png' });
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   // Holding arrives in the chuck.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');

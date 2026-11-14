@@ -101,7 +101,6 @@ import type { MachineRecord } from '@/platform/locationClient';
  */
 const MUTED: CSSProperties = { fontSize: 11, color: '#9aa4b0', lineHeight: 1.5, margin: '4px 0' };
 /** #870 — a fact or "nothing yet" is grey; amber is only for a step that cannot be left. */
-const ARRIVAL: CSSProperties = { fontSize: 11, color: '#9aa4b0', margin: 0 };
 const UNBLOCK: CSSProperties = { fontSize: 11, color: '#e0c07a', margin: 0 };
 
 /** Take `stockEntry` off the job, if it carries one. */
@@ -229,7 +228,8 @@ function stockMatchesProposal(
   const s = p.choice.stock;
   return (
     p.choice.entry.form === proposal.form &&
-    s.material === material &&
+    // A proposal that left the material open (#1263) is matched by whatever the operator chose: choosing it is not editing the blank.
+    (material === null || s.material === material) &&
     s.length === proposal.length &&
     s.width === proposal.width &&
     s.thickness === proposal.thickness
@@ -417,7 +417,6 @@ export function StartWizard(): JSX.Element {
         !jobStarted &&
         next !== null &&
         proposal !== null &&
-        proposalMaterial !== null &&
         !stockMatchesProposal(next, proposal, proposalMaterial)
       ) {
         setStockEdited(true);
@@ -507,8 +506,11 @@ export function StartWizard(): JSX.Element {
   const seed = jobStarted ? seedFromJob(job) : undefined;
   // #897 — the stock step's starting point: the blank the work asks for on a run that has not
   // started its job yet; an edited answer or a re-entry's job keeps what it has.
+  // #1263 — several pieces of different materials hold the work and the job states none: NO
+  // proposal. Nothing is preselected; the step asks, and lists the holding pieces.
+  const severalHold = proposal?.source.case === 'several' ? proposal.source.itemIds : null;
   const proposedSeed: StartStockSeed | null =
-    !jobStarted && proposal !== null && proposalMaterial !== null
+    !jobStarted && proposal !== null && severalHold === null
       ? { ...proposal, material: proposalMaterial, computed: true }
       : null;
   const stockSeed = stockEdited && pending !== null ? (seedFromPending(pending) ?? seed) : (proposedSeed ?? seed);
@@ -1142,6 +1144,7 @@ export function StartWizard(): JSX.Element {
         <>
           <StockStep
             seed={stockSeed}
+            several={severalHold}
             onPending={onStockPending}
             part={partFootprintFor(work)}
             // #1098 item 6 — a PrusaSlicer project dropped on the question step arrives here already
@@ -1196,8 +1199,6 @@ export function StartWizard(): JSX.Element {
     </>
   );
 
-  const stockUnblock =
-    step === 'stock' && pending === null && confirmReplace === null && startError === null && !starting;
   // #1107 — the question's only footer sentence: a NEW run with nothing picked. (A picked but
   // incomplete answer draws its sentence inside its own field, as before.)
   const operationUnblock =
@@ -1314,11 +1315,6 @@ export function StartWizard(): JSX.Element {
           {operationUnblock !== null && (
             <p style={UNBLOCK} data-testid="start-wizard-operation-unblock">
               {operationUnblock}
-            </p>
-          )}
-          {stockUnblock && (
-            <p style={ARRIVAL} data-testid="start-wizard-stock-unblock">
-              Choose the stock: a size you type, a piece on the shelf, or a file.
             </p>
           )}
           {holdingBlock !== null && (

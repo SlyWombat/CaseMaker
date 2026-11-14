@@ -84,7 +84,7 @@ function WizardHost() {
  * Walk to the stock step. #897 put the question before it, so the walk answers it: an engrave text
  * by default, or the chip a test wants to make (`pocket`).
  */
-async function toStockStep(pick: 'engrave' | 'pocket' = 'engrave'): Promise<void> {
+async function toStockStep(pick: 'engrave' | 'pocket' = 'engrave', material: string | null = 'hardwood'): Promise<void> {
   act(() => {
     useStartWizardStore.getState().openWizard();
   });
@@ -103,6 +103,9 @@ async function toStockStep(pick: 'engrave' | 'pocket' = 'engrave'): Promise<void
   }
   fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
   expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+  // #1263 — the app assumes no material: the walks choose one, as an operator does. (`null` keeps
+  // the step as it arrives.)
+  if (material !== null) fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: material } });
 }
 
 function chooseMaterial(value: string): void {
@@ -495,13 +498,12 @@ describe('the material-first start (#418)', () => {
 
   it("the material is grouped three ways, this house's own first (#683, A4, A5)", async () => {
     fakeShelf(SHELF);
-    // #897 — a pocket sizes no blank, so the step opens on the house material itself rather
-    // than a proposal's material.
-    await toStockStep('pocket');
-    // #879 — A FRESH HOUSE IS HARDWOOD: the app's flagship blank is a hardwood name plate, and
-    // printed plastic (PLA/PETG) is a choice a job makes, with its cutting-heat line said once.
+    // #897 — a pocket sizes no blank. #1263 — and the app assumes no material: the select opens on
+    // "Choose a material", and the list is the same three families.
+    await toStockStep('pocket', null);
     const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
-    expect(select.value).toBe('hardwood');
+    expect(select.value).toBe('');
+    expect(select.options[0]?.textContent).toBe('Choose a material');
     const groups = Array.from(select.querySelectorAll('optgroup'));
     // #1105 — the vocabulary in the order a woodworker reads it: Woods first, then the cast
     // boards (#1066's tooling board), the plastics, the metals and the copper-clad board.
@@ -518,7 +520,7 @@ describe('the material-first start (#418)', () => {
     fakeShelf(SHELF);
     const base = defaultEngraveJob();
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
-    await toStockStep();
+    await toStockStep('engrave', null);
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
   });
 
@@ -635,10 +637,10 @@ describe('a mesh loaded as stock takes its finish default from the material (#46
     expect(await loadMesh(material)).toBe('printed');
   });
 
-  // #1259 — the opening finish is what the shop's own record says: the recorded stick is hardwood
-  // and planed, so hardwood opens finished; a material the shop records nothing in opens as bought.
-  it.each(NOT_PRINTED)('%s: the finish is the step’s opening one (the shop’s record, else as bought)', async (material) => {
-    expect(await loadMesh(material)).toBe(material === 'hardwood' ? 'finished' : 'rough');
+  // The opening finish is the proposal's (the shop's recorded stick is planed, #934); choosing
+  // another material is not editing the proposed blank (#1263), so a loaded mesh keeps that face.
+  it.each(NOT_PRINTED)('%s: the finish is the step’s opening one (the proposal’s)', async (material) => {
+    expect(await loadMesh(material)).toBe('finished');
   });
 });
 

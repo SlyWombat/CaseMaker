@@ -9,7 +9,7 @@
 // never block.
 
 import { fileURLToPath } from 'node:url';
-import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -244,7 +244,7 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('7');
 
   // The hold follows from the blank, and the last step creates the goal.
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   // #1103 — THE SEAT READS THE WORK: a 6 mm surfacing pass reaches the blank's edge, so the
   // recommendation is the board fallback with its sentence — 6 mm down on a 7 mm blank leaves

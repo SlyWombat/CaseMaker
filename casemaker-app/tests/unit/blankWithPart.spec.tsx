@@ -24,6 +24,15 @@ describe('#1099 — the part drawn on the blank', () => {
     expect(screen.queryByTestId('blank-part-overrun')).toBeNull();
   });
 
+  it('the "Hello" sign: a blank stated to 0.1 mm and a part to 0.01 mm read 5 mm on every side (#1263)', () => {
+    // The proposal rounds the blank to 0.1 (40.27 → 40.3, 20.11 → 20.1); the margins are really 5.015 and
+    // 4.995, and the picture prints them at the precision the blank is stated in. The part is centred.
+    render(<BlankWithPart blank={{ length: 40.3, width: 20.1, thickness: 1.5 }} part={{ kind: 'text', length: 30.27, width: 10.11, height: 0.5 } as never} />);
+    for (const side of ['left', 'right', 'front', 'back']) {
+      expect(screen.getByTestId(`blank-part-margin-${side}`).textContent, side).toBe('5 mm');
+    }
+  });
+
   it('a 90 mm part on a 75 mm blank is clipped and the overrun is named', () => {
     render(<BlankWithPart blank={BLANK} part={{ ...PART, length: 90 }} />);
     expect(screen.getByTestId('blank-part-footprint').getAttribute('class')).toContain('blank-part--clipped');
