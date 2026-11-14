@@ -33,8 +33,12 @@ import tempfile
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# render.py reads the location export at import time; the same demo export the page was built with.
-os.environ.setdefault('CM_LOCATION', os.path.expanduser('~/casemaker-manager/demo-build/location.json'))
+# render.py reads the location export at import time. The pinned fixtures need only its `inventory`
+# (render's tool table) and `defaults` (the pass line, 0.95 when absent), so they default to the
+# COMMITTED location fixture the app's own specs use — never a path on one machine (#1267). Set
+# CM_LOCATION to run them against another export.
+LOCATION_FIXTURE = os.path.join(HERE, '..', '..', '..', '..', 'casemaker-app', 'tests', 'unit', 'fixtures', 'location-doc.json')
+os.environ.setdefault('CM_LOCATION', LOCATION_FIXTURE)
 sys.path.insert(0, HERE)
 import goal_check as GC          # noqa: E402
 PITCH = 0.1
@@ -60,9 +64,9 @@ def run(nc_text, prefix, out):
     open(nc, 'w').write(nc_text)
     os.makedirs(out, exist_ok=True)
     env = dict(os.environ)
-    # render.py reads the location export (its defaults carry the pass line); the demo export is
-    # the one the page was built with, and any export gives the same pass rule for these fixtures.
-    env.setdefault('CM_LOCATION', os.path.expanduser('~/casemaker-manager/demo-build/location.json'))
+    # render.py reads the location export (its defaults carry the pass line); the committed fixture
+    # (above) gives the same pass rule for these fixtures as any export.
+    env.setdefault('CM_LOCATION', LOCATION_FIXTURE)
     r = subprocess.run([sys.executable, os.path.join(HERE, 'goal_check.py'), prefix, str(T), out, nc],
                        capture_output=True, text=True, env=env)
     if r.returncode != 0:
