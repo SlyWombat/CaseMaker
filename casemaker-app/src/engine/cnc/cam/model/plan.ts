@@ -2713,6 +2713,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         facing: input.facing ?? 'off',
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
         ...(goalCutInto === undefined ? {} : { goalCutInto }),
+        // #1252 (review 4) — the all-dirty pick asks every feasible chain; each ask is a visible tick
+        // ("checking set N of M against the model"), so a long pick does not look like a hang.
+        ...(opts.onProgress === undefined
+          ? {}
+          : {
+              onAdjudicate: (done: number, total: number) =>
+                opts.onProgress!({ setupIndex, op: 'sequence', fraction: 0.4, note: `checking set ${done} of ${total} against the model` }),
+            }),
         ...(restRegion === undefined ? {} : { restRegion }),
         ...(input.stockProbes === undefined ? {} : { stockProbes: input.stockProbes }),
       },
@@ -3775,6 +3783,8 @@ export interface PlanPocketsOptions {
    * classification pass and nothing else. Absent → the picker never adjudicates.
    */
   goalCutInto?: (irs: readonly ToolpathIR[]) => { adjudicatedCells: number; maxMm: number; areaMm2: number } | null;
+  /** #1252 (review 4) — a tick before each adjudication call (`SequenceOptions.onAdjudicate`). */
+  onAdjudicate?: (done: number, total: number) => void;
   /**
    * #961 — a COVERAGE rest's region, from the caller's own simulated field: the cells the chain so
    * far leaves above the band, as polygons in the plan's XY (the caller owns the goal and the
@@ -3913,6 +3923,44 @@ export function cutIntoAllSentence(cutInto: NonNullable<SequenceChoice['cutInto'
   const areaMm2 = Math.round(cutInto.areaMm2 * 10) / 10;
   const maxMm = Math.round(cutInto.maxMm * 100) / 100;
   return `Every set of cutters cuts into the part; the one chosen cuts ${areaMm2} mm² more than the model allows, up to ${maxMm} mm.`;
+}
+
+/**
+ * #1252 — THE STATEMENTS THE ADJUDICATION OWES THE OPERATOR, from the picker's choice.
+ *
+ *  - a chain passed over because it cuts into the part: a sheet line saying only what is known (the
+ *    rank is leftover-first, so the set passed over may be the SLOWER one; #1232's tall sentence
+ *    made that mistake) — no "faster";
+ *  - every chain cutting in: the plan KNOWINGLY cuts into the model, so this is a FINDING the
+ *    operator meets before the sheet, at the severity the goal check's own cut-into verdict
+ *    carries — `goal-overcut`, an error (the guide row: material cut from the part cannot be put
+ *    back) — with the same sentence;
+ *  - the check not running: a sheet line.
+ */
+export function adjudicationStatements(
+  choice: Pick<SequenceChoice, 'passedOver' | 'cutInto' | 'cutIntoNotRun'>,
+): PlanStatement[] {
+  const out: PlanStatement[] = [];
+  if (choice.passedOver !== undefined) {
+    out.push({
+      severity: 'sheet',
+      code: 'plan-run',
+      text: 'A set of cutters that would otherwise have been chosen was passed over because it cuts into the part.',
+      count: 1,
+    });
+  }
+  if (choice.cutInto !== undefined) {
+    out.push({ severity: 'error', code: 'goal-overcut', text: cutIntoAllSentence(choice.cutInto), count: 1 });
+  }
+  if (choice.cutIntoNotRun === true) {
+    out.push({
+      severity: 'sheet',
+      code: 'plan-run',
+      text: 'The cut-into check did not run for this plan, so whether the chosen cutters cut into the part is not known.',
+      count: 1,
+    });
+  }
+  return out;
 }
 
 export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions): PlanPocketsResult {
@@ -4577,6 +4625,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
             return irs.length === 0 ? null : opts.goalCutInto!(irs);
           },
         }),
+    ...(opts.onAdjudicate === undefined ? {} : { onAdjudicate: opts.onAdjudicate }),
   });
 
   // planner v3 slice 3 — THE SELECTOR IN SHADOW. Trace-only: with no trace file this block does
@@ -5087,22 +5136,10 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
     notes.push(text);
     statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
   }
-  // #1252 — the check's adjudication's own lines: a chain passed over for cutting in; every chain
-  // cutting in, with the chosen one's figures; or the check not running at all.
-  if (choice.passedOver !== undefined) {
-    const text = 'A faster set of cutters was passed over because it cuts into the part.';
-    notes.push(text);
-    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
-  }
-  if (choice.cutInto !== undefined) {
-    const text = cutIntoAllSentence(choice.cutInto);
-    notes.push(text);
-    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
-  }
-  if (choice.cutIntoNotRun === true) {
-    const text = 'The cut-into check did not run for this plan, so whether the chosen cutters cut into the part is not known.';
-    notes.push(text);
-    statements.push({ severity: 'sheet', code: 'plan-run', text, count: 1 });
+  // #1252 — the check's adjudication's own lines (see `adjudicationStatements`).
+  for (const statement of adjudicationStatements(choice)) {
+    notes.push(statement.text);
+    statements.push(statement);
   }
 
   const sequence: SequencedCutter[] = choice.cost.entries.map((entry) => {
