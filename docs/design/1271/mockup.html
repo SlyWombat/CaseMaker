@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>#1271 part 2 — a goal job states its freeing tabs</title>
+<style>
+:root{--surface:#0b1326;--low:#131b2e;--cont:#17203a;--on:#dae2fd;--var:#a9b4d0;--muted:#7f8aa8;--line:#2a3448;--primary:#4d8eff;--amber:#f5a524}
+*{box-sizing:border-box}body{margin:0;background:#060a14;font-family:Inter,'Segoe UI',system-ui,sans-serif;color:var(--on);padding:20px}
+h4{margin:0 0 10px;font:600 12px monospace;color:var(--muted)}
+.frame{background:var(--surface);padding:24px;margin-bottom:24px;display:flex;justify-content:center}
+.panel{width:372px;background:var(--low);border:1px solid var(--line);border-radius:12px;padding:12px}
+.phone .panel{width:340px}
+.row{border:1px solid var(--line);background:var(--cont);border-radius:8px;padding:10px 11px;margin-bottom:8px}
+.row .nm{font:600 13px 'Space Grotesk',sans-serif}.row .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.fld{display:flex;gap:8px;margin-top:8px;font-size:11.5px;color:var(--var)}.fld .k{color:var(--muted)}
+.chip{border:1px solid var(--line);border-radius:10px;padding:2px 8px;font-size:11px;color:var(--var)}
+.grp{border-top:1px dashed var(--line);margin-top:10px;padding-top:9px}
+.grp .t{font:600 12px 'Space Grotesk',sans-serif;display:flex;justify-content:space-between;align-items:baseline}
+.grp .t a{font-size:11px;color:var(--primary);font-weight:400}.grp .t .k{font-size:11px;color:var(--muted);font-weight:400}
+.nums{display:flex;gap:8px;margin-top:7px}.nums label{flex:1;font-size:10.5px;color:var(--muted)}
+.num{margin-top:3px;background:#2a303d;border:1px solid var(--line);border-radius:4px;padding:6px 8px;font-size:12.5px;color:var(--on)}
+.num.mine{border:2px solid var(--primary)}.num.focus{border:2px solid var(--amber)}
+.num small{color:var(--muted);font-size:10.5px}
+.said{margin:8px 0 0;font-size:12px;color:var(--var);line-height:1.45}.said b{color:var(--on)}
+.said.warn{border-left:4px solid var(--amber);padding-left:8px;color:#ffe2a8}
+.note{font-size:11px;color:var(--muted);margin:6px 0 0}
+.card{border-left:5px solid var(--amber);background:#201a0c;border-radius:6px;padding:10px 12px;margin-bottom:8px}.card b{display:block;font:700 13px 'Space Grotesk',sans-serif;color:#ffe2a8}
+.opt{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:12px;margin-top:6px;color:var(--var)}.opt.go{border-color:var(--primary);color:var(--on)}
+.legend{max-width:780px;color:var(--var);font-size:13px;line-height:1.5;margin:0 0 22px}
+.legend li{margin-bottom:4px}
+</style></head><body>
+<div class="legend"><b>#1271 part 2 — where a goal job states its freeing tabs.</b> Mock-up for 9b. No code until approved.
+<ul>
+<li><b>Where:</b> inside the goal object's existing row (<code>EngraveTargetObjectRow</code>), as one group under its fit / chamfer fields — the Job panel's structure, no new panel. Same three fields as an item job's cut-out row (tabs · width · height), same words.</li>
+<li><b>Starts from the shop's values; the job keeps its own.</b> The fields show the effective value. Until the operator types, the job carries nothing (<code>tabs</code> absent) and follows the shop; a typed field is blue-outlined (the job's own), and "Use the shop's" clears it. The shop's number is read the same way whether or not the <code>tabs.*</code> keys are live today (part 1): if they are inert, the group shows the constant until the fix lands, and nothing in this design changes.</li>
+<li><b>What the planner did</b> is one sentence under the fields: placed, and added to meet the span limit. It needs the engine to report the requested count beside the final one (an ask for P3; part 1's fix touches the same code).</li>
+<li><b>The tab question's option 3, <i>Change the tabs myself</i></b>, comes back on goal jobs and focuses the tab-count field (frame D).</li>
+<li>The numbers in the frames are illustrative, not measured.</li>
+</ul></div>
+
+<h4>A — desktop: the goal row, following the shop (nothing typed)</h4>
+<div class="frame"><div class="panel">
+<div class="row"><div class="nm">Goal: lid.stl</div><div class="sub">Cut free from the blank · 60 × 40 × 8 mm</div>
+<div class="fld"><span><span class="k">fit</span> as modelled</span><span><span class="k">chamfer</span> none</span><span class="chip">clear around 2 mm</span></div>
+<div class="grp"><div class="t"><span>Tabs holding the part</span><span class="k">the shop's values</span></div>
+<div class="nums"><label>tabs<div class="num">4</div></label><label>width<div class="num">6 <small>mm</small></div></label><label>height<div class="num">1 <small>mm</small></div></label></div>
+<p class="said">Placed <b>4 tabs</b> on the outline. Longest stretch left: 38 mm, inside the shop's 40 mm limit.</p></div></div>
+</div></div>
+
+<h4>B — desktop: the operator's own values; the planner added tabs to meet the limit</h4>
+<div class="frame"><div class="panel">
+<div class="row"><div class="nm">Goal: lid.stl</div><div class="sub">Cut free from the blank · 60 × 40 × 8 mm</div>
+<div class="fld"><span><span class="k">fit</span> as modelled</span><span><span class="k">chamfer</span> none</span><span class="chip">clear around 2 mm</span></div>
+<div class="grp"><div class="t"><span>Tabs holding the part</span><a>Use the shop's (4 × 6 × 1)</a></div>
+<div class="nums"><label>tabs<div class="num mine">2</div></label><label>width<div class="num mine">8 <small>mm</small></div></label><label>height<div class="num">1 <small>mm</small></div></label></div>
+<p class="said">You asked for <b>2 tabs</b>; the shop's limit is 40 mm, so the planner placed <b>4</b> (2 added). Longest stretch left: 38 mm.</p></div></div>
+</div></div>
+
+<h4>C — desktop: 0 tabs (cut free), said plainly, in the item row's own words</h4>
+<div class="frame"><div class="panel">
+<div class="row"><div class="nm">Goal: lid.stl</div><div class="sub">Cut free from the blank · 60 × 40 × 8 mm</div>
+<div class="grp"><div class="t"><span>Tabs holding the part</span><a>Use the shop's (4 × 6 × 1)</a></div>
+<div class="nums"><label>tabs<div class="num mine">0</div></label><label>width<div class="num">6 <small>mm</small></div></label><label>height<div class="num">1 <small>mm</small></div></label></div>
+<p class="said warn">No tabs: the part is cut free and needs tape, glue or screws to keep it from moving.</p></div></div>
+</div></div>
+
+<h4>D — the tab question, option 3 back on a goal job: it goes here and focuses the tab count</h4>
+<div class="frame"><div class="panel">
+<div class="card"><b>Action needed: choose how this part is held</b><span style="font-size:11.5px;color:var(--var)">Generate has no programs until you choose.</span>
+<div class="opt">Put a tab inside the corner margin</div><div class="opt">Leave a longer stretch</div><div class="opt go">Change the tabs myself — takes you to the tab count and width below ↓</div></div>
+<div class="row"><div class="nm">Goal: lid.stl</div>
+<div class="grp"><div class="t"><span>Tabs holding the part</span></div>
+<div class="nums"><label>tabs<div class="num focus">4</div></label><label>width<div class="num">6 <small>mm</small></div></label><label>height<div class="num">1 <small>mm</small></div></label></div>
+<p class="note">Generate asks again if the new tabs still leave a stretch too long (the answer is stale once count or width changes).</p></div></div>
+</div></div>
+
+<h4>E — phone: the three fields stay on one line; the sentence wraps beneath</h4>
+<div class="frame phone"><div class="panel">
+<div class="row"><div class="nm">Goal: lid.stl</div><div class="sub">Cut free from the blank</div>
+<div class="grp"><div class="t"><span>Tabs holding the part</span><a>Use the shop's</a></div>
+<div class="nums"><label>tabs<div class="num mine">2</div></label><label>width<div class="num mine">8 <small>mm</small></div></label><label>height<div class="num">1 <small>mm</small></div></label></div>
+<p class="said">You asked for <b>2 tabs</b>; the limit is 40 mm, so <b>4</b> were placed (2 added).</p></div></div>
+</div></div>
+</body></html>
