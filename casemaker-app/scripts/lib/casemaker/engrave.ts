@@ -844,7 +844,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * registry, and a drill-shaped cutter needs the shop's own point angle); the builder folds them
    * in too, so this is the one place the CLI assembles the bag the generator reads.
    */
-  const shop: EngraveShopOpts = engraveShopOpts(shopDefaults, boot.location?.path ?? null);
+  // #1237 — the location is STATED to the planner only when it states a settings map: a pre-#412 house
+  // file has none (`defaults` is null by design, bootstrap.ts) and plans on the recommendations with no
+  // location named; a location document always reads as a map, `{}` when it carries no overrides.
+  const shop: EngraveShopOpts = engraveShopOpts(shopDefaults, shopDefaults === null ? null : (boot.location?.path ?? null));
   /**
    * #1068 — THE JOB'S MOUNT, DERIVED AS THE APP DERIVES IT. `jobMountObstacles` is the one
    * derivation `engraveRunStore.ts` calls, so the command line and the browser check a bracket
