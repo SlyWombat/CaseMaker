@@ -7,7 +7,7 @@
 // "not read from a machine record" on every job without one.
 
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 400, height: 900 } });
 
@@ -57,7 +57,7 @@ test('#875 — phone step 2: equal form buttons in two rows, size fields whole w
 test('#875 — phone step 3: the picture first, the hold fold shut with its answer, no empty machine band', async ({ cm, page }) => {
   await cm.ready();
   await toStock(page);
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 
   // The picture is the FIRST thing the step offers on a phone: above the mount radios.

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect, readJob } from './fixtures/caseMaker';
+import { test, expect, readJob, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -103,7 +103,7 @@ test('#1098 — an STL dropped on step 2 reaches Holding in two clicks', async (
   await page.getByTestId('start-wizard-operation-next').click();
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('Sized from the mesh:');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
 });
 
@@ -128,7 +128,10 @@ test('#1098 — an SVG dropped on step 2 becomes a cut-it-out job that generates
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('From your shelf: aluminium-6061 plate, 100 × 100 × 5 mm.');
   await page.screenshot({ path: 'test-results/1098-stock-from-svg.png' });
-  await page.getByTestId('start-wizard-stock-next').click();
+  // The proposal is the shelf's aluminium plate; the walk cuts it in the house's wood, so the operator
+  // chooses the material (the app assumes none, and the plate's is only the proposal's).
+  await page.getByTestId('start-wizard-stock-material').selectOption('hardwood');
+  await stockNext(page);
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   await page.screenshot({ path: 'test-results/1098-holding-from-svg.png' });
   // The one radio the cut-out adds: a through cut needs the waste board under the piece.
@@ -177,7 +180,7 @@ test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same jo
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   // The Stock step arrives settled on that file and says what it is — it does not ask for it again.
   await expect(page.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
   const viaDrop = await readJob(page);
   expect(viaDrop.stockEntry?.kind).toBe('file');
@@ -197,7 +200,7 @@ test('#1098 item 6 — a PrusaSlicer project dropped on step 2 makes the same jo
   await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await fresh.getByTestId('start-wizard-load-file').setInputFiles(PROJECT_3MF);
   await expect(fresh.getByTestId('start-wizard-load-name')).toContainText('single.3mf', { timeout: 60_000 });
-  await fresh.getByTestId('start-wizard-stock-next').click();
+  await stockNext(fresh);
   await expect(fresh.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding', { timeout: 60_000 });
   const viaLoader = await readJob(fresh);
   await context.close();

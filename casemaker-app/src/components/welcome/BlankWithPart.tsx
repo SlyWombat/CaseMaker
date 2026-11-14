@@ -111,16 +111,16 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
             {/* The blank's four edges are the dimension lines: each margin is written just
                 outside the edge it belongs to, where there is room for the number. */}
             <text x={bx - 6} y={by + bh / 2 + 3} textAnchor="end" fontSize="10" fill="#c8d3de" data-testid="blank-part-margin-left">
-              {fmt(margins.left)} mm
+              {one(Math.abs(margins.left))} mm
             </text>
             <text x={bx + bw + 6} y={by + bh / 2 + 3} fontSize="10" fill="#c8d3de" data-testid="blank-part-margin-right">
-              {fmt(margins.right)} mm
+              {one(Math.abs(margins.right))} mm
             </text>
             <text x={bx + bw / 2} y={by - 8} textAnchor="middle" fontSize="10" fill="#c8d3de" data-testid="blank-part-margin-back">
-              {fmt(margins.back)} mm
+              {one(Math.abs(margins.back))} mm
             </text>
             <text x={bx + bw / 2} y={by + bh + 14} textAnchor="middle" fontSize="10" fill="#c8d3de" data-testid="blank-part-margin-front">
-              {fmt(margins.front)} mm
+              {one(Math.abs(margins.front))} mm
             </text>
           </>
         )}

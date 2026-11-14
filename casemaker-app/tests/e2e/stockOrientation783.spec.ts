@@ -6,7 +6,7 @@
 //   CASEMAKER_PORT=5403 npx playwright test tests/e2e/stockOrientation783.spec.ts
 
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 1440, height: 900 } });
 test.setTimeout(180_000);
@@ -24,7 +24,7 @@ async function reachHolding(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-make-width').fill('60');
   await page.getByTestId('start-wizard-make-thickness').fill('12');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 }
 

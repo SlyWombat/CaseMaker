@@ -11,7 +11,6 @@
  * the work — today the flat-bottom style leaves the goal's height plus a stated skin.
  */
 
-import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { readDefault } from '@/platform/defaultsClient';
 import type { StockItem } from '@/platform/stockClient';
 import type { JobStockFinish, JobStockForm, StockMaterial } from '@/types/engraveJob';
@@ -46,13 +45,6 @@ export interface ProposalContext {
   presetMarginMm?: number;
 }
 
-/**
- * The material the work proposes for a blank it sized itself: the house default (#879 — the
- * hardwood name plate). READ from the default rather than written a second time, so the proposal
- * and the job the app opens cannot drift apart.
- */
-export const WORK_STOCK_MATERIAL: StockMaterial = defaultEngraveJob().stock.material;
-
 /** What the work is, in the terms a blank is sized from. */
 export type WorkShape =
   | { kind: 'mesh'; size: { x: number; y: number; z: number } }
@@ -84,7 +76,8 @@ export type WorkShape =
 
 export interface StockProposal {
   form: JobStockForm;
-  material: StockMaterial;
+  /** The blank's material: a piece's own, a board's, a stated one — or null, NOT CHOSEN (#1263: the app assumes none). */
+  material: StockMaterial | null;
   length: number;
   width: number;
   thickness: number;
@@ -152,7 +145,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       const { x, y, z } = work.size;
       return {
         form: 'plate',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(x + 2 * m),
         width: round1(y + 2 * m),
         thickness,
@@ -186,7 +179,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       const m = work.sign === true ? (ctx.signMarginMm ?? workMarginMm) : workMarginMm;
       return {
         form: 'plate',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(work.size.length + 2 * m),
         width: round1(work.size.width + 2 * m),
         thickness,
@@ -200,7 +193,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       const m = workMarginMm;
       return {
         form: 'plate',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(work.length + 2 * m),
         width: round1(work.width + 2 * m),
         thickness,
@@ -213,7 +206,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       const m = presetMarginMm;
       return {
         form: 'plate',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(work.length + 2 * m),
         width: round1(work.width + 2 * m),
         thickness,
@@ -225,7 +218,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       const m = presetMarginMm;
       return {
         form: 'plate',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(work.length + 2 * m),
         width: round1(work.width + 2 * m),
         thickness,
@@ -238,7 +231,7 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
       // step asks a rod's numbers in (diameter as length and width, the rod's length as thickness).
       return {
         form: 'rod',
-        material: WORK_STOCK_MATERIAL,
+        material: null,
         length: round1(work.diameter),
         width: round1(work.diameter),
         thickness: round1(work.length),
@@ -276,7 +269,9 @@ export type BlankSource =
   /** Case 1 — a stock entry the shop records holds the work. */
   | { case: 'shelf'; itemId: string }
   /** Case 2 — nothing recorded holds it, so the blank the work needs is recommended. `shelfEmpty` is case 3: no stock is recorded at all. */
-  | { case: 'recommended'; shelfEmpty: boolean };
+  | { case: 'recommended'; shelfEmpty: boolean }
+  /** #1263 — pieces of more than one material hold the work and the job states none: no proposal; the operator picks. The ids are the holding pieces, least waste first. */
+  | { case: 'several'; itemIds: string[] };
 
 export interface BlankProposal extends StockProposal {
   source: BlankSource;
@@ -312,14 +307,35 @@ function holds(need: StockProposal, i: StockItem, holdMm: number): boolean {
 }
 
 /**
- * THE SHELF ITEM THAT HOLDS A NEED (#1259, generalising #1098's plate rule). Among the entries with
- * some left and none held back that hold the need (turned either way; a flat need by a plate, sheet
- * or block, a rod by a rod; circuit-board work only by board material and nothing else by it): the
- * material sought first — a FILTER when the job states a material (a piece of another material does
- * not hold the job; `onlyMaterial`), a preference for the default the work is sized in when it states
- * none — then the least waste (item volume less the need's), then the
- * shelf's own order — the sort is stable and adds no tie-break of ours. Null when none holds it.
+ * EVERY SHELF PIECE THAT HOLDS A NEED (#1259, generalising #1098's plate rule), least waste first
+ * (item volume less the need's), the shelf's own order breaking ties — the sort is stable and adds
+ * no tie-break of ours. A piece must have some left and none held back and hold the need (turned
+ * either way; a flat need by a plate, sheet or block, a rod by a rod; circuit-board work only by
+ * board material and nothing else by it). `onlyMaterial` is the FILTER a job that states a material
+ * applies: a piece of another material does not hold it.
  */
+export function holdingItemsFor(
+  need: StockProposal,
+  shelf: readonly StockItem[],
+  holdMm: number = need.thickness,
+  onlyMaterial: StockMaterial | null = null,
+): StockItem[] {
+  const wantsBoard = need.material === 'pcb';
+  const vol = needVolume(need);
+  return shelf
+    .map((item, order) => ({ item, order }))
+    .filter(
+      ({ item: i }) =>
+        freeOf(i) > 0 &&
+        (i.material === 'pcb') === wantsBoard &&
+        (onlyMaterial === null || i.material === onlyMaterial) &&
+        holds(need, i, holdMm),
+    )
+    .sort((a, b) => itemVolume(a.item) - vol - (itemVolume(b.item) - vol) || a.order - b.order)
+    .map((x) => x.item);
+}
+
+/** The first of {@link holdingItemsFor}, with a material PREFERRED when given (kept for the outline tests; the proposal itself prefers none). */
 export function shelfItemFor(
   need: StockProposal,
   material: StockMaterial | null,
@@ -327,24 +343,9 @@ export function shelfItemFor(
   holdMm: number = need.thickness,
   onlyMaterial: StockMaterial | null = null,
 ): StockItem | null {
-  const wantsBoard = need.material === 'pcb';
-  const candidates = shelf.filter(
-    (i) =>
-      freeOf(i) > 0 &&
-      (i.material === 'pcb') === wantsBoard &&
-      (onlyMaterial === null || i.material === onlyMaterial) &&
-      holds(need, i, holdMm),
-  );
-  const rank = (i: StockItem): number => (material !== null && i.material === material ? 0 : 1);
-  const vol = needVolume(need);
-  const indexed = candidates.map((item, order) => ({ item, order }));
-  indexed.sort(
-    (a, b) =>
-      rank(a.item) - rank(b.item) ||
-      itemVolume(a.item) - vol - (itemVolume(b.item) - vol) ||
-      a.order - b.order,
-  );
-  return indexed[0]?.item ?? null;
+  const all = holdingItemsFor(need, shelf, holdMm, onlyMaterial);
+  if (material === null) return all[0] ?? null;
+  return all.find((i) => i.material === material) ?? all[0] ?? null;
 }
 
 function shelfSentence(i: StockItem): string {
@@ -354,29 +355,41 @@ function shelfSentence(i: StockItem): string {
     : `From your shelf: ${i.material} ${i.form}, ${n(l ?? 0)} × ${n(w ?? 0)} × ${n(t ?? 0)} mm.`;
 }
 
+/** The ask when the shelf holds the work in more than one material and the job has not said which (#1263). */
+export const SEVERAL_HOLD_SENTENCE =
+  "Several pieces on your shelf hold this. Pick one, or choose the material and enter the piece's size.";
+
 /**
- * THE BLANK THE WIZARD PROPOSES (#1259) — one rule, from the shop's own stock.
+ * THE BLANK THE WIZARD PROPOSES (#1259, #1263) — one rule, from the shop's own stock, and no
+ * material of the app's own.
  *
- *  1. **The shelf** holds the work: an entry the shop records (free, every size stated, big enough)
- *     is the blank, at its own size, material, form and finish.
- *  2. **Nothing recorded holds it:** the blank the work needs — extent plus the margin, thickness
- *     from depth plus the floor — in the job's material, recommended, never required.
+ *  1. **The shelf** holds the work. The pieces that hold it (free, every size stated, big enough;
+ *     only pieces of the job's material when the job states one):
+ *       - all of ONE material → the least-waste piece is the blank (case 1: its own size,
+ *         material, form and finish);
+ *       - of MORE THAN ONE material and the job states none → **no proposal**: the operator picks
+ *         (`several`, the holding pieces least waste first). The material decides the feeds, so the
+ *         app does not choose it.
+ *  2. **Nothing recorded holds it:** the size the work needs, recommended, never required; the
+ *     material is the job's when it states one, otherwise NOT CHOSEN (`material: null`).
  *  3. **No stock at all** reads as case 2 and says so; it adds no built-in stock.
  *
- * Next is never blocked by 2 or 3, and the operator can change every number. This function does
- * not test the HOLD (whether a mount the shop owns can grip the blank): the Holding step that
- * follows answers that for whatever blank was chosen.
+ * Next is never blocked by the recommendation, and the operator can change every number. This
+ * function does not test the HOLD (whether a mount the shop owns can grip the blank): the Holding
+ * step that follows answers that for whatever blank was chosen.
  */
 export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankProposal | null {
   const need = needFor(work, ctx);
   if (need === null) return null;
   const shelf = ctx.shelf ?? [];
-  // The material the blank is sought in: the job's stated one, else the one the work would be sized in
-  // (the shop's default). A preference, not a filter — see shelfItemFor.
-  const preferred = need.material === 'pcb' ? null : (ctx.jobMaterial ?? need.material);
   const stated = need.material === 'pcb' ? null : (ctx.jobMaterial ?? null);
-  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need, ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value), stated);
-  if (held !== null) {
+  const holders = holdingItemsFor(need, shelf, holdThicknessFor(work, need, ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value), stated);
+  if (holders.length > 0) {
+    const materials = new Set(holders.map((i) => i.material));
+    if (stated === null && materials.size > 1) {
+      return { ...need, sentence: SEVERAL_HOLD_SENTENCE, source: { case: 'several', itemIds: holders.map((i) => i.id) } };
+    }
+    const held = holders[0]!;
     const { length: l, width: w, thickness: t, diameter: d } = held.size;
     return {
       form: held.form,
@@ -390,8 +403,6 @@ export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankP
     };
   }
   const shelfEmpty = shelf.length === 0;
-  // Copper-clad IS what a board's work is; every other need takes the job's stated material.
-  const material = need.material === 'pcb' ? need.material : (ctx.jobMaterial ?? need.material);
   const lead = shelfEmpty
     ? 'No stock is recorded for this shop yet.'
     : stated !== null
@@ -400,10 +411,11 @@ export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankP
   const size = need.form === 'rod'
     ? `a ⌀${n(need.length)} × ${n(need.thickness)} mm rod`
     : `a blank of at least ${n(need.length)} × ${n(need.width)} × ${n(need.thickness)} mm`;
+  const material = need.material === 'pcb' ? need.material : stated;
   return {
     ...need,
     material,
-    sentence: `${lead} It needs ${size}, ${material}. ${need.sentence}`,
+    sentence: `${lead} It needs ${size}${material === null ? '' : `, ${material}`}. ${need.sentence}`,
     source: { case: 'recommended', shelfEmpty },
   };
 }

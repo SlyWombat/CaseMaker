@@ -14,7 +14,6 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import {
-  WORK_STOCK_MATERIAL,
   type BlankSource,
   type ProposalContext,
   type StockProposal,
@@ -26,24 +25,22 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { OperationChoice } from './OperationStep';
 
 /**
- * The material a proposed blank opens on.
+ * The material a proposed blank opens on — or null, NOT CHOSEN (#1263): the app assumes none.
  *
- * #897 — the house's own (hardwood, #879) for a job that has not said otherwise; a job that STATES
- * a material keeps it, exactly as the stock step's own opening rule does — the proposal sizes the
- * blank, it does not overrule the piece the operator has already named. A board's blank is the
- * exception: copper-clad IS what the work is, and the import does not restate it.
+ * A job that STATES a material keeps it (the proposal was already filtered to it). Otherwise the
+ * material is the answering shelf piece's own, or a board's (copper-clad IS what the work is); with
+ * neither it is not chosen and the Stock step asks. The untouched demo job is the app's own sample
+ * and states nothing: it never seeds the wizard.
  */
 export function proposedMaterialFor(
   proposal: StockProposal & { source?: BlankSource },
   job: EngraveJob,
-): EngraveJob['stock']['material'] {
+): EngraveJob['stock']['material'] | null {
   if (proposal.material === 'pcb') return 'pcb';
   const shipped = defaultEngraveJob();
   const untouchedDemo = isShippedDemoLabelSet(job) && job.stock.material === shipped.stock.material;
-  // #1259 — a job that states no material takes the shelf item's own when the shelf answers (an
-  // aluminium plate is cut as aluminium, not on hardwood feeds); otherwise the default.
-  if (untouchedDemo && proposal.source?.case === 'shelf') return proposal.material;
-  return untouchedDemo ? WORK_STOCK_MATERIAL : job.stock.material;
+  if (untouchedDemo) return proposal.source?.case === 'shelf' ? proposal.material : null;
+  return job.stock.material;
 }
 
 /**

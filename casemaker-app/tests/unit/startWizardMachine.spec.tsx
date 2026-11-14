@@ -392,6 +392,8 @@ describe('#682 — step 1 is the house’s machine', () => {
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'A block' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
     expect(screen.getByTestId('start-wizard-step-stock')).toBeDefined();
+    // #1263 — the material is the operator's to choose; Next waits for it.
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
     const stockNext = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
     await waitFor(() => expect(stockNext.disabled).toBe(false));
     await act(async () => {

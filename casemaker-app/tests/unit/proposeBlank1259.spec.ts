@@ -58,7 +58,7 @@ describe('#1259 — proposeBlank', () => {
     const q = proposeBlank(mesh, ctx([plate]))!;
     expect(q.source).toEqual({ case: 'recommended', shelfEmpty: false });
     expect(q.sentence).toBe(
-      'Nothing on your shelf holds this. It needs a blank of at least 60 × 60 × 21 mm, hardwood. ' +
+      'Nothing on your shelf holds this. It needs a blank of at least 60 × 60 × 21 mm. ' +
         'Sized from the mesh: 50 × 50 × 20 mm, plus 5 mm each side and 1 mm under it.',
     );
   });
@@ -76,7 +76,7 @@ describe('#1259 — proposeBlank', () => {
       expect(p.sentence.startsWith('No stock is recorded for this shop yet. It needs ')).toBe(true);
     }
     expect(proposeBlank(TEXT, ctx([]))!.sentence).toBe(
-      'No stock is recorded for this shop yet. It needs a blank of at least 60 × 20 × 3 mm, hardwood. ' +
+      'No stock is recorded for this shop yet. It needs a blank of at least 60 × 20 × 3 mm. ' +
         'Sized from the text: 50 × 10 mm, plus 5 mm each side.',
     );
   });
@@ -125,9 +125,9 @@ describe('#1259 — proposeBlank', () => {
     expect(p.sentence).toBe('From your shelf: hardwood plate, 72 × 70 × 9 mm.');
   });
 
-  it('the stop rule: on our location’s own shelf, a default-size line is held by the stick, not by the sheet or the other blocks', () => {
-    // Our location's recorded stock as read from its house (2026-11-13): a 1.5 mm plastic sheet that
-    // is thin enough to "hold" a shallow line, two other blocks, and the stick.
+  it('#1263 — pieces of more than one material hold the work and the job states none: no proposal, the holding pieces least waste first', () => {
+    // Our location's recorded stock as read from its house: a 1.5 mm plastic sheet that is thin
+    // enough to "hold" a shallow line, two other blocks, and the stick.
     const shelf = [
       item('sheet', 'sheet', { length: 25.35, width: 76, thickness: 1.5 }, { material: 'plastic' as never, finish: 'finished' }),
       item('soft', 'block', { length: 100, width: 100, thickness: 100 }, { material: 'softwood' as never }),
@@ -136,8 +136,26 @@ describe('#1259 — proposeBlank', () => {
     ];
     const shallow: WorkShape = { kind: 'text', size: { length: 46.58, width: 10.11 }, depth: 0.5 };
     const p = proposeBlank(shallow, ctx(shelf))!;
-    expect(p.source).toEqual({ case: 'shelf', itemId: 'stick' });
-    expect(p).toMatchObject({ form: 'block', material: 'hardwood', length: 36, width: 100, thickness: 36, finish: 'finished' });
+    expect(p.source).toEqual({ case: 'several', itemIds: ['sheet', 'stick', 'plate', 'soft'] });
+    expect(p.material).toBeNull();
+    expect(p.sentence).toBe(
+      "Several pieces on your shelf hold this. Pick one, or choose the material and enter the piece's size.",
+    );
+    // The same shelf and a job that STATES hardwood: only hardwood pieces count; the stick has the least waste.
+    const q = proposeBlank(shallow, ctx(shelf, { jobMaterial: 'hardwood' as never }))!;
+    expect(q.source).toEqual({ case: 'shelf', itemId: 'stick' });
+    expect(q).toMatchObject({ form: 'block', material: 'hardwood', length: 36, width: 100, thickness: 36, finish: 'finished' });
+  });
+
+  it('#1263 — a shelf of two hardwood pieces proposes the smaller; one piece is that piece; three softwood and one hardwood, none holding the work, asks for the size only', () => {
+    const big = item('big', 'plate', { length: 300, width: 200, thickness: 20 });
+    const small = item('small', 'plate', { length: 80, width: 40, thickness: 20 });
+    expect(proposeBlank(TEXT, ctx([big, small]))!.source).toEqual({ case: 'shelf', itemId: 'small' });
+    expect(proposeBlank(TEXT, ctx([STICK]))!.source).toEqual({ case: 'shelf', itemId: 'stick' });
+    const tiny = (id: string, material: string) => item(id, 'plate', { length: 10, width: 10, thickness: 3 }, { material: material as never });
+    const p = proposeBlank(TEXT, ctx([tiny('a', 'softwood'), tiny('b', 'softwood'), tiny('c', 'softwood'), tiny('d', 'hardwood')]))!;
+    expect(p.source).toEqual({ case: 'recommended', shelfEmpty: false });
+    expect(p.material).toBeNull(); // asked, not preselected: no counting of stock
   });
 
   it('9. a job that states a material is held only by stock of that material: brass on the hardwood stick is case 2', () => {
@@ -160,7 +178,7 @@ describe('#1259 — proposeBlank', () => {
     expect(proposedMaterialFor(p, defaultEngraveJob())).toBe('aluminium-6061');
     // With nothing on the shelf the default material stands.
     const q = proposeBlank(TEXT, ctx([]))!;
-    expect(proposedMaterialFor(q, defaultEngraveJob())).toBe('hardwood');
+    expect(proposedMaterialFor(q, defaultEngraveJob())).toBeNull(); // no stock, no stated material: not chosen
   });
 
   it('11. the pocket floor’s body is a shop setting: at the recommendation nothing moves; at 10 mm the need and the shelf’s minimum both move by 4', () => {
@@ -175,6 +193,12 @@ describe('#1259 — proposeBlank', () => {
     // The shelf's own minimum moved by the same 4: a 17 mm plate no longer holds it.
     expect(proposeBlank(pocket, ten)!.source).toEqual({ case: 'recommended', shelfEmpty: false });
     expect(proposeBlank(pocket, ctx([item('ok', 'plate', { length: 200, width: 100, thickness: 20 })], { pocketFloorBodyMm: 10 }))!.source).toEqual({ case: 'shelf', itemId: 'ok' });
+  });
+
+  it('#1263 — the app’s boot job keeps its hardwood (the sample); the wizard treats it as stating no material', () => {
+    expect(defaultEngraveJob().stock.material).toBe('hardwood');
+    // Untouched demo + no stock: nothing chosen — the sample never seeds the wizard.
+    expect(proposedMaterialFor(proposeBlank(TEXT, ctx([]))!, defaultEngraveJob())).toBeNull();
   });
 
   it('work that sizes no blank proposes none, and circuit-board stock is only for board work', () => {

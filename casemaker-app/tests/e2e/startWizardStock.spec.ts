@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -61,7 +61,7 @@ test('new project → shelf stock → mount → empty design, the stock drawn', 
   // entry (the fields' "edit" would make the numbers the operator's own).
   await expect(page.getByTestId('start-wizard-stock-summary')).toContainText('120 × 60 × 8 mm');
   await expect(page.getByTestId('start-wizard-make-length')).toHaveCount(0);
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   // Step 4 — the same wizard, on the mount; its button is the create (#897).
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
