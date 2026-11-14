@@ -195,6 +195,18 @@ export function readSource(opts: { host?: string }): string {
     : `config-get sd on ${opts.host.trim()}`;
 }
 
+/**
+ * The saved `source` sentence in the operator's words. The record keeps what {@link readSource}
+ * wrote (older records carry the same sentence); this is the presentation layer — it says what the
+ * `config-get` read means, not the command. A source of any other shape is shown as it was saved.
+ */
+export function readSourceWords(source: string): string {
+  const onHost = /^config-get sd on (.+)$/.exec(source.trim());
+  if (onHost) return `the machine’s own settings, read on ${onHost[1]}`;
+  if (/^config-get sd(?: \(read on the machine\))?$/.test(source.trim())) return 'the machine’s own settings';
+  return source;
+}
+
 /** What `parseMachineCalibration` found. */
 export type CalibrationParse =
   | { ok: true; calibration: MachineCalibration }
@@ -396,7 +408,7 @@ export function machineCalibrationNotice(
       severity: 'info',
       code: 'machine-calibrated-frame',
       message:
-        `Machine positions come from this machine's own configuration (${calibration.source}, read ` +
+        `Machine positions come from this machine's own configuration (${readSourceWords(calibration.source)}, ` +
         `${when}): the anchors, the tool-length sensor and the change position are where THIS machine ` +
         `says they are, not the vendor's defaults.`,
     };

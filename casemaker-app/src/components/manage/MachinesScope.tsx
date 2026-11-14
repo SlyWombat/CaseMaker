@@ -22,6 +22,7 @@
  * the machine's pane.
  */
 
+import { readSourceWords } from '@/engine/cnc/calibration';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MACHINE_FRAME_UNREAD, MACHINE_RUN_ELSEWHERE, PRINTER_PROFILES, millModelById, type Mill } from '@/engine/cnc/machine';
 import { canReachMachine, NO_MACHINE_RELAY_SENTENCE } from '@/platform/capabilities';
@@ -675,7 +676,7 @@ export function MachinesScope() {
               </tr>
               <tr>
                 <th>read</th>
-                <td>{calibration.source}</td>
+                <td>{readSourceWords(calibration.source)}</td>
               </tr>
             </tbody>
           </table>

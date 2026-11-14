@@ -44,6 +44,7 @@ describe('#412 the location card', () => {
     expect(machine.textContent).toContain('192.0.2.10 : 2222');
     expect(machine.textContent).toContain('not read yet');
     expect(machine.textContent).toContain('measured');
+    expect(machine.textContent).not.toContain('config-get');
   });
 
   it('says when the location has no machine yet, and shows a refused write-through', () => {

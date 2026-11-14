@@ -21,7 +21,7 @@
  * bench machine's anchor 1 sits 1.51 mm off Makera's default on X (#208 B6/B7).
  */
 
-import type { MachineCalibration } from '@/engine/cnc/calibration';
+import { readSourceWords, type MachineCalibration } from '@/engine/cnc/calibration';
 import type { FixtureEnvelope, ObstacleBox } from '@/engine/cnc/setup';
 import type { BracketObstacle } from '@/types/engraveJob';
 import { readDefault, readMeasured, type DefaultSource, type ShopDefaults } from '@/platform/defaultsClient';
@@ -176,7 +176,7 @@ export function anchorFrom(
     anchor: {
       x: r3(a1x + ox),
       y: r3(a1y + oy),
-      from: anchor === 1 ? `anchor 1 read from the machine (${calibration.source}, ${date})` : `anchor 2 = anchor 1 + its offset, read from the machine (${calibration.source}, ${date})`,
+      from: anchor === 1 ? `anchor 1 read from the machine (${readSourceWords(calibration.source)}, ${date})` : `anchor 2 = anchor 1 + its offset, read from the machine (${readSourceWords(calibration.source)}, ${date})`,
     },
   };
 }
