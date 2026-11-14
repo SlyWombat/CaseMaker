@@ -104,6 +104,7 @@ import {
   jobSetups,
   pureGoalObject,
   defaultTapeHold,
+  tapeDefaultsFor,
   setupProgramFindings,
   toSetup,
   validateGoalObject,
@@ -6991,7 +6992,7 @@ async function faceItemProgram(args: {
     thickness: Math.max(1, deepest + 2),
     material: job.stock.material,
   };
-  sub.workholding = { kind: 'tape', tape: defaultTapeHold() };
+  sub.workholding = { kind: 'tape', tape: defaultTapeHold(tapeDefaultsFor(shop.defaults ?? null)) };
   sub.sacrificial = { under: null, sides: { left: null, right: null, front: null, back: null }, source: job.sacrificial.source };
   const labels = frame.items
     .filter((it) => it.kind === 'text')

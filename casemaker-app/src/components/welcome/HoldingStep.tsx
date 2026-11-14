@@ -1783,8 +1783,9 @@ export function HoldingStep({
         through: work?.through === true || throughCut,
         tape,
         canReachMachine,
+        stripWidthMm: tapeStripWidthMm,
       }),
-    [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape],
+    [machine, accessories, answers.stock, boardMm, rotaryEnvelope, job, tape, tapeStripWidthMm],
   );
   // #1103 — WHAT THE WORK TAKES, and the seat it recommends; the reason is shown under the rows.
   const houseBoards = useMemo(() => boardChoices(profile), [profile]);

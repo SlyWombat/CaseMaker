@@ -542,6 +542,8 @@ export interface MountOptionArgs {
    * wizard. Absent is true (the desktop build).
    */
   canReachMachine?: boolean;
+  /** #1256 — the shop's `tape.stripWidthMm`, for the tape row's hint when the job holds no tape yet. */
+  stripWidthMm?: number;
 }
 
 const Z1_ROTARY_ENVELOPE = { diameter: 80, length: 150 } as const;
@@ -773,7 +775,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
       }
       const hint =
         mount === 'bed-tape'
-          ? tapeStripsLine(args.tape ?? defaultTapeHold(), stock)
+          ? tapeStripsLine(args.tape ?? defaultTapeHold({ ...TAPE_DEFAULTS, widthMm: args.stripWidthMm ?? TAPE_DEFAULTS.widthMm }), stock)
           : bracketHint(now.profile, stock);
       out.push({ ...base, hint, disabled: false, reason: null, escape: null });
       continue;
