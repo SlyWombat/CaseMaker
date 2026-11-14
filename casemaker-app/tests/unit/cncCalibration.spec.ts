@@ -22,6 +22,7 @@ import {
   machineCalibrationNotice,
   parseMachineCalibration,
   readSource,
+  readSourceWords,
   resolveMachine,
   resolvedMachineById,
   type MachineCalibration,
@@ -255,6 +256,20 @@ describe('saying which frame is in force', () => {
     expect(notice.code).toBe('machine-vendor-frame');
     expect(notice.severity).toBe('warning');
     expect(notice.message).toContain("vendor's shipped defaults");
+  });
+
+  it('shows the saved source in the operator’s words, leaving the record alone', () => {
+    expect(readSourceWords('config-get sd on 192.168.10.43')).toBe('the machine’s own settings, read on 192.168.10.43');
+    expect(readSourceWords(readSource({}))).toBe('the machine’s own settings');
+    expect(readSourceWords('config-get sd')).toBe('the machine’s own settings');
+    expect(readSourceWords('typed by hand')).toBe('typed by hand');
+    expect(readSource({ host: '10.0.0.1' })).toBe('config-get sd on 10.0.0.1');
+  });
+
+  it('the calibrated-frame notice carries no command', () => {
+    const notice = machineCalibrationNotice(Z1, readMachine());
+    expect(notice.message).not.toContain('config-get');
+    expect(notice.message).toContain('the machine’s own settings, read on 192.168.10.43');
   });
 
   it('says when the numbers came from this machine, and when', () => {
