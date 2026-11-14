@@ -57,7 +57,7 @@ export interface ProfileCut {
   /** The blank's thickness, mm. The tab top is `-(thickness - tabs.height)`. */
   thickness: number;
   /** The cut-out's tab spec. `count: 0` cuts the part free. */
-  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number };
+  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number; /** #1258 — what the operator chose for a stretch the margin leaves too long; absent = the pre-#1258 placement (a tight tab). */ tabChoice?: TabChoiceMode };
 }
 
 /** A tab span on one contour, by work XY and by arc length along the contour. */
@@ -121,6 +121,11 @@ export interface TabPlacement {
    * centre and the distances the sheet states.
    */
   tight: readonly TightTab[];
+  /**
+   * #1258 — the stretches full-margin tabs could not bring under the limit, each with its candidate.
+   * Present only when the caller stated a {@link TabChoiceMode}; empty when nothing is too long.
+   */
+  stretches?: readonly TabStretch[];
 }
 
 /** #1206 — one step-2 tab: where it sits and what it closes. */
@@ -135,6 +140,40 @@ export interface TightTab {
   joins: number;
   /** How many of those joins turn sharper than the placement's smooth-arc limit. */
   sharpJoins: number;
+}
+
+/**
+ * #1258 — WHAT THE PLACEMENT DOES WITH A STRETCH THE CORNER MARGIN LEAVES TOO LONG. `ask` places
+ * nothing for it and reports it (`TabPlacement.stretches`); `insideMargin` places #1206's step-2 tab;
+ * `longerStretch` leaves it and states it. Absent: the pre-#1258 behaviour (the step-2 tab is
+ * placed, nothing is reported) — callers outside the model plan keep their bytes.
+ */
+export type TabChoiceMode = 'ask' | 'insideMargin' | 'longerStretch';
+
+/**
+ * #1258 — ONE STRETCH tabs at full margins cannot bring under `tabs.maxSpanMm`, with the tab
+ * #1206's step 2 would place in it (called and reported, not placed). All lengths mm, positions in
+ * work XY. `candidate: null` — no tab fits in the stretch at all.
+ */
+export interface TabStretch {
+  /** The stretch's order along its contour, from 0. */
+  index: number;
+  /** Its unsupported length before any step-2 tab. */
+  spanMm: number;
+  startXY: [number, number];
+  endXY: [number, number];
+  candidate: {
+    /** The step-2 tab's centre. */
+    atXY: [number, number];
+    /** The centre's distance to the nearer end of its edge. */
+    fromCornerMm: number;
+    /** That nearer end of the edge. */
+    cornerXY: [number, number];
+    /** The corner margin of the edge the tab sits on — the usual rule, which this tab is inside. */
+    marginMm: number;
+    /** The two stretches that would remain either side of the tab. */
+    leavesSpansMm: [number, number];
+  } | null;
 }
 
 /** #1206 — how the default placement is shaped; the release pass (#1073) states its own targets. */
@@ -154,6 +193,8 @@ export interface TabPlacementOptions {
   maxSpanMm?: number;
   /** #1207 — `tabs.cornerDeg`: the turn sharper than this is a corner, not an arc joint. */
   cornerDeg?: number;
+  /** #1258 — what to do with a stretch the margin leaves too long (see {@link TabChoiceMode}). */
+  tabChoice?: TabChoiceMode;
 }
 
 /** One cut's tab facts, for the run sheet and the `tab-unplaceable` finding. */
@@ -168,6 +209,8 @@ export interface ProfileTabReport {
   added: number;
   /** #1206 step 2 — the tight tabs placed inside the corner margin, across every contour. */
   tight: TightTab[];
+  /** #1258 — the stretches the margin left too long, with their candidates (only when a mode was stated). */
+  stretches?: TabStretch[];
 }
 
 export interface ProfileResult {
@@ -602,9 +645,19 @@ export function placeTabs(
   // A ROUND outline is one smooth edge around the whole contour: equal spacing is its own
   // symmetry, and there is no side midpoint to prefer.
   if (edges.length === 1 && edges[0]!.end - edges[0]!.start >= perimeter - 1e-6) {
-    return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => ((k + 0.5) / count) * perimeter);
+    const placed = placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => ((k + 0.5) / count) * perimeter);
+    // #1258 — a round outline has no edge inside a stretch to tab, so a stretch past the limit is
+    // reported with no candidate (the step-2 tab never applied to it; the contour used to refuse).
+    const limit = options?.maxSpanMm;
+    if (options?.tabChoice === undefined) return placed;
+    const sorted = placed.spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc })).sort((a, b) => a.startArc - b.startArc);
+    const stretches =
+      limit !== undefined && Number.isFinite(limit) && limit > 0
+        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit)
+        : [];
+    return { ...placed, stretches };
   }
-  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad);
+  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad, options?.tabChoice);
 }
 
 /**
@@ -687,12 +740,23 @@ interface SideEdge {
  * edge that is at least one centre-path span long always keeps its centred tab, as far from the
  * corners as the edge allows; long edges keep the full margin.
  */
+/**
+ * The corner margin of an edge of this length: the usual rule, `max(2 × tab width, 10 % of the
+ * edge)`, capped so it never empties an edge that fits a tab. An edge shorter than one centre-path
+ * span takes no tab at all under the rule, so its margin is the rule's own, uncapped.
+ */
+function edgeMargin(length: number, widthMm: number, spanLength?: number): number {
+  const rule = Math.max(2 * widthMm, 0.1 * length);
+  if (spanLength !== undefined && length < spanLength - 1e-9) return rule;
+  return Math.min(rule, (length - widthMm) / 2);
+}
+
 function sideEdges(edges: readonly Edge[], widthMm: number, spanLength: number): SideEdge[] {
   const out: SideEdge[] = [];
   for (const edge of edges) {
     const length = edge.end - edge.start;
     if (!(length > 0)) continue;
-    const margin = Math.min(Math.max(2 * widthMm, 0.1 * length), (length - widthMm) / 2);
+    const margin = edgeMargin(length, widthMm);
     // `spanLength` still gates the edge: a span longer than the edge cannot sit on it at all.
     if (length < spanLength - 1e-9) continue;
     const maxTabs = Math.floor(length / (margin + widthMm / 2) + 1e-9) - 1;
@@ -795,6 +859,7 @@ function placeMidSide(
   spanLength: number,
   maxSpanMm: number | undefined,
   cornerRad: number,
+  tabChoice: TabChoiceMode | undefined,
 ): TabPlacement {
   const sides = sideEdges(edges, widthMm, spanLength);
   const counts = new Map<SideEdge, number>(sides.map((side) => [side, 0] as const));
@@ -827,52 +892,32 @@ function placeMidSide(
   // #1206 (the analyst's step 2) — HOLDING COMES BEFORE THE MARGIN. A stretch still longer than
   // the limit after every margin-respecting place gets ONE centred tab on the longest edge inside
   // it, even where the corner margin would have refused it, provided the tab's WIDTH fits centred.
+  //
+  // #1258 — …BUT ONLY WHEN THE OPERATOR SAID SO. With a mode stated, the stretches are first
+  // REPORTED (each with the tab this step would place, called and not placed); `ask` and
+  // `longerStretch` stop there, `insideMargin` goes on to place them as #1206 always did. With no
+  // mode (a caller outside the model plan) the placement is exactly the pre-#1258 one.
   const tight: TightTab[] = [];
-  if (maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0) {
+  const limited = maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0;
+  let stretches: TabStretch[] | undefined;
+  if (limited && tabChoice !== undefined) {
+    spans.sort((x, y) => x.startArc - y.startArc);
+    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!);
+  }
+  if (limited && (tabChoice === undefined || tabChoice === 'insideMargin')) {
     for (let guard = 0; guard < 512; guard++) {
       spans.sort((a, b) => a.startArc - b.startArc);
       if (spans.length === 0) break;
-      let worst = 0;
-      let worstIndex = -1;
-      for (let i = 0; i < spans.length; i++) {
-        const span = spans[i]!;
-        const next = spans[(i + 1) % spans.length]!;
-        let gap: number;
-        if (spans.length === 1) {
-          gap = perimeter - spanLength;
-        } else {
-          let gapEnd = next.startArc;
-          if (next.startArc < span.endArc) gapEnd += perimeter;
-          gap = gapEnd - span.endArc;
-        }
-        if (gap > worst) {
-          worst = gap;
-          worstIndex = i;
-        }
-      }
-      if (worstIndex < 0 || worst <= maxSpanMm + 1e-9) break;
+      const gap = worstGap(spans, perimeter, spanLength);
+      const worst = gap.gap;
+      const worstIndex = gap.index;
+      if (worstIndex < 0 || worst <= maxSpanMm! + 1e-9) break;
       const span = spans[worstIndex]!;
       const next = spans[(worstIndex + 1) % spans.length]!;
       const from = span.endArc;
       let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
       if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
-      // The longest edge that lies inside this stretch; the TAB'S WIDTH must fit centred within
-      // the STRETCH (the material may cross the short edges' corners — that is the price of
-      // holding), and the tab must not overlap one already placed.
-      let pick: { start: number; end: number } | null = null;
-      for (const edge of edges) {
-        const length = edge.end - edge.start;
-        if (!(length > 0)) continue;
-        const candStart = edge.start + Math.round((from - edge.start) / perimeter) * perimeter;
-        const candEnd = candStart + length;
-        if (candStart < from - 1e-9 || candEnd > to + 1e-9) continue;
-        const centre = candStart + length / 2;
-        if (centre - widthMm / 2 < from - 1e-9 || centre + widthMm / 2 > to + 1e-9) continue;
-        const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
-        const endArc = startArc + spanLength;
-        if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
-        if (pick === null || length > pick.end - pick.start) pick = { start: candStart, end: candEnd };
-      }
+      const pick = pickTightEdge(spans, edges, from, to, widthMm, spanLength, perimeter);
       if (pick === null) break;
       const centre = pick.start + (pick.end - pick.start) / 2;
       const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
@@ -921,7 +966,123 @@ function placeMidSide(
     unplaceable: Math.max(0, count - spans.length),
     added: Math.max(0, spans.length - count),
     tight,
+    ...(tabChoice === undefined ? {} : { stretches: stretches ?? [] }),
   };
+}
+
+/** The widest gap between consecutive spans (sorted by start), mm, and the span it follows. */
+function worstGap(
+  spans: readonly { startArc: number; endArc: number }[],
+  perimeter: number,
+  spanLength: number,
+): { gap: number; index: number } {
+  let worst = 0;
+  let worstIndex = -1;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    const next = spans[(i + 1) % spans.length]!;
+    let gap: number;
+    if (spans.length === 1) {
+      gap = perimeter - spanLength;
+    } else {
+      let gapEnd = next.startArc;
+      if (next.startArc < span.endArc) gapEnd += perimeter;
+      gap = gapEnd - span.endArc;
+    }
+    if (gap > worst) {
+      worst = gap;
+      worstIndex = i;
+    }
+  }
+  return { gap: worst, index: worstIndex };
+}
+
+/**
+ * #1206 step 2's pick, extracted so #1258 can call it without placing: the longest edge that lies
+ * inside the stretch `[from, to]`. THE TAB'S WIDTH must fit centred within the STRETCH (the
+ * material may cross the short edges' corners — that is the price of holding), and the tab must
+ * not overlap one already placed. `null` — no edge qualifies.
+ */
+function pickTightEdge(
+  spans: readonly { startArc: number; endArc: number }[],
+  edges: readonly Edge[],
+  from: number,
+  to: number,
+  widthMm: number,
+  spanLength: number,
+  perimeter: number,
+): { start: number; end: number } | null {
+  let pick: { start: number; end: number } | null = null;
+  for (const edge of edges) {
+    const length = edge.end - edge.start;
+    if (!(length > 0)) continue;
+    const candStart = edge.start + Math.round((from - edge.start) / perimeter) * perimeter;
+    const candEnd = candStart + length;
+    if (candStart < from - 1e-9 || candEnd > to + 1e-9) continue;
+    const centre = candStart + length / 2;
+    if (centre - widthMm / 2 < from - 1e-9 || centre + widthMm / 2 > to + 1e-9) continue;
+    const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+    const endArc = startArc + spanLength;
+    if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
+    if (pick === null || length > pick.end - pick.start) pick = { start: candStart, end: candEnd };
+  }
+  return pick;
+}
+
+/**
+ * #1258 — every stretch the placed spans leave longer than the limit, in contour order, each with
+ * the tab step 2 would put in it (the same {@link pickTightEdge}, called and reported). The spans
+ * must be sorted by start. Nothing is placed here.
+ */
+function stretchesOf(
+  spans: readonly { startArc: number; endArc: number }[],
+  edges: readonly Edge[],
+  segments: readonly Segment[],
+  perimeter: number,
+  widthMm: number,
+  spanLength: number,
+  maxSpanMm: number,
+): TabStretch[] {
+  const out: TabStretch[] = [];
+  if (spans.length === 0) return out;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]!;
+    const next = spans[(i + 1) % spans.length]!;
+    const from = span.endArc;
+    let to: number;
+    let gap: number;
+    if (spans.length === 1) {
+      to = span.startArc + perimeter;
+      gap = perimeter - spanLength;
+    } else {
+      to = next.startArc;
+      if (next.startArc < span.endArc) to += perimeter;
+      gap = to - from;
+    }
+    if (gap <= maxSpanMm + 1e-9) continue;
+    const pick = pickTightEdge(spans, edges, from, to, widthMm, spanLength, perimeter);
+    let candidate: TabStretch['candidate'] = null;
+    if (pick !== null) {
+      const length = pick.end - pick.start;
+      const centre = pick.start + length / 2;
+      const toNearStart = centre - pick.start <= pick.end - centre;
+      candidate = {
+        atXY: pointAt(segments, perimeter, centre),
+        fromCornerMm: length / 2,
+        cornerXY: pointAt(segments, perimeter, toNearStart ? pick.start : pick.end),
+        marginMm: edgeMargin(length, widthMm, spanLength),
+        leavesSpansMm: [centre - spanLength / 2 - from, to - (centre + spanLength / 2)],
+      };
+    }
+    out.push({
+      index: out.length,
+      spanMm: gap,
+      startXY: pointAt(segments, perimeter, from),
+      endXY: pointAt(segments, perimeter, to),
+      candidate,
+    });
+  }
+  return out;
 }
 
 /** The points along the contour from arc `from`, travelling `length` mm (wrapping at the end). */
@@ -1055,11 +1216,13 @@ export function generateProfile(
     let unplaceable = 0;
     let added = 0;
     const tight: TightTab[] = [];
+    const stretches: TabStretch[] = [];
     for (const z of passes) {
       for (const contour of cut.path) {
         const placement = placeTabs(contour, cut.tabs.count, cut.tabs.width, toolRadius, {
           ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
           ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
+          ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
         });
         // Count once per cut, not once per pass: the report is about the tabs, not the Z levels.
         if (z === passes[0]) {
@@ -1067,6 +1230,7 @@ export function generateProfile(
           unplaceable += placement.unplaceable;
           added += placement.added;
           tight.push(...placement.tight);
+          if (placement.stretches !== undefined) stretches.push(...placement.stretches);
         }
         const one = contourMoves(contour, z, tabTopZ, placement, params);
         moves.push(...one.moves);
@@ -1086,7 +1250,7 @@ export function generateProfile(
       estimatedSeconds: estimateCycleSeconds(moves, rapid),
       passKind: 'through',
     });
-    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable, added, tight });
+    tabs.push({ id: cut.id, name: cut.name, spans: placed, unplaceable, added, tight, ...(cut.tabs.tabChoice === undefined ? {} : { stretches }) });
   }
 
   return {
