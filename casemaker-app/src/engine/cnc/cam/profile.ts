@@ -166,8 +166,12 @@ export interface TabStretch {
   spanMm: number;
   startXY: [number, number];
   endXY: [number, number];
-  candidate: {
-    /** The step-2 tab's centre. */
+  /**
+   * EVERY tab `insideMargin` would place in this stretch, in order along it — the placement is
+   * iterative, so a long stretch can take several. Empty: no tab fits in it at all.
+   */
+  candidates: {
+    /** The tab's centre. */
     atXY: [number, number];
     /** The centre's distance to the nearer end of its edge. */
     fromCornerMm: number;
@@ -175,9 +179,11 @@ export interface TabStretch {
     cornerXY: [number, number];
     /** The corner margin of the edge the tab sits on — the usual rule, which this tab is inside. */
     marginMm: number;
-    /** The two stretches that would remain either side of the tab. */
-    leavesSpansMm: [number, number];
-  } | null;
+  }[];
+  /** The unsupported lengths in this stretch once ALL the candidates stand (the whole stretch when there are none). */
+  leavesSpansMm: number[];
+  /** A length left is still past the limit even after every candidate. */
+  stillOverLimit: boolean;
 }
 
 /** #1206 — how the default placement is shaped; the release pass (#1073) states its own targets. */
@@ -657,7 +663,7 @@ export function placeTabs(
     const sorted = placed.spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc })).sort((a, b) => a.startArc - b.startArc);
     const stretches =
       limit !== undefined && Number.isFinite(limit) && limit > 0
-        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit)
+        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit, cornerRad)
         : [];
     return { ...placed, stretches };
   }
@@ -901,60 +907,20 @@ function placeMidSide(
   // REPORTED (each with the tab this step would place, called and not placed); `ask` and
   // `longerStretch` stop there, `insideMargin` goes on to place them as #1206 always did. With no
   // mode (a caller outside the model plan) the placement is exactly the pre-#1258 one.
-  const tight: TightTab[] = [];
+  let tight: TightTab[] = [];
   const limited = maxSpanMm !== undefined && Number.isFinite(maxSpanMm) && maxSpanMm > 0;
   let stretches: TabStretch[] | undefined;
   if (limited && tabChoice !== undefined) {
+    // REPORT FIRST, ON A COPY: the very function that places the tabs below runs here on a clone
+    // of the spans, so what the question lists is what `insideMargin` then places — by
+    // construction, not by a second implementation.
     spans.sort((x, y) => x.startArc - y.startArc);
-    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!);
+    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad);
   }
   if (limited && (tabChoice === undefined || tabChoice === 'insideMargin')) {
-    for (let guard = 0; guard < 512; guard++) {
-      spans.sort((a, b) => a.startArc - b.startArc);
-      if (spans.length === 0) break;
-      const gap = worstGap(spans, perimeter, spanLength);
-      const worst = gap.gap;
-      const worstIndex = gap.index;
-      if (worstIndex < 0 || worst <= maxSpanMm! + 1e-9) break;
-      const span = spans[worstIndex]!;
-      const next = spans[(worstIndex + 1) % spans.length]!;
-      const from = span.endArc;
-      let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
-      if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
-      const pick = pickTightEdge(spans, edges, from, to, widthMm, spanLength, perimeter);
-      if (pick === null) break;
-      const centre = pick.start + (pick.end - pick.start) / 2;
-      const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
-      const endArc = startArc + spanLength;
-      if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) break;
-      spans.push({ startArc, endArc });
-      // The joins the tab's span crosses, and how many of them turn sharper than the placement's
-      // own smooth-arc limit (tabs.cornerDeg — a corner, not an arc joint).
-      const spanStart = centre - spanLength / 2;
-      let joins = 0;
-      let sharpJoins = 0;
-      for (let k = 0; k < segments.length; k++) {
-        let d = (segments[k]!.start - spanStart) % perimeter;
-        if (d < 0) d += perimeter;
-        if (d <= 1e-9 || d >= spanLength - 1e-9) continue;
-        joins += 1;
-        const u = segments[(k - 1 + segments.length) % segments.length]!;
-        const v = segments[k]!;
-        const ud = unitDirection(u.a, u.b);
-        const vd = unitDirection(v.a, v.b);
-        if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > cornerRad) {
-          sharpJoins += 1;
-        }
-      }
-      tight.push({
-        at: pointAt(segments, perimeter, centre),
-        stretchMm: worst,
-        cornerMm: Math.min(centre - pick.start, pick.end - centre),
-        marginMm: edgeMargin(pick.end - pick.start, widthMm, spanLength),
-        joins,
-        sharpJoins,
-      });
-    }
+    // A mode stated: a gap no tab fits in is left (and reported) and the others are still
+    // tabbed. Absent: the pre-#1258 loop, which stops at the first gap it cannot fix.
+    tight = placeStepTwo(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad, tabChoice !== undefined).map((t) => t.tab);
   }
   spans.sort((a, b) => a.startArc - b.startArc);
   return {
@@ -975,16 +941,21 @@ function placeMidSide(
   };
 }
 
-/** The widest gap between consecutive spans (sorted by start), mm, and the span it follows. */
+/**
+ * The widest gap between consecutive spans (sorted by start), mm, and the span it follows. A gap
+ * whose preceding span ends at an arc in `skip` is ignored (#1258: a gap no tab fits in).
+ */
 function worstGap(
   spans: readonly { startArc: number; endArc: number }[],
   perimeter: number,
   spanLength: number,
+  skip?: ReadonlySet<number>,
 ): { gap: number; index: number } {
   let worst = 0;
   let worstIndex = -1;
   for (let i = 0; i < spans.length; i++) {
     const span = spans[i]!;
+    if (skip?.has(Math.round(span.endArc * 1e6)) === true) continue;
     const next = spans[(i + 1) % spans.length]!;
     let gap: number;
     if (spans.length === 1) {
@@ -1034,10 +1005,99 @@ function pickTightEdge(
   return pick;
 }
 
+/** One step-2 tab as placed: its facts for the sheet, and where it sits (arc, nearer corner). */
+interface PlacedTight {
+  tab: TightTab;
+  centreArc: number;
+  cornerArc: number;
+}
+
 /**
- * #1258 — every stretch the placed spans leave longer than the limit, in contour order, each with
- * the tab step 2 would put in it (the same {@link pickTightEdge}, called and reported). The spans
- * must be sorted by start. Nothing is placed here.
+ * #1206 step 2 — THE ITERATIVE PLACEMENT, one function for both uses. Tabs the worst gap, re-sorts
+ * and goes round again while any gap is over the limit, MUTATING `spans`. `skipUnfixable` (#1258):
+ * a gap no tab fits in is marked and passed over, so the other gaps are still tabbed; off, the
+ * loop stops at the first such gap exactly as it always did. The question runs this on a copy
+ * and `insideMargin` runs it on the real spans — the same code on the same input.
+ */
+function placeStepTwo(
+  spans: { startArc: number; endArc: number }[],
+  edges: readonly Edge[],
+  segments: readonly Segment[],
+  perimeter: number,
+  widthMm: number,
+  spanLength: number,
+  maxSpanMm: number,
+  cornerRad: number,
+  skipUnfixable: boolean,
+): PlacedTight[] {
+  const placedTabs: PlacedTight[] = [];
+  const unfixable = new Set<number>();
+  for (let guard = 0; guard < 512; guard++) {
+    spans.sort((a, b) => a.startArc - b.startArc);
+    if (spans.length === 0) break;
+    const gap = worstGap(spans, perimeter, spanLength, unfixable);
+    const worst = gap.gap;
+    const worstIndex = gap.index;
+    if (worstIndex < 0 || worst <= maxSpanMm + 1e-9) break;
+    const span = spans[worstIndex]!;
+    const next = spans[(worstIndex + 1) % spans.length]!;
+    const from = span.endArc;
+    let to = spans.length === 1 ? span.startArc + perimeter : next.startArc;
+    if (spans.length > 1 && next.startArc < span.endArc) to += perimeter;
+    const pick = pickTightEdge(spans, edges, from, to, widthMm, spanLength, perimeter);
+    if (pick === null) {
+      if (!skipUnfixable) break;
+      unfixable.add(Math.round(from * 1e6));
+      continue;
+    }
+    const centre = pick.start + (pick.end - pick.start) / 2;
+    const startArc = (((centre - spanLength / 2) % perimeter) + perimeter) % perimeter;
+    const endArc = startArc + spanLength;
+    if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) {
+      if (!skipUnfixable) break;
+      unfixable.add(Math.round(from * 1e6));
+      continue;
+    }
+    spans.push({ startArc, endArc });
+    // The joins the tab's span crosses, and how many of them turn sharper than the placement's
+    // own smooth-arc limit (tabs.cornerDeg — a corner, not an arc joint).
+    const spanStart = centre - spanLength / 2;
+    let joins = 0;
+    let sharpJoins = 0;
+    for (let k = 0; k < segments.length; k++) {
+      let d = (segments[k]!.start - spanStart) % perimeter;
+      if (d < 0) d += perimeter;
+      if (d <= 1e-9 || d >= spanLength - 1e-9) continue;
+      joins += 1;
+      const u = segments[(k - 1 + segments.length) % segments.length]!;
+      const v = segments[k]!;
+      const ud = unitDirection(u.a, u.b);
+      const vd = unitDirection(v.a, v.b);
+      if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > cornerRad) {
+        sharpJoins += 1;
+      }
+    }
+    placedTabs.push({
+      tab: {
+        at: pointAt(segments, perimeter, centre),
+        stretchMm: worst,
+        cornerMm: Math.min(centre - pick.start, pick.end - centre),
+        marginMm: edgeMargin(pick.end - pick.start, widthMm, spanLength),
+        joins,
+        sharpJoins,
+      },
+      centreArc: centre,
+      cornerArc: centre - pick.start <= pick.end - centre ? pick.start : pick.end,
+    });
+  }
+  return placedTabs;
+}
+
+/**
+ * #1258 — every stretch the placed spans leave longer than the limit, in contour order, with EVERY
+ * tab `insideMargin` would place in it (`candidates`, in order along the stretch) and the spans
+ * left AFTER all of them (`leavesSpansMm`; `stillOverLimit` when one is still past the limit). The
+ * spans must be sorted by start. Nothing is placed here: {@link placeStepTwo} runs on a copy.
  */
 function stretchesOf(
   spans: readonly { startArc: number; endArc: number }[],
@@ -1047,9 +1107,12 @@ function stretchesOf(
   widthMm: number,
   spanLength: number,
   maxSpanMm: number,
+  cornerRad: number,
 ): TabStretch[] {
   const out: TabStretch[] = [];
   if (spans.length === 0) return out;
+  // The stretches as they stand, in arc space.
+  const intervals: { from: number; to: number; gap: number }[] = [];
   for (let i = 0; i < spans.length; i++) {
     const span = spans[i]!;
     const next = spans[(i + 1) % spans.length]!;
@@ -1064,27 +1127,39 @@ function stretchesOf(
       if (next.startArc < span.endArc) to += perimeter;
       gap = to - from;
     }
-    if (gap <= maxSpanMm + 1e-9) continue;
-    const pick = pickTightEdge(spans, edges, from, to, widthMm, spanLength, perimeter);
-    let candidate: TabStretch['candidate'] = null;
-    if (pick !== null) {
-      const length = pick.end - pick.start;
-      const centre = pick.start + length / 2;
-      const toNearStart = centre - pick.start <= pick.end - centre;
-      candidate = {
-        atXY: pointAt(segments, perimeter, centre),
-        fromCornerMm: length / 2,
-        cornerXY: pointAt(segments, perimeter, toNearStart ? pick.start : pick.end),
-        marginMm: edgeMargin(length, widthMm, spanLength),
-        leavesSpansMm: [centre - spanLength / 2 - from, to - (centre + spanLength / 2)],
-      };
+    if (gap > maxSpanMm + 1e-9) intervals.push({ from, to, gap });
+  }
+  if (intervals.length === 0) return out;
+  // The placement, on a copy, then each placed tab filed under the stretch it falls in.
+  const copy = spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc }));
+  const placed = placeStepTwo(copy, edges, segments, perimeter, widthMm, spanLength, maxSpanMm, cornerRad, true);
+  const lift = (arc: number, from: number): number => from + ((((arc - from) % perimeter) + perimeter) % perimeter);
+  for (const iv of intervals) {
+    const mine = placed
+      .map((p) => ({ p, at: lift(p.centreArc, iv.from) }))
+      .filter((m) => m.at <= iv.to + 1e-9)
+      .sort((x, y) => x.at - y.at);
+    // The spans left in this stretch once those tabs stand: the gaps between from, each tab's span, to.
+    const leaves: number[] = [];
+    let cursor = iv.from;
+    for (const m of mine) {
+      leaves.push(m.at - spanLength / 2 - cursor);
+      cursor = m.at + spanLength / 2;
     }
+    leaves.push(mine.length === 0 ? iv.gap : iv.to - cursor);
     out.push({
       index: out.length,
-      spanMm: gap,
-      startXY: pointAt(segments, perimeter, from),
-      endXY: pointAt(segments, perimeter, to),
-      candidate,
+      spanMm: iv.gap,
+      startXY: pointAt(segments, perimeter, iv.from),
+      endXY: pointAt(segments, perimeter, iv.to),
+      candidates: mine.map((m) => ({
+        atXY: m.p.tab.at,
+        fromCornerMm: m.p.tab.cornerMm,
+        cornerXY: pointAt(segments, perimeter, m.p.cornerArc),
+        marginMm: m.p.tab.marginMm,
+      })),
+      leavesSpansMm: leaves,
+      stillOverLimit: leaves.some((v) => v > maxSpanMm + 1e-9),
     });
   }
   return out;
