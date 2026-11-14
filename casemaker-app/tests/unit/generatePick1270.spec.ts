@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pickUnderProgress } from '@/store/generatePick';
 import { useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
+import { beforeEach as beforeEachSettled } from 'vitest';
+import { settleShopSettings } from '../tools/settledShop';
+
+// #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
+beforeEachSettled(() => settleShopSettings());
 
 /** A pick that settles when the test says so. */
 function slowPick<T>(): { promise: Promise<T>; finish: (v: T) => void } {

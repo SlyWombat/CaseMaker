@@ -39,6 +39,11 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { setSimClientLoader, type SimClient } from '@/store/simStore';
 import type { SimLoadResult } from '@/workers/sim/session';
 import type { EngraveCutout, EngraveJob, EngraveKeepOut } from '@/types/engraveJob';
+import { beforeEach as beforeEachSettled } from 'vitest';
+import { settleShopSettings } from '../tools/settledShop';
+
+// #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
+beforeEachSettled(() => settleShopSettings());
 
 /** The 3.175 mm flat the cut-out specs use: 20 mm of flute and shoulder clears a 12.3 mm cut. */
 const PROFILER = flatEndMill(3.175, {

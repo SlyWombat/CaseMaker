@@ -75,12 +75,19 @@ import {
   marginsKey,
   runInputs,
   RUN_INPUT_ORDER,
-  shopKey,
+  shopSettingsKey,
   surfaceKey,
   type EngraveInputKey,
   type EngraveRunInputs,
 } from '@/engine/cnc/engrave/runInputs';
 import type { SurfacePostFit } from '@/engine/cnc/engrave/surfaceSpread';
+import {
+  SETTINGS_ABSENT_SENTENCE,
+  SETTINGS_READING_LABEL,
+  SETTINGS_UNREAD_RECHECK,
+  SETTINGS_UNREAD_SENTENCE,
+  type ShopSettingsRead,
+} from '@/engine/cnc/engrave/settingsWords';
 import { useSettingsStore } from './settingsStore';
 import { useEngraveJobStore } from './engraveJobStore';
 import { useEngravePreviewStore } from './engravePreviewStore';
@@ -265,6 +272,12 @@ export function setEngraveRunClientLoader(fn: (() => Promise<EngraveRunClient>) 
  * the planner the Generate press would run; asking the page's worker while the press would ask
  * the house would report a difference that is not the build's.
  */
+/** #1276 — the settings store's state, map and version READ TOGETHER (never the map alone: it is null in three states). */
+function shopSettingsNow(): ShopSettingsRead {
+  const s = useShopDefaultsStore.getState();
+  return { status: s.status, defaults: s.defaults, etag: s.etag };
+}
+
 async function clientForGenerate(): Promise<EngraveRunClient> {
   const base = await clientLoader();
   // #1175 — THE PUBLISH SWITCH. `true` forces the in-page worker for every Generate, exactly as a
@@ -594,6 +607,13 @@ export interface EngraveRunState {
    */
   cancelGenerate: () => void;
   /**
+   * #1276 — SETTLE THE SHOP'S SETTINGS BEFORE A PRESS PLANS ANYTHING (the cutter pick included). `true` =
+   * `present` or `absent`: go on. `unknown` is waited for (the run says "reading the shop's settings");
+   * `error` — or a read that ends in it — sets the run `blocked` with the unread sentence and answers
+   * `false`: the press does not go on. The run's phase is put back as it was when the wait ends well.
+   */
+  awaitShopSettings: () => Promise<boolean>;
+  /**
    * #1270 — THE MEASURED CUTTER PICK IS PART OF THE PRESS. Generate with no cutter chosen first runs
    * the measured pick, which can take minutes over a large inventory; the run state did not exist
    * until after it, so the button stayed live and nothing moved. `beginPick` puts the run into
@@ -740,6 +760,28 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     const simulateOnly = opts.simulateOnly === true;
     const priorGenerated = get().generated;
     if (simulateOnly && (priorGenerated === null || priorGenerated.nc === null || get().staleSince !== null)) return;
+    // #1276 — THE SHOP'S SETTINGS FIRST, before the job is read and before anything is planned.
+    // A planning press never goes on a map that has not arrived (`unknown`: it WAITS for the read, on a
+    // progress line that says so) and never on one that could not be read (`error`: it does not run).
+    // `absent` (no house at all, the hosted build) plans on the recommendations and says so afterwards.
+    let settings: ShopSettingsRead = shopSettingsNow();
+    if (!simulateOnly && settings.status === 'unknown') {
+      const waiting = ++seq;
+      const was = get().phase;
+      phaseBeforeRun = was;
+      pickPhaseBefore = was === 'generating' || was === 'simulating' || was === 'checking' ? null : was;
+      set({ phase: 'generating', progress: { stage: 'prepare', label: SETTINGS_READING_LABEL } });
+      await useShopDefaultsStore.getState().refresh();
+      // A Stop (or a newer press) while the read was out: that press owns the state now.
+      if (seq !== waiting || get().phase !== 'generating') return;
+      settings = shopSettingsNow();
+    }
+    if (!simulateOnly && settings.status !== 'present' && settings.status !== 'absent') {
+      // `error` (or a read that ended unknown): fail closed. The previous result stays as it was.
+      pickPhaseBefore = null;
+      set({ phase: 'blocked', progress: null, error: SETTINGS_UNREAD_SENTENCE });
+      return;
+    }
     const job = useEngraveJobStore.getState().job;
     const mine = ++seq;
     // #581 — WHAT THE RUN BEFORE THIS ONE SAW, captured before the reset below clears the result.
@@ -796,8 +838,9 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     // the warn ratio decides which items fail `item-detail-lost`, the peck clearance decides the
     // Z each drill's re-entry rapid stops at, and the whole location crosses as `defaults` so the
     // worker can read the `thread.*` set (#445 D6) without a second IPC. Reading them before the
-    // await keeps the run's inputs one snapshot.
-    const shopDefaults = useShopDefaultsStore.getState().defaults;
+    // await keeps the run's inputs one snapshot. (#1276: the map, its state and its version were
+    // read TOGETHER at the top of this run — never the map alone.)
+    const shopDefaults = settings.defaults;
     // #442's #427 item — the mount's obstacles, resolved HERE for the same reason the shop defaults
     // are: the bracket's sizes live in the location's defaults and the worker must not import the
     // defaults client. `null` in the vise, and then the verifier and the sweep are exactly what
@@ -855,6 +898,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       margins,
       calibration,
       shopDefaults,
+      shopStatus: settings.status,
       feeds: shop.feeds ?? [],
       catalogue,
       tools: shop.tools ?? [],
@@ -1002,6 +1046,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       return;
     }
     if (mine !== seq) return;
+
+    // #1276 — A RUN PLANNED WITH NO SHOP CONNECTED SAYS SO, once, on the run and so on its sheet.
+    if (settings.status === 'absent' && !simulateOnly) {
+      generated = {
+        ...generated,
+        findings: [...generated.findings, { severity: 'info', code: 'location-no-settings', message: SETTINGS_ABSENT_SENTENCE }],
+      };
+    }
 
     // The job may have been edited while generating: the result already describes an older job. So
     // may the machine's saved frame (#301), and so may the depth margins (#345): the program above
@@ -1626,10 +1678,24 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
       if (generated === null) return;
       // A new Generate (or another restore) replaced the run this check was asked about.
       if (get().generated !== generated) return;
+      // #1276 — the same rule at the re-check: wait for an unread map, and do not check against the
+      // recommendations in silence when the shop's settings could not be read. A run that could not be
+      // re-checked is not offered as current.
+      let settings = shopSettingsNow();
+      if (settings.status === 'unknown') {
+        await useShopDefaultsStore.getState().refresh();
+        if (get().generated !== generated) return;
+        settings = shopSettingsNow();
+      }
+      if (settings.status !== 'present' && settings.status !== 'absent') {
+        markStale('shop');
+        set({ restoreNote: SETTINGS_UNREAD_RECHECK, restoreChecking: false });
+        return;
+      }
       const job = useEngraveJobStore.getState().job;
       const calibration = useSettingsStore.getState().machineCalibration ?? null;
       const machine = jobMachine(job, calibration);
-      const shopDefaults = useShopDefaultsStore.getState().defaults;
+      const shopDefaults = settings.defaults;
       const mount = jobMountObstacles(job, shopDefaults);
       const bed = bedUnderFacts(
         machineForJob(useLocationStore.getState().location, job.machineId),
@@ -1680,7 +1746,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         // the job the operator has, not a second reading of it.
         const calibration = useSettingsStore.getState().machineCalibration ?? null;
         const margins = effectiveMargins(job, useSettingsStore.getState().margins);
-        const shopDefaults = useShopDefaultsStore.getState().defaults;
+        // #1276 — a background comparison does not plan on a map that has not arrived or could not be
+        // read: it keeps the run (the comparison offers a change; with no settings it offers none).
+        const read = shopSettingsNow();
+        if (read.status !== 'present' && read.status !== 'absent') {
+          set({ buildCompare: { status: 'kept', changed: 0, total: restored.programs.length } });
+          return;
+        }
+        const shopDefaults = read.defaults;
         const mount = jobMountObstacles(job, shopDefaults);
         const bed = bedUnderFacts(
           machineForJob(useLocationStore.getState().location, job.machineId),
@@ -1743,6 +1816,23 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           ? {}
           : { buildCompare: { ...state.buildCompare, status: 'kept' } },
       ),
+    awaitShopSettings: async () => {
+      let settings = shopSettingsNow();
+      if (settings.status === 'unknown') {
+        const was = get().phase;
+        if (was === 'generating' || was === 'simulating' || was === 'checking') return false;
+        const waiting = ++seq;
+        set({ phase: 'generating', progress: { stage: 'prepare', label: SETTINGS_READING_LABEL } });
+        await useShopDefaultsStore.getState().refresh();
+        // A Stop while the read was out: that Stop owns the state.
+        if (seq !== waiting || get().phase !== 'generating') return false;
+        settings = shopSettingsNow();
+        set({ phase: was, progress: null });
+      }
+      if (settings.status === 'present' || settings.status === 'absent') return true;
+      set({ phase: 'blocked', progress: null, error: SETTINGS_UNREAD_SENTENCE });
+      return false;
+    },
     cancelGenerate: () => {
       const phase = get().phase;
       if (phase !== 'generating' && phase !== 'simulating' && phase !== 'checking') return;
@@ -1864,6 +1954,8 @@ export function runShopSignature(): string {
   const tools = useToolRegistryStore.getState();
   return [
     `location:${location.status}:${location.etag ?? ''}`,
+    // #1276 — the settings' state and version: a result planned under one is stale under another.
+    `settings:${useShopDefaultsStore.getState().status}:${useShopDefaultsStore.getState().etag ?? ''}`,
     `tools:${tools.status}:${tools.etag ?? ''}`,
     `feeds:${tools.feedEtag ?? ''}`,
     `inventory:${tools.inventoryEtag ?? ''}`,
@@ -1888,6 +1980,7 @@ export function currentRunInputStamps(): EngraveRunInputs {
     margins: effectiveMargins(job, settings.margins),
     calibration: settings.machineCalibration ?? null,
     shopDefaults: useShopDefaultsStore.getState().defaults,
+    shopStatus: useShopDefaultsStore.getState().status,
     feeds: resolvedFeedsTable().table,
     catalogue: feedCatalogueRows(),
     tools: dedupeCutterEntries(getTools()),
@@ -1932,9 +2025,10 @@ function staleIfMoved(key: EngraveInputKey, current: string): void {
 }
 
 useShopDefaultsStore.subscribe((state, prev) => {
-  // A re-read of the same document is a new object with the same values; `shopKey` settles it.
-  if (state.defaults === prev.defaults) return;
-  staleIfMoved('shop', shopKey(state.defaults));
+  // A re-read of the same document is a new object with the same values; the key settles it. The
+  // STATE is part of the stamp (#1276): `absent`/`error` → `present` is a change though both maps were null before.
+  if (state.defaults === prev.defaults && state.status === prev.status) return;
+  staleIfMoved('shop', shopSettingsKey(state.status, state.defaults));
 });
 
 useFeedTableStore.subscribe((state, prev) => {

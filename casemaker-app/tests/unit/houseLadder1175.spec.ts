@@ -52,6 +52,11 @@ import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRu
 import { getTools } from '@/engine/cnc/toolRegistry';
 import { useSimStore } from '@/store/simStore';
 import type { SimLoadOk } from '@/workers/sim/session';
+import { beforeEach as beforeEachSettled } from 'vitest';
+import { settleShopSettings } from '../tools/settledShop';
+
+// #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
+beforeEachSettled(() => settleShopSettings());
 
 function swept(over: Partial<SimLoadOk> = {}): SimLoadOk {
   return {
