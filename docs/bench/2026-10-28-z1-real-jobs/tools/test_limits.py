@@ -73,6 +73,27 @@ def test_over_limit_records_both_numbers_and_the_last_phase():
         assert ok['timeout'] is False and ok['exit'] == 0 and ok['reached'] is None
 
 
+def test_a_card_that_asks_the_tab_question_is_its_own_outcome_and_is_never_answered():
+    import build
+    asked = [{'code': 'stopped', 'reason': 'stopped at cam'},
+             {'code': 'tab-choice-needed', 'reason': "This part can't be held within both of the shop's tab rules. Choose one: --tab-choice inside-margin"}]
+    q = limits.tab_choice_question(asked)
+    assert q is not None and q.startswith("This part can't be held") and 'inside-margin' in q
+    assert limits.needs_choice_record(q) == {'outcome': 'needs-choice', 'question': q}
+    # an ordinary refusal, a stage error and no refusals at all are not the question
+    assert limits.tab_choice_question([{'code': 'stage-error', 'reason': 'boom'}]) is None
+    assert limits.tab_choice_question([]) is None and limits.tab_choice_question(None) is None
+    # the receipt reader keeps it among the real refusals (only `stopped` and `nothing-written` are dropped)
+    with tempfile.TemporaryDirectory() as d:
+        json.dump({'ok': False, 'stage': 'cam', 'refusals': asked}, open(os.path.join(d, 'receipt.json'), 'w'))
+        rc = build.load_receipt(d)
+        assert limits.tab_choice_question(rc['refusals']) == q
+    # it has its own pill, and the builder records the question without ever passing an answer
+    assert build.PILL['needs-choice'][1] == "Needs the operator's choice"
+    src = open(os.path.join(HERE, 'build.py')).read()
+    assert "'--tab-choice'" not in src and '"--tab-choice"' not in src, 'the builder never answers the question'
+
+
 def test_last_phase_maps_stages_and_says_when_there_is_no_trace():
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, 't.jsonl')

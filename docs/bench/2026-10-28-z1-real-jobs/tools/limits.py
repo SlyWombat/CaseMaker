@@ -134,6 +134,20 @@ def over_limit_record(limit_seconds, elapsed_seconds, reached):
     return {'outcome': 'over-limit', 'limitSeconds': limit_seconds, 'elapsedSeconds': elapsed_seconds, 'reached': reached}
 
 
+def tab_choice_question(refusals):
+    """#1258 — a card whose run STOPPED TO ASK the tab question is its own outcome, not a refusal and not an error: the question
+    (the receipt's own sentence, with each stretch's numbers and the two flag values) or None when the receipt does not carry it.
+    The builder records the question and never answers it — no `--tab-choice` is ever passed here."""
+    for x in refusals or []:
+        if isinstance(x, dict) and x.get('code') == 'tab-choice-needed':
+            return x.get('reason') or ''
+    return None
+
+
+def needs_choice_record(question):
+    return {'outcome': 'needs-choice', 'question': question}
+
+
 def over_limit_sentence(rec):
     r = rec.get('reached')
     where = f"reached: {r['phase']} at {round((r.get('tMs') or 0) / 1000)} s of the trace" if r else 'reached: not traced'
