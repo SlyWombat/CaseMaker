@@ -286,10 +286,17 @@ def fixture_edge_break(tmp, stated):
 def main():
     with tempfile.TemporaryDirectory(prefix='goal-check-selftest-') as tmp:
         # A — a plunge: the disc's lattice points strictly inside r = 1.0; max depth exactly 1 mm.
+        # #1251 — THE EDGE BAND moves ONE pin. The 12 lattice points exactly on the rim (i^2 + j^2 = 100)
+        # sit on a flat floor at -0.5 (the stock top is 0.0). v8 left them untouched, 0.5 mm proud, so
+        # they stood in the leftover; v9 judges an edge cell by the goal: the plunge's descent lowers
+        # each of them while the tip is at or above the goal, and stops at the goal (the last step to
+        # -1.5 would take it below). They end at -0.5, exactly the goal, so the share standing more than
+        # 0.1 mm above it falls by 12 / 20,000 = 0.06 %: 98.47 -> 98.41. Cut-into stays 305 cells
+        # (1.52 %). The app's stamp and this checker agree on all 20,000 cells of this plunge.
         s = fixture_plunge(tmp)
         check('A plunge', s, {'goalCells': 20000, 'cutIntoInclEdgePct': 1.52,
                               'cutInto0p1Pct': 1.52, 'maxCutIntoMm': 1.0,
-                              'leftover0p1Pct': 98.47, 'medianMm': 0.5})
+                              'leftover0p1Pct': 98.41, 'medianMm': 0.5})
         # B — a clean pocket: the sweep equals the goal, so nothing is cut into or left.
         s = fixture_pocket(tmp)
         check('B clean pocket', s, {'goalCells': 4941, 'cutIntoInclEdgePct': 0.0,
