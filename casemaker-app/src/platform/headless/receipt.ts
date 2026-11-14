@@ -974,9 +974,10 @@ function engraveLines(receipt: Extract<Receipt, { command: 'engrave' }>): string
     }
     const findings = findingsOf(receipt, program.name);
     const errors = findings.filter((f) => f.severity === 'error');
-    lines.push(`  findings   ${errors.length} error, ${findings.length - errors.length} warning`);
+    const warnings = findings.filter((f) => f.severity === 'warning');
+    lines.push(`  findings   ${errors.length} error, ${warnings.length} warning`);
     for (const f of errors) lines.push(`     ERROR ${f.code}: ${f.message}`);
-    for (const f of findings.filter((x) => x.severity === 'warning')) {
+    for (const f of warnings) {
       lines.push(`     warn  ${f.code}: ${f.message}`);
     }
     for (const f of receipt.diagnostics.filter(
