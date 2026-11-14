@@ -2921,6 +2921,17 @@ const engraveJobV2Schema = engraveJobV1Schema.extend({
   stockEntry: stockEntrySchema
     .optional()
     .describe('Where the stock came from: a shelf entry, a file, or made in place.'),
+  // #1258 — the operator's answer to the tab question, kept with the job and honoured on every
+  // regenerate until the outline or the tab settings change (`answeredFor` echoes the question's
+  // fingerprint). OPTIONAL and not defaulted: absent means nothing was asked or nothing answered, and
+  // every stored job round-trips byte-for-byte.
+  tabChoice: z
+    .object({
+      choice: z.enum(['insideMargin', 'longerStretch']).describe('The answer: a tab inside the corner margin, or a longer unsupported stretch.'),
+      answeredFor: z.string().min(1).describe('The fingerprint of the question this answers; a changed outline or tab setting voids it.'),
+    })
+    .optional()
+    .describe('The operator\'s answer to the tab question, when the corner margin and the span limit could not both be met.'),
   // #419 J2's setups. OPTIONAL and NOT defaulted: absent is today's single implicit top-up vise
   // setup, and it must stay absent so every stored job round-trips byte-for-byte (the same rule as
   // `combined`/`traces`/`vectors`/`keepOuts`/`drills`). Consumers read it through `jobSetups`, which

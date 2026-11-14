@@ -156,6 +156,13 @@ describe('#1258 the contour op: byte-identical on insideMargin, the question oth
     expect((left.notes ?? []).join('\n')).not.toMatch(/Tab \d+ sits/);
   });
 
+  it('the sheet states the in-margin tabs in tab-number order', () => {
+    const notes = (runContour(teeth(), { tabChoice: 'insideMargin' }).notes ?? []).filter((n) => /Tab \d+ sits/.test(n));
+    const numbers = notes.map((n) => Number(/Tab (\d+) sits/.exec(n)![1]));
+    expect(numbers.length).toBeGreaterThan(1);
+    expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+  });
+
   it('a no-fit stretch under insideMargin stays long and is stated, not refused', () => {
     const out = runContour(round(), { count: 1, maxSpanMm: 40, tabChoice: 'insideMargin' });
     expect((out.notes ?? []).join('\n')).toMatch(/of the outline has no tab and no tab fits there; the shop's limit is 40 mm\./);

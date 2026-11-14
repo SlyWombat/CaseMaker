@@ -216,6 +216,8 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     }
     return total;
   };
+  // The sentences are written in TAB-NUMBER order (per cut-out), not in the order the loop placed them.
+  const tabSentences: { ring: number; n: number; text: string }[] = [];
   placements.forEach((placement, i) => {
     if (placement.tight.length === 0) return;
     const centres = placement.spans.map((span) => midpointOfRun(span.points));
@@ -230,13 +232,18 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           n = k + 1;
         }
       });
-      tabNotes.push(
-        `${ringOf(i)}Tab ${n} sits ${mm(tab.cornerMm)} mm from a corner, closer than the edge's ${mm(tab.marginMm)} mm margin — the operator's choice. ` +
+      tabSentences.push({
+        ring: i,
+        n,
+        text:
+          `${ringOf(i)}Tab ${n} sits ${mm(tab.cornerMm)} mm from a corner, closer than the edge's ${mm(tab.marginMm)} mm margin — the operator's choice. ` +
           `Longest stretch without a tab: ${mm(longest)} mm. ` +
           `It crosses ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline, ${tab.sharpJoins === 0 ? 'none' : tab.sharpJoins} sharp.`,
-      );
+      });
     }
   });
+  tabSentences.sort((a, b) => a.ring - b.ring || a.n - b.n);
+  for (const s of tabSentences) tabNotes.push(s.text);
 
   // #1258 — THE STRETCHES THE MARGIN LEFT, across every ring (re-indexed in ring order), and what
   // the answer did with them. `ask` states nothing here: the plan stops and asks. `insideMargin`'s

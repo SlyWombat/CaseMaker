@@ -11,94 +11,42 @@
  * edges each hold one tab and the stretches between them stay over the limit (no tab fits in them).
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import type { CommandOptions } from '../../scripts/lib/casemaker/output';
-import { defaultEngraveJob } from '../../src/engine/cnc/engrave/defaults';
 import type { Receipt } from '../../src/platform/headless/receipt';
-import type { EngraveJob, EngraveTargetObject } from '../../src/types/engraveJob';
-import { stl, type MeshTri } from './helpers/meshes';
+import { blockJob, blockLocation, SETB } from './helpers/tabChoiceBlock1258';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const SETB = join(HERE, 'fixtures', 'giraffe-1155', 'setb');
 const NOW = new Date('2026-11-13T12:00:00.000Z');
 const SCRATCH = mkdtempSync(join(tmpdir(), 'casemaker-tab-choice-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
-
-/** The committed Set B shop (owned flats and balls with feeds) with its span limit moved to the registry's lowest, 10 mm. */
-function location(): string {
-  const doc = JSON.parse(readFileSync(join(SETB, 'location.json'), 'utf8')) as { defaults: Record<string, Record<string, unknown>> };
-  doc.defaults['tabs.maxSpanMm'] = {
-    value: 10,
-    source: 'chosen',
-    setAt: '2026-11-13T12:00:00.000Z',
-    unit: 'mm',
-    note: 'chosen for this spec: the lowest span limit the registry allows',
-  };
-  const path = join(SCRATCH, 'location.json');
-  writeFileSync(path, JSON.stringify(doc, null, 2));
-  return path;
-}
-
-function boxTarget(): EngraveTargetObject {
-  const [w, d, h] = [27, 10, 10];
-  const v: [number, number, number][] = [
-    [1, 1, 0], [w - 1, 1, 0], [w - 1, d - 1, 0], [1, d - 1, 0],
-    [0, 0, -h], [w, 0, -h], [w, d, -h], [0, d, -h],
-  ];
-  const faces: [number, number, number][] = [
-    [0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6],
-    [0, 4, 5], [0, 5, 1], [1, 5, 6], [1, 6, 2],
-    [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0],
-  ];
-  const tris: MeshTri[] = faces.map((f) => [v[f[0]]!, v[f[1]]!, v[f[2]]!]);
-  return {
-    id: 'goal-1258',
-    name: 'block-1258.stl',
-    format: 'stl',
-    sha256: 'e'.repeat(64),
-    data: stl(tris),
-    size: { x: w, y: d, z: h },
-    position: { x: 30, y: 20, z: 0 },
-    rotation: 0,
-    enabled: true,
-    role: 'goal',
-  };
-}
-
-function job(): EngraveJob {
-  return {
-    ...defaultEngraveJob(),
-    labels: [],
-    shapes: [],
-    stock: { ...defaultEngraveJob().stock, length: 60, width: 40, thickness: 10, material: 'hardwood' },
-    targetObject: boxTarget(),
-  };
-}
 
 interface Run {
   code: number;
   receipt: Receipt;
   outDir: string;
   progress: string[];
+  /** The `--generated` document (the house path), or null when none was written. */
+  generated: Record<string, unknown> | null;
 }
 
 async function cut(name: string, flag: string[]): Promise<Run> {
   const outDir = join(SCRATCH, name);
   mkdirSync(outDir, { recursive: true });
   const jobPath = join(outDir, 'job.json');
-  writeFileSync(jobPath, JSON.stringify(job(), null, 2) + '\n');
+  const generatedPath = join(outDir, 'generated.json');
+  writeFileSync(jobPath, JSON.stringify(blockJob(), null, 2) + '\n');
   let receipt: Receipt | null = null;
   const progress: string[] = [];
   const options: CommandOptions = { json: true, now: NOW, sink: { progress: (line) => progress.push(line), receipt: (r) => { receipt = r; } } };
-  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', location(), '--catalogue', join(SETB, 'catalogue.json'), ...flag], options);
-  return { code, receipt: receipt!, outDir, progress };
+  const code = await engraveJobMain([jobPath, '--out', outDir, '--location', blockLocation(SCRATCH), '--catalogue', join(SETB, 'catalogue.json'), '--generated', generatedPath, ...flag], options);
+  const generated = existsSync(generatedPath) ? (JSON.parse(readFileSync(generatedPath, 'utf8')) as Record<string, unknown>) : null;
+  return { code, receipt: receipt!, outDir, progress, generated };
 }
 
 const sheetText = (outDir: string): string =>
@@ -122,6 +70,14 @@ describe('#1258 casemaker cut, flag to planner', () => {
     const said = run.progress.join('\n');
     expect(said).toContain('the pick ranked the cutters under a provisional tab answer');
     expect(said).not.toContain("the pick's plan reused");
+    // THE HOUSE PATH: on a stop the failed generate result is written to `--generated` WITH the
+    // structured question, so a house-backed run can draw the card.
+    expect(run.generated).not.toBeNull();
+    const asked = run.generated as { ok: boolean; stage: string; programs?: unknown[]; tabChoiceNeeded?: { fingerprint: string; stretches: unknown[]; setups: unknown[] } };
+    expect(asked.ok).toBe(false);
+    expect(asked.tabChoiceNeeded?.stretches.length).toBeGreaterThan(0);
+    expect(asked.tabChoiceNeeded?.setups.length).toBeGreaterThan(0);
+    expect(asked.tabChoiceNeeded?.fingerprint).toMatch(/^[0-9a-f]{8}$/);
   }, 300_000);
 
   for (const [flag, sentence] of [
@@ -139,6 +95,13 @@ describe('#1258 casemaker cut, flag to planner', () => {
       const said = run.progress.join('\n');
       expect(said).toContain("the pick's plan reused");
       expect(said).not.toContain('provisional tab answer');
+      // THE HOUSE PATH, answered: the generated document carries the programs and the question the
+      // answer was given for (`plan.tabChoiceApplied`), so an answered summary survives a reopen.
+      const gen = run.generated as { ok: boolean; programs: unknown[]; plan: { tabChoiceApplied?: { choice: string; stretches: unknown[] } } };
+      expect(gen.ok).toBe(true);
+      expect(gen.programs.length).toBeGreaterThan(0);
+      expect(gen.plan.tabChoiceApplied?.choice).toBe(flag === 'inside-margin' ? 'insideMargin' : 'longerStretch');
+      expect(gen.plan.tabChoiceApplied?.stretches.length).toBeGreaterThan(0);
     }, 300_000);
   }
 });

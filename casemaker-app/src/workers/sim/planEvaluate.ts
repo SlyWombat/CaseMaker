@@ -643,6 +643,7 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
           conditions: ctx.conditions ?? ctx.runShop.conditions ?? null,
           ...(ctx.table === undefined ? {} : { feeds: ctx.table }),
         };
+  const answer = ctx.tabChoice ?? job.tabChoice;
   const gen = await engraveGenerate(
     ctx.tl,
     applied,
@@ -660,13 +661,26 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
     // #1258 — the caller's answer, when it has one: a candidate is evaluated under the answer the
     // cut will carry. With none, a PROVISIONAL `insideMargin` so a candidate that would ask is still
     // measured and ranked (flagged below; never reused as the final plan).
-    { ownedOnly: true, tabChoice: ctx.tabChoice ?? { choice: 'insideMargin' } },
+    // The answer a candidate is measured under: the caller's explicit one (the CLI's flag), else the
+    // JOB's saved one (the app — the pick is handed no explicit answer), else a provisional
+    // `insideMargin` so a candidate that would ask is still ranked. ONLY THE CHOICE reaches a
+    // candidate, never `answeredFor`: a fingerprint describes one question, and a candidate with a
+    // different cutter radius would read it as stale and ask — `invalid-job` again.
+    { ownedOnly: true, tabChoice: { choice: answer?.choice ?? 'insideMargin' } },
   );
-  const tabQuestion =
-    ctx.tabChoice === undefined &&
+  // THE PICK'S PLAN IS REUSED AS THE FINAL ONE ONLY WHEN IT IS PROVEN FOR THIS QUESTION: no question
+  // arose, or the explicit answer carries no fingerprint (the CLI's, for the job as it stands), or the
+  // plan's own question carries the fingerprint the saved answer was given for. Otherwise (a
+  // provisional answer, an unproven or stale one) it is flagged and withheld: the cut plans again
+  // under the full answer — or asks, naming the stale answer.
+  const asked = gen.plan?.tabChoiceApplied;
+  const questionArose =
     gen.plan !== undefined &&
     gen.plan !== null &&
     gen.plan.perSetup.some((setup) => setup.ops.some((op) => op.outcome.tabChoice !== undefined));
+  const proven =
+    answer !== undefined && (answer.answeredFor === undefined || (asked !== undefined && asked.fingerprint === answer.answeredFor));
+  const tabQuestion = questionArose && !proven;
   const seconds = gen.ok ? gen.programs.reduce((sum, program) => sum + (program.cam?.estimatedSeconds ?? 0), 0) : null;
   const refusal = gen.ok
     ? null

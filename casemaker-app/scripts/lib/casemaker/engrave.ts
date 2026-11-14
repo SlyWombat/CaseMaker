@@ -392,6 +392,12 @@ interface EngraveFailure {
   gate: Receipt['gate'];
   diagnostics: ReceiptDiagnostic[];
   refusals: ReceiptRefusal[];
+  /**
+   * #1258 — the failed generate result, carried ONLY when the run stopped to ask the tab question, so
+   * `--generated` can hand a house-backed run the structured question (`tabChoiceNeeded`, with its
+   * stretches and the drawing data) and not just the receipt's sentence.
+   */
+  generated?: EngraveGenerated;
 }
 
 /**
@@ -1344,6 +1350,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
                   { code: 'stopped', reason: `stopped at ${generated.stage}` },
                   ...generated.errors.map((e) => ({ code: 'stage-error', reason: stageErrorReason(e.message) })),
                 ],
+          ...(generated.tabChoiceNeeded === undefined ? {} : { generated }),
         },
       };
     }
@@ -1963,7 +1970,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ? {}
         : { reusedOwnedPlan: opts.reusedOwnedPlan },
     );
-    if (!prepared.ok) return prepared;
+    if (!prepared.ok) {
+      // #1258 — a run that STOPPED TO ASK still writes its generated document: a house-backed run
+      // draws the card from it. (Every other failure writes none, as before.)
+      if (opts.generatedFile !== undefined && prepared.failure.generated !== undefined) {
+        writeFileSync(opts.generatedFile, JSON.stringify(prepared.failure.generated));
+      }
+      return prepared;
+    }
     if (opts.generatedFile !== undefined) {
       // The browser's worker returns this same plain-data object; the house writes it beside the
       // programs so the panel settles a house run exactly as it settles an in-page one.
