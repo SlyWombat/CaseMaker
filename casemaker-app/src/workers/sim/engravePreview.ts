@@ -57,7 +57,7 @@ import { withCatalogueEntries, withCatalogueValues } from '@/engine/cnc/engrave/
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { recommendTool, type ToolRecommendation } from '@/engine/cnc/engrave/recommendTool';
-import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { refuseFractionOf, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { executeProfile, type ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import { boxSolid, OVERSHOOT_MM } from '@/workers/geometry/sweep';
 import { manifoldOfTriangles, meshOutputOf, type NodeMeshOutput } from '@/workers/geometry/meshOutput';
@@ -1050,6 +1050,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
         const entry = catalogueEntries.find((e) => e.key === key);
         return entry ? raisedText(entry.tool) : [];
       },
+      refuseFractionOf(shop.defaults ?? null),
     );
 
     // #766 — THE MEASURED SEARCH IS DELIBERATELY NOT RUN HERE. Its per-candidate measures cost

@@ -539,6 +539,8 @@ export function recommendTool(
    * area bar alone — the pre-#760 answer.
    */
   measureRaised?: ((toolKey: string) => RaisedTextMeasurement[]) | null,
+  /** #1256 — the shop's `clamp.refuseFraction`, so the recommendation refuses what the cut will; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): ToolRecommendation {
   // The bar a cutter has to clear is #201's own (engraveGeometry's `LOST_DETAIL_RATIO_FALLBACK`
   // unless the caller sends the shop's `engrave.lostDetailWarnRatio`, #451). Passing it here rather
@@ -612,7 +614,7 @@ export function recommendTool(
   // screenshot's ⌀1 mm flat end, an hour and a half of passes). The face rule picks the WIDEST
   // flat end that fits the narrowest face and drills the cross-holes; every fitting width leaves
   // the same face, so width changes the time, not the result.
-  const facePick = faceCutterPick(job, tools, catalogue, conditions, table);
+  const facePick = faceCutterPick(job, tools, catalogue, conditions, table, true, false, refuseFraction);
   if (facePick !== null) {
     return {
       key: facePick.entry.key,
@@ -628,7 +630,7 @@ export function recommendTool(
   // #762 — A GOAL OR A THREAD-ONLY JOB IS NOT A FLAT JOB. A ball and a thread mill are
   // `not-flat` to the candidate map below, so by construction it could never name them; the
   // per-item-kind picker answers instead (the same rule the CLI's multi-cutter plan uses).
-  const kindPick = kindOnlyPick(job, tools, catalogue, conditions, table);
+  const kindPick = kindOnlyPick(job, tools, catalogue, conditions, table, refuseFraction);
   if (kindPick !== null) {
     return {
       key: kindPick.key,
@@ -738,7 +740,7 @@ export function recommendTool(
     }
     // #347 — the JOB's machine. The profile only supplies the clamp ceilings here, which no
     // calibration touches, so this needs no saved frame to be right.
-    if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job), undefined, table).ok) {
+    if (!feedsFor(catalogue, job.stock.material, tool, jobMachine(job), undefined, table, undefined, refuseFraction).ok) {
       return {
         ...base,
         qualifies: false,

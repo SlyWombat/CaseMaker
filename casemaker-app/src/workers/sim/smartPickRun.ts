@@ -24,7 +24,7 @@
 
 import type { EngraveJob } from '@/types/engraveJob';
 import { dedupeCutterEntries, type ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
-import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
+import { refuseFractionOf, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { smartPickKey } from '@/engine/cnc/engrave/measuredPick';
 import {
@@ -93,7 +93,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
 /** `candidatePlans` with the context's own filters — never the three-argument form. */
 export function pickCandidates(inputs: EngravePickInputs): CandidatePlan[] {
   const ctx = pickContext(inputs);
-  return candidatePlans(inputs.job, ctx.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors);
+  return candidatePlans(inputs.job, ctx.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors, refuseFractionOf(inputs.shop.defaults ?? null));
 }
 
 /** One plan, evaluated against the context the search itself uses. */
@@ -132,6 +132,8 @@ export function pickForEngrave(
         : { toolChangeSeconds: inputs.shop.toolChangeSeconds }),
       // #940 — the same floors the candidate filter reads, from the inputs, never a second path.
       ...(inputs.floors === undefined || inputs.floors === null ? {} : { floors: inputs.floors }),
+      // #1256 — the shop's refusal band, so the search refuses what the cut will.
+      refuseFraction: refuseFractionOf(inputs.shop.defaults ?? null),
       ...(evaluateMany === undefined ? {} : { evaluateMany }),
       ...opts,
     },

@@ -155,6 +155,8 @@ export function goalRoughOptions(
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ballDiameter = 0,
+  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): GoalRoughOptions | null {
   const ballWork = kindedWork(job).filter((w) => w.kind === 'ball');
   if (ballWork.length === 0) return null;
@@ -165,7 +167,7 @@ export function goalRoughOptions(
     if (!(sizeOf(entry) > 0)) return false;
     const reach = reachOf(entry);
     if (reach !== null && needed > reach + 1e-9) return false;
-    return materialRefusal(job, entry, catalogue, conditions, table) === null;
+    return materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction }) === null;
   });
   if (flats.length === 0) return null;
   const nearBall = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
@@ -315,12 +317,14 @@ export function faceCutterOptions(
    * answers for the whole job.
    */
   allowMixed = false,
+  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): FaceCutterOptions | null {
   const facts = faceWorkOf(job);
   if (facts === null) return null;
   if (jobHasItems(job) && !allowMixed) return null;
   const eligible = tools.filter(
-    (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches }) === null,
+    (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches, refuseFraction }) === null,
   );
   const matched = eligible.filter((e) => faceCutterFits(e, facts, true)).sort(widestFirst);
   if (matched.length > 0) return { facts, candidates: matched, matchedHoles: true };
@@ -336,8 +340,10 @@ export function faceCutterPick(
   table?: readonly FeedsEntry[],
   ownedVouches = true,
   allowMixed = false,
+  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): FaceCutterPick | null {
-  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches, allowMixed);
+  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches, allowMixed, refuseFraction);
   if (options === null) return null;
   const { facts, matchedHoles } = options;
   const pick = options.candidates[0];
@@ -602,11 +608,17 @@ export function planCutters(
   floors?: ReadonlyMap<string, number> | null,
   // #1244 — the map from the caller's edge (a job-decided predicate; see faceWorkOf).
   defaults: ShopDefaults | null = null,
+  /**
+   * #1256 — the shop's `clamp.refuseFraction`, when the caller holds it apart from `defaults` (the
+   * measured pick passes no map); absent, it is read from `defaults`.
+   */
+  refuseFractionIn?: number,
 ): CutterPlan {
+  const refuseFraction = refuseFractionIn ?? refuseFractionOf(defaults);
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
   // It is answered here so the rule plan, the CLI and the search's baseline are the same cutter.
-  const face = faceCutterPick(job, tools, catalogue, conditions, table);
+  const face = faceCutterPick(job, tools, catalogue, conditions, table, true, false, refuseFraction);
   if (face !== null) {
     return {
       cutters: [
@@ -625,7 +637,7 @@ export function planCutters(
     };
   }
   // #842 — a MIXED job's face program has its own cutter, chosen by the same face rule.
-  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true) : null;
+  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true, refuseFraction) : null;
   const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
   // #1051 — THE PANEL'S ADVISORY FOLLOWS THE ENGINE'S TWO RULES.
@@ -658,7 +670,7 @@ export function planCutters(
   const candidates: Candidate[] = [];
   const refusals = new Map<string, string>();
   for (const entry of candidateTools) {
-    const refusal = materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction: refuseFractionOf(defaults) });
+    const refusal = materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction });
     if (refusal !== null) {
       refusals.set(entry.key, refusal);
       continue;
@@ -763,7 +775,7 @@ export function planCutters(
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.
-      const rough = goalRoughOptions(job, candidateTools, catalogue, conditions, table, pick.diameter);
+      const rough = goalRoughOptions(job, candidateTools, catalogue, conditions, table, pick.diameter, refuseFraction);
       const roughPick = rough?.candidates[0];
       if (roughPick !== undefined) {
         goalRoughKey = roughPick.key;
@@ -1096,12 +1108,14 @@ export function kindOnlyPick(
   catalogue: readonly FeedCatalogueRow[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
+  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): { key: string; reason: string; kind: WorkKind } | null {
   const work = kindedWork(job);
   const kind = work[0]?.kind;
   if (kind !== 'ball' && kind !== 'thread') return null;
   if (!work.every((w) => w.kind === kind)) return null;
-  const plan = planCutters(job, null, tools, catalogue, conditions, table);
+  const plan = planCutters(job, null, tools, catalogue, conditions, table, undefined, undefined, null, refuseFraction);
   const pick = plan.cutters[0];
   return pick === undefined ? null : { key: pick.key, reason: pick.reason, kind };
 }

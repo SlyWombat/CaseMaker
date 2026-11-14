@@ -197,6 +197,8 @@ export function reachabilityFor(
    * the recommendation agree about a cutter that joins raised letters. Omitted: no raised rule.
    */
   measureRaised?: ((key: string) => RaisedTextMeasurement[]) | null,
+  /** #1256 — the shop's `clamp.refuseFraction`, handed to the recommendation. */
+  refuseFraction?: number,
 ): Reachability {
   const measured = new Map<string, LabelEngravability[]>();
   const recommendation = recommendTool(
@@ -212,6 +214,7 @@ export function reachabilityFor(
     lostDetailWarnRatio,
     undefined,
     measureRaised,
+    refuseFraction,
   );
 
   const items = enabledItems(job);
