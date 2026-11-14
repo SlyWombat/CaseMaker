@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
+import { anchorFrom } from '@/engine/cnc/mounts/bracket';
 import {
   bracketArmTop,
   bracketSeat,
@@ -260,5 +261,16 @@ describe('#599/#607 the BED-SETUP jaw tap (a job never taps — #1199 field 7 (e
     expect(r.ok).toBe(true);
     expect(steps.some((s) => s.includes('5 mm above the stored jaw top -56.82'))).toBe(true);
     expect(steps.some((s) => s.includes('the datum is refreshed'))).toBe(true);
+  });
+});
+
+describe('the anchor provenance wording', () => {
+  it('names the machine’s own settings once, with where and when', () => {
+    const one = anchorFrom(CAL, 'Z1', 1);
+    const two = anchorFrom(CAL, 'Z1', 2);
+    if (!one.ok || !two.ok) throw new Error('expected both anchors');
+    expect(one.anchor.from).toBe('anchor 1 read from the machine’s own settings (read on 192.168.10.43, 2026-10-07)');
+    expect(two.anchor.from).toBe('anchor 2 = anchor 1 + its offset, read from the machine’s own settings (read on 192.168.10.43, 2026-10-07)');
+    expect(one.anchor.from).not.toContain('config-get');
   });
 });

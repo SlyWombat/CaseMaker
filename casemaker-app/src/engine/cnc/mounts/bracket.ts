@@ -171,12 +171,18 @@ export function anchorFrom(
   const [a1x, a1y] = calibration.frame.anchor1;
   const [ox, oy] = anchor === 2 ? calibration.frame.anchor2Offset : [0, 0];
   const date = calibration.measuredAt.slice(0, 10);
+  // "the machine's own settings (read on <host>, <date>)" — no second "the machine".
+  const words = readSourceWords(calibration.source);
+  const own = /^the machine’s own settings(?:, (read on .+))?$/.exec(words);
+  const where = own
+    ? `the machine’s own settings (${own[1] === undefined ? '' : `${own[1]}, `}${date})`
+    : `the machine (${words}, ${date})`;
   return {
     ok: true,
     anchor: {
       x: r3(a1x + ox),
       y: r3(a1y + oy),
-      from: anchor === 1 ? `anchor 1 read from the machine (${readSourceWords(calibration.source)}, ${date})` : `anchor 2 = anchor 1 + its offset, read from the machine (${readSourceWords(calibration.source)}, ${date})`,
+      from: anchor === 1 ? `anchor 1 read from ${where}` : `anchor 2 = anchor 1 + its offset, read from ${where}`,
     },
   };
 }
