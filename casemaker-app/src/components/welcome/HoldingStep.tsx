@@ -145,6 +145,11 @@ const LANDMARK_CARD: CSSProperties = {
   background: '#10151b',
 };
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+
+// #1273 — the Holding step's words when nothing is recorded (mock-up docs/design/1273, approved).
+const NO_MACHINE_SENTENCE = 'No machine is recorded for this shop yet.';
+const NO_BED_SENTENCE = 'The machine is recorded, but its bed is not described yet.';
+const ASSUMED_SENTENCE = 'You chose this yourself; no machine is recorded. The piece’s fit cannot be checked until it is.';
 const FIELD_LABEL: CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12, margin: '2px 0' };
 const SEVERITY_COLOR: Record<JobFinding['severity'], string> = { error: '#f0b4ad', warning: '#e0c07a', info: '#7fa6c9' };
 
@@ -1815,8 +1820,17 @@ export function HoldingStep({
   // OFFER (a board import's tape, with no machine record) is not this defect: the step simply has
   // no radio for it, and blocking Create would refuse a job the import already made.
   const currentOption = options.find((o) => o.mount === current) ?? null;
-  const mountBlocked =
-    currentOption !== null && currentOption.disabled
+  // #1273 — NOTHING RECORDED IS NOT "A VISE". With no machine profile the step asks: no seat is
+  // selected until the operator picks one (or the job already states its own hold — a file, a saved
+  // job — which is kept). The pick is carried as the operator's assumption (`vise.assumed`).
+  const noRecord = now === null;
+  const holdStated = job.workholding.kind !== 'vise' || answers.vise.source !== 'default' || answers.vise.assumed === true;
+  const nothingChosen = noRecord && !holdStated;
+  const askShown = noRecord && (nothingChosen || answers.vise.assumed === true);
+  const selected: HoldingMount | null = nothingChosen ? null : current;
+  const mountBlocked = nothingChosen
+    ? 'choose how the stock is held'
+    : currentOption !== null && currentOption.disabled && !(noRecord && currentOption.unrecorded === true)
       ? (currentOption.reason ?? 'choose how the stock is held')
       : null;
   useEffect(() => {
@@ -1859,6 +1873,8 @@ export function HoldingStep({
     if (job.workholding.kind !== 'vise') return;
     // With the bed or the rotary on the pins, their own effects decide (#715, #714).
     if (now !== null && now.mount !== 'vise') return;
+    // #1273 — nothing recorded: no seat is recommended on the operator's behalf; the step asks.
+    if (now === null) return;
     const next = applyRecommendedMount(answers, boardMm, work, boardChoices(profile), seatShop);
     if (next !== answers) onAnswers(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1995,7 +2011,10 @@ export function HoldingStep({
       );
       return;
     }
-    const next = applyMount(answers, mount, mm);
+    const picked = applyMount(answers, mount, mm);
+    // #1273 — a seat chosen with no machine recorded is the operator's assumption about the shipped
+    // jaws; the job says so.
+    const next = noRecord ? { ...picked, vise: { ...picked.vise, assumed: true as const } } : picked;
     if (job.workholding.kind === 'rotary-chuck') onRotary(null, next);
     // #715 — taking the bed job back to the vise is the bed write with `null`.
     else if (jobHold !== null) onBedHold(null, next);
@@ -2783,6 +2802,32 @@ export function HoldingStep({
       >
         <div style={{ display: 'grid', gap: 8 }}>
           <div data-testid="engrave-setup-holding-vise" style={{ display: 'grid', gap: 7 }}>
+            {askShown && (
+              <div
+                data-testid="engrave-setup-holding-ask"
+                style={{ borderLeft: '5px solid #f5a524', background: '#201a0c', borderRadius: 6, padding: '11px 13px', display: 'grid', gap: 6 }}
+              >
+                <b style={{ fontSize: 16, lineHeight: 1.3, color: '#ffe2a8' }}>What will hold this on the machine?</b>
+                <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-setup-holding-ask-sentence">
+                  {machine === null ? NO_MACHINE_SENTENCE : NO_BED_SENTENCE}
+                </span>
+                <div>
+                  <button
+                    type="button"
+                    className="sw-btn btn btn--sm"
+                    data-testid="engrave-setup-holding-ask-action"
+                    onClick={() => onOpenManage?.()}
+                  >
+                    {machine === null ? 'Add the machine' : 'Describe the bed'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {askShown && rows.some((o) => o.unrecorded === true && !o.disabled) && (
+              <span style={{ ...MUTED, margin: 0 }} data-testid="engrave-setup-holding-ask-caption">
+                You can also choose one yourself — nothing here is recorded for this shop yet.
+              </span>
+            )}
             {rows.length === 0 && (
               // #1104 — A CELL WITH NO ROW AT ALL says what to do instead of leaving a silent gap
               // (it is reachable: a 150 mm rod with no machine record has no vise seat and no chuck).
@@ -2820,7 +2865,7 @@ export function HoldingStep({
                 // #1107 item 5 — the job's OWN answer stays selected even when this machine cannot
                 // honour it: a rod answer with the rotary off the pins shows the chuck row chosen,
                 // disabled, with its Change the machine… action (Next is blocked by mountBlocked).
-                checked={current === option.mount}
+                checked={selected === option.mount}
                 onChoose={() => choose(option.mount)}
                 onOpenManage={onOpenManage}
                 onBackToStock={onBackToStock}
@@ -2878,6 +2923,15 @@ export function HoldingStep({
           </div>
 
 
+          {noRecord && answers.vise.assumed === true && selected !== null && (
+            <p
+              style={{ ...MUTED, borderLeft: '4px solid #f5a524', paddingLeft: 10, margin: '2px 0' }}
+              data-testid="engrave-setup-holding-assumed"
+            >
+              {ASSUMED_SENTENCE}
+            </p>
+          )}
+
           {/* #809 — the unmeasured vise is a FACT here, not a warning. It used to be a finding row
               on every vise job; now it is one line under the radios, and `vise-default` speaks
               only where an unmeasured figure could decide the job (a grip or proud height inside
@@ -2895,6 +2949,7 @@ export function HoldingStep({
               data (which part axis is up / along X / along Y) is unchanged; only its words and
               landmarks are the mount's. A rod in the chuck has one axis — the chuck decides — so it
               gets no hold cards. */}
+          {!nothingChosen && (
           <details data-testid="engrave-setup-hold-fold" style={{ marginTop: 8 }}>
             <summary style={{ fontSize: 12, cursor: 'pointer', color: '#d1d5db' }}>
               Which way round{current === 'rotary' ? '' : ` — ${holdSummary} · change`}
@@ -2993,6 +3048,7 @@ export function HoldingStep({
               </>
             )}
           </details>
+          )}
 
           {/* #715 — a bed job's provenance lives in its own option's Technical fold. */}
           {jobHold === null && (
@@ -3049,6 +3105,7 @@ export function HoldingStep({
           }}
         >
           <div style={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
+            {!nothingChosen && (
             <HoldingPicture
               mount={drawnMount}
               stock={answers.stock}
@@ -3062,6 +3119,7 @@ export function HoldingStep({
               part={part}
               tapeOffered={tapeOffered}
             />
+            )}
           </div>
           {narrow && (
             <button
@@ -3171,6 +3229,11 @@ function MountRow({
         />
         <span>
           <b style={{ fontWeight: checked ? 600 : 400 }}>{option.label}</b>
+          {option.unrecorded === true && !option.disabled && (
+            <span style={{ ...MUTED, margin: '0 0 0 8px' }} data-testid={`engrave-setup-mount-unrecorded-${option.mount}`}>
+              not recorded for this shop
+            </span>
+          )}
           {hint !== null && (
             <>
               <br />
@@ -3202,7 +3265,7 @@ function MountRow({
           <Explain term="anchor-1" />
         </div>
       )}
-      {option.disabled && option.action != null && (
+      {option.disabled && option.action != null && option.unrecorded !== true && (
         <button
           type="button"
           className="sw-btn btn btn--sm"

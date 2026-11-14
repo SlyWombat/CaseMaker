@@ -392,8 +392,14 @@ export function StartWizard(): JSX.Element {
   // app's own vise model is, and a bed job has no jaw tops to clear.
   const viseOnPins = useMemo(() => {
     const now = machineNow(machineForJob(location, job.machineId));
-    return now === null || now.mount === 'vise';
-  }, [location, job.machineId]);
+    // #1273 — nothing recorded is not "a vise": no jaws are the fixture over this blank, unless the
+    // job states a vise of its own (a file, a saved job, the operator's pick).
+    if (now === null) {
+      const hold = job.workholding;
+      return hold.kind === 'vise' && (hold.vise.source !== 'default' || hold.vise.assumed === true);
+    }
+    return now.mount === 'vise';
+  }, [location, job.machineId, job.workholding]);
   // #1107 — the ROTARY facts the question step offers its rod intents from: whether the house
   // owns one (the location's accessories) and whether it is on the pins (the machine's state).
   const rotaryFacts = useMemo(() => {

@@ -8640,6 +8640,11 @@
             "vise": {
               "description": "The vise jaw measurements the job was set up with.",
               "properties": {
+                "assumed": {
+                  "const": true,
+                  "description": "True when the operator chose this seat with no machine recorded: an assumption about the shipped jaws, not a measurement.",
+                  "type": "boolean"
+                },
                 "fixedJawThickness": {
                   "description": "Fixed jaw thickness in millimetres.",
                   "type": "number"

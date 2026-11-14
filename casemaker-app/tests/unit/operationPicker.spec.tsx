@@ -46,6 +46,7 @@ import { useEngraveJobStore, newItemDepthFor } from '@/store/engraveJobStore';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import type { EngraveJob } from '@/types/engraveJob';
+import { pickAssumedMount } from '../tools/holdingPick';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -120,6 +121,7 @@ function openOperationStep(): void {
 function finish(): void {
   fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
   fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+  pickAssumedMount('ledge'); // #1273 — nothing recorded: the step asks, the operator chooses
   fireEvent.click(screen.getByTestId('engrave-setup-next'));
 }
 

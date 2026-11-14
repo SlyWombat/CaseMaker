@@ -5,6 +5,7 @@
 // `scheduleImmediate` is mocked because a jsdom test has no geometry worker, and the wizard's own
 // hand-off does not depend on the rebuild finishing.
 
+import { pickAssumedMount } from '../tools/holdingPick';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { resetStockStore } from '@/store/stockStore';
 import { seedTestShopShelf, testShopStickRecord } from '../tools/testShopStock';
@@ -512,7 +513,10 @@ describe('#432 slice 4 — a new job starts with the finish’s facing choice', 
     fireEvent.change(screen.getByTestId('start-wizard-stock-finish'), { target: { value: 'rough' } });
     await start();
 
-    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: false, depth: 0, source: 'seed' });
+    // #1273 — with nothing recorded no jaws are assumed over the blank (`viseOnPins` is false), so the
+    // jaw guard does not seed the facing off; the guard itself (a pass that would end in the jaws) is
+    // pinned on `facingForSeat` in recommendedSeat1103.spec.ts, and runs again at Generate.
+    expect(useEngraveJobStore.getState().job.facing).toEqual({ enabled: true, depth: 0.5, source: 'seed' });
   });
 
   it('the finish line states the rule once, with no consequence paragraph (#683, A8)', () => {
@@ -584,6 +588,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     await throughStockToHolding();
     // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
     expect(screen.getByTestId('engrave-setup-next').textContent).toBe('Create the job');
+    // #1273 — nothing recorded is not "a vise": the step asks, Create waits, the operator chooses.
+    pickAssumedMount('ledge');
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 
@@ -604,6 +610,7 @@ describe('#681 — the wizard with nothing to lean on', () => {
     // The default job names no cutter (#516), and this path added none.
     expect(useEngraveJobStore.getState().job.toolKey ?? '').toBe('');
 
+    pickAssumedMount('ledge'); // #1273
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
 
     const job = useEngraveJobStore.getState().job;

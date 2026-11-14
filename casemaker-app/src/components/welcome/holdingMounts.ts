@@ -500,6 +500,12 @@ export interface MountOption {
   escapeFitBracket?: boolean;
   /** How the option reads in the machine-change request. */
   holdingWords: string;
+  /**
+   * #1273 — NOTHING IS RECORDED for this mount: the row is listed because the product knows it, not
+   * because this shop has it. A vise seat can be chosen as the operator's own assumption; the bed's
+   * and the rotary's rows need the machine's own numbers and wait for it.
+   */
+  unrecorded?: boolean;
 }
 
 export interface MountOptionArgs {
@@ -616,9 +622,39 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
 
     // No machine described: the vise mounts are the app's own setup; the machine-only ones are not
     // offered (there is no state to read and no change to offer).
+    // #1273 — NOTHING RECORDED IS NOT "A VISE". Every mount the product knows is listed; the three
+    // vise seats need only the blank, so the operator may choose one as their own assumption; the
+    // bed's and the rotary's rows need the machine's numbers, so they wait for the machine. A machine
+    // that is recorded without a vise (or without a described bed) says so the same way.
     if (now === null) {
-      if (mechanism !== 'vise') continue;
-      out.push({ ...base, hint: hintFor(mount, stock, boardMm), disabled: false, reason: null, escape: null });
+      const recorded = machine !== null;
+      if (mechanism === 'vise') {
+        if (recorded && accessoryFor(accessories, 'vise') === null) {
+          out.push({ ...base, hint: null, disabled: true, reason: 'Not in this location’s accessories', escape: null });
+        } else if (mount === 'block' && args.through === true) {
+          // The stock's own refusals hold with no machine recorded too (#1103).
+          out.push({ ...base, hint: null, disabled: true, reason: 'The cut goes through the blank — the block seat’s jaws would stand in it; use the board seat.', escape: null });
+        } else if (mount === 'ledge' && stock.thickness < LEDGE_STEP) {
+          out.push({ ...base, hint: null, disabled: true, reason: `It would sit ${fmt(LEDGE_STEP - stock.thickness)} mm below the jaw tops — use the board seat or a thicker board.`, escape: null });
+        } else {
+          out.push({ ...base, hint: hintFor(mount, stock, boardMm), disabled: false, reason: null, escape: null, unrecorded: true });
+        }
+        continue;
+      }
+      const needs =
+        mechanism === 'rotary'
+          ? 'the rotary’s envelope'
+          : mount === 'bed-bracket'
+            ? 'the bed’s pins'
+            : 'the bed’s size';
+      out.push({
+        ...base,
+        hint: null,
+        disabled: true,
+        reason: `needs ${needs} — ${recorded ? 'comes with the bed’s description' : 'comes with the machine'}`,
+        escape: null,
+        unrecorded: true,
+      });
       continue;
     }
 
@@ -793,7 +829,9 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
     .map((o): MountOption => {
       if (!o.disabled) return { ...o, action: null };
       const action: MountOption['action'] =
-        o.escape !== null
+        o.unrecorded === true
+          ? { label: machine === null ? 'Add the machine' : 'Describe the bed', kind: 'manage-link' }
+          : o.escape !== null
           ? drive
             ? { label: 'Change the machine…', kind: 'change-machine' }
             : { label: 'in Manage › Machines', kind: 'manage-link' }
@@ -819,7 +857,7 @@ export function mountOptions(args: MountOptionArgs): MountOption[] {
  * state does not offer.
  */
 export function bedOffered(rows: readonly MountOption[]): boolean {
-  return rows.some((r) => r.mount === 'bed-tape' && (!r.disabled || (r.action ?? null) !== null));
+  return rows.some((r) => r.mount === 'bed-tape' && r.unrecorded !== true && (!r.disabled || (r.action ?? null) !== null));
 }
 
 /** A sentence without its tape clause: "…, or tape it to the bed" and "tape it or hold it in the vise". */
