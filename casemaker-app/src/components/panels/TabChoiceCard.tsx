@@ -104,7 +104,7 @@ export function TabChoiceDrawing({
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
   const size = Math.max(maxX - minX, maxY - minY);
-  const pad = size * 0.16;
+  const pad = size * 0.24;
   const fs = size * 0.042;
   // Work Y points up; the screen's points down.
   const px = (x: number): number => x - minX;

@@ -162,7 +162,8 @@ export function runErrorCodes(v: EngraveRunView): string[] {
   // them a run that threw before raising a finding counted zero errors and the operator read
   // "Not generated." with no words. The STAGE is the name such a failure carries; it is not a
   // finding code and no Fix mapping matches it, so none draws a press that cannot do anything.
-  for (const e of v.generated?.errors ?? []) codes.push(e.stage);
+  // The tab question is the plan asking (#1258), not an error: the card owns it.
+  if (v.generated?.tabChoiceNeeded === undefined) for (const e of v.generated?.errors ?? []) codes.push(e.stage);
   return codes;
 }
 
@@ -224,7 +225,7 @@ function firstErrorOf(
   // The optional chain matters: a generated fixture (or a result stored before the field existed)
   // can carry no `errors` array at all, and `.at` on undefined would throw instead of answering
   // "no generated error" — the same `?? []` the codes loop above already uses.
-  const own = v.generated?.errors?.at(-1);
+  const own = v.generated?.tabChoiceNeeded === undefined ? v.generated?.errors?.at(-1) : undefined;
   if (own !== undefined) return { source: 'generate', code: own.stage, message: own.message };
   return null;
 }

@@ -300,7 +300,9 @@ export function collect(input: PreflightInput): PreflightRow[] {
   // fact already stated twice over. That is the whole of the exclusion — nothing here compares,
   // matches or re-words a message; it asks whether an owner has already spoken, which is a fact about
   // the answer, not a rule about the job.
-  if (gen !== null && !gen.ok) {
+  // #1258 — the tab question is the plan ASKING, not a stoppage: the card owns it, and its sentence
+  // (written for a terminal, with the CLI's flags in it) is never a row here.
+  if (gen !== null && !gen.ok && gen.tabChoiceNeeded === undefined) {
     const verifyClean = !(gen.verify?.findings ?? []).some((f) => f.severity === 'error');
     const frameClean = !(gen.frameVerify?.findings ?? []).some((f) => f.severity === 'error');
     // The Generate's last word before returning is the reason it returned: each `stop(...)` pushes
