@@ -217,10 +217,33 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
     expect(notes).not.toMatch(/holding the part comes first|tight tab/i);
   });
 
-  it('refuses only when no edge can take a tight tab either', () => {
-    // A 64-gon circle is ONE smooth edge (a round outline keeps equal spacing); one tab leaves a
-    // ~66 mm stretch, and step 2 has no edge inside it to centre another tab on — so a 40 mm
-    // limit is the last-resort refusal.
+  it('#1269 — a smooth round outline gets its tab count RAISED to meet the limit, not refused', () => {
+    // A 64-gon circle is ONE smooth edge (a round outline keeps equal spacing). One tab left a
+    // ~66 mm stretch against a 40 mm limit and the contour refused it; a circle has no corner and no
+    // reason to refuse, so the round branch now adds evenly spaced tabs until no stretch is over the
+    // limit (#1269 change 3).
+    const ROUND = 12;
+    const outline: [number, number][] = Array.from({ length: 64 }, (_, i) => [
+      ROUND * Math.cos((2 * Math.PI * i) / 64),
+      ROUND * Math.sin((2 * Math.PI * i) / 64),
+    ]);
+    const c = contourOf({ outline: [outline], area: Math.PI * ROUND * ROUND, zTo: -6, frees: true, shoulders: [] });
+    const out = contour({
+      cutter: flat6,
+      contour: c,
+      region: region(),
+      depthMm: 6,
+      tabs: { count: 1, width: 6, height: 1, maxSpanMm: 40 },
+      offset: identityOffset,
+      params,
+      rapid,
+    });
+    expect(out.ir.operations.length).toBeGreaterThan(0);
+  });
+
+  it('refuses only where the tabs the limit needs would touch', () => {
+    // The same circle against a limit no number of 12 mm spans can meet (they would touch): the
+    // count asked is placed and the stretch left is the last-resort refusal.
     const ROUND = 12;
     const outline: [number, number][] = Array.from({ length: 64 }, (_, i) => [
       ROUND * Math.cos((2 * Math.PI * i) / 64),
@@ -239,7 +262,7 @@ describe('#1206 the freeing contour’s tabs are stated and bounded', () => {
         contour: c,
         region: region(),
         depthMm: 6,
-        tabs: { count: 1, width: 6, height: 1, maxSpanMm: 40 },
+        tabs: { count: 1, width: 6, height: 1, maxSpanMm: 0.5 },
         offset: identityOffset,
         params,
         rapid,
