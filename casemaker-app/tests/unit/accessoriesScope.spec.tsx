@@ -27,6 +27,7 @@ const MACHINE_ID = 'machine-1a2b3c';
 
 const HEALTH: HouseHealth = {
   ok: true,
+  runs: true,
   schemaVersion: 1,
   build: 'v-test',
   hasCatalogue: false,

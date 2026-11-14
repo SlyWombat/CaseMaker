@@ -186,14 +186,22 @@ const HouseHealthSchema = z.object({
    */
   lastSync: SyncSummarySchema.nullable().default(null),
   /**
-   * #1126 — whether this service can RUN CNC generation (the runs API over the CLI path). False on
-   * every service before the runs slice, and false when the service's own Node/CLI paths are
-   * missing or not executable: the house never guesses a path, and the location document (data a
-   * LAN client may write) can never name an executable. OPTIONAL rather than defaulted so the
-   * inferred `HouseHealth` type keeps every existing fake and caller compiling; absent is false,
-   * and every reader asks `health.runs === true`.
+   * #1126 — whether this service can RUN CNC generation (the runs API over the CLI path). False
+   * when the service's own Node/CLI paths are missing or not executable: the house never guesses a
+   * path, and the location document (data a LAN client may write) can never name an executable.
+   * Always sent; a false is always accompanied by `runsReason` and `runsReasonCode`.
    */
-  runs: z.boolean().optional(),
+  runs: z.boolean(),
+  /**
+   * #1293 — WHY `runs` is false, in the service's own sentence. Present exactly when `runs` is false;
+   * the page puts it in the run's Log.
+   */
+  runsReason: z.string().optional(),
+  /**
+   * #1293 — the stable kebab-case code for `runsReason` (`node-missing`, `cli-missing`,
+   * `setting-not-a-number`). Present exactly when `runs` is false.
+   */
+  runsReasonCode: z.string().optional(),
   /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
@@ -204,6 +212,15 @@ const HouseHealthSchema = z.object({
    * after `location.json`, by an older build. Defaulted, so a service from before the field answers.
    */
   warnings: z.array(z.string()).default([]),
+}).superRefine((h, ctx) => {
+  // #1293 — a house that cannot run always says why; one that can says nothing.
+  const said = h.runsReasonCode !== undefined || h.runsReason !== undefined;
+  if (!h.runs && (h.runsReasonCode === undefined || h.runsReason === undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'runs is false but the service gave no runsReason and runsReasonCode' });
+  }
+  if (h.runs && said) {
+    ctx.addIssue({ code: 'custom', message: 'runs is true but the service gave a runsReason' });
+  }
 });
 
 export type HouseHealth = z.infer<typeof HouseHealthSchema>;

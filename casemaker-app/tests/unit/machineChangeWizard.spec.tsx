@@ -40,6 +40,7 @@ const IDLE_AWAY = '<Idle|MPos:-160.5000,-188.0000,-55.0000|WPos:19.6000,4.7000,0
 
 const HEALTH: HouseHealth = {
   ok: true,
+  runs: true,
   schemaVersion: 1,
   build: 'v-test',
   hasCatalogue: false,

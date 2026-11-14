@@ -582,9 +582,16 @@ pub struct Health {
     /// #1126 — whether this service can RUN generation (the runs API over the CLI path). False on
     /// every service before the runs slice, and false when the service's own Node/CLI paths are
     /// missing or not executable: the house never guesses a path, and the location document (data
-    /// a LAN client may write) can never name an executable. Defaulted for old reports.
-    #[serde(default)]
+    /// a LAN client may write) can never name an executable.
     pub runs: bool,
+    /// #1293 — WHY `runs` is false, in the service's own sentence (the missing Node or CLI, the
+    /// unreadable setting). Present exactly when `runs` is false, absent when it is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runs_reason: Option<String>,
+    /// #1293 — the stable kebab-case code for `runs_reason` (`node-missing`, `cli-missing`,
+    /// `setting-not-a-number`); present exactly when `runs` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runs_reason_code: Option<String>,
     pub has_catalogue: bool,
     /// How many feed rows the stored catalogue holds (#310). A catalogue synced before the feed tier
     /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
@@ -1206,6 +1213,8 @@ impl HouseStore {
             material_spec_rows: inner.catalogue.material_specs.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
             runs: crate::runs::capability(),
+            runs_reason: crate::runs::unavailable_reason(),
+            runs_reason_code: crate::runs::unavailable_code().map(str::to_owned),
             last_sync: inner.catalogue.last_sync.clone(),
             problems: [&inner.location_problem, &inner.catalogue_problem]
                 .iter()
@@ -2404,6 +2413,28 @@ mod tests {
         // Not a report, not stored: the kind is checked before the disk is touched.
         assert!(matches!(store.save_crash_report(br#"{"kind":"other"}"#), Err(HouseError::BadEntry(_))));
         assert!(matches!(store.save_crash_report(b"not json"), Err(HouseError::BadEntry(_))));
+    }
+
+    #[tokio::test]
+    async fn health_carries_the_reason_exactly_when_runs_is_false() {
+        let (_dir, store) = store();
+        let h = store.health().await;
+        // One fact, two fields: a house that cannot run says why; one that can says nothing.
+        assert_eq!(h.runs, h.runs_reason.is_none());
+        assert_eq!(h.runs, h.runs_reason_code.is_none());
+        assert_eq!(h.runs_reason.is_some(), h.runs_reason_code.is_some());
+        let json = serde_json::to_value(&h).unwrap();
+        match (&h.runs_reason, &h.runs_reason_code) {
+            (Some(reason), Some(code)) => {
+                assert_eq!(json["runsReason"], serde_json::json!(reason));
+                assert_eq!(json["runsReasonCode"], serde_json::json!(code));
+                assert!(["node-missing", "cli-missing", "setting-not-a-number"].contains(&code.as_str()));
+            }
+            _ => {
+                assert!(json.get("runsReason").is_none());
+                assert!(json.get("runsReasonCode").is_none());
+            }
+        }
     }
 
     #[tokio::test]
