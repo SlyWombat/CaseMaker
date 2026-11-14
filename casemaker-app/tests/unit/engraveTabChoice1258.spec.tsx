@@ -17,7 +17,9 @@ import { FIXTURE_NEEDED } from '../tools/tabChoiceFixture';
 
 const asking = (stale = false): EngraveGenerated =>
   ({ ok: false, stage: 'cam', tabChoiceNeeded: FIXTURE_NEEDED, ...(stale ? { tabChoiceStale: true } : {}) }) as unknown as EngraveGenerated;
-const done = (): EngraveGenerated => ({ ok: true, stage: 'done' }) as unknown as EngraveGenerated;
+/** A plan that honoured an answer: it carries the question beside the answer, as plain data. */
+const doneWith = (choice: 'insideMargin' | 'longerStretch'): EngraveGenerated =>
+  ({ ok: true, stage: 'done', plan: { perSetup: [], tabChoiceApplied: { ...FIXTURE_NEEDED, choice } } }) as unknown as EngraveGenerated;
 
 beforeEach(() => {
   useEngraveJobStore.setState({ job: defaultEngraveJob() });
@@ -64,7 +66,7 @@ describe('#1258 — the question where Generate stopped', () => {
     fireEvent.click(screen.getByLabelText(/Put a tab inside the corner margin/));
     fireEvent.click(screen.getByTestId('tab-choice-use'));
     // The next generate succeeds: no question comes back, the answer stands on the job.
-    act(() => useEngraveRunStore.setState({ generated: done() }));
+    act(() => useEngraveRunStore.setState({ generated: doneWith('insideMargin') }));
     expect(screen.getByTestId('tab-choice-answered').textContent).toContain('Holding: 3 tabs inside the corner margin.');
     fireEvent.click(screen.getByTestId('tab-choice-change'));
     expect(screen.getByTestId('tab-choice-card')).toBeTruthy();
@@ -102,6 +104,7 @@ describe('#1258 — the question where Generate stopped', () => {
     render(<EngraveTabChoice onGenerate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText(/Leave the longer stretches/));
     fireEvent.click(screen.getByTestId('tab-choice-use'));
+    act(() => useEngraveRunStore.setState({ generated: doneWith('longerStretch') }));
     function Row(): JSX.Element {
       return <span data-testid="row">{useTabChoiceSuffix(0)}</span>;
     }
@@ -129,6 +132,21 @@ describe('#1258 — the question where Generate stopped', () => {
     expect(document.activeElement).toBe(row0);
     row0.remove();
     row1.remove();
+  });
+
+  it('a saved job opened with an answer shows the summary after Generate, with Change… (nothing was asked in this session)', () => {
+    useEngraveJobStore.getState().setTabChoice({ choice: 'longerStretch', answeredFor: 'fixture-1258' });
+    useEngraveRunStore.setState({ generated: doneWith('longerStretch') });
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    expect(screen.getByTestId('tab-choice-answered').textContent).toContain('Holding: 3 stretches left longer than the shop');
+    fireEvent.click(screen.getByTestId('tab-choice-change'));
+    expect(screen.getByTestId('tab-choice-card')).toBeTruthy();
+    // An answer for another outline shows no summary.
+    cleanup();
+    useEngraveJobStore.getState().setTabChoice({ choice: 'longerStretch', answeredFor: 'another-outline' });
+    useTabChoiceStore.getState().reset();
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    expect(screen.queryByTestId('tab-choice-answered')).toBeNull();
   });
 
   it('a stale answer asks again with the one-line reason', () => {

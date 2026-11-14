@@ -1,18 +1,18 @@
 /**
  * #1258 — THE HOLDING ROW'S SUFFIX: "4 tabs · 1 by your choice". Once the operator has answered the
  * tab question, the choice stays visible on the cut-out's own row after the card has scrolled away.
- * It reads the job's answer and the question it was given for (display state, `tabChoiceStore`), and
+ * It reads the job's answer and the question it was given for (the plan's own `tabChoiceApplied`), and
  * names the cut-out the engine says each stretch belongs to; when the engine does not say, the first
  * cut-out carries it.
  */
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { useTabChoiceStore } from '@/store/tabChoiceStore';
+import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { cutPosition, holdingChoiceSuffix, type TabStretchOf } from './tabChoiceWords';
 
 export function useTabChoiceSuffix(index: number): string | null {
   const answer = useEngraveJobStore((s) => s.job.tabChoice);
-  const asked = useTabChoiceStore((s) => s.asked);
-  if (answer === undefined || asked === null || answer.answeredFor !== asked.fingerprint) return null;
+  const asked = useEngraveRunStore((s) => s.generated?.plan?.tabChoiceApplied);
+  if (answer === undefined || asked === undefined || answer.answeredFor !== asked.fingerprint) return null;
   const stretches = asked.stretches as readonly TabStretchOf[];
   const named = stretches.some((s) => s.cut !== undefined);
   // The planner mints `setup-S-cut-K`; the K-th ring is the K-th cut-out row.

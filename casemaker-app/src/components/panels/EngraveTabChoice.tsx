@@ -11,7 +11,6 @@
  * stays paused) and takes the operator to the cut-out's tab count; the stretches stay marked in the
  * preview. Generate asks again if the new tabs still leave a stretch too long.
  */
-import { useEffect } from 'react';
 import type { JSX } from 'react';
 
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -46,14 +45,12 @@ export function EngraveTabChoice({
   const ui = useTabChoiceStore();
   const phone = useMediaQuery('(max-width: 640px)');
   const needed = generated?.tabChoiceNeeded;
+  // Once answered, the plan states the question it honoured (same shape, plus the answer): the summary and "Change…" read it from the run's result, so a job reopened with an answer shows them too.
+  const applied = generated?.plan?.tabChoiceApplied;
   const stale = generated?.tabChoiceStale === true;
-  useEffect(() => {
-    if (needed !== undefined) ui.ask(needed, stale);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needed, stale]);
   const use = (choice: 'insideMargin' | 'longerStretch'): void => {
-    const q = needed ?? ui.asked;
-    if (q === null) return;
+    const q = needed ?? applied;
+    if (q === undefined) return;
     useEngraveJobStore.getState().setTabChoice({ choice, answeredFor: q.fingerprint });
     ui.settle();
     onGenerate();
@@ -72,19 +69,18 @@ export function EngraveTabChoice({
     // operator goes to the cut-out's own tab count.
     onChangeTabs: () => {
       ui.collapse();
-      const first = (needed ?? ui.asked)?.stretches[0];
+      const first = (needed ?? applied)?.stretches[0];
       showTabSettings(first === undefined ? null : cutPosition(first));
     },
   };
   if (needed !== undefined) {
     return <TabChoiceCard {...common} needed={withCutNames(needed, cutNames)} stale={stale} mode={ui.collapsed ? 'collapsed' : 'ask'} />;
   }
-  const asked = ui.asked;
-  if (asked !== null && answer !== undefined && answer.answeredFor === asked.fingerprint) {
+  if (applied !== undefined && answer !== undefined && answer.answeredFor === applied.fingerprint) {
     return ui.reopened ? (
-      <TabChoiceCard {...common} needed={withCutNames(asked, cutNames)} mode="ask" />
+      <TabChoiceCard {...common} needed={withCutNames(applied, cutNames)} mode="ask" />
     ) : (
-      <TabChoiceCard {...common} needed={withCutNames(asked, cutNames)} mode="answered" answer={answer.choice} />
+      <TabChoiceCard {...common} needed={withCutNames(applied, cutNames)} mode="answered" answer={answer.choice} />
     );
   }
   return null;
