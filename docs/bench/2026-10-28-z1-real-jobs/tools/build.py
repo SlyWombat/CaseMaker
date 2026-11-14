@@ -92,7 +92,8 @@ TOL = 0.02          # fraction of an item's area; the same 2 % the issue's verdi
 NOISE = {'vise-default', 'sacrificial-default', 'plunge-unproven'}
 PILL = {'match': ('ok', 'Matches the design'), 'deviates': ('gap', 'Deviates'),
         'refused': ('fail', 'Refused'), 'unchecked': ('right', 'Not checkable'), 'error': ('cant', 'Not run'),
-        'over-limit': ('cant', 'Over its limit')}
+        'over-limit': ('cant', 'Over its limit'),
+        'needs-choice': ('cant', 'Needs the operator\'s choice')}
 
 
 def arg_parse():
@@ -530,6 +531,12 @@ def run_card(c, args, sha, cat):
             card['numbers'] = {'oomWallSeconds': wall}
         else:
             card['verdict'], card['sentence'] = 'error', 'the command wrote no receipt'
+        return card
+    # #1258 — THE RUN ASKED THE TAB QUESTION: its own outcome, with the question as the card's sentence. The builder records
+    # it and does not answer it (no `--tab-choice` anywhere in this file).
+    question = limits.tab_choice_question(rc['refusals'])
+    if question is not None:
+        card['verdict'], card['needsChoice'], card['sentence'] = 'needs-choice', limits.needs_choice_record(question), question
         return card
     card['time'] = rc['time']
     card['warnings'] = rc['warnings']
