@@ -26,6 +26,7 @@ import {
   CLAMP_REFUSE_FRACTION_FALLBACK,
   type Machine,
 } from '@/engine/cnc/machine';
+import { NO_SHOP } from '../tools/noShop';
 
 describe('the Z1 profile', () => {
   it('is one of the framed mills — the Z1, the Carvera Air and the Carvera carry a frame (#773, #828)', () => {
@@ -203,22 +204,22 @@ describe('the Z1 profile', () => {
 
 describe('clampToMachine: the single choke point', () => {
   it('passes values within the ceiling untouched, and null through as null', () => {
-    expect(clampToMachine(1000, 10000, Z1)).toEqual({ feed: 1000, rpm: 10000, diagnostics: [] });
-    expect(clampToMachine(null, null, Z1)).toEqual({ feed: null, rpm: null, diagnostics: [] });
-    expect(clampToMachine(1200, 13000, Z1).diagnostics).toEqual([]); // exactly at the limit is fine
+    expect(clampToMachine(1000, 10000, Z1, NO_SHOP.refuse)).toEqual({ feed: 1000, rpm: 10000, diagnostics: [] });
+    expect(clampToMachine(null, null, Z1, NO_SHOP.refuse)).toEqual({ feed: null, rpm: null, diagnostics: [] });
+    expect(clampToMachine(1200, 13000, Z1, NO_SHOP.refuse).diagnostics).toEqual([]); // exactly at the limit is fine
   });
 
   it("clamps a modest overage and says so: Makera's own 15 000 RPM rows on a 13 000 RPM spindle", () => {
     // The 32 rows in t_MakeraCutterProperties above the Z1's ceiling are +15 %: a table
     // written for a Carvera, not garbage. Clamp, warn.
-    const r = clampToMachine(null, 15000, Z1);
+    const r = clampToMachine(null, 15000, Z1, NO_SHOP.refuse);
     expect(r.rpm).toBe(13000);
     expect(r.diagnostics).toHaveLength(1);
     expect(r.diagnostics[0]).toMatchObject({ severity: 'warning', code: 'rpm-clamped' });
   });
 
   it('REFUSES a gross overage rather than clamping it: wrong tool, wrong material, or corruption', () => {
-    const r = clampToMachine(1200 * (1 + CLAMP_REFUSE_FRACTION_FALLBACK) + 1, 24000, Z1);
+    const r = clampToMachine(1200 * (1 + CLAMP_REFUSE_FRACTION_FALLBACK) + 1, 24000, Z1, NO_SHOP.refuse);
     expect(r.feed).toBeNull();
     expect(r.rpm).toBeNull();
     expect(r.diagnostics.map((d) => [d.severity, d.code])).toEqual([
@@ -229,7 +230,7 @@ describe('clampToMachine: the single choke point', () => {
 
   it('refuses the garbage Studio writes into its own files (1e61, NaN, Infinity)', () => {
     for (const bad of [9.255963134931783e61, NaN, Infinity]) {
-      const r = clampToMachine(bad, bad, Z1);
+      const r = clampToMachine(bad, bad, Z1, NO_SHOP.refuse);
       expect(r.feed, String(bad)).toBeNull();
       expect(r.rpm, String(bad)).toBeNull();
       expect(r.diagnostics.every((d) => d.severity === 'error')).toBe(true);

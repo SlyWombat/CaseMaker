@@ -22,6 +22,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { buildPcbJob, type PcbJobFile } from '../../scripts/lib/casemaker/pcbJob';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
+import { NO_SHOP } from '../tools/noShop';
 
 const file = (name: string): PcbJobFile => ({ name, bytes: bytes(name) });
 const ENGRAVER: ToolLibraryEntry = {
@@ -162,7 +163,7 @@ describe('thin-trace (#743 P-5)', () => {
 describe('the isolation reaches Generate (#743 P-5)', () => {
   it('still posts the gaps board, with the short stated as a warning', async () => {
     const built = await buildPcbJob(tl, [file('gaps.gbr')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: { count: 3, width: 3, height: 1 },
       tools: [ENGRAVER, CORN],
       catalogue: ROWS,
@@ -181,7 +182,7 @@ describe('the isolation reaches Generate (#743 P-5)', () => {
 
   it('generates the board whose gap opens', async () => {
     const built = await buildPcbJob(tl, [file('gaps-pass.gbr')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: { count: 3, width: 3, height: 1 },
       tools: [ENGRAVER, CORN],
       catalogue: ROWS,

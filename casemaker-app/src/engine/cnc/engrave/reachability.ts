@@ -20,6 +20,7 @@
  * `measureLabels` — this module never decides what "reachable" means, it reads #201's answer.
  */
 
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { isVTraceTool } from '@/engine/cnc/tool';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
@@ -188,6 +189,12 @@ export function reachabilityFor(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   measure: (key: string) => LabelEngravability[],
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   lostDetailWarnRatio: number | null = null,
@@ -203,6 +210,7 @@ export function reachabilityFor(
     job,
     tools,
     catalogue,
+    defaults,
     (key) => {
       const rows = measure(key);
       measured.set(key, rows);

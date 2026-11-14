@@ -51,6 +51,7 @@ import { feedsFor } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc';
 import { validateVise } from '@/engine/cnc/fixture';
 import type { EngraveJob } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
 const NC = [';@MKR|BEGIN', 'G21 G90', 'T1 M6', 'G1 Z-2.000 F200', 'M2'].join('\n');
@@ -66,7 +67,7 @@ function stubGenerated(job: EngraveJob, nc: string = NC): RunSheetGenerated {
       ...validateJob(job),
       ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]),
-    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc,
     verify: {

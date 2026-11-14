@@ -72,7 +72,7 @@ describe('#1066 epoxy tooling board', () => {
   });
 
   it('states a third-party cutter unfeedable in it, rather than borrowing a row', () => {
-    const feeds = engraveFeedsFor({}, CATALOGUE.feeds, 'epoxy-tooling', THIRD_PARTY, Z1);
+    const feeds = engraveFeedsFor({}, CATALOGUE.feeds, null, 'epoxy-tooling', THIRD_PARTY, Z1);
     expect(feeds.ok).toBe(false);
     if (feeds.ok) return;
     expect(feeds.reason).toContain('Epoxy tooling board');

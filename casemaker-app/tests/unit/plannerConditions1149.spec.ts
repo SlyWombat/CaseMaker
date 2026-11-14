@@ -128,7 +128,7 @@ describe('#1149 T1 — lost, broken and unknown, on the bench', () => {
 
   it('the planner never picks a cutter with no usable copy, and the plan says why', () => {
     setInventoryConditions([{ id: 'flat-3', quantity: 1, copies: [copy('c1', 'lost')] }], (id) => `inv:${id}`);
-    const plan = planCutters(labelJob(), NO_REACH, [FLAT_3], [], inventoryConditions());
+    const plan = planCutters(labelJob(), NO_REACH, [FLAT_3], [], null, inventoryConditions());
     expect(plan.cutters).toEqual([]);
     expect(plan.unassigned[0]!.reason).toContain('marked broken or lost');
   });
@@ -136,7 +136,7 @@ describe('#1149 T1 — lost, broken and unknown, on the bench', () => {
   it('an UNKNOWN cutter is still planable — the exclusion is lost/broken, not undescribed', () => {
     // This is what keeps an inventory nobody has described (the bench's own case) planable.
     setInventoryConditions([{ id: 'flat-3', quantity: 2, copies: [] }], (id) => `inv:${id}`);
-    const plan = planCutters(labelJob(), NO_REACH, [FLAT_3], [], inventoryConditions());
+    const plan = planCutters(labelJob(), NO_REACH, [FLAT_3], [], null, inventoryConditions());
     expect(plan.cutters.map((c) => c.key)).toEqual(['inv:flat-3']);
   });
 });
@@ -148,7 +148,7 @@ describe('#1149 T2 — owned is a bit on the shelf, not "any non-cat: key"', () 
     expect(owned.has('user:lonely-06')).toBe(false);
     expect(sourceOf(USER_LONELY, owned)).toBe('catalogue');
     // …and the plan records that source, so the search can rank a real bit above it.
-    const plans = candidatePlans(labelJob(), [FLAT_2, USER_LONELY], []);
+    const plans = candidatePlans(labelJob(), [FLAT_2, USER_LONELY], [], null);
     const withUser = plans.find((p) => p.cutters.some((c) => c.key === 'user:lonely-06'));
     if (withUser !== undefined) expect(withUser.source['user:lonely-06']).toBe('catalogue');
   });
@@ -156,7 +156,7 @@ describe('#1149 T2 — owned is a bit on the shelf, not "any non-cat: key"', () 
   it('a bit with the plans switch off is absent from a plan’s candidates (#1172 item 5)', () => {
     const OFF: ToolLibraryEntry = { ...entry('inv:off', 'flat', { tipDiameter: 1, diameter: 1 }), useInPlans: false };
     const ON = entry('inv:on', 'flat', { tipDiameter: 2, diameter: 2 });
-    const plans = candidatePlans(labelJob(), [OFF, ON], []);
+    const plans = candidatePlans(labelJob(), [OFF, ON], [], null);
     for (const plan of plans) expect(plan.cutters.map((c) => c.key)).not.toContain('inv:off');
     // …and it is not "on the shelf" either; the ON one still is.
     expect(ownedKeysOf([OFF, ON], null).has('inv:off')).toBe(false);

@@ -8,7 +8,7 @@ import { boxProblem } from '@/engine/cnc/stockStart';
 import { MAX_OUTLINE_CONTOURS, MAX_OUTLINE_POINTS } from '@/engine/import/outlineTypes';
 import { FACES, type Face } from '@/engine/cnc/setups/types';
 import { MAX_LINE_POINTS, MAX_SLOT_WIDTH_MM, type EngraveJob } from '@/types/engraveJob';
-import { defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
+import { TAPE_DEFAULTS, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import { newId } from '@/utils/id';
 
 /**
@@ -3150,7 +3150,7 @@ export function migrateLegacyFenceHold(json: unknown): unknown {
   fence.variant = b.variant;
   fence.edges = 'corner';
   if (b.obstacles !== undefined) fence.obstacles = b.obstacles;
-  return { ...doc, workholding: { kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence } } };
+  return { ...doc, workholding: { kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence } } };
 }
 
 /**

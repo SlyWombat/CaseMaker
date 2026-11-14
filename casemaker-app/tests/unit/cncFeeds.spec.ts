@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { FEEDS_TABLE, feedsFor, feedsToolForSurface, type FeedsEntry } from '@/engine/cnc/feeds';
 import { cuttingDiameter, flatEndMill, cuttingRadiusForSweep } from '@/engine/cnc/tool';
 import { Z1, CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
+import { NO_SHOP } from '../tools/noShop';
 
 /**
  * A cutter that lands in a row's range, on the row's OWN edge (#405): a row states the edge its
@@ -58,7 +59,7 @@ describe('#940 — a cone takes its own V row, and a chamfer falls back to the f
   };
 
   it('a chamfer takes the V row whose band covers its tip, with that row’s provenance', () => {
-    const out = feedsFor([], 'hardwood', CHAMFER, Z1, undefined, [flatRow, vRow]);
+    const out = feedsFor([], 'hardwood', CHAMFER, Z1, NO_SHOP.refuse, undefined, [flatRow, vRow]);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.params.feed).toBe(1000);
@@ -72,7 +73,7 @@ describe('#940 — a cone takes its own V row, and a chamfer falls back to the f
   });
 
   it('with no V row covering the tip, #669’s flat row at the cone base answers — labelled, and the V step-down', () => {
-    const out = feedsFor([], 'hardwood', CHAMFER, Z1, undefined, [flatRow]);
+    const out = feedsFor([], 'hardwood', CHAMFER, Z1, NO_SHOP.refuse, undefined, [flatRow]);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.params.feed).toBe(400);
@@ -150,7 +151,7 @@ describe('the V1 feeds table', () => {
   it('every row resolves for a cutter in its range, with NO diagnostics on the Z1', () => {
     // The table itself must never need clamping: it is written for this machine (#184, #202).
     for (const row of FEEDS_TABLE) {
-      const res = feedsFor([], row.material, cutterFor(row), Z1);
+      const res = feedsFor([], row.material, cutterFor(row), Z1, NO_SHOP.refuse);
       expect(res.ok, `${row.material} ${row.edge ?? 'flat'} ${row.minDiameter}-${row.maxDiameter}`).toBe(true);
       if (!res.ok) continue;
       expect(res.entry).toBe(row);
@@ -161,7 +162,7 @@ describe('the V1 feeds table', () => {
 
 describe('feedsFor selects a row by cutting diameter', () => {
   it('softwood + 1.0 mm flat end -> the first row, step-over 0.45 (fraction x diameter)', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.entry).toBe(FEEDS_TABLE[0]);
@@ -170,7 +171,7 @@ describe('feedsFor selects a row by cutting diameter', () => {
   });
 
   it('softwood + 3.175 mm flat end -> the 1.6-3.2 mm row (inclusive at both ends), step-down 1.0', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(3.175), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(3.175), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.entry.minDiameter).toBe(1.6);
@@ -179,7 +180,7 @@ describe('feedsFor selects a row by cutting diameter', () => {
   });
 
   it('a cutter exactly on the shared 1.6 mm boundary takes the FIRST (smaller-diameter) row', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(1.6), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(1.6), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.entry).toBe(FEEDS_TABLE[0]);
@@ -191,7 +192,7 @@ describe('feedsFor selects a row by cutting diameter', () => {
   // rest of the table — #284's coupons measure it — so what is pinned here is only that it EXISTS and
   // is selected, at the CUTTING diameter (2), not the 3.175 shank.
   it('PLA + the fitted 2 mm O-flute -> the 1.6-3.2 mm PLA row', () => {
-    const res = feedsFor([], 'pla', flatEndMill(2, { name: 'Spiral O single flute 2 x 12' }), Z1);
+    const res = feedsFor([], 'pla', flatEndMill(2, { name: 'Spiral O single flute 2 x 12' }), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.entry.material).toBe('pla');
@@ -200,14 +201,14 @@ describe('feedsFor selects a row by cutting diameter', () => {
     expect(res.params.stepDown).toBe(0.5);
     expect(res.params.feed).toBe(500);
     // Still the FIRST matching row for a smaller PLA cutter: #284's sweeps do not move the boundary.
-    const small = feedsFor([], 'pla', flatEndMill(1.0), Z1);
+    const small = feedsFor([], 'pla', flatEndMill(1.0), Z1, NO_SHOP.refuse);
     expect(small.ok).toBe(true);
     if (!small.ok) throw new Error(small.reason);
     expect(small.entry.maxDiameter).toBe(1.6);
   });
 
   it('a 6 mm cutter has no row: refused, never extrapolated', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(6), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(6), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('6 mm');
@@ -216,7 +217,7 @@ describe('feedsFor selects a row by cutting diameter', () => {
 
   it('a ball-nose is refused by cuttingRadiusForSweep, with its reason', () => {
     const ball = flatEndMill(1, { shape: 'ball', typeText: 'Ball End' });
-    const res = feedsFor([], 'softwood', ball, Z1);
+    const res = feedsFor([], 'softwood', ball, Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     const expected = cuttingRadiusForSweep(ball);
@@ -228,7 +229,7 @@ describe('feedsFor selects a row by cutting diameter', () => {
 
 describe('feedsFor and the V-bit row (#405)', () => {
   it('PLA + the 30° × 0.3 mm engraving bit -> the V row: S12000, F500 along, F200 plunge, one 1 mm pass', () => {
-    const res = feedsFor([], 'pla', vBit30(0.3), Z1);
+    const res = feedsFor([], 'pla', vBit30(0.3), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.entry.edge).toBe('v');
@@ -250,14 +251,14 @@ describe('feedsFor and the V-bit row (#405)', () => {
     // a cutter that engages its flank. Were the edge not part of selection, this flat end mill
     // would run a cone's feed. It has no flat PLA row at 0.4 mm, so the honest answer is a refusal.
     const flat = flatEndMill(0.4);
-    const res = feedsFor([], 'pla', flat, Z1);
+    const res = feedsFor([], 'pla', flat, Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('0.4 mm');
   });
 
   it('refuses a V-bit in a material with no V row, by the catalogue rule every cutter obeys', () => {
-    const res = feedsFor([], 'softwood', vBit30(0.3), Z1);
+    const res = feedsFor([], 'softwood', vBit30(0.3), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     // #732 — a cone has no special "the catalogue cannot answer it" refusal. It reaches the same
@@ -282,7 +283,7 @@ describe('feedsFor and the V-bit row (#405)', () => {
       halfAngle: 30,
       angle: 60,
     });
-    const res = feedsFor([], 'pla', metal, Z1);
+    const res = feedsFor([], 'pla', metal, Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('V-bit');
@@ -291,13 +292,13 @@ describe('feedsFor and the V-bit row (#405)', () => {
 
 describe('feedsFor enforces step-over <= radius (#191)', () => {
   it('refuses an override past the radius and names it; allows exactly the radius', () => {
-    const tooWide = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { stepOver: 0.6 });
+    const tooWide = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, { stepOver: 0.6 });
     expect(tooWide.ok).toBe(false);
     if (tooWide.ok) throw new Error('expected a refusal');
     expect(tooWide.reason).toContain('0.5 mm radius');
     expect(tooWide.reason).toContain('refused rather than clamped');
 
-    const atRadius = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { stepOver: 0.5 });
+    const atRadius = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, { stepOver: 0.5 });
     expect(atRadius.ok).toBe(true);
     if (!atRadius.ok) throw new Error(atRadius.reason);
     expect(atRadius.params.stepOver).toBe(0.5);
@@ -305,7 +306,7 @@ describe('feedsFor enforces step-over <= radius (#191)', () => {
 
   it('refuses a zero or negative step-over override as well as one past the radius', () => {
     for (const stepOver of [0, -0.1]) {
-      const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { stepOver });
+      const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, { stepOver });
       expect(res.ok, String(stepOver)).toBe(false);
       if (res.ok) throw new Error('expected a refusal');
       expect(res.reason).toContain('step-over');
@@ -315,7 +316,7 @@ describe('feedsFor enforces step-over <= radius (#191)', () => {
 
 describe('feedsFor clamps against the machine', () => {
   it('clamps an override feed of 1500 to the Z1 ceiling of 1200 and says so', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { feed: 1500 });
+    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, { feed: 1500 });
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.feed).toBe(1200);
@@ -326,7 +327,7 @@ describe('feedsFor clamps against the machine', () => {
   });
 
   it('refuses an override rpm of 24000 (+85 %), past the 50 % refusal threshold', () => {
-    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, { rpm: 24000 });
+    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, { rpm: 24000 });
     expect(res.ok).toBe(false);
     if (res.ok) throw new Error('expected a refusal');
     expect(res.reason).toContain('24000');
@@ -335,7 +336,7 @@ describe('feedsFor clamps against the machine', () => {
 
   it('refuses non-positive depth, feeds and spindle rather than clamping them', () => {
     for (const override of [{ stepDown: 0 }, { feed: 0 }, { plungeFeed: -1 }, { rpm: 0 }]) {
-      const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, override);
+      const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse, override);
       expect(res.ok, JSON.stringify(override)).toBe(false);
     }
   });

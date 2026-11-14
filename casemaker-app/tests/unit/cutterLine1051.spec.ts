@@ -103,7 +103,7 @@ const OWNED_BALL_12 = entry('inv:kz-ball-nose-2-12', 'ball', { tipDiameter: 2, d
 
 describe('#1051 the panel advises from the shop, and a mesh goal makes no reach claim', () => {
   it('RED: a mesh goal picks the owned ball, and the sentence names no whole-goal reach', () => {
-    const plan = planCutters(goalJob(), NO_REACH, [CAT_BALL_30, OWNED_BALL_22], []);
+    const plan = planCutters(goalJob(), NO_REACH, [CAT_BALL_30, OWNED_BALL_22], [], null);
     expect(plan.cutters[0]!.key).toBe('inv:kz-ball-nose-3-175-22');
     const reason = plan.cutters[0]!.reason;
     expect(reason).toContain("the engine measures the finishing ball among the shop's balls");
@@ -114,17 +114,17 @@ describe('#1051 the panel advises from the shop, and a mesh goal makes no reach 
   });
 
   it('a PNG relief keeps the reach rule — its engine has no per-feature judge', () => {
-    const plan = planCutters(goalJob({ format: 'png' }, 26), NO_REACH, [CAT_BALL_30, OWNED_BALL_22], []);
+    const plan = planCutters(goalJob({ format: 'png' }, 26), NO_REACH, [CAT_BALL_30, OWNED_BALL_22], [], null);
     expect(plan.cutters[0]!.key).toBe('cat:019c049a-ball-1-305');
     expect(plan.cutters[0]!.reason).toContain('reaches');
   });
 
   it('a shop with no records falls back to the registry, and the sentence says so', () => {
-    const plan = planCutters(goalJob(), NO_REACH, [CAT_BALL_30, OWNED_BALL_12], []);
+    const plan = planCutters(goalJob(), NO_REACH, [CAT_BALL_30, OWNED_BALL_12], [], null);
     // OWNED_BALL_12 is an `inv:` record, so this shop DOES have records; the fallback case is a
     // tools list of catalogue/built-in entries only.
     expect(plan.cutters[0]!.key).toBe('inv:kz-ball-nose-2-12');
-    const fallback = planCutters(goalJob(), NO_REACH, [CAT_BALL_30], []);
+    const fallback = planCutters(goalJob(), NO_REACH, [CAT_BALL_30], [], null);
     expect(fallback.cutters[0]!.key).toBe('cat:019c049a-ball-1-305');
     expect(fallback.cutters[0]!.reason).toContain('no inventory recorded, so the registry stands in');
   });
@@ -132,7 +132,7 @@ describe('#1051 the panel advises from the shop, and a mesh goal makes no reach 
   // A/6b's round (#1051): the no-ball branch kept the same whole-goal reach claim item 2 removes.
   it('a mesh goal with no ball in the shop says so without a whole-goal reach number', () => {
     const OWNED_FLAT = entry('inv:kz-o-flute-3-175-25', 'flat', { tipDiameter: 3.175, diameter: 3.175, fluteLength: 25 });
-    const plan = planCutters(goalJob(), NO_REACH, [OWNED_FLAT], []);
+    const plan = planCutters(goalJob(), NO_REACH, [OWNED_FLAT], [], null);
     expect(plan.cutters).toHaveLength(0);
     const reason = plan.unassigned[0]!.reason;
     expect(reason).toBe(
@@ -140,7 +140,7 @@ describe('#1051 the panel advises from the shop, and a mesh goal makes no reach 
     );
     expect(reason).not.toMatch(/needs .* mm of reach/);
     // The same shop with no records at all falls back to the registry and says WHICH registry.
-    const fallback = planCutters(goalJob(), NO_REACH, [entry('cat:019c-flat-3', 'flat', { tipDiameter: 3, diameter: 3, fluteLength: 12 })], []);
+    const fallback = planCutters(goalJob(), NO_REACH, [entry('cat:019c-flat-3', 'flat', { tipDiameter: 3, diameter: 3, fluteLength: 12 })], [], null);
     expect(fallback.unassigned[0]!.reason).toContain('no ball end mill in the registry');
     expect(fallback.unassigned[0]!.reason).not.toMatch(/needs .* mm of reach/);
   });

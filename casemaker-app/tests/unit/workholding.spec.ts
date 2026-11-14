@@ -24,6 +24,7 @@ import { engraveJobDocumentSchema, parseEngraveJob } from '@/store/engraveJobSch
 import { ShopDefaultsSchema, type ShopDefaults } from '@/platform/defaultsClient';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import type { BedFence, EngraveJob, JobWorkholding } from '@/types/engraveJob';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TRAY_SIDE_2 = join(HERE, '..', 'e2e', 'fixtures', 'm1trayB', 'm1trayB-bottom.cutjob.json');
@@ -38,7 +39,7 @@ const parse = (job: unknown) => parseEngraveJob(JSON.parse(JSON.stringify(job)))
 
 describe('#1102 the fence: tape holds, the bracket locates', () => {
   it('tape + fence (anchor 1, corner) is accepted, with where null and squareTo fence', () => {
-    const tape = { ...defaultTapeHold(), where: null, squareTo: 'fence' as const, fence: FENCE };
+    const tape = { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence' as const, fence: FENCE };
     const parsed = parse(jobWith({ kind: 'tape', tape }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -46,15 +47,15 @@ describe('#1102 the fence: tape holds, the bracket locates', () => {
   });
 
   it('tape without a fence is still the stored shape it was (fence absent, squareTo front)', () => {
-    const parsed = parse(jobWith({ kind: 'tape', tape: defaultTapeHold() }));
+    const parsed = parse(jobWith({ kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.job.workholding).toEqual({ kind: 'tape', tape: defaultTapeHold() });
+    expect(parsed.job.workholding).toEqual({ kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) });
     expect('fence' in (parsed.job.workholding as { tape: object }).tape).toBe(false);
   });
 
   it('a fence that names more than the corner is refused (a one-arm fence is not proven)', () => {
-    const tape = { ...defaultTapeHold(), squareTo: 'fence' as const, fence: { ...FENCE, edges: 'left-arm' } };
+    const tape = { ...defaultTapeHold(TAPE_DEFAULTS), squareTo: 'fence' as const, fence: { ...FENCE, edges: 'left-arm' } };
     expect(parse(jobWith({ kind: 'tape', tape: tape as never })).ok).toBe(false);
   });
 
@@ -92,7 +93,7 @@ describe('#1102 the migration: the vendor tray’s side 2 is tape + fence', () =
       edges: 'corner',
       obstacles: b.obstacles as BedFence['obstacles'],
     };
-    const explicit = { ...raw, workholding: { kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence } } };
+    const explicit = { ...raw, workholding: { kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence } } };
     const expected = parseEngraveJob(JSON.parse(JSON.stringify(explicit)));
     expect(expected.ok).toBe(true);
     if (!expected.ok) return;
@@ -160,7 +161,7 @@ function attemptFor(job: EngraveJob, mountKind: 'tape' | 'bracket') {
 
 describe('#1102 registration with the fence', () => {
   it('a taped + fenced job plans no edge find and one top touch, XY from the anchor', () => {
-    const job = trayJob({ kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence: FENCE } });
+    const job = trayJob({ kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence: FENCE } });
     const attempt = attemptFor(job, 'tape');
     expect(attempt.kind, JSON.stringify(attempt)).toBe('plan');
     if (attempt.kind !== 'plan') return;
@@ -172,7 +173,7 @@ describe('#1102 registration with the fence', () => {
   });
 
   it('unfenced tape is still refused with its sentence', () => {
-    const attempt = attemptFor(trayJob({ kind: 'tape', tape: defaultTapeHold() }), 'tape');
+    const attempt = attemptFor(trayJob({ kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) }), 'tape');
     expect(attempt.kind).toBe('refused');
     if (attempt.kind !== 'refused') return;
     expect(attempt.reason).toBe('registration on tape has not been run on this machine yet — hold the blank in the vise');
@@ -181,13 +182,13 @@ describe('#1102 registration with the fence', () => {
 
 
 describe('#1102 one mount for a fenced job: every reader sees the bracket', () => {
-  const fencedJob = () => trayJob({ kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence: FENCE } });
+  const fencedJob = () => trayJob({ kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence: FENCE } });
   // The same setup said from the bracket's side (hand-built: the schema refuses it, which is the point).
   const bracketTwin = () => trayJob({ kind: 'bracket', bracket: { anchor: 1, variant: 'thin', clamps: [], source: 'default' } });
 
   it('the job’s mount, its derived setup and its planner hold are the bracket’s', () => {
     expect(jobMount(fencedJob())).toBe('bracket');
-    expect(jobMount(trayJob({ kind: 'tape', tape: defaultTapeHold() }))).toBe('tape');
+    expect(jobMount(trayJob({ kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) }))).toBe('tape');
     expect(implicitSetupFor(fencedJob())?.mount.kind).toBe('bracket');
     expect(workholdingFor(fencedJob())).toEqual({ kind: 'anchor-bracket', anchor: 1, offset: [0, 0] });
   });

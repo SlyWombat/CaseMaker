@@ -31,6 +31,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { binaryStlBase64 } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -103,7 +104,7 @@ describe('#722 — the scale helpers', () => {
 describe('#722 — every reader applies the one scale', () => {
   it('the heightfield samples the fitted mesh at its placed size, centred, top at position.z', () => {
     const f = fitToStockScale({ x: 200, y: 100, z: 40 }, STOCK, 1)!;
-    const hf = sampleGoalHeightfield(goal({ scale: { x: f, y: f, z: f } }), { pitchMm: 0.25, stockTopZ: 0 });
+    const hf = sampleGoalHeightfield(goal({ scale: { x: f, y: f, z: f } }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25, stockTopZ: 0 });
     // Footprint 50 × 25 centred on (38, 19).
     expect(hf.x0).toBeCloseTo(13, 6);
     expect(hf.y0).toBeCloseTo(6.5, 6);
@@ -121,7 +122,7 @@ describe('#722 — every reader applies the one scale', () => {
 
   it('a 50 % scale halves the footprint and the step', () => {
     const hf = sampleGoalHeightfield(goal({ scale: { x: 0.5, y: 0.5, z: 0.5 }, position: { x: 60, y: 30, z: 0 } }), {
-      pitchMm: 0.5,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5,
     });
     expect(hf.x0).toBeCloseTo(10, 6); // 60 − 100/2
     expect(hf.y0).toBeCloseTo(5, 6); //  30 − 50/2
@@ -129,8 +130,8 @@ describe('#722 — every reader applies the one scale', () => {
   });
 
   it('a Z-only stretch deepens the step without moving the footprint', () => {
-    const flat = sampleGoalHeightfield(goal({ scale: { x: 0.25, y: 0.25, z: 0.25 } }), { pitchMm: 0.25 });
-    const tall = sampleGoalHeightfield(goal({ scale: { x: 0.25, y: 0.25, z: 0.4 } }), { pitchMm: 0.25 });
+    const flat = sampleGoalHeightfield(goal({ scale: { x: 0.25, y: 0.25, z: 0.25 } }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25 });
+    const tall = sampleGoalHeightfield(goal({ scale: { x: 0.25, y: 0.25, z: 0.4 } }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25 });
     expect(tall.x0).toBeCloseTo(flat.x0, 9);
     expect(tall.nx).toBe(flat.nx);
     expect(flat.minZ).toBeCloseTo(-5, 4);
@@ -204,7 +205,7 @@ describe('#722 review — a turned object', () => {
   });
 
   it('a scaled AND turned heightfield lands where the turned footprint says', () => {
-    const hf = sampleGoalHeightfield(goal({ scale: { x: 0.2, y: 0.2, z: 0.2 }, rotation: 90 }), { pitchMm: 0.25 });
+    const hf = sampleGoalHeightfield(goal({ scale: { x: 0.2, y: 0.2, z: 0.2 }, rotation: 90 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25 });
     // 40 × 20 turned 90° about (38, 19): X 28…48, Y −1…39.
     expect(hf.x0).toBeCloseTo(28, 4);
     expect(hf.y0).toBeCloseTo(-1, 4);

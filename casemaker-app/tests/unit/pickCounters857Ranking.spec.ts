@@ -17,7 +17,7 @@ describe('#857 a raised glyph’s counters count in the pick', () => {
     // #1134 caps the default full evaluations at 3; this case MEASURES the ranking across the
     // corn-rest plans too, so it asks for enough finalists to time every candidate (the cap's own
     // behaviour is pinned in smartPick.spec.ts).
-    const pick = picked(await smartPick(job, TOOLS, [], (p, level) => evaluate(job, p, level), { maxCandidates: 16, fullFinalists: 20 }));
+    const pick = picked(await smartPick(job, TOOLS, [], null, (p, level) => evaluate(job, p, level), { maxCandidates: 16, fullFinalists: 20 }));
     expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
     // The V rest after a clearance flat: the search's answer, not a rule's. Which flat clears is the
     // run time's call (with this four-cutter library the ⌀1.9 is in the V pairings and is faster;

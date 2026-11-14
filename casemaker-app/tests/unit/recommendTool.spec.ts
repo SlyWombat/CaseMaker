@@ -87,7 +87,7 @@ describe('recommendTool (#211)', () => {
       tool('t3.175', 3.175, { shoulderLength: 12 }),
     ];
     const measure = (key: string) => (key === 't3.175' ? [row('l1', 0.5)] : [row('l1', 1)]);
-    const rec = recommendTool(job, tools, [], measure);
+    const rec = recommendTool(job, tools, [], null, measure);
     expect(rec.key).toBe('t2.0');
     expect(rec.compromise).toBe(false);
     expect(rec.reason).toBe('Largest cutter that keeps every item intact.');
@@ -102,7 +102,7 @@ describe('recommendTool (#211)', () => {
   it('ranks the user’s own cutters by their inventory keys (#309)', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tools = [tool('inv:aaa', 2.0), tool('inv:bbb', 2.0), tool('inv:wide', 3.175)];
-    const rec = recommendTool(job, tools, [], allRows(1));
+    const rec = recommendTool(job, tools, [], null, allRows(1));
     expect(rec.key).toBe('inv:wide');
     expect(rec.compromise).toBe(false);
     expect(candidate(rec, 'inv:aaa').qualifies).toBe(true);
@@ -113,7 +113,7 @@ describe('recommendTool (#211)', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tools = [tool('t1.0', 1.0), tool('t2.0', 2.0)];
     const measure = (key: string) => [row('l1', key === 't1.0' ? 1 : 0.4)];
-    const rec = recommendTool(job, tools, [], measure);
+    const rec = recommendTool(job, tools, [], null, measure);
     expect(rec.key).toBe('t1.0');
     expect(rec.compromise).toBe(false);
   });
@@ -123,7 +123,7 @@ describe('recommendTool (#211)', () => {
     const tools = [tool('t1.0', 1.0), tool('t2.0', 2.0), tool('t3.175', 3.175)];
     // Every cutter loses detail; the smaller the cutter the less it loses.
     const measure = (key: string) => [row('l1', key === 't1.0' ? 0.4 : key === 't2.0' ? 0.2 : 0.05)];
-    const rec = recommendTool(job, tools, [], measure);
+    const rec = recommendTool(job, tools, [], null, measure);
     expect(rec.key).toBe('t1.0');
     expect(rec.compromise).toBe(true);
     expect(rec.reason).toContain('CASE');
@@ -135,7 +135,7 @@ describe('recommendTool (#211)', () => {
   it('does not recommend a cutter whose reach is shorter than the deepest label, even at ratio 1', () => {
     const job = jobWithLabel('l1', 'CASE', 2.0);
     const tools = [tool('short', 2.0, { shoulderLength: 1 }), tool('ok', 1.0, { fluteLength: 12 })];
-    const rec = recommendTool(job, tools, [], allRows(1));
+    const rec = recommendTool(job, tools, [], null, allRows(1));
     expect(rec.key).toBe('ok');
     const short = candidate(rec, 'short');
     expect(short.reachKnown).toBe(true);
@@ -148,7 +148,7 @@ describe('recommendTool (#211)', () => {
     const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
     const flat = tool('flat', 1.0);
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [ball, flat], [], measure);
+    const rec = recommendTool(job, [ball, flat], [], null, measure);
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
     expect(candidate(rec, 'ball').excluded).toBe('not-flat');
@@ -158,7 +158,7 @@ describe('recommendTool (#211)', () => {
   it('excludes a cutter with no feeds row and never measures it', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [tool('big', 5.0), tool('flat', 1.0)], [], measure);
+    const rec = recommendTool(job, [tool('big', 5.0), tool('flat', 1.0)], [], null, measure);
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure).toHaveBeenCalledWith('flat');
     expect(candidate(rec, 'big').excluded).toBe('no-feeds');
@@ -186,7 +186,7 @@ describe('recommendTool (#211)', () => {
       stepDown: 0.5,
     };
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const withRows = recommendTool(job, [cutter], [absurd], measure);
+    const withRows = recommendTool(job, [cutter], [absurd], null, measure);
     expect(candidate(withRows, 't').excluded).toBeUndefined();
     expect(withRows.key).toBe('t');
 
@@ -194,12 +194,12 @@ describe('recommendTool (#211)', () => {
     // can decide this pre-filter, so what a row still decides for a picker is nothing — the
     // hand-over is observable where it matters, in the NUMBERS `engraveGenerate.spec.ts` reads out
     // of the `.nc` (the feed catalogue reaches the worker, #324).
-    expect(recommendTool(job, [cutter], [], allRows(1)).key).toBe('t');
+    expect(recommendTool(job, [cutter], [], null, allRows(1)).key).toBe('t');
   });
 
   it('still qualifies a cutter with unknown reach, and says so in the note', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('unknown-reach', 1.0)], [], allRows(1));
+    const rec = recommendTool(job, [tool('unknown-reach', 1.0)], [], null, allRows(1));
     expect(rec.key).toBe('unknown-reach');
     expect(rec.compromise).toBe(false);
     expect(candidate(rec, 'unknown-reach').reachKnown).toBe(false);
@@ -211,19 +211,19 @@ describe('recommendTool (#211)', () => {
   it('is deterministic on ties: known reach wins, then the lower key', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tied = [tool('z-unknown', 2.0), tool('a-unknown', 2.0)];
-    expect(recommendTool(job, tied, [], allRows(1)).key).toBe('a-unknown');
+    expect(recommendTool(job, tied, [], null, allRows(1)).key).toBe('a-unknown');
 
     const reachTie = [tool('z-unknown', 2.0), tool('y-known', 2.0, { shoulderLength: 12 })];
-    expect(recommendTool(job, reachTie, [], allRows(1)).key).toBe('y-known');
+    expect(recommendTool(job, reachTie, [], null, allRows(1)).key).toBe('y-known');
   });
 
   it('returns key null only when no eligible cutter exists', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' })], [], allRows(1));
+    const rec = recommendTool(job, [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' })], [], null, allRows(1));
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('flat end mill');
 
-    const empty = recommendTool(job, [], [], allRows(1));
+    const empty = recommendTool(job, [], [], null, allRows(1));
     expect(empty.key).toBeNull();
     expect(empty.candidates).toEqual([]);
   });
@@ -251,7 +251,7 @@ describe('recommendTool integration (#211)', () => {
       return measureLabels(tl, plan, radius.radius, job.edgeMargin, perChar);
     };
 
-    const rec = recommendTool(job, TOOL_LIBRARY, [], measure);
+    const rec = recommendTool(job, TOOL_LIBRARY, [], null, measure);
     expect(rec.key).toBe('flat-1.0');
     // The wide cutter is the one that loses the thin strokes of the smaller labels.
     expect(candidate(rec, 'flat-3.175x12-metal').qualifies).toBe(false);
@@ -314,7 +314,7 @@ describe('recommendTool and V-bits (#405)', () => {
     // The V row is PLA's; the default job is softwood, where a V-bit is honestly refused at feeds.
     job.stock = { ...job.stock, material: 'pla' };
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], measure);
+    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], null, measure);
     // One candidate measured — the flat one. A cone is not measured against a glyph at all, because
     // a cone has no single width for the glyph's opening to be measured against; its qualification
     // is the colour-plane model (#221).
@@ -332,7 +332,7 @@ describe('recommendTool and V-bits (#405)', () => {
   it('picks the V-carve when no flat keeps the detail', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     job.stock = { ...job.stock, material: 'pla' };
-    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], (_key) => [row('l1', 0.1)]);
+    const rec = recommendTool(job, [vBit(), tool('flat', 1.0)], [], null, (_key) => [row('l1', 0.1)]);
     expect(rec.key).toBe('inv:v30');
     expect(rec.compromise).toBe(false);
     // The reason is the strategy sentence, not "largest cutter that keeps every item intact": the
@@ -347,7 +347,7 @@ describe('recommendTool and V-bits (#405)', () => {
     // the generic phrase, because no V-carve is what a ball nose would be.
     const job = jobWithLabel('l1', 'CASE', 1);
     const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
-    const rec = recommendTool(job, [ball, tool('flat', 1.0)], [], vi.fn((_key: string) => [row('l1', 1)]));
+    const rec = recommendTool(job, [ball, tool('flat', 1.0)], [], null, vi.fn((_key: string) => [row('l1', 1)]));
     expect(candidate(rec, 'ball').excluded).toBe('not-flat');
     expect(candidate(rec, 'ball').vCarve).toBeUndefined();
   });
@@ -355,7 +355,7 @@ describe('recommendTool and V-bits (#405)', () => {
   it('qualifies a V-bit for a trace-only job and measures it', () => {
     const job = traceJob();
     const measure = vi.fn((_key: string) => [row('tr1', 1)]);
-    const rec = recommendTool(job, [vBit()], [], measure);
+    const rec = recommendTool(job, [vBit()], [], null, measure);
     expect(measure).toHaveBeenCalledWith('inv:v30');
     expect(candidate(rec, 'inv:v30').excluded).toBeUndefined();
     expect(candidate(rec, 'inv:v30').qualifies).toBe(true);
@@ -369,13 +369,13 @@ describe('recommendTool and V-bits (#405)', () => {
     // The V row is PLA's alone (#405): a softwood trace job has no numbers for a cone, and this
     // V-bit carries no Makera id for a catalogue row to name it by (#732), so there is nothing to
     // fall back on. (The catalogue does state engraving rows — for cutters that carry an id.)
-    const rec = recommendTool(traceJob('softwood'), [vBit()], [], allRows(1));
+    const rec = recommendTool(traceJob('softwood'), [vBit()], [], null, allRows(1));
     expect(candidate(rec, 'inv:v30').excluded).toBe('no-feeds');
     expect(rec.key).toBeNull();
   });
 
   it('names the V-bit option when a job with a region has nothing else to recommend', () => {
-    const rec = recommendTool(jobWithLabel('l1', 'CASE', 1), [vBit()], [], allRows(1));
+    const rec = recommendTool(jobWithLabel('l1', 'CASE', 1), [vBit()], [], null, allRows(1));
     expect(rec.key).toBeNull();
     expect(rec.reason).toContain('V-bit');
   });
@@ -415,7 +415,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
       job,
       [corn('inv:corn')],
       [catRow('900000000001', 'PCB'), catRow('900000000001', 'Carbon Fiber')],
-      measure,
+      null, measure,
     );
 
     // It is out before it is measured: a detail ratio for a bit the vendor says is for PCB is not a
@@ -442,7 +442,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
       job,
       [corn('inv:corn')],
       [catRow('900000000001', 'Acrylic'), catRow('900000000001', 'ABS')],
-      allRows(1),
+      null, allRows(1),
     );
 
     expect(rec.key).toBe('inv:corn');
@@ -464,7 +464,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
       plaJob(),
       [mine],
       [catRow('900000000001', 'ABS')],
-      allRows(1),
+      null, allRows(1),
     );
 
     expect(rec.key).toBe('user:mine');
@@ -482,7 +482,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
       job,
       [corn('inv:corn'), tool('inv:ok', 1.0)],
       [catRow('900000000001', 'PCB'), catRow('900000000001', 'Carbon Fiber')],
-      allRows(1),
+      null, allRows(1),
     );
 
     // The recommendation picks another cutter, and the warning about the job's own choice still
@@ -504,7 +504,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
       ...catRow('900000000001', 'ABS'),
       cutter: { shape: 'flat', diameter: 6, tipDiameter: 6 },
     };
-    const rec = recommendTool(job, [corn('inv:corn')], [stale], allRows(1));
+    const rec = recommendTool(job, [corn('inv:corn')], [stale], null, allRows(1));
 
     expect(rec.selectedNote).toContain('900000000001');
     expect(rec.selectedNote).toContain('6 mm');
@@ -517,7 +517,7 @@ describe('recommendTool and the catalogue’s material list (#455)', () => {
   it('adds no note when the catalogue row is the material’s own', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     job.stock = { ...job.stock, material: 'abs' };
-    const rec = recommendTool(job, [corn('inv:corn')], [catRow('900000000001', 'ABS')], allRows(1));
+    const rec = recommendTool(job, [corn('inv:corn')], [catRow('900000000001', 'ABS')], null, allRows(1));
     expect(rec.key).toBe('inv:corn');
     expect(rec.catalogueNote).toBeNull();
     expect(rec.selectedNote).toBeNull();
@@ -560,7 +560,7 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     const tools = [tool('inv:good', 1.0), tool('inv:dead', 3.175)];
     const measure = vi.fn((_key: string) => [row('l1', 1)]);
-    const rec = recommendTool(job, tools, [], measure, conditionsOf(held('good', 'used'), held('dead', 'broken')));
+    const rec = recommendTool(job, tools, [], null, measure, conditionsOf(held('good', 'used'), held('dead', 'broken')));
 
     // 3.175 mm would win on size alone; the operator has said it cannot cut, so it never even gets
     // measured — a catalogue row or a detail ratio for a bit that cannot cut is not worth computing.
@@ -575,14 +575,14 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
     // Same diameter, same unknown reach: the key order alone would recommend the worn one first.
     const tools = [tool('inv:aworn', 1.0), tool('inv:bfresh', 1.0)];
-    const rec = recommendTool(job, tools, [], allRows(1), conditionsOf(held('aworn', 'worn'), held('bfresh', 'new')));
+    const rec = recommendTool(job, tools, [], null, allRows(1), conditionsOf(held('aworn', 'worn'), held('bfresh', 'new')));
     expect(rec.key).toBe('inv:bfresh');
     expect(rec.conditionNote).toBeNull();
   });
 
   it('still picks a worn cutter when it is the only one, and carries the warning', () => {
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('inv:only', 1.0)], [], allRows(1), conditionsOf(held('only', 'worn')));
+    const rec = recommendTool(job, [tool('inv:only', 1.0)], [], null, allRows(1), conditionsOf(held('only', 'worn')));
     expect(rec.key).toBe('inv:only');
     // The warning is `toolCondition`'s own sentence, not a second spelling of it.
     expect(rec.conditionNote).toBe(summaryOf('only', 'worn').note);
@@ -598,7 +598,7 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
       job,
       [tool('inv:small', 1.0), tool('inv:big', 2.0)],
       [],
-      allRows(1),
+      null, allRows(1),
       conditionsOf(held('small', 'new'), held('big', 'worn')),
     );
     expect(rec.key).toBe('inv:big');
@@ -613,7 +613,7 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
     // A catalogue row, a built-in, or a bench whose inventory has not loaded: `null` is "nobody has
     // said", which is a different answer from "worn", and it must not read as a caution.
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('cat:x', 1.0)], [], allRows(1), conditionsOf(held('other', 'broken')));
+    const rec = recommendTool(job, [tool('cat:x', 1.0)], [], null, allRows(1), conditionsOf(held('other', 'broken')));
     expect(rec.key).toBe('cat:x');
     expect(candidate(rec, 'cat:x').condition).toBeNull();
     expect(rec.conditionNote).toBeNull();
@@ -625,7 +625,7 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
       job,
       [tool('inv:one', 1.0), tool('inv:two', 2.0)],
       [],
-      allRows(1),
+      null, allRows(1),
       conditionsOf(held('one', 'broken'), held('two', 'broken')),
     );
     expect(rec.key).toBeNull();
@@ -639,7 +639,7 @@ describe('recommendTool — the cutters’ condition (#442)', () => {
     // The web build with no service, and every caller that has no inventory: no cutter is excluded
     // and none is cautioned, because the app knows of no possession of any of them.
     const job = jobWithLabel('l1', 'CASE', 1);
-    const rec = recommendTool(job, [tool('flat', 1.0)], [], allRows(1));
+    const rec = recommendTool(job, [tool('flat', 1.0)], [], null, allRows(1));
     expect(rec.key).toBe('flat');
     expect(rec.conditionNote).toBeNull();
     expect(candidate(rec, 'flat').condition).toBeNull();
@@ -744,7 +744,7 @@ describe('recommendTool — the computed pick states its size and its material r
 
   it('never recommends the sizeless chamfer, and the pick has a stated size and a direct PLA row', () => {
     const job = badgeJob();
-    const rec = recommendTool(job, [chamfer(), engraver(), flat()], catalogue, (_key) => [row('name', 1)]);
+    const rec = recommendTool(job, [chamfer(), engraver(), flat()], catalogue, null, (_key) => [row('name', 1)]);
 
     // The old reading — `cuttingDiameter`'s `diameter=` fallback — calls the shank a size; the rule
     // this issue adds does not, and the candidate is out before it can be measured.
@@ -774,7 +774,7 @@ describe('recommendTool — the computed pick states its size and its material r
   });
 
   it('says the sizes are missing when every cutter is sizeless, rather than blaming the material', () => {
-    const rec = recommendTool(badgeJob(), [chamfer()], catalogue, (_key) => [row('name', 1)]);
+    const rec = recommendTool(badgeJob(), [chamfer()], catalogue, null, (_key) => [row('name', 1)]);
     expect(rec.key).toBeNull();
     expect(rec.reason).toBe('No cutter in the list states a cutting diameter.');
   });
@@ -810,7 +810,7 @@ describe('recommendTool — the computed pick states its size and its material r
     const gateCatalogue = [plasticRow(PLAIN_PLA_ID)];
 
     it('picks the plain 1 mm flat, and the metal one carries its own refusal', () => {
-      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
+      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, null, (_key) => [
         row('name', 1),
       ]);
 
@@ -826,7 +826,7 @@ describe('recommendTool — the computed pick states its size and its material r
     });
 
     it('leaves the badge + text job generating with no blocking finding', async () => {
-      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, (_key) => [
+      const rec = recommendTool(badgeJob(), [metalFlat(), plainFlat()], gateCatalogue, null, (_key) => [
         row('name', 1),
       ]);
       const job: EngraveJob = { ...badgeJob(), toolKey: rec.key!, tool: plainFlat().tool };
@@ -851,7 +851,7 @@ describe('recommendTool — the computed pick states its size and its material r
       // The override is the operator's decision: the job's gate then allows the pair, so the
       // recommendation must not keep refusing it.
       const job: EngraveJob = { ...badgeJob(), metalLineOverride: true };
-      const rec = recommendTool(job, [metalFlat(), plainFlat()], gateCatalogue, (_key) => [row('name', 1)]);
+      const rec = recommendTool(job, [metalFlat(), plainFlat()], gateCatalogue, null, (_key) => [row('name', 1)]);
       expect(candidate(rec, 'inv:kz-metal-flat-1').excluded).toBeUndefined();
       expect(rec.key).toBe('inv:kz-metal-flat-1');
     });
@@ -910,7 +910,7 @@ describe('recommendTool — the computed pick states its size and its material r
 
     it('a bore refuses the larger V-bit; the flat is picked and the job generates', async () => {
       const job: EngraveJob = { ...jobWithLabel('l1', 'CASE', 1), drills: [bore()] };
-      const rec = recommendTool(job, [vBit(2), flat()], [], (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [vBit(2), flat()], [], null, (_key) => [row('l1', 1)]);
       const v = candidate(rec, 'inv:v-30');
       expect(v.diameter).toBeGreaterThan(candidate(rec, 'inv:kz-flat-1').diameter);
       expect(v.excluded).toBe('job-shape');
@@ -942,7 +942,7 @@ describe('recommendTool — the computed pick states its size and its material r
       // #762 — the cut-out reaches 12.3 mm through this 12 mm blank, so the flat must reach it
       // too; the shared `flat()` stops at 12, and this case is about the SHAPE gate.
       const longFlat: ToolLibraryEntry = { ...flat(), tool: { ...flat().tool, shoulderLength: 15 } };
-      const rec = recommendTool(job, [vBit(2), longFlat], [], (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [vBit(2), longFlat], [], null, (_key) => [row('l1', 1)]);
       expect(candidate(rec, 'inv:v-30').excluded).toBe('job-shape');
       expect(candidate(rec, 'inv:v-30').refusal).toContain('cut-out');
       expect(rec.key).toBe('inv:kz-flat-1');
@@ -950,7 +950,7 @@ describe('recommendTool — the computed pick states its size and its material r
 
     it('a variable-depth V-carve refuses the larger flat; the V-bit is picked', () => {
       const job: EngraveJob = { ...badgeJob(), shapes: [rect({ vCarveDepth: 'variable' })] };
-      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('name', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, null, (_key) => [row('name', 1)]);
       const flatCandidate = candidate(rec, 'inv:kz-flat-1');
       expect(flatCandidate.diameter).toBeGreaterThan(candidate(rec, 'inv:v-30').diameter);
       expect(flatCandidate.excluded).toBe('job-shape');
@@ -966,7 +966,7 @@ describe('recommendTool — the computed pick states its size and its material r
         ...badgeJob(),
         shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
       };
-      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('name', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, null, (_key) => [row('name', 1)]);
       expect(candidate(rec, 'inv:kz-flat-1').excluded).toBe('job-shape');
       expect(candidate(rec, 'inv:kz-flat-1').refusal).toContain('inlay');
       expect(rec.key).toBe('inv:v-30');
@@ -978,7 +978,7 @@ describe('recommendTool — the computed pick states its size and its material r
         drills: [bore()],
         shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
       };
-      const rec = recommendTool(job, [flat(), vBit(2)], [], (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(2)], [], null, (_key) => [row('l1', 1)]);
       expect(rec.key).toBeNull();
       expect(rec.reason).toContain('refused by the job’s own operations');
       expect(rec.reason).toContain('bores a hole');
@@ -994,7 +994,7 @@ describe('recommendTool — the computed pick states its size and its material r
         shapes: [rect({ inlay: { role: 'female', glueGapMm: 0.2 } })],
       };
       const sizeless: ToolLibraryEntry = { ...flat(), key: 'inv:no-size', tool: { ...flat().tool, diameter: null } };
-      const rec = recommendTool(job, [flat(), vBit(2), sizeless], [], (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(2), sizeless], [], null, (_key) => [row('l1', 1)]);
       expect(rec.key).toBeNull();
       expect(rec.reason).toMatch(/^No single cutter can cut this job/);
       expect(rec.reason).not.toContain('is a flat end mill — or');
@@ -1006,7 +1006,7 @@ describe('recommendTool — the computed pick states its size and its material r
         drills: [bore()],
         shapes: [rect({ enabled: false, inlay: { role: 'female', glueGapMm: 0.2 } })],
       };
-      const rec = recommendTool(job, [flat(), vBit(2)], [], (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(2)], [], null, (_key) => [row('l1', 1)]);
       expect(rec.key).toBe('inv:kz-flat-1');
       const withPick: EngraveJob = { ...job, toolKey: rec.key!, tool: flat().tool };
       expect(validateJob(withPick).some((f) => f.code === 'inlay-needs-cone')).toBe(false);
@@ -1018,7 +1018,7 @@ describe('recommendTool — the computed pick states its size and its material r
         ...base,
         labels: base.labels.map((l) => ({ ...l, vCarveDepth: 'variable' as const })),
       };
-      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, (_key) => [row('l1', 1)]);
+      const rec = recommendTool(job, [flat(), vBit(0.5)], shapeCatalogue, null, (_key) => [row('l1', 1)]);
       expect(candidate(rec, 'inv:kz-flat-1').excluded).toBe('job-shape');
       const withFlat: EngraveJob = { ...job, toolKey: 'inv:kz-flat-1', tool: flat().tool };
       expect(validateJob(withFlat).some((f) => f.code === 'vcarve-variable-needs-cone')).toBe(true);

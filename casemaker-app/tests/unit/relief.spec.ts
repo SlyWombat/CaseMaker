@@ -20,6 +20,7 @@ import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 // ---- a minimal PNG writer, so the fixtures are PIXELS we constructed -------------------------
 
@@ -174,7 +175,7 @@ describe('the picture becomes the goal heightfield (#672)', () => {
   it('maps the ramp INDEPENDENTLY: the height comes from the fixture’s bytes, not the map', () => {
     const size = { x: 25.6, y: 0.8 }; // 256 px over 25.6 mm = 0.1 mm per pixel
     const target = reliefTarget(rampPng(), size, { maxDepthMm: 2 });
-    const hf = sampleGoalHeightfield(target, { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(hf.coveredCount).toBeGreaterThan(0);
     // For a cell at world x, the picture's continuous column is u = (x − left) / 0.1, its grey
     // (white-high) is the ramp's `u − 0.5` clamped, and the depth is 2 × (1 − grey/255) — all
@@ -199,7 +200,7 @@ describe('the picture becomes the goal heightfield (#672)', () => {
   it('a two-band picture gives the top face and the full depth exactly; invert swaps them', () => {
     // 4 × 1: two black columns then two white — sampled away from the boundary.
     const band = greyPng(4, 1, new Uint8Array([0, 0, 255, 255]));
-    const low = sampleGoalHeightfield(reliefTarget(band, { x: 4, y: 4 }, { maxDepthMm: 3 }), { pitchMm: 0.5 });
+    const low = sampleGoalHeightfield(reliefTarget(band, { x: 4, y: 4 }, { maxDepthMm: 3 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     const zAt = (hf: ReturnType<typeof sampleGoalHeightfield>, x: number): number => {
       const i = Math.round((x - hf.x0) / hf.pitch);
       const j = Math.floor(hf.ny / 2);
@@ -210,14 +211,14 @@ describe('the picture becomes the goal heightfield (#672)', () => {
 
     const inverted = sampleGoalHeightfield(
       reliefTarget(band, { x: 4, y: 4 }, { maxDepthMm: 3, invert: true }),
-      { pitchMm: 0.5 },
+      { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 },
     );
     expect(zAt(inverted, 19)).toBeCloseTo(0, 2);
     expect(zAt(inverted, 21)).toBeCloseTo(-3, 2);
   });
 
   it('is gouge-free to sample: a linear ramp stays linear between pixels (bilinear)', () => {
-    const hf = sampleGoalHeightfield(reliefTarget(rampPng(), { x: 25.6, y: 0.8 }, { maxDepthMm: 2 }), { pitchMm: 0.25 });
+    const hf = sampleGoalHeightfield(reliefTarget(rampPng(), { x: 25.6, y: 0.8 }, { maxDepthMm: 2 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.25 });
     const xs = [10, 10.5, 11, 11.5];
     const zs = xs.map((x) => {
       const i = Math.round((x - hf.x0) / hf.pitch);

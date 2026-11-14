@@ -15,11 +15,12 @@ import type { StockMaterial } from '@/types/engraveJob';
 import type { FeedRowFact } from './sevenLines';
 import type { Tool } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
+import { NO_SHOP } from './noShop';
 
 /** One cutter's row, as the resolver answered it (`rowDiameter` is the diameter it matched on). */
 export function feedRowFor(tool: Tool, material: StockMaterial): FeedRowFact {
   const cutter = tool.name || tool.id || `${tool.shape} cutter`;
-  const resolved = feedsFor(feedCatalogueSnapshot(), material, feedsToolForSurface(tool), Z1);
+  const resolved = feedsFor(feedCatalogueSnapshot(), material, feedsToolForSurface(tool), Z1, NO_SHOP.refuse);
   if (!resolved.ok) {
     return {
       cutter,

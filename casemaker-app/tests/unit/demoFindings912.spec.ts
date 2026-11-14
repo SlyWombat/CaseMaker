@@ -96,7 +96,7 @@ function maleJob(tanHalf: number, depth = 3.5): EngraveJob {
 describe('#912 — the cutter pick respects the plug’s cone', () => {
   it('picks the pair’s 30° bit, and sets the 20° one aside by name', () => {
     const job = maleJob(TAN_15);
-    const plan = planCutters(job, null, [ENGRAVER_20, ENGRAVER_30], []);
+    const plan = planCutters(job, null, [ENGRAVER_20, ENGRAVER_30], [], null);
     expect(plan.cutters).toHaveLength(1);
     expect(plan.cutters[0]!.key).toBe('engraver-30');
     expect(plan.unassigned).toHaveLength(0);
@@ -104,7 +104,7 @@ describe('#912 — the cutter pick respects the plug’s cone', () => {
 
   it('the recommendation excludes the wrong cone with the pair’s angle in its own words', () => {
     const job = maleJob(TAN_15);
-    const rec = recommendTool(job, [ENGRAVER_20, ENGRAVER_30], [], () => []);
+    const rec = recommendTool(job, [ENGRAVER_20, ENGRAVER_30], [], null, () => []);
     expect(rec.key).toBe('engraver-30');
     const wrong = rec.candidates.find((c) => c.key === 'engraver-20');
     expect(wrong?.qualifies).toBe(false);
@@ -115,10 +115,10 @@ describe('#912 — the cutter pick respects the plug’s cone', () => {
 
   it('says the pair’s cone when the list holds none that matches', () => {
     const job = maleJob(TAN_15);
-    const plan = planCutters(job, null, [ENGRAVER_20], []);
+    const plan = planCutters(job, null, [ENGRAVER_20], [], null);
     expect(plan.cutters).toHaveLength(0);
     expect(plan.unassigned[0]?.reason).toContain('built for a 30° V');
-    const rec = recommendTool(job, [ENGRAVER_20], [], () => []);
+    const rec = recommendTool(job, [ENGRAVER_20], [], null, () => []);
     expect(rec.key).toBeNull();
   });
 
@@ -126,7 +126,7 @@ describe('#912 — the cutter pick respects the plug’s cone', () => {
     // The plug is 1.2 mm deep: inside the 3.175 mm chamfer bit's 1.54 mm cone (a deeper plug is
     // the over-deep V the depth rule refuses, #741 — not this test's question).
     const job = maleJob(TAN_45, 1.2);
-    const plan = planCutters(job, null, [ENGRAVER_30, CHAMFER_90], []);
+    const plan = planCutters(job, null, [ENGRAVER_30, CHAMFER_90], [], null);
     expect(plan.cutters[0]!.key).toBe('chamfer-90');
   });
 
@@ -148,7 +148,7 @@ describe('#912 — the cutter pick respects the plug’s cone', () => {
         vCarveDepth: 'variable',
       } as unknown as EngraveJob['labels'][number],
     ];
-    const plan = planCutters(job, null, [ENGRAVER_20, ENGRAVER_30], []);
+    const plan = planCutters(job, null, [ENGRAVER_20, ENGRAVER_30], [], null);
     expect(plan.cutters).toHaveLength(1);
     expect(['engraver-20', 'engraver-30']).toContain(plan.cutters[0]!.key);
   });

@@ -93,7 +93,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
 /** `candidatePlans` with the context's own filters — never the three-argument form. */
 export function pickCandidates(inputs: EngravePickInputs): CandidatePlan[] {
   const ctx = pickContext(inputs);
-  return candidatePlans(inputs.job, ctx.tools, inputs.catalogue, ctx.conditions, ctx.table, inputs.floors);
+  return candidatePlans(inputs.job, ctx.tools, inputs.catalogue, inputs.shop.defaults ?? null, ctx.conditions, ctx.table, inputs.floors);
 }
 
 /** One plan, evaluated against the context the search itself uses. */
@@ -125,6 +125,7 @@ export function pickForEngrave(
     inputs.job,
     ctx.tools,
     inputs.catalogue,
+    inputs.shop.defaults ?? null,
     evaluate ?? ((plan, level) => evaluatePlan(inputs.job, plan, ctx, { level })),
     {
       ...(inputs.shop.toolChangeSeconds === undefined || inputs.shop.toolChangeSeconds === null

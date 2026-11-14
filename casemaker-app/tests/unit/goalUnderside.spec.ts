@@ -125,6 +125,7 @@ function jobOf(target: EngraveTargetObject, thickness = 20): EngraveJob {
 }
 
 import { goalWorkMesh } from '@/engine/cnc/engrave/goalFlipFindings';
+import { NO_SHOP } from '../tools/noShop';
 const goalWorkMeshForTest = (goal: EngraveTargetObject) => goalWorkMesh(goal)!;
 
 const FLAT = { x: 30, y: 30, z: 10 };
@@ -180,7 +181,7 @@ describe('#898 — the cut floor each kind gives', () => {
     const goal = goalOf(flatBasedStl(), FLAT, { underside: { kind: 'flat', skinMm: 0.5 } });
     const base = undersideClearBaseZ(goal)!;
     const hf = sampleGoalHeightfield(goal, {
-      pitchMm: 0.5,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5,
       clear: { kind: 'ring', widthMm: 3 },
       stockRect: { xMin: 0, xMax: 100, yMin: 0, yMax: 60 },
       baseZ: base,
@@ -194,7 +195,7 @@ describe('#898 — the cut floor each kind gives', () => {
     const ramp = goalOf(rampStl(20), { x: 30, y: 30, z: 20 }, { underside: { kind: 'plinth', plinthMm: 5 } });
     const pfloor = undersideFloorZ(ramp, { thickness: 20 })!;
     const phf = sampleGoalHeightfield(ramp, {
-      pitchMm: 0.5,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5,
       depthLimitZ: pfloor,
       clip: { xMin: 0, xMax: 100, yMin: 0, yMax: 60 },
     });

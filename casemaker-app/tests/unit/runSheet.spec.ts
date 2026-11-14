@@ -59,6 +59,7 @@ import type { ProgramSweepSummary } from '@/engine/cnc/engrave/programSweep';
 import type { ProgramEfficiency } from '@/engine/cnc/cam/ir';
 import type { RotarySheetDatum } from '@/engine/cnc/rotary/sheetDatum';
 import { renderRunSheetMarkdown } from '../../scripts/runSheetMarkdown';
+import { NO_SHOP } from '../tools/noShop';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
 
@@ -91,7 +92,7 @@ function stubGenerated(job: EngraveJob, nc: string = NC, frame = true): RunSheet
       ...validateJob(job),
       ...validateVise(job.stock, jobVise(job), job.sacrificial),
     ]),
-    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride) : null,
     cam: { operations: 3, cuttingMoves: 1234, estimatedSeconds: 95, passes: 2 },
     nc,
     verify: {
@@ -187,7 +188,7 @@ describe('runSheet (#207)', () => {
     // stockProud (the default vise's 4 mm) is stated in section 3.
     expect(section(sheet, 'load').steps.some((s) => s.text.includes('4 mm above the jaw tops'))).toBe(true);
     // The feeds come from `feedsFor`.
-    const feeds = feedsFor([], job.stock.material, jobTool(job)!, Z1, job.cutOverride);
+    const feeds = feedsFor([], job.stock.material, jobTool(job)!, Z1, NO_SHOP.refuse, job.cutOverride);
     expect(feeds.ok).toBe(true);
     if (feeds.ok) {
       expect(all).toContain(`${feeds.params.rpm} RPM`);

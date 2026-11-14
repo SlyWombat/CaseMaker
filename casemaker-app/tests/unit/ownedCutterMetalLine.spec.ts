@@ -22,6 +22,7 @@ import type { Tool } from '@/engine/cnc/tool';
 import type { EngraveJob } from '@/types/engraveJob';
 import { engraveRegions } from '@/workers/sim/engraveGenerate';
 import { tl } from './helpers/manifoldExec';
+import { NO_SHOP } from '../tools/noShop';
 
 const JOBS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs', 'bench', '2026-10-27-z1-typical-jobs', 'jobs');
 const job = JSON.parse(readFileSync(join(JOBS, 'j01-topclamp-alu-proxy.json'), 'utf8')) as EngraveJob;
@@ -84,7 +85,7 @@ describe('#732 the metal line stands down when Makera itself lists the cutter fo
     // finding consults; without it the finding above stands.
     expect(catalogueCoverageFor(CATALOGUE, job.stock.material, confirmed.tool).kind).toBe('covered');
 
-    const res = feedsFor(CATALOGUE, job.stock.material, confirmed.tool, Z1);
+    const res = feedsFor(CATALOGUE, job.stock.material, confirmed.tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(10000);
     expect(res.params.feed).toBe(1000);

@@ -23,6 +23,7 @@ import {
 import type { Polygons } from '@/engine/cnc/cam/pocket';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
+import { NO_SHOP } from '../tools/noShop';
 
 const offset = makeClipperOffset(tl);
 const D = 3.175;
@@ -629,8 +630,8 @@ describe('slotting feeds for a profile cut (#218)', () => {
   it('halves the step-down, so the profile takes twice the pocket passes', () => {
     // The SAME row answers both: pocketing is what the feeds row describes, and a profile cut
     // is a full-width slot. `slotting` is the one difference.
-    const pocket = feedsFor([], 'softwood', MILL, Z1);
-    const slot = feedsFor([], 'softwood', MILL, Z1, undefined, undefined, { slotting: true });
+    const pocket = feedsFor([], 'softwood', MILL, Z1, NO_SHOP.refuse);
+    const slot = feedsFor([], 'softwood', MILL, Z1, NO_SHOP.refuse, undefined, undefined, { slotting: true });
     expect(pocket.ok).toBe(true);
     expect(slot.ok).toBe(true);
     if (!pocket.ok || !slot.ok) return;

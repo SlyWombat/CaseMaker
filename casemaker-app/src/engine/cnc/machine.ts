@@ -1675,7 +1675,7 @@ export function clampToMachine(
   feed: number | null,
   rpm: number | null,
   machine: ClampMachine,
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number,
 ): ClampResult {
   const diagnostics: ClampDiagnostic[] = [];
   const one = (value: number | null, limit: number, what: 'feed' | 'rpm', unit: string): number | null => {

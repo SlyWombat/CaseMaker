@@ -10,6 +10,7 @@ import { clearanceHoldWords } from '@/components/welcome/holdingMounts';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { defaultBracketHold, defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import type { JobWorkholding } from '@/types/engraveJob';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 
 const STOCK = { x: 100, y: 60, z: 12 };
 
@@ -44,7 +45,7 @@ describe('#1123-55 — the clearance words come from the job’s own hold', () =
   });
 
   it('a taped blank names the bed it sits on', () => {
-    expect(clearanceHoldWords({ kind: 'tape', tape: defaultTapeHold() })).toBe('the bed');
+    expect(clearanceHoldWords({ kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) })).toBe('the bed');
   });
 
   it('a rotary job names the chuck, and the tailstock when one is fitted', () => {

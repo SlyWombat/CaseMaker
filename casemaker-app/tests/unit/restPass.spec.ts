@@ -123,7 +123,7 @@ function tableOf(rows: { key: string; diameter: number; share: number }[]): Reac
 
 describe('roughPick (#410)', () => {
   it('takes the cutter with the largest ⌀² × share, and says so with this design’s numbers', () => {
-    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], measuring(BADGE));
+    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], null, measuring(BADGE));
     const pick = roughPick(reach);
     // ⌀2 mm × 66 % of the design = 2.64, against ⌀0.6 mm × 96 % = 0.35. The wide bit is not
     // "a slow cutter" here, it is an absent one, and a zero share is not a candidate at all.
@@ -142,7 +142,7 @@ describe('roughPick (#410)', () => {
     // exclusion happens before the measurement, and a rule that ranked the table alone would pick
     // a cutter the generator refuses.
     const tools = [tool('ball', 3.175, { shape: 'ball' }), ...TOOLS.slice(1)];
-    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], measuring({ ...BADGE, ball: BADGE.fine }));
+    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], null, measuring({ ...BADGE, ball: BADGE.fine }));
     const pick = roughPick(reach);
     expect(pick.ranked.map((c) => c.key)).not.toContain('ball');
     expect(pick.chosen?.key).toBe('mid');
@@ -171,7 +171,7 @@ describe('roughPick (#410)', () => {
     // answer depended on the order a catalogue listed its rows in would not be a rule.
     const tied = [tool('b-mid', 2), tool('a-mid', 2)];
     const measured = { 'b-mid': BADGE.mid, 'a-mid': BADGE.mid };
-    const pick = roughPick(reachabilityFor(jobWith('big', 'small'), tied, [], measuring(measured)));
+    const pick = roughPick(reachabilityFor(jobWith('big', 'small'), tied, [], null, measuring(measured)));
     expect(pick.chosen?.key).toBe('a-mid');
     expect(pick.reason).toContain('2 cutters score that same number');
     expect(pick.reason).toContain('a-mid is the first of them by key');
@@ -179,7 +179,7 @@ describe('roughPick (#410)', () => {
   });
 
   it('answers null — not a zero-diameter cutter — when nothing reaches anything', () => {
-    const reach = reachabilityFor(jobWith('big'), [tool('wide', 3.175)], [], measuring({ wide: { big: 0 } }));
+    const reach = reachabilityFor(jobWith('big'), [tool('wide', 3.175)], [], null, measuring({ wide: { big: 0 } }));
     const pick = roughPick(reach);
     expect(pick.chosen).toBeNull();
     expect(pick.ranked).toEqual([]);
@@ -189,7 +189,7 @@ describe('roughPick (#410)', () => {
 
 describe('unroughedItems (#410)', () => {
   it('names the items the first cutter cannot enter AT ALL, with the area it cannot cut', () => {
-    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], measuring(BADGE));
+    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], null, measuring(BADGE));
     // `small` is reached by neither wide nor mid; `big` is missed by wide alone, which is a cutter
     // choice the rule already made and a different sentence.
     const items = unroughedItems(reach, 'mid');
@@ -202,21 +202,21 @@ describe('unroughedItems (#410)', () => {
 
 describe('restToolPick (#410)', () => {
   it('picks the SMALLEST cutter that reaches strictly more, and reports both shares', () => {
-    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], measuring(BADGE));
+    const reach = reachabilityFor(jobWith('big', 'small'), TOOLS, [], null, measuring(BADGE));
     const pick = restToolPick(reach, 'mid');
     expect(pick.cutter?.key).toBe('fine');
     expect(pick.reason).toContain('66 % → 96 %');
   });
 
   it('separates “only one cutter was measured” from “the first already reaches everything”', () => {
-    const one = reachabilityFor(jobWith('big'), [tool('line-1', 1)], [], measuring({ 'line-1': { big: 900 } }));
+    const one = reachabilityFor(jobWith('big'), [tool('line-1', 1)], [], null, measuring({ 'line-1': { big: 900 } }));
     expect(restToolPick(one, 'line-1').reason).toContain('no second cutter was measured');
 
     const all = reachabilityFor(
       jobWith('big'),
       [tool('mid', 2), tool('fine', 0.6)],
       [],
-      measuring({ mid: { big: 900 }, fine: { big: 900 } }),
+      null, measuring({ mid: { big: 900 }, fine: { big: 900 } }),
     );
     const pick = restToolPick(all, 'mid');
     expect(pick.cutter).toBeNull();
@@ -267,7 +267,7 @@ describe('vBitRestRefusal (#486)', () => {
       provenance: 'restPass test',
     };
     // Every flat loses the detail, so the V-carve is the recommendation.
-    const reach = reachabilityFor(jobWith('big'), [vbit, tool('flat', 1.0)], [], () => [row('big', 0)]);
+    const reach = reachabilityFor(jobWith('big'), [vbit, tool('flat', 1.0)], [], null, () => [row('big', 0)]);
     expect(reach.recommendation.key).toBe('inv:v30');
     const pick = restToolPick(reach, 'inv:v30');
     expect(pick.cutter).toBeNull();

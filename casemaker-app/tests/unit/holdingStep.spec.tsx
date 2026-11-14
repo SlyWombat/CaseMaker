@@ -57,6 +57,7 @@ import {
   type MachineRecord,
 } from '@/platform/locationClient';
 import type { EngraveJob, EngraveTargetObject, JobStockEntry, ViseParams } from '@/types/engraveJob';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, 'fixtures', 'location-doc.json');
@@ -1145,7 +1146,7 @@ describe('#1099 — the part in the holding pictures', () => {
 
   it("a bed mount's top view contains the footprint", () => {
     seedLocation(bareBedMachine());
-    const job = { ...dj({ length: 65, width: 62.7, thickness: 20 }), workholding: { kind: 'tape' as const, tape: defaultTapeHold() } };
+    const job = { ...dj({ length: 65, width: 62.7, thickness: 20 }), workholding: { kind: 'tape' as const, tape: defaultTapeHold(TAPE_DEFAULTS) } };
     drawStep(job);
     const picture = screen.getByTestId('engrave-setup-holding-picture');
     expect(picture.getAttribute('data-mechanism')).toBe('bed');
@@ -1157,7 +1158,7 @@ describe('#1099 — the part in the holding pictures', () => {
     const job = {
       ...dj({ length: 65, width: 65, thickness: 20, shape: 'cylinder' }),
       stockEntry: { kind: 'made' as const, shelfId: null, file: null, form: 'rod' as const, finish: 'rough' as const, conductive: false },
-      workholding: { kind: 'tape' as const, tape: defaultTapeHold() },
+      workholding: { kind: 'tape' as const, tape: defaultTapeHold(TAPE_DEFAULTS) },
     };
     drawStep(job);
     expect(screen.getByTestId('engrave-setup-holding-picture').querySelector('[data-testid="engrave-setup-holding-part-footprint"]')).toBeNull();

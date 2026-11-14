@@ -62,7 +62,7 @@ const TOOLS = [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' }), tool(
 function reachFor(): Reachability {
   const opened = (key: string, id: string): number =>
     key === 'fine' ? { title: 900, sub: 80, lost: 0 }[id]! : 0;
-  return reachabilityFor(jobWith(), TOOLS, [], (key) => ITEMS.map((i) => row(i.id, opened(key, i.id))));
+  return reachabilityFor(jobWith(), TOOLS, [], null, (key) => ITEMS.map((i) => row(i.id, opened(key, i.id))));
 }
 
 function generated(): RunSheetGenerated {
@@ -173,7 +173,7 @@ describe('the run sheet’s reachability report (#410)', () => {
     });
     const job = jobWith();
     job.stock.material = 'pla'; // the V row is PLA's
-    const reach = reachabilityFor(job, [...TOOLS, vbit], [], (key) =>
+    const reach = reachabilityFor(job, [...TOOLS, vbit], [], null, (key) =>
       ITEMS.map((i) => row(i.id, key === 'fine' ? { title: 900, sub: 80, lost: 0 }[i.id]! : 0)),
     );
     // The V-carve is OFFERED and qualified; it is simply not a flat-disc measurement, so the table

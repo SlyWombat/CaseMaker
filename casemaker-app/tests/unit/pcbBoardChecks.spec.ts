@@ -13,6 +13,7 @@ import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { flatEndMill } from '@/engine/cnc/tool';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveCutout, EngraveDrill, EngraveJob, EngraveVectorShape } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const drillBit = (key: string, d: number): ToolLibraryEntry => ({
   key,
@@ -170,7 +171,7 @@ describe('a hole no cutter makes does not block the board (#743 P-5 review)', ()
     const built = await buildPcbJob(
       tl,
       [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('holes-06.drl')],
-      { blank: { length: 60, width: 40, thickness: 1.6 }, tabs: { count: 3, width: 3, height: 1 }, tools: [engraver, corn], catalogue: rows },
+      { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: { length: 60, width: 40, thickness: 1.6 }, tabs: { count: 3, width: 3, height: 1 }, tools: [engraver, corn], catalogue: rows },
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;
@@ -203,7 +204,7 @@ describe('an item whose cutter the library does not hold is stated, not blocked 
     const built = await buildPcbJob(
       tl,
       [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')],
-      { blank: { length: 100, width: 60, thickness: 12 }, tabs: { count: 3, width: 3, height: 1 }, tools: TOOL_LIBRARY },
+      { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: { length: 100, width: 60, thickness: 12 }, tabs: { count: 3, width: 3, height: 1 }, tools: TOOL_LIBRARY },
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;

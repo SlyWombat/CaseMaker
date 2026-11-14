@@ -27,6 +27,7 @@ import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { Z1 } from '@/engine/cnc/machine';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
 import type { EngraveFrameShape, EngraveVectorShape } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const FIXTURES = join(process.cwd(), 'tests/unit/fixtures/pcb');
 const bytes = (name: string): Uint8Array<ArrayBuffer> => Uint8Array.from(readFileSync(join(FIXTURES, name)));
@@ -129,7 +130,7 @@ function emptyJob() {
 describe('the copper topology through the real sweep (#743 P-5)', () => {
   it('passes the tiny board’s isolation program, from the swept stock', async () => {
     const built = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny.drl')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools: [engraver, corn],
       catalogue: ROWS,
@@ -166,7 +167,7 @@ describe('the copper topology through the real sweep (#743 P-5)', () => {
     // stops above the copper's underside. That is the design's "deliberately posted shallow
     // program" case, and the simulated copper is what the check must read.
     const built = await buildPcbJob(tl, [file('gaps-pass.gbr')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools: [engraver, corn],
       catalogue: ROWS,

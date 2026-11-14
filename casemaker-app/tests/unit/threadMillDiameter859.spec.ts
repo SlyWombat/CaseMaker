@@ -55,7 +55,7 @@ describe('#859 — the M3 job picks Makera’s M3 thread mill', () => {
 
   it('j18 (M3×0.5, 6061) picks inv:kz-thread-m3-9 from the run’s thread mills', () => {
     const job = j18();
-    const plan = planCutters(job, null, fx.inventory, ROWS);
+    const plan = planCutters(job, null, fx.inventory, ROWS, null);
     expect(plan.unassigned).toEqual([]);
     expect(plan.cutters.map((c) => c.key)).toEqual(['inv:kz-thread-m3-9']);
     expect(plan.cutters[0]!.diameter).toBe(2.4);

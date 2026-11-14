@@ -24,6 +24,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { buildModelPlanInputForGoal, generateGoalProgram, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
 import type { EngraveJob, EngraveTargetObject, StockMaterial } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const L = 60;
 const W = 40;
@@ -177,7 +178,7 @@ describe('#1047 the plan resolves on the rows its door passed, never the realm s
       { cutterId: '132132605018', material: 'Hardwood', rpm: WOOD_RPM, feed: WOOD_FEED, plungeFeed: 300, stepDown: 0.4 },
     ] as const;
     // The panel's read: `feedsFor` on the installed rows (EngravePanel's own call).
-    const panel = feedsFor(rows, 'hardwood', feedsToolForSurface(ROWED6), Z1);
+    const panel = feedsFor(rows, 'hardwood', feedsToolForSurface(ROWED6), Z1, NO_SHOP.refuse);
     expect(panel.ok, panel.ok ? '' : panel.reason).toBe(true);
     if (!panel.ok) return;
     const target = targetFor(pocketBlock());
@@ -196,7 +197,7 @@ describe('#1047 the plan resolves on the rows its door passed, never the realm s
     // this fix — read differently, so the posted S/F above came from the caller's rows. The table
     // tops out at 3.2 mm, so the ⌀3.175 flat is its own largest covered row for hardwood (the
     // proxy `resolvedCutParams` used for the ⌀6).
-    const tableOnly = feedsFor([], 'hardwood', flatEndMill(3.175), Z1);
+    const tableOnly = feedsFor([], 'hardwood', flatEndMill(3.175), Z1, NO_SHOP.refuse);
     expect(tableOnly.ok).toBe(true);
     if (!tableOnly.ok) return;
     expect(tableOnly.params.rpm).not.toBe(panel.params.rpm);

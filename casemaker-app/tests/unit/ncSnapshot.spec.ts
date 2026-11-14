@@ -30,6 +30,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import type { EngraveJob, EngraveLabel } from '@/types/engraveJob';
 import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { tl } from './helpers/manifoldExec';
+import { NO_SHOP } from '../tools/noShop';
 
 /**
  * The default job, with its label ids pinned so the golden cannot depend on the id generator.
@@ -50,7 +51,7 @@ function defaultJobNc(job: EngraveJob): string {
   if (!tool) throw new Error('the default job has no tool');
   const radius = cuttingRadiusForSweep(tool);
   if (!radius.ok) throw new Error(radius.reason);
-  const feeds = feedsFor([], job.stock.material, tool, Z1);
+  const feeds = feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse);
   if (!feeds.ok) throw new Error(feeds.reason);
 
   const opened = (label: EngraveLabel): Polygons => {
