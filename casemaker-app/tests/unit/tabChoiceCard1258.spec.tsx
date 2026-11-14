@@ -63,6 +63,32 @@ describe('#1258 — the question', () => {
     expect(two).not.toMatch(/flute/i);
   });
 
+  it('a picked option looks picked: a filled accent centre, and the others an empty ring', () => {
+    render(<TabChoiceCard {...props()} />);
+    expect(screen.getByTestId('tab-choice-radio-insideMargin').getAttribute('data-picked')).toBe('false');
+    fireEvent.click(screen.getByLabelText(/Put a tab inside the corner margin/));
+    const one = screen.getByTestId('tab-choice-radio-insideMargin') as HTMLElement;
+    const two = screen.getByTestId('tab-choice-radio-longerStretch') as HTMLElement;
+    expect(one.getAttribute('data-picked')).toBe('true');
+    expect(two.getAttribute('data-picked')).toBe('false');
+    expect(one.style.background).toContain('radial-gradient');
+    expect(two.style.background === 'transparent' || two.style.background === '').toBe(true);
+    expect(one.style.border).not.toBe(two.style.border);
+  });
+
+  it('option 3 tells the truth about where it goes, and each row names its cut-out when there are several', () => {
+    const named = {
+      ...FIXTURE_NEEDED,
+      stretches: FIXTURE_NEEDED.stretches.map((s, i) => ({ ...s, cut: i === 0 ? { id: 'a', name: 'Lid outline' } : { id: 'b', name: 'Base outline' } })),
+    };
+    render(<TabChoiceCard {...props({ needed: named as never })} />);
+    expect(screen.getByTestId('tab-choice-change-tabs').textContent).toContain(
+      "Takes you to this cut-out's tab count and width. Generate asks again if the new tabs still leave a stretch too long.",
+    );
+    expect(screen.getByTestId('tab-choice-option-insideMargin').textContent).toContain('Lid outline — Stretch 1: a tab 5 mm');
+    expect(screen.getByTestId('tab-choice-option-longerStretch').textContent).toContain('Base outline — Stretch 2: 86 mm with no tab');
+  });
+
   it('choosing enables the primary and hands the answer back; the drawing follows the option', () => {
     const onUse = vi.fn();
     render(<TabChoiceCard {...props({ onUse })} />);

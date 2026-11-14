@@ -7,8 +7,9 @@
  *   result done, the job holds an answer for the question last asked → the answered summary
  *   anything else → nothing
  *
- * "Change the tabs myself" keeps the question where it is and brings the tab settings into view with
- * the stretches still marked; Generate stays paused.
+ * "Change the tabs myself" collapses the card to its amber bar (the question stays visible, Generate
+ * stays paused) and takes the operator to the cut-out's tab count; the stretches stay marked in the
+ * preview. Generate asks again if the new tabs still leave a stretch too long.
  */
 import { useEffect } from 'react';
 import type { JSX } from 'react';
@@ -52,7 +53,12 @@ export function EngraveTabChoice({ onGenerate, tabWidthMm }: { onGenerate: () =>
     onCancel: () => ui.collapse(),
     onChoose: () => ui.expand(),
     onChange: () => ui.reopen(),
-    onChangeTabs: showTabSettings,
+    // Option 3 is not an answer: the question stays visible as the bar (Generate stays paused), and the
+    // operator goes to the cut-out's own tab count.
+    onChangeTabs: () => {
+      ui.collapse();
+      showTabSettings();
+    },
   };
   if (needed !== undefined) {
     return <TabChoiceCard {...common} needed={needed} stale={stale} mode={ui.collapsed ? 'collapsed' : 'ask'} />;

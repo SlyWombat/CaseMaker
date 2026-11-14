@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { EngraveTabChoice } from '@/components/panels/EngraveTabChoice';
+import { useTabChoiceSuffix } from '@/components/panels/useTabChoiceSuffix';
+import type { JSX } from 'react';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
@@ -63,6 +65,32 @@ describe('#1258 — the question where Generate stopped', () => {
     fireEvent.click(screen.getByLabelText(/Leave the longer stretches/));
     fireEvent.click(screen.getByTestId('tab-choice-use'));
     expect(useEngraveJobStore.getState().job.tabChoice?.choice).toBe('longerStretch');
+  });
+
+  it('"Change the tabs myself" collapses the card to the bar and goes to the cut-out’s tab count; it answers nothing', () => {
+    const count = document.createElement('input');
+    count.setAttribute('data-testid', 'engrave-cutout-tabs-count-0');
+    count.scrollIntoView = vi.fn();
+    document.body.appendChild(count);
+    useEngraveRunStore.setState({ generated: asking() });
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('tab-choice-change-tabs'));
+    expect(screen.getByTestId('tab-choice-bar')).toBeTruthy();
+    expect(document.activeElement).toBe(count);
+    expect(useEngraveJobStore.getState().job.tabChoice).toBeUndefined();
+    count.remove();
+  });
+
+  it('the Holding row carries the choice once answered', () => {
+    useEngraveRunStore.setState({ generated: asking() });
+    render(<EngraveTabChoice onGenerate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/Leave the longer stretches/));
+    fireEvent.click(screen.getByTestId('tab-choice-use'));
+    function Row(): JSX.Element {
+      return <span data-testid="row">{useTabChoiceSuffix('cut-1', 0)}</span>;
+    }
+    render(<Row />);
+    expect(screen.getByTestId('row').textContent).toBe('3 stretches by your choice');
   });
 
   it('a stale answer asks again with the one-line reason', () => {

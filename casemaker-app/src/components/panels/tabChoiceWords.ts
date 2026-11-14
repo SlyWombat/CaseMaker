@@ -10,7 +10,21 @@
 
 import type { TabChoiceNeeded } from '@/engine/cnc/cam/model/plan';
 
-export type TabStretchOf = TabChoiceNeeded['stretches'][number];
+/**
+ * A stretch as the planner reports it. `cut` names the cut-out it belongs to, as the operation list
+ * names it, when the engine says (several cut-outs can each have a stretch).
+ */
+export type TabStretchOf = TabChoiceNeeded['stretches'][number] & { cut?: { id: string; name: string } };
+
+/** "Lid outline — " before a row when the stretch's cut-out is known and there is more than one. */
+function cutPrefix(s: TabStretchOf, several: boolean): string {
+  return several && s.cut !== undefined ? `${s.cut.name} — ` : '';
+}
+
+/** Whether the stretches span more than one cut-out (each row then names its own). */
+export function severalCuts(stretches: readonly TabStretchOf[]): boolean {
+  return new Set(stretches.map((s) => s.cut?.id ?? '')).size > 1;
+}
 
 /** The two answers; the third option changes the rules' inputs and is not an answer. */
 export type TabChoiceAnswer = 'insideMargin' | 'longerStretch';
@@ -39,15 +53,16 @@ export const COST_INSIDE_MARGIN =
 export const COST_LONGER_STRETCH = 'The stretch has no tab; the part may flex or lift along it.';
 
 /** Option 1's sentence for one stretch — a row of the choice, at body size. */
-export function insideMarginRow(s: TabStretchOf): string {
+export function insideMarginRow(s: TabStretchOf, several = false): string {
   const c = s.candidate;
-  if (c === null) return `Stretch ${stretchNumber(s)}: no place for a tab — stays ${mm(s.spanMm)}.`;
-  return `Stretch ${stretchNumber(s)}: a tab ${mm(c.fromCornerMm)} from the corner (margin ${mmOne(c.marginMm)} mm) leaves ${mm(c.leavesSpansMm[0])} and ${mm(c.leavesSpansMm[1])}.`;
+  const head = `${cutPrefix(s, several)}Stretch ${stretchNumber(s)}`;
+  if (c === null) return `${head}: no place for a tab — stays ${mm(s.spanMm)}.`;
+  return `${head}: a tab ${mm(c.fromCornerMm)} from the corner (margin ${mmOne(c.marginMm)} mm) leaves ${mm(c.leavesSpansMm[0])} and ${mm(c.leavesSpansMm[1])}.`;
 }
 
 /** Option 2's sentence for one stretch. */
-export function longerStretchRow(s: TabStretchOf, limitMm: number): string {
-  return `Stretch ${stretchNumber(s)}: ${mm(s.spanMm)} with no tab; the shop's limit is ${mm(limitMm)}.`;
+export function longerStretchRow(s: TabStretchOf, limitMm: number, several = false): string {
+  return `${cutPrefix(s, several)}Stretch ${stretchNumber(s)}: ${mm(s.spanMm)} with no tab; the shop's limit is ${mm(limitMm)}.`;
 }
 
 /** Whether the first option can be offered: at least one stretch has a place for a tab. */
@@ -104,4 +119,7 @@ export function answeredSummary(choice: TabChoiceAnswer, n: TabChoiceNeeded): { 
 export const TAB_AGAIN_LINE = 'The outline changed since you chose; choose again.';
 export const TAB_BAR_HEADLINE = 'Action needed: choose how this part is held';
 export const TAB_BAR_SUB = 'Generate has no programs until you choose.';
+/** Option 3: it is not an answer, and it goes to the cut-out's own tab settings. */
+export const CHANGE_TABS_LINE =
+  "Takes you to this cut-out's tab count and width. Generate asks again if the new tabs still leave a stretch too long.";
 export const TAB_PAUSED_LINE = 'Generate is paused until you choose.';

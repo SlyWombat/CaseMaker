@@ -35,9 +35,11 @@ import {
   TAB_QUESTION,
   answeredSummary,
   insideMarginOffered,
+  CHANGE_TABS_LINE,
   insideMarginRow,
   longerStretchRow,
   mm,
+  severalCuts,
   stretchCountLine,
   stretchNumber,
   type TabChoiceAnswer,
@@ -314,16 +316,35 @@ export function TabChoiceCard(props: TabChoiceCardProps): JSX.Element {
       onMouseLeave={() => setHover(null)}
       data-testid={`tab-choice-option-${value}`}
     >
-      <input
-        type="radio"
-        name="tab-choice"
-        value={value}
-        checked={picked === value}
-        onChange={() => setPicked(value)}
-        onFocus={() => setHover(value)}
-        onBlur={() => setHover(null)}
-        style={{ marginTop: 3 }}
-      />
+      {/* The native radio carries the keyboard and the screen reader; the drawn ring and centre carry
+          the look, so a picked option rests on more than its border: a filled accent centre against
+          an empty ring. */}
+      <span style={{ position: 'relative', width: 18, height: 18, marginTop: 2 }}>
+        <input
+          type="radio"
+          name="tab-choice"
+          value={value}
+          checked={picked === value}
+          onChange={() => setPicked(value)}
+          onFocus={() => setHover(value)}
+          onBlur={() => setHover(null)}
+          style={{ position: 'absolute', inset: 0, margin: 0, opacity: 0, cursor: 'pointer' }}
+        />
+        <span
+          aria-hidden
+          data-testid={`tab-choice-radio-${value}`}
+          data-picked={picked === value}
+          style={{
+            display: 'block',
+            width: 18,
+            height: 18,
+            boxSizing: 'border-box',
+            borderRadius: '50%',
+            border: `2px solid ${picked === value ? BLUE : '#7f8aa8'}`,
+            background: picked === value ? `radial-gradient(circle at center, ${BLUE} 0 5px, transparent 5px)` : 'transparent',
+          }}
+        />
+      </span>
       <span>
         <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: INK, marginBottom: 4 }}>{title}</span>
         {rows.map((r) => (
@@ -375,12 +396,12 @@ export function TabChoiceCard(props: TabChoiceCardProps): JSX.Element {
               <b style={{ color: AMBER }}>Option 1 is not offered.</b> {NO_PLACE_LINE}
             </p>
           ) : (
-            radio('insideMargin', 'Put a tab inside the corner margin', needed.stretches.map(insideMarginRow), COST_INSIDE_MARGIN)
+            radio('insideMargin', 'Put a tab inside the corner margin', needed.stretches.map((s) => insideMarginRow(s, severalCuts(needed.stretches))), COST_INSIDE_MARGIN)
           )}
           {radio(
             'longerStretch',
             needed.stretches.length === 1 ? 'Leave the longer stretch' : 'Leave the longer stretches',
-            needed.stretches.map((s) => longerStretchRow(s, needed.limitMm)),
+            needed.stretches.map((s) => longerStretchRow(s, needed.limitMm, severalCuts(needed.stretches))),
             COST_LONGER_STRETCH,
           )}
           <div aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#7f8aa8', fontSize: 10, fontWeight: 600, letterSpacing: '.16em', textTransform: 'uppercase' }}>
@@ -396,7 +417,7 @@ export function TabChoiceCard(props: TabChoiceCardProps): JSX.Element {
           >
             <span style={{ display: 'block', fontSize: 14, fontWeight: 500 }}>Change the tabs myself</span>
             <span style={{ display: 'block', fontSize: 13, lineHeight: 1.45 }}>
-              Opens the tab settings (count and width) beneath this question, with the stretch{needed.stretches.length === 1 ? '' : 'es'} still marked. Generate stays paused.
+              {CHANGE_TABS_LINE}
             </span>
           </button>
         </div>
