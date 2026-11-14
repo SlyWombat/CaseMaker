@@ -272,11 +272,9 @@ export type JobFindingCode =
   // in `verify.ts`. The bounds a BLANK states (a void's ceiling, the stock's underside) keep the
   // owners named above: `cut-too-deep` and `depth-exceeds-stock`.
   | 'item-depth-bound'
-  // Single-line traces (#219). `trace-self-overlap` is raised here; `trace-outside-stock` needs
-  // the swept region intersected with the stock, which only the worker evaluates (#201). Both
-  // are part of `TraceFindingCode` in `partPlan.ts`, where the geometry that detects them lives.
+  // Single-line traces (#219). `trace-self-overlap` is part of `TraceFindingCode` in `partPlan.ts`,
+  // where the geometry that detects it lives.
   | 'trace-self-overlap'
-  | 'trace-outside-stock'
   // Plunge drills (#220). All four are checks on the job as data plus the resolved tool.
   | 'drill-outside-stock'
   | 'plunge-unproven'

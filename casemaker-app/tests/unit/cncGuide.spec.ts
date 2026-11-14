@@ -31,7 +31,7 @@ function tsFiles(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...tsFiles(p));
-    else if (p.endsWith('.ts')) out.push(p);
+    else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
   }
   return out;
 }
@@ -53,30 +53,87 @@ function tsFiles(dir: string): string[] {
  *     `code: rotary ? 'rotary-stock' : 'flat-stock'`) — the literal pattern above cannot see
  *     either arm, so both are read by the last two (#470).
  *
+ * Plus the ways a code is declared that the pattern above cannot see, which hid
+ * `goal-mesh-unclosable` (a class field, `readonly code = '…'`) from this gate:
+ *   - `code = '…'` assignments and class fields;
+ *   - `const …CODE = '…'` constants, whether exported or not;
+ *   - a union of codes (`code: 'a' | 'b'`, `type …Code = 'a' | 'b'`), every member read;
+ *   - a code written as the head of a message (`` `goal-mesh-non-finite: …` ``), the form a
+ *     refusal takes when the code travels inside its sentence.
+ * The scan reads every `.ts` and `.tsx` under `src/`, minus `src/engine/compiler` (the case
+ * geometry's own checks, which the CNC guide does not describe).
+ *
  * `custom` is Zod's own issue code (`toolLibrary.ts`), not a diagnostic a user sees.
  */
 function sourceCodes(): string[] {
+  return scan().codes;
+}
+
+/**
+ * A code that is only DECLARED — a member of a union type, with no other quoted use anywhere in `src/` —
+ * is dead: nothing raises it, so a guide row would describe a message no operator can see
+ * (`trace-outside-stock` was one). Members of a union that appear a second time, as a literal, a
+ * `<code>` word on screen or a comparison, are raised by some route and are not listed here.
+ */
+function declaredButNeverRaised(): string[] {
+  const { unionMembers, files } = scan();
+  const dead: string[] = [];
+  for (const code of unionMembers) {
+    let uses = 0;
+    for (const f of files) {
+      const lines = f.text.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+      for (const l of lines) if (new RegExp(`['"\`>]${code}['"\`<]`).test(l)) uses++;
+    }
+    if (uses < 2) dead.push(code);
+  }
+  return dead.sort();
+}
+
+function scan(): { codes: string[]; unionMembers: Set<string>; files: { file: string; text: string }[] } {
   const codes = new Set<string>();
-  const patterns = [
-    /code:\s*'([a-z0-9-]+)'/g,
+  const unionMembers = new Set<string>();
+  const files: { file: string; text: string }[] = [];
+  // The call-shaped patterns (`push(`, `warn(`, …) are read in the engine and the workers only: in a
+  // component or a store `push('x')` is a class list or a label list, not a diagnostic.
+  const callPatterns = [
     /diag\(\s*'(?:error|warning|info)'\s*,\s*'([a-z0-9-]+)'/g,
     /warn\([^,()]+,\s*'([a-z0-9-]+)'/g,
     /push\(\s*'([a-z0-9-]+)'/g,
     /refuse\(\s*'([a-z0-9-]+)'/g,
     /refuse\(\s*\n\s*'([a-z0-9-]+)'/g,
+  ];
+  const patterns = [
+    /code:\s*'([a-z0-9-]+)'/g,
     /code:\s*[^,;\n]*?\?\s*'([a-z0-9-]+)'/g,
     /code:\s*[^,;\n]*?\?\s*'[a-z0-9-]+'\s*:\s*'([a-z0-9-]+)'/g,
+    /\bcode\s*=\s*'([a-z0-9]+(?:-[a-z0-9]+)+)'/g,
+    /\b[A-Za-z_]*CODE\s*(?::[^=\n]+)?=\s*'([a-z0-9]+(?:-[a-z0-9]+)+)'/g,
   ];
-  for (const dir of [join(APP, 'src/engine/cnc'), join(APP, 'src/workers')]) {
-    for (const file of tsFiles(dir)) {
-      const text = readFileSync(file, 'utf8');
-      for (const pattern of patterns) {
-        for (const m of text.matchAll(pattern)) codes.add(m[1]!);
+  // The head of a message, read outside `src/components` (where `'flex-wrap: '` is a style, not a code).
+  const messageHeads = [/[`'"]([a-z]+(?:-[a-z]+)+): /g];
+  // A union: the whole `'a' | 'b' | 'c'` run after `code:` or `Code =` is captured, then split.
+  const unions = [/\bcode\??:\s*((?:'[a-z0-9-]+'\s*\|\s*)+'[a-z0-9-]+')/g, /Code\s*=\s*((?:'[a-z0-9-]+'\s*\|\s*)+'[a-z0-9-]+')/g];
+  for (const file of tsFiles(join(APP, 'src'))) {
+    if (file.includes(join('src', 'engine', 'compiler'))) continue;
+    const text = readFileSync(file, 'utf8');
+    files.push({ file, text });
+    const callShaped = file.endsWith('.ts') && (file.includes(join('src', 'engine', 'cnc')) || file.includes(join('src', 'workers')));
+    const inComponents = file.includes(join('src', 'components'));
+    for (const pattern of [...patterns, ...(callShaped ? callPatterns : []), ...(inComponents ? [] : messageHeads)]) {
+      for (const m of text.matchAll(pattern)) codes.add(m[1]!);
+    }
+    for (const pattern of unions) {
+      for (const m of text.matchAll(pattern)) {
+        for (const member of m[1]!.matchAll(/'([a-z0-9-]+)'/g)) {
+          codes.add(member[1]!);
+          unionMembers.add(member[1]!);
+        }
       }
     }
   }
   codes.delete('custom');
-  return [...codes].sort();
+  unionMembers.delete('custom');
+  return { codes: [...codes].sort(), unionMembers, files };
 }
 
 interface Section {
@@ -111,6 +168,12 @@ describe('cnc-guide.md — the reference table is complete', () => {
       missing,
       `cnc-guide.md chapter 8 is missing a row for: ${missing.join(', ')} — add one per code`,
     ).toEqual([]);
+  });
+});
+
+describe('diagnostic codes — none is declared and never raised', () => {
+  it('has a second quoted use for every member of a code union', () => {
+    expect(declaredButNeverRaised(), 'declared in a union but nothing raises it — delete the code').toEqual([]);
   });
 });
 
