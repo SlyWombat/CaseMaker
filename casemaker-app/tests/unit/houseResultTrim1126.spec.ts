@@ -128,7 +128,7 @@ describe('#1126 — camIr is not a browser input', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '');
     expect([...restored.matchAll(/\bperSetup\b[^\n]*/g)].map((m) => m[0].trim())).toEqual([
-      'perSetup[program.setupIndex - 1] === undefined))',
+      'perSetup[program.setupIndex - 1] === undefined)) {',
     ]);
   });
 
