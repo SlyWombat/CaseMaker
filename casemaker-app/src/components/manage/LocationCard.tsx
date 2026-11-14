@@ -8,6 +8,7 @@
  * never typed in.
  */
 
+import { readSourceWords } from '@/engine/cnc/calibration';
 import { useState, type JSX, type ReactNode } from 'react';
 import type { FixtureRecord, LocationView, MachineRecord } from '@/platform/locationClient';
 import { formatStamp } from './display';
@@ -77,7 +78,7 @@ function MachineKv({ machine }: { machine: MachineRecord }) {
       <Kv label="calibration">
         {machine.calibration === null
           ? '— not in the location'
-          : provenance(machine.calibration.source, machine.calibration.measuredAt)}
+          : provenance(readSourceWords(machine.calibration.source), machine.calibration.measuredAt)}
       </Kv>
       <Kv label="vise">{vise === undefined ? '— the default' : provenance(vise.source, vise.measuredAt)}</Kv>
       <Kv label="sacrificial">{sacrificial === undefined ? '— none saved' : sacrificial.source}</Kv>
