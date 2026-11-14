@@ -40,6 +40,8 @@ export interface ProposalContext {
   signMarginMm?: number;
   /** #1207 — `stock.workMarginMm`: the scrap a mesh or line's plate leaves each side, mm. */
   workMarginMm?: number;
+  /** #1259 — `stock.pocketFloorBodyMm`: the material left under a pocket's floor, mm. */
+  pocketFloorBodyMm?: number;
   /** #1207 — `stock.presetMarginMm`: the scrap a preset's cut-out or pocket leaves each side, mm. */
   presetMarginMm?: number;
 }
@@ -105,6 +107,7 @@ function n(v: number): string {
  */
 export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): number | null {
   const plateMm = ctx.plateThicknessMm ?? HOUSE_PLATE_THICKNESS_MM;
+  const floorBodyMm = ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value;
   switch (work.kind) {
     case 'mesh':
       return round1(work.size.z + WORK_STOCK_SKIN_MM);
@@ -121,8 +124,8 @@ export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): n
       // #1100 — the cut frees the part, so the blank is a plate the profile can go through.
       return plateMm;
     case 'pocket':
-      // #1100 — the floor needs its depth plus six millimetres of body under it.
-      return round1(Math.max(work.depth + 6, plateMm));
+      // #1100 — the floor needs its depth plus the shop's body under it (`stock.pocketFloorBodyMm`).
+      return round1(Math.max(work.depth + floorBodyMm, plateMm));
     case 'rod':
       // #1107 — a rod's "thickness" is its own length in the standing box.
       return round1(work.length);
@@ -255,14 +258,14 @@ function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | nu
  * holds it; a drawing pocketed or carved needs its depth plus the skin; a pocket its depth plus
  * the body under the floor.
  */
-function holdThicknessFor(work: WorkShape, need: StockProposal): number {
+function holdThicknessFor(work: WorkShape, need: StockProposal, floorBodyMm: number): number {
   switch (work.kind) {
     case 'outline':
       return work.through ? 0 : (work.depthMm ?? 0) + WORK_STOCK_SKIN_MM;
     case 'cutout':
       return 0;
     case 'pocket':
-      return work.depth + 6;
+      return work.depth + floorBodyMm;
     default:
       return need.thickness;
   }
@@ -372,7 +375,7 @@ export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankP
   // (the shop's default). A preference, not a filter — see shelfItemFor.
   const preferred = need.material === 'pcb' ? null : (ctx.jobMaterial ?? need.material);
   const stated = need.material === 'pcb' ? null : (ctx.jobMaterial ?? null);
-  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need), stated);
+  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need, ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value), stated);
   if (held !== null) {
     const { length: l, width: w, thickness: t, diameter: d } = held.size;
     return {

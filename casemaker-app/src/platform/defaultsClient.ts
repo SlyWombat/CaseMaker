@@ -774,6 +774,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.centreSearchMaxMm': { label: 'centre find, the most the search may travel (chosen)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 60 },
   // The stock proposal's scrap, and the preset's own (wider) scrap.
   'stock.workMarginMm': { label: 'scrap the stock proposal leaves each side of a mesh or a line of text (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 5 },
+  // #1259 — the material left under a pocket's floor (ruling: a registered key, read at both sites).
+  'stock.pocketFloorBodyMm': { label: 'material left under a pocket’s floor when the wizard sizes or accepts a blank (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 6 },
   'stock.presetMarginMm': { label: 'scrap a preset’s cut-out or pocket leaves each side (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
   // The V-carve step-over, as a share of the groove's width at the colour plane.
   'vcarve.stepoverRatio': { label: 'V-carve step-over, as a share of the groove’s width (chosen)', unit: 'x', rule: z.number().min(0.1).max(1), fallback: 0.6 },

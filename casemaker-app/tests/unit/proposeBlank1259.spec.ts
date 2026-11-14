@@ -163,6 +163,20 @@ describe('#1259 — proposeBlank', () => {
     expect(proposedMaterialFor(q, defaultEngraveJob())).toBe('hardwood');
   });
 
+  it('11. the pocket floor’s body is a shop setting: at the recommendation nothing moves; at 10 mm the need and the shelf’s minimum both move by 4', () => {
+    const pocket: WorkShape = { kind: 'pocket', length: 60, width: 40, depth: 10 };
+    const thin = item('thin', 'plate', { length: 200, width: 100, thickness: 17 });
+    const base = proposeBlank(pocket, ctx([]))!;
+    expect(base.thickness).toBe(16); // 10 deep + the recommended 6 under the floor
+    expect(proposeBlank(pocket, ctx([thin]))!.source).toEqual({ case: 'shelf', itemId: 'thin' });
+    const ten = ctx([thin], { pocketFloorBodyMm: 10 });
+    const moved = proposeBlank(pocket, { ...ten, shelf: [] })!;
+    expect(moved.thickness).toBe(20); // 4 more
+    // The shelf's own minimum moved by the same 4: a 17 mm plate no longer holds it.
+    expect(proposeBlank(pocket, ten)!.source).toEqual({ case: 'recommended', shelfEmpty: false });
+    expect(proposeBlank(pocket, ctx([item('ok', 'plate', { length: 200, width: 100, thickness: 20 })], { pocketFloorBodyMm: 10 }))!.source).toEqual({ case: 'shelf', itemId: 'ok' });
+  });
+
   it('work that sizes no blank proposes none, and circuit-board stock is only for board work', () => {
     expect(proposeBlank({ kind: 'none' }, ctx([STICK]))).toBeNull();
     const board = item('fr4', 'plate', { length: 200, width: 100, thickness: 1.6 }, { material: 'pcb' as never });

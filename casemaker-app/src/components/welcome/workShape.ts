@@ -179,5 +179,6 @@ export function proposalContextFor(
     // #1207 — the proposal's two scrap margins, from the shop's record.
     workMarginMm: readDefault(defaults, 'stock.workMarginMm').value,
     presetMarginMm: readDefault(defaults, 'stock.presetMarginMm').value,
+    pocketFloorBodyMm: readDefault(defaults, 'stock.pocketFloorBodyMm').value,
   };
 }

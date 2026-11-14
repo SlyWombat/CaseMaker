@@ -619,6 +619,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     ("registration.cutBlankMaxPoints", 5.0, "points", "chosen, not measured: the most spread check candidates the cut-blank choice offers (the executor touches three, five without an agreeing pair)"),
     ("registration.centreSearchMaxMm", 60.0, "mm", "chosen, not measured: the most a centre-find search may travel — a wrong estimate must not cross the bed"),
     ("stock.workMarginMm", 5.0, "mm", "chosen, not measured: the scrap the stock proposal leaves each side of a mesh or a line of text"),
+    ("stock.pocketFloorBodyMm", 6.0, "mm", "chosen, not measured: the material left under a pocket's floor when the wizard sizes or accepts a blank"),
     ("stock.presetMarginMm", 10.0, "mm", "chosen, not measured: the scrap a preset's cut-out or pocket leaves each side — room for the cutter beside the part and for the clamps that hold the offcut"),
     ("vcarve.stepoverRatio", 0.6, "x", "chosen, not measured: the V-carve step-over as a share of the groove's width at the colour plane; the seed the feeds rows and the CAM share"),
     ("margins.laminateCapMm", 0.025, "mm", "chosen, not measured: how far below a purchased laminate's cap its floor sits — the supplier's tolerance and the machine's Z resolution, not a printer layer"),
@@ -1561,7 +1562,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
             n.is_some_and(|v| (1.0..=200.0).contains(&v)),
             "1 to 200 mm",
         )),
-        "stock.workMarginMm" | "stock.presetMarginMm" => Some(need(
+        "stock.workMarginMm" | "stock.presetMarginMm" | "stock.pocketFloorBodyMm" => Some(need(
             n.is_some_and(|v| (0.0..=100.0).contains(&v)),
             "0 to 100 mm",
         )),

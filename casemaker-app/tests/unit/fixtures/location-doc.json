@@ -1935,6 +1935,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the scrap the stock proposal leaves each side of a mesh or a line of text"
     },
+    "stock.pocketFloorBodyMm": {
+      "value": 6.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the material left under a pocket's floor when the wizard sizes or accepts a blank"
+    },
     "stock.presetMarginMm": {
       "value": 10.0,
       "source": "seeded",
