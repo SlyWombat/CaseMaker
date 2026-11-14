@@ -68,6 +68,7 @@ const ALLOWED: Readonly<Record<string, AllowEntry>> = {
   'src/engine/cnc/cam/model/features/rims.ts:MODELLED_CHAMFER_MAX_LEG_MM': { reason: 'feature-recognition geometry: the longest leg of a modelled chamfer (analyst-ruled allow-list)' },
   'src/engine/cnc/engrave/goalFlipPlan.ts:FLAT_DEG': { reason: 'feature classification: how far a face may tilt and still count as flat (analyst-ruled allow-list)' },
   'src/engine/cnc/engrave/goalFlipSetups.ts:STOCK_BOTTOM_FLAT_DEG': { reason: 'feature classification: the stock bottom’s own flatness test (analyst-ruled allow-list)' },
+  'src/engine/cnc/cam/fields/flatReach.ts:BAND_SLIVER_MM2': { reason: 'geometric tolerance: the area below which an offset-rounding remnant is not counted as a patch (#1249); not a shop\'s choice' },
   'src/engine/cnc/cam/adaptive.ts:ACCEPT_OF_CAP': { reason: "a planner method constant; the code itself says it is about the method, not the cut" },
   'src/engine/cnc/cam/adaptive.ts:TARGET_OF_CAP': { reason: "a planner method constant; the code itself says it is about the method, not the cut" },
   'src/engine/cnc/cam/adaptive.ts:WALL_MARGIN_MM': { reason: "a numeric epsilon or rounding guard" },
