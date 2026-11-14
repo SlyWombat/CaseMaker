@@ -39,6 +39,7 @@ import {
 } from '@/engine/cnc/engrave/smartPick';
 import { explainSmartPick, type SmartPickWords } from '@/engine/cnc/engrave/smartPickWords';
 import type { EngraveShopOpts } from './engraveGenerate';
+import type { ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { evaluatePlan, type EvalContext, type PlanEvaluation } from './planEvaluate';
 
 /**
@@ -59,6 +60,8 @@ export interface EngravePickInputs {
    * the full evaluation plans the program the cut would post, so the pick's winning plan can be
    * handed to the cut byte for byte. Absent: the pick shop, as before. */
   runShop?: EngraveShopOpts | null;
+  /** #1258 — the operator's answer to the tab question (the CLI's `--tab-choice`); absent: candidates are measured under a provisional one. */
+  tabChoice?: ModelPlanInput['tabChoice'];
   /** The caller's own table, when it is not the shop's `feeds` (the worker sends it explicitly). */
   table?: readonly FeedsEntry[] | null;
   /**
@@ -80,6 +83,7 @@ export function pickContext(inputs: EngravePickInputs): EvalContext {
     catalogue: inputs.catalogue,
     shop: inputs.shop,
     runShop: inputs.runShop ?? null,
+    ...(inputs.tabChoice === undefined ? {} : { tabChoice: inputs.tabChoice }),
     calibration: null,
     conditions: inputs.conditions,
     table: inputs.table ?? inputs.shop.feeds ?? null,

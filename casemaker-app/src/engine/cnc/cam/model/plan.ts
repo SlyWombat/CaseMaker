@@ -595,6 +595,13 @@ export interface ModelPlanOutput {
   tabChoiceNeeded?: TabChoiceNeeded;
   /** #1258 — an answer was on the input but its fingerprint no longer matches (the outline or the tab settings changed). */
   tabChoiceStale?: true;
+  /**
+   * #1258 — AN ANSWERED PLAN CARRIES THE QUESTION IT WAS ANSWERED FOR, beside its programs: the same
+   * {@link TabChoiceNeeded} (stretches with their candidates and the spans left, the outline, the
+   * fingerprint) and the answer honoured. Plain data, no behaviour: it lets an answered summary and
+   * a "Change…" survive a reopened job. Absent when no stretch was too long.
+   */
+  tabChoiceApplied?: TabChoiceNeeded & { choice: 'insideMargin' | 'longerStretch' };
 }
 
 /**
@@ -3081,12 +3088,14 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // #1258 — THE TAB QUESTION. Every contour that ran reports the stretches the corner margin left
   // too long. With no valid answer the plan hands back the question and NO programs; with a valid
   // one it goes on (the contour already tabbed or left each stretch as the answer said).
+  let tabChoiceApplied: ModelPlanOutput['tabChoiceApplied'];
   {
     const asked = collectTabQuestion(perSetup, readDefault(input.defaults ?? null, 'tabs.cornerDeg').value);
     if (asked !== null) {
       const answer = input.tabChoice;
       if (answer === undefined) return { perSetup: [], tabChoiceNeeded: asked };
       if (answer.answeredFor !== undefined && answer.answeredFor !== asked.fingerprint) return { perSetup: [], tabChoiceNeeded: asked, tabChoiceStale: true };
+      tabChoiceApplied = { ...asked, choice: answer.choice };
     }
   }
   // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
@@ -3199,6 +3208,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // same list); absent when the ladder did not run.
   const result: ModelPlanOutput = outcome === undefined ? { perSetup } : { perSetup, outcome };
   if (ladderRowsAll !== undefined) result.ladderRows = ladderRowsAll;
+  if (tabChoiceApplied !== undefined) result.tabChoiceApplied = tabChoiceApplied;
   // #1046 — the timing read and the finishing ball the ladder's estimate scales go to the CALLER'S
   // SINK, never into `result`: two runs of the same plan differ in the clock, and every plan
   // identity pin compares the JSON.

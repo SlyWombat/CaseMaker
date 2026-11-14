@@ -6712,7 +6712,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}), ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }), });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6739,7 +6739,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}), ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }), });
     const sideList = sidePrograms(one, side);
     // A side that failed stops the run: this result's `programs` are the run's so far, but no run
     // total is stated for an incomplete run — `one`'s own side-total would read as the run's.
@@ -7473,6 +7473,11 @@ export interface EngraveGenerateOptions {
   measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
   /** #1046 — the virtual ladder on the OWNED plan (the run-sheet press, the CLI's flag). */
   restLadder?: boolean;
+  /**
+   * #1258 — the operator's answer to the tab question (see `ModelPlanInput.tabChoice`): forwarded to
+   * every goal program's plan. Absent: a job that needs the answer stops and asks.
+   */
+  tabChoice?: ModelPlanInput['tabChoice'];
 }
 
 export async function engraveGenerate(
@@ -7724,6 +7729,7 @@ export async function engraveGenerate(
         ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }),
         ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }),
         ...(options.restLadder === true ? { restLadder: true } : {}),
+        ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }),
       })),
       surface: null,
     };
