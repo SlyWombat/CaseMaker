@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect, openSignCard, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSignCard, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -251,6 +251,10 @@ test.describe('first job acceptance (§6)', () => {
     await capture(page, 'wizard-4-holding');
     // The last step's button is the create (#897); it offers the job only when the hold is one the
     // wizard can leave.
+    // #1273 — nothing recorded is not a vise: the step asks, and the walk's one extra click is the
+    // operator's own choice of seat (through the helper that refuses to pick silently).
+    clicks += 1;
+    await pickAssumedMount(page, 'ledge');
     await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
     await tap(page, 'engrave-setup-next');
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);
@@ -522,6 +526,9 @@ test.describe('first job acceptance (§6)', () => {
     await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
     await stockNext(page);
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
+    // A rod with nothing recorded: the chuck needs the machine's envelope, so the vise seats are the
+    // choice on offer (#1273); the walk chooses one explicitly.
+    await pickAssumedMount(page, 'board');
     await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
     await page.getByTestId('engrave-setup-next').click();
     await expect(page.getByTestId('start-wizard')).toHaveCount(0);

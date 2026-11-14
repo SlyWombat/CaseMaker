@@ -11,7 +11,7 @@
 // #870 — on a phone the dialog is a full-height SHEET, edge to edge: no gutter, no band above it;
 // the 16 px edge is the body's (the one scroll region) between its pinned header and footer.
 
-import { test, expect, openSomethingElse, stockNext } from '../fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext, pickAssumedMount } from '../fixtures/caseMaker';
 
 type Box = { left: number; top: number; right: number; bottom: number } | null;
 
@@ -62,6 +62,10 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   // #1263 — a bare "something else" states no material, so the Stock step asks; the helper answers it.
   await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1273 — nothing recorded: the step asks and draws no picture until a seat is chosen (the approved
+  // mock-up). The picture-first layout below is the CHOSEN state's, so the walk chooses.
+  await expect(page.getByTestId('engrave-setup-holding-picture')).toHaveCount(0);
+  await pickAssumedMount(page, 'ledge');
 
   const layout = await page.evaluate(() => {
     const box = (el: Element | null): { left: number; top: number; right: number; bottom: number } | null => {

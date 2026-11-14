@@ -92,6 +92,7 @@ import { surfacePrimitivesOf } from '@/engine/cnc/engrave/primitiveSurface';
 import { placedSize } from '@/engine/cnc/engrave/targetScale';
 import { closeOpenSheet } from '@/engine/cnc/engrave/closeSheet';
 import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
+import { adjudicatedCellCount, asGoalHeightfield } from '@/workers/sim/goalChainCutInto';
 import { memTrace } from '@/engine/cnc/memTrace';
 import { mouldSolidOf } from '@/engine/cnc/engrave/mouldSolid';
 import { toPartPlan, labelProfile, jobDepthLimit, keepOutNameAt, type PartPlan } from '@/engine/cnc/engrave/partPlan';
@@ -239,7 +240,8 @@ import { rotaryFreeSpan, freeEndSentence, tailstockSentence, throughCentreSenten
 import { generateRotaryReliefIR, reliefKeepOutX, sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { ceilingName, effectiveMargins, MARGIN_DEFAULTS } from '@/engine/cnc/engrave/depthBounds';
 import { ORACLE_SHALLOW_DEPTH_FRACTION, type OraclePoint, type OraclePredicted, type OracleThreadMove } from '@/engine/cnc/engrave/oracle';
-import { designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { checkGoalCutInto, designCutterOf, type DesignCheckItem } from '@/engine/cnc/engrave/designCheck';
+import { goalEdgeBreakOptions } from '@/engine/cnc/engrave/edgeBreak';
 import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
@@ -5509,7 +5511,6 @@ export async function buildModelPlanInputForGoal(
   // `planTwoOutcomes` de-duplicates by key and skips the ideal run when the catalogue adds nothing
   // the owned set did not carry. Absent = no ideal — the worker itself never reads house state.
   const cutters: CutterCandidates = { house, catalogue: catalogueTools === undefined ? [] : [...catalogueTools] };
-
   // #985 — THE SCALLOP SEAT HOLDS A CUSP, THE PITCH HAS ITS OWN SEAT. The model engine's
   // `tolerances.finishMm` is the ball's cusp HEIGHT (the ruling makes it decide the finish), and
   // a goal JOB states no cusp: `EngraveSurfaceSettings` carries step-overs, allowances and a
@@ -6463,18 +6464,48 @@ export async function generateGoalProgram(
   // goes first, the ideal second; the ladder's surcharge is the OWNED plan's).
   let planTiming: PlanTiming | null = null;
   try {
+    // #1252 — THE CHECK'S OWN ADJUDICATION, INJECTED VIA THE OPTIONS (never the input: the input
+    // is cloned to the rank pool's workers and must stay plain data — #1254's walker). This seam
+    // owns the check's call and options; the planner folds the chain's stamp with the cache it
+    // already has and hands this function the field, so one call is the check's classification
+    // pass. The goal field is the same sample the plan stamps against (`input.goal`, the
+    // `sampleGoalHeightfield` result itself — `GoalCellField` is its structural subset, so
+    // `asGoalHeightfield` checks the fields the check reads before they are trusted).
+    const planGoalCutInto = input.goal === undefined
+      ? undefined
+      : (field: Float32Array, irs: readonly ToolpathIR[]): { adjudicatedCells: number; maxMm: number; areaMm2: number } | null => {
+          // The plan's goal is the full sampled field, or the check did not run (review 3: no bare cast).
+          const goalField = asGoalHeightfield(input.goal);
+          if (goalField === null) return null;
+          const verdictTop = (x: number, y: number): number | null => {
+            const i = Math.round((x - goalField.x0) / goalField.pitch);
+            const j = Math.round((y - goalField.y0) / goalField.pitch);
+            if (i < 0 || j < 0 || i >= goalField.nx || j >= goalField.ny) return null;
+            return field[j * goalField.nx + i]!;
+          };
+          const checkTools = new Map<string, Tool>();
+          for (const t of [...input.cutters.house, ...input.cutters.catalogue]) checkTools.set(cutterKeyOf(t), t);
+          const chainKeys = irs.map((ir) => cutterKeyOf(ir.tool));
+          const options = goalEdgeBreakOptions(job, (key) => checkTools.get(key) ?? null, chainKeys);
+          const report = checkGoalCutInto(goalField, null, { leftoverTop: verdictTop, ...options });
+          const cells = adjudicatedCellCount(report.adjudicatedFraction, goalField.coveredCount);
+          if (cells === null) return null;
+          return { adjudicatedCells: cells, maxMm: report.adjudicatedMaxMm, areaMm2: cells * goalField.pitch * goalField.pitch };
+        };
     // #1038 — the planner's stage reports reach the run (see this function's `opts.onProgress`).
     const planOpts: PlanModelCamOptions = {
       // #1214's ruling (b) — the job's own machine's printed precision, the grid every feed word
       // in the plan is decided on (the plan posts through this same machine's post).
       axisPrecision: dialectOf(jobMachine(job, calibration)).axisPrecision,
+      // #1252 — the check's own adjudication (see the seam above).
+      ...(planGoalCutInto === undefined ? {} : { goalCutInto: planGoalCutInto }),
       ...(onProgress === undefined
         ? {}
         : {
             onProgress: (p: ModelPlanProgress) =>
               onProgress({
                 stage: 'plan',
-                label: `planning: ${p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
+                label: `planning: ${p.note ?? p.op} — setup ${p.setupIndex + 1}, ${Math.round(p.fraction * 100)} %`,
               }),
           }),
       ...(signal === undefined ? {} : { signal }),

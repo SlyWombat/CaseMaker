@@ -1208,6 +1208,10 @@ const viseSchema = z.object({
   source: z
     .enum(['default', 'saved', 'measured'])
     .describe('Where these jaw numbers came from: a default, a saved setup, or a measurement.'),
+  assumed: z
+    .literal(true)
+    .optional()
+    .describe('True when the operator chose this seat with no machine recorded: an assumption about the shipped jaws, not a measurement.'),
   uncertainty: z
     .number()
     .finite()

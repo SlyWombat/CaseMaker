@@ -75,6 +75,9 @@ export type PlanFindingCode =
   | 'goal-rest-pass'
   | 'goal-rest-uncut'
   | 'goal-plan-tradeoff'
+  // #1252 — every feasible set of cutters cuts into the part: the plan cuts into the model. The guide's
+  // `goal-overcut` row (an error: material cut from the part cannot be put back), raised by the pick.
+  | 'goal-overcut'
   // #1012 — the rim stage's bevel was clamped to the V's one-pass reach (the 2.5D path's own code).
   | 'chamfer-too-wide'
   // #1019 — the engine-chosen curved rough's stated flat could not reach the region's depth.
@@ -201,4 +204,10 @@ export interface ModelPlanProgress {
   setupIndex: number;
   op: PlannedOpKind | 'features' | 'clSurface' | 'sequence' | 'linking';
   fraction: number;
+  /**
+   * #1252 — a fixed sentence for this tick, when the stage's name alone would not tell the operator
+   * what is running: "checking set N of M against the model" while the pick asks the goal check
+   * about each feasible chain. The run's label reads it in place of the op's name.
+   */
+  note?: string;
 }
