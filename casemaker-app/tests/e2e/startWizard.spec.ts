@@ -36,11 +36,12 @@ test('welcome → wizard → blank → the Engrave panel, with the stock already
   await page.getByTestId('start-wizard-preset-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();
 
-  // Step 3 — the stock: #930 proposes the house's stick for a line of text (the work no longer
-  // sizes a plate from its ink). The starters are the door's (#680), not a list under the step.
+  // Step 3 — the stock: this shop records none (no house service here), and the step says so
+  // while proposing the blank the line needs (#1259). The starters are the door's (#680), not a
+  // list under the step.
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText(
-    'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
+    'No stock is recorded for this shop yet. It needs a blank of at least',
   );
   await page.getByTestId('start-wizard-close').click();
   // #1123 item 2 — ✕ leaves the operator in the CNC workspace, not on the door. The starters are

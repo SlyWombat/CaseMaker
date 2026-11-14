@@ -70,6 +70,7 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'setups.remountMinutes',
   'setups.reregisterMinutes',
   'stock.defaultPlateThicknessMm',
+  'stock.pocketFloorBodyMm',
   'stock.presetMarginMm',
   'stock.workMarginMm',
   'tape.holdRatio',

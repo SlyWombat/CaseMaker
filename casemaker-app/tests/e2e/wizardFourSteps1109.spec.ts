@@ -23,6 +23,12 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
   await expect(page).toHaveScreenshot('1109-step3-stock.png');
 
+  // #1259 — a bare pocket states no size, so the step proposes no blank: the operator types the
+  // piece. The walk types the stick's numbers, so the Holding step below is the one it always was.
+  await page.getByTestId('start-wizard-form-block').click();
+  await page.getByTestId('start-wizard-make-length').fill('36');
+  await page.getByTestId('start-wizard-make-width').fill('100');
+  await page.getByTestId('start-wizard-make-thickness').fill('36');
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page).toHaveScreenshot('1109-step4-holding.png');

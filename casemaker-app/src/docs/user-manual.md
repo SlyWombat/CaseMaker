@@ -260,8 +260,8 @@ card with **Cut it out**, **Pocket it** or **Carve it (V)**, a PrusaSlicer proje
 and design route, and a Gerber set opens the board card. The card shows a picture of what was read
 beside the numbers it found, so a file that read wrongly is caught here rather than at Generate.
 
-**The sign's letter size.** The size starts unchosen: the line is fitted to the house's stick and
-no plate is asked for. Choosing **Small · 20 mm**, **Medium · 35 mm** or **Large · 60 mm** asks
+**The sign's letter size.** The size starts unchosen: the line is measured at the shop's default letter size and
+fitted to the blank your shelf gives (or the one the work needs); no plate is asked for. Choosing **Small · 20 mm**, **Medium · 35 mm** or **Large · 60 mm** asks
 for a plate sized from the line — the chosen size is the target, never larger than the fitted
 line, with a 10 mm margin around it — and the label is re-seated centred on the plate whenever the
 blank changes. The font is chosen beside the text.

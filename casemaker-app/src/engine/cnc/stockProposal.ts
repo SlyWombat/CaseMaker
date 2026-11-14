@@ -40,48 +40,11 @@ export interface ProposalContext {
   signMarginMm?: number;
   /** #1207 — `stock.workMarginMm`: the scrap a mesh or line's plate leaves each side, mm. */
   workMarginMm?: number;
+  /** #1259 — `stock.pocketFloorBodyMm`: the material left under a pocket's floor, mm. */
+  pocketFloorBodyMm?: number;
   /** #1207 — `stock.presetMarginMm`: the scrap a preset's cut-out or pocket leaves each side, mm. */
   presetMarginMm?: number;
 }
-
-/**
- * #1098 — THE SHELF PLATE FOR A DRAWING. Among the shelf's plates that are free (some left, none
- * held back) and hold the drawing's extent plus the margin each side (turned either way), with a
- * thickness of at least `needMm`: the job's material first when one is set, then the smallest
- * area, then the thinnest. Null when none holds it.
- */
-export function shelfPlateFor(
-  extent: { length: number; width: number },
-  needMm: number,
-  material: StockMaterial | null,
-  shelf: readonly StockItem[],
-  marginMm: number = readDefault(null, 'stock.workMarginMm').value,
-): StockItem | null {
-  const m = marginMm;
-  const needL = extent.length + 2 * m;
-  const needW = extent.width + 2 * m;
-  const free = (i: StockItem): number => i.quantity - i.reservations.reduce((a, r) => a + r.quantity, 0);
-  const candidates = shelf.filter((i) => {
-    if (i.form !== 'plate' || free(i) <= 0) return false;
-    const { length: l, width: w, thickness: t } = i.size;
-    if (l == null || w == null || t == null || t + 1e-9 < needMm) return false;
-    return (l >= needL - 1e-9 && w >= needW - 1e-9) || (l >= needW - 1e-9 && w >= needL - 1e-9);
-  });
-  const area = (i: StockItem): number => (i.size.length ?? 0) * (i.size.width ?? 0);
-  candidates.sort(
-    (a, b) =>
-      Number(material !== null && b.material === material) - Number(material !== null && a.material === material) ||
-      area(a) - area(b) ||
-      (a.size.thickness ?? 0) - (b.size.thickness ?? 0),
-  );
-  return candidates[0] ?? null;
-}
-
-/**
- * #1100 — the margin a preset's cut-out or pocket leaves each side, mm. Ten, not the mesh rule's
- * five: the profile needs room for the cutter beside the part and for the clamps that hold the
- * offcut. (Mockup/acceptance: a 60 × 40 shape proposes 80 × 60.)
- */
 
 /**
  * The material the work proposes for a blank it sized itself: the house default (#879 — the
@@ -144,6 +107,7 @@ function n(v: number): string {
  */
 export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): number | null {
   const plateMm = ctx.plateThicknessMm ?? HOUSE_PLATE_THICKNESS_MM;
+  const floorBodyMm = ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value;
   switch (work.kind) {
     case 'mesh':
       return round1(work.size.z + WORK_STOCK_SKIN_MM);
@@ -160,8 +124,8 @@ export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): n
       // #1100 — the cut frees the part, so the blank is a plate the profile can go through.
       return plateMm;
     case 'pocket':
-      // #1100 — the floor needs its depth plus six millimetres of body under it.
-      return round1(Math.max(work.depth + 6, plateMm));
+      // #1100 — the floor needs its depth plus the shop's body under it (`stock.pocketFloorBodyMm`).
+      return round1(Math.max(work.depth + floorBodyMm, plateMm));
     case 'rod':
       // #1107 — a rod's "thickness" is its own length in the standing box.
       return round1(work.length);
@@ -171,10 +135,12 @@ export function proposedThickness(work: WorkShape, ctx: ProposalContext = {}): n
 }
 
 /**
- * The blank the work proposes, or null when it does not size one (a pocket, a profile or a hole
- * keeps today's default).
+ * WHAT THE WORK NEEDS (#1259): the smallest blank the work asks for, sized from the work and the
+ * shop's margins, with the sentence that says where the numbers came from — or null when the work
+ * does not size one. It never reads the shelf; {@link proposeBlank} decides whether the shelf
+ * already holds it.
  */
-export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockProposal | null {
+function needFor(work: WorkShape, ctx: ProposalContext = {}): StockProposal | null {
   // #1207 — the two scrap margins are the shop's; a caller without them reads the recommendations.
   const workMarginMm = ctx.workMarginMm ?? readDefault(null, 'stock.workMarginMm').value;
   const presetMarginMm = ctx.presetMarginMm ?? readDefault(null, 'stock.presetMarginMm').value;
@@ -216,7 +182,7 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
     }
     case 'text': {
       // #1100 item 3 — a SIGN's line sizes its own plate with the sign margin (the shop's number);
-      // any other text keeps the historical 5 mm proposal, and the stock step opens the house stick.
+      // any other text keeps the historical 5 mm proposal.
       const m = work.sign === true ? (ctx.signMarginMm ?? workMarginMm) : workMarginMm;
       return {
         form: 'plate',
@@ -232,21 +198,6 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
       // #1098 — the drawing's own extent, plus the same margin every mesh gets; the plate is the
       // house's, because an SVG carries no material of its own.
       const m = workMarginMm;
-      // The shelf's own plate wins: a pocket needs its depth plus the skin; a cut-out no thickness.
-      const need = work.through ? 0 : (work.depthMm ?? 0) + WORK_STOCK_SKIN_MM;
-      const held = shelfPlateFor(work, need, ctx.jobMaterial ?? null, ctx.shelf ?? []);
-      if (held !== null) {
-        const { length: l, width: w, thickness: t } = held.size as { length: number; width: number; thickness: number };
-        return {
-          form: 'plate',
-          material: held.material,
-          length: l,
-          width: w,
-          thickness: t,
-          finish: 'rough',
-          sentence: `From your shelf: ${held.material} plate, ${n(l)} × ${n(w)} × ${n(t)} mm.`,
-        };
-      }
       return {
         form: 'plate',
         material: WORK_STOCK_MATERIAL,
@@ -298,4 +249,169 @@ export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockP
     default:
       return null;
   }
+}
+
+/**
+ * The least thickness a SHELF item must have to hold the work. It is the proposal's own thickness
+ * except where the proposal is a convenience, not a requirement: a cut that frees the part
+ * (a through outline, a cut-out) goes through whatever plate it is cut from, so any thickness
+ * holds it; a drawing pocketed or carved needs its depth plus the skin; a pocket its depth plus
+ * the body under the floor.
+ */
+function holdThicknessFor(work: WorkShape, need: StockProposal, floorBodyMm: number): number {
+  switch (work.kind) {
+    case 'outline':
+      return work.through ? 0 : (work.depthMm ?? 0) + WORK_STOCK_SKIN_MM;
+    case 'cutout':
+      return 0;
+    case 'pocket':
+      return work.depth + floorBodyMm;
+    default:
+      return need.thickness;
+  }
+}
+
+/** Where a proposed blank came from (#1259). */
+export type BlankSource =
+  /** Case 1 — a stock entry the shop records holds the work. */
+  | { case: 'shelf'; itemId: string }
+  /** Case 2 — nothing recorded holds it, so the blank the work needs is recommended. `shelfEmpty` is case 3: no stock is recorded at all. */
+  | { case: 'recommended'; shelfEmpty: boolean };
+
+export interface BlankProposal extends StockProposal {
+  source: BlankSource;
+}
+
+const EPS = 1e-9;
+
+function freeOf(i: StockItem): number {
+  return i.quantity - i.reservations.reduce((a, r) => a + r.quantity, 0);
+}
+
+/** Volume of what the proposal needs, or of what an item is, mm³ — for "least waste". */
+function itemVolume(i: StockItem): number {
+  const { length: l, width: w, thickness: t, diameter: d } = i.size;
+  if (i.form === 'rod') return Math.PI * ((d ?? 0) / 2) ** 2 * (l ?? 0);
+  return (l ?? 0) * (w ?? 0) * (t ?? 0);
+}
+function needVolume(need: StockProposal): number {
+  if (need.form === 'rod') return Math.PI * (need.length / 2) ** 2 * need.thickness;
+  return need.length * need.width * need.thickness;
+}
+
+/** Whether a shelf item holds the need, with the same slack everywhere. */
+function holds(need: StockProposal, i: StockItem, holdMm: number): boolean {
+  const { length: l, width: w, thickness: t, diameter: d } = i.size;
+  if (need.form === 'rod') {
+    // The need states a rod in the standing box: diameter as length and width, the rod's length as thickness.
+    return i.form === 'rod' && d != null && l != null && d >= need.length - EPS && l >= need.thickness - EPS;
+  }
+  if (i.form !== 'plate' && i.form !== 'sheet' && i.form !== 'block') return false;
+  if (l == null || w == null || t == null || t + EPS < holdMm) return false;
+  return (l >= need.length - EPS && w >= need.width - EPS) || (l >= need.width - EPS && w >= need.length - EPS);
+}
+
+/**
+ * THE SHELF ITEM THAT HOLDS A NEED (#1259, generalising #1098's plate rule). Among the entries with
+ * some left and none held back that hold the need (turned either way; a flat need by a plate, sheet
+ * or block, a rod by a rod; circuit-board work only by board material and nothing else by it): the
+ * material sought first — a FILTER when the job states a material (a piece of another material does
+ * not hold the job; `onlyMaterial`), a preference for the default the work is sized in when it states
+ * none — then the least waste (item volume less the need's), then the
+ * shelf's own order — the sort is stable and adds no tie-break of ours. Null when none holds it.
+ */
+export function shelfItemFor(
+  need: StockProposal,
+  material: StockMaterial | null,
+  shelf: readonly StockItem[],
+  holdMm: number = need.thickness,
+  onlyMaterial: StockMaterial | null = null,
+): StockItem | null {
+  const wantsBoard = need.material === 'pcb';
+  const candidates = shelf.filter(
+    (i) =>
+      freeOf(i) > 0 &&
+      (i.material === 'pcb') === wantsBoard &&
+      (onlyMaterial === null || i.material === onlyMaterial) &&
+      holds(need, i, holdMm),
+  );
+  const rank = (i: StockItem): number => (material !== null && i.material === material ? 0 : 1);
+  const vol = needVolume(need);
+  const indexed = candidates.map((item, order) => ({ item, order }));
+  indexed.sort(
+    (a, b) =>
+      rank(a.item) - rank(b.item) ||
+      itemVolume(a.item) - vol - (itemVolume(b.item) - vol) ||
+      a.order - b.order,
+  );
+  return indexed[0]?.item ?? null;
+}
+
+function shelfSentence(i: StockItem): string {
+  const { length: l, width: w, thickness: t, diameter: d } = i.size;
+  return i.form === 'rod'
+    ? `From your shelf: ${i.material} rod, ⌀${n(d ?? 0)} × ${n(l ?? 0)} mm.`
+    : `From your shelf: ${i.material} ${i.form}, ${n(l ?? 0)} × ${n(w ?? 0)} × ${n(t ?? 0)} mm.`;
+}
+
+/**
+ * THE BLANK THE WIZARD PROPOSES (#1259) — one rule, from the shop's own stock.
+ *
+ *  1. **The shelf** holds the work: an entry the shop records (free, every size stated, big enough)
+ *     is the blank, at its own size, material, form and finish.
+ *  2. **Nothing recorded holds it:** the blank the work needs — extent plus the margin, thickness
+ *     from depth plus the floor — in the job's material, recommended, never required.
+ *  3. **No stock at all** reads as case 2 and says so; it adds no built-in stock.
+ *
+ * Next is never blocked by 2 or 3, and the operator can change every number. This function does
+ * not test the HOLD (whether a mount the shop owns can grip the blank): the Holding step that
+ * follows answers that for whatever blank was chosen.
+ */
+export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankProposal | null {
+  const need = needFor(work, ctx);
+  if (need === null) return null;
+  const shelf = ctx.shelf ?? [];
+  // The material the blank is sought in: the job's stated one, else the one the work would be sized in
+  // (the shop's default). A preference, not a filter — see shelfItemFor.
+  const preferred = need.material === 'pcb' ? null : (ctx.jobMaterial ?? need.material);
+  const stated = need.material === 'pcb' ? null : (ctx.jobMaterial ?? null);
+  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need, ctx.pocketFloorBodyMm ?? readDefault(null, 'stock.pocketFloorBodyMm').value), stated);
+  if (held !== null) {
+    const { length: l, width: w, thickness: t, diameter: d } = held.size;
+    return {
+      form: held.form,
+      material: held.material as StockMaterial,
+      length: held.form === 'rod' ? round1(d ?? 0) : (l as number),
+      width: held.form === 'rod' ? round1(d ?? 0) : (w as number),
+      thickness: held.form === 'rod' ? (l as number) : (t as number),
+      finish: held.finish,
+      sentence: shelfSentence(held),
+      source: { case: 'shelf', itemId: held.id },
+    };
+  }
+  const shelfEmpty = shelf.length === 0;
+  // Copper-clad IS what a board's work is; every other need takes the job's stated material.
+  const material = need.material === 'pcb' ? need.material : (ctx.jobMaterial ?? need.material);
+  const lead = shelfEmpty
+    ? 'No stock is recorded for this shop yet.'
+    : stated !== null
+      ? `Nothing on your shelf holds this in ${stated}.`
+      : 'Nothing on your shelf holds this.';
+  const size = need.form === 'rod'
+    ? `a ⌀${n(need.length)} × ${n(need.thickness)} mm rod`
+    : `a blank of at least ${n(need.length)} × ${n(need.width)} × ${n(need.thickness)} mm`;
+  return {
+    ...need,
+    material,
+    sentence: `${lead} It needs ${size}, ${material}. ${need.sentence}`,
+    source: { case: 'recommended', shelfEmpty },
+  };
+}
+
+/** The proposal without its provenance — for callers that only need the blank. */
+export function proposeStock(work: WorkShape, ctx: ProposalContext = {}): StockProposal | null {
+  const p = proposeBlank(work, ctx);
+  if (p === null) return null;
+  const { source: _source, ...blank } = p;
+  return blank;
 }

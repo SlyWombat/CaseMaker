@@ -609,7 +609,7 @@ export function OperationStep({
           text: answers.text,
           depth: newItemDepthFor(job),
           font: answers.font,
-          // Ruling b — no size chosen is #930's fitted line (the house stick); a chosen size
+          // Ruling b — no size chosen is the line at the shop's default letter size (#1259), fitted to the blank the shelf gives; a chosen size
           // carries the plate-sized sign flow.
           ...(answers.letterSize === null ? {} : { sizeMm: letterSizeMm(answers.letterSize) }),
         }
@@ -641,7 +641,7 @@ export function OperationStep({
   const shopDefaultsForSentence = useShopDefaultsStore((st) => st.defaults);
   const proposalSentence = useMemo(() => {
     if (reportedChoice === null) return null;
-    const proposal = proposeStock(workShapeFor(reportedChoice, job), proposalContextFor(job, shelfItems, shopDefaultsForSentence ?? null));
+    const proposal = proposeStock(workShapeFor(reportedChoice, job, shopDefaultsForSentence ?? null), proposalContextFor(job, shelfItems, shopDefaultsForSentence ?? null));
     if (proposal === null) return null;
     const n = (v: number): string => String(Number(v.toFixed(2)));
     return `Will cut on a ${n(proposal.length)} × ${n(proposal.width)} × ${n(proposal.thickness)} mm ${

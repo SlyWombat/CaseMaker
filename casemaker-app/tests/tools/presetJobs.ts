@@ -18,8 +18,8 @@ import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
 import { proposeStock } from '@/engine/cnc/stockProposal';
 import { readDefault } from '@/platform/defaultsClient';
 import { applyHoldAnswers, defaultSetupAnswers } from '@/engine/cnc/engrave/setupFlow';
+import { TEST_SHOP_STICK } from './testShopStock';
 import { TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
-import { HOUSE_STOCK } from '@/components/welcome/workShape';
 import { DEFAULT_BOARD_MM, applyRecommendedMount, seatShopFrom } from '@/components/welcome/holdingMounts';
 import { workFactsOf } from '@/components/welcome/workFacts';
 import type { OperationChoice } from '@/components/welcome/OperationStep';
@@ -46,13 +46,12 @@ function bare(job: EngraveJob): EngraveJob {
   };
 }
 
-/** The house's stick, as the sign's proposal (a block worked on its 36 × 100 face). */
 function stickStock(): EngraveJob['stock'] {
   return {
-    length: HOUSE_STOCK.length,
-    width: HOUSE_STOCK.width,
-    thickness: HOUSE_STOCK.thickness,
-    material: HOUSE_STOCK.material,
+    length: TEST_SHOP_STICK.length,
+    width: TEST_SHOP_STICK.width,
+    thickness: TEST_SHOP_STICK.thickness,
+    material: TEST_SHOP_STICK.material,
   };
 }
 

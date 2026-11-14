@@ -846,7 +846,7 @@ function hintFor(mount: HoldingMount, stock: { thickness: number }, boardMm: num
       return `still ${fmt(-proud)} mm below the jaw tops — a thicker board, or tape it to the bed`;
     }
     case 'block': {
-      // #930 — the stock's own numbers, not the option's category: a 36 mm stick on the body's
+      // #930 — the stock's own numbers, not the option's category: a 36 mm block on the body's
       // floor stands 16 mm above the jaw tops and the jaws hold its lower 20 mm.
       const proud = stock.thickness - VISE_FLOOR_DEPTH;
       const grip = Math.min(stock.thickness, VISE_FLOOR_DEPTH);

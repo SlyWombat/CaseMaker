@@ -50,6 +50,12 @@ test('#1109 — the four wizard steps on the desktop bundle, one screenshot each
   await expect(page).toHaveScreenshot('1109-dev-step3-stock.png');
 
   // Step 4 — holding, which the found machine makes the VISE's (this set's point).
+  // #1259 — a bare pocket states no size, so the step proposes no blank: the operator types the
+  // piece (the stick's numbers, so Holding below is the one it always was).
+  await page.getByTestId('start-wizard-form-block').click();
+  await page.getByTestId('start-wizard-make-length').fill('36');
+  await page.getByTestId('start-wizard-make-width').fill('100');
+  await page.getByTestId('start-wizard-make-thickness').fill('36');
   await page.getByTestId('start-wizard-stock-next').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-holding-picture').first()).toHaveAttribute('data-mechanism', 'vise');

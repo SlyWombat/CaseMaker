@@ -124,20 +124,15 @@ for (const vp of VIEWPORTS) {
       expect(back.x).toBeLessThan(primary.x);
       expect(primary.x + primary.width).toBeGreaterThan(box.x + box.width - 40);
 
-      // #930 — a pocket gets the same house stock: the blank step opens with the stick proposed,
-      // so there is no arrival sentence and the primary is live at once.
+      // #1259 — a bare pocket states no size, so it proposes no blank: the step opens on its
+      // fields and the operator types the piece.
       await openSomethingElse(page);
       await page.getByTestId('engrave-setup-what-pocket').click();
       await page.getByTestId('start-wizard-operation-next').click();
 
       // Step 3 — the blank.
       await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-      await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
-      await expect(page.getByTestId('engrave-setup-stock-provenance')).toContainText('The stock this workshop keeps');
-      await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
-      await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('100');
-      await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('36');
+      await expect(page.getByTestId('engrave-setup-stock-provenance')).toHaveCount(0);
       await expectOnScreen(page, page.getByTestId('start-wizard-stock-next'), 'step 3 primary');
       await expectOnScreen(page, page.getByTestId('start-wizard-back'), 'step 3 Back');
 

@@ -8,6 +8,7 @@
 // step opens — those must survive it.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { seedTestShopShelf } from '../tools/testShopStock';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { StartWizard } from '@/components/welcome/StartWizard';
@@ -165,7 +166,8 @@ endsolid tet
 `;
 
 describe('#897 — the question comes first, and it sizes the blank', () => {
-  it('a line of text proposes the house’s stock, and the sentence says so', async () => {
+  it('a line of text proposes the blank from the shop’s shelf, and the sentence says so', async () => {
+    seedTestShopShelf();
     openWizard();
     toQuestion();
     // #1100 — a text job comes from the sign card now.
@@ -174,17 +176,13 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
     expect(progress()).toContain('Stock');
-    // #930 — THE HOUSE'S STOCK, not a plate sized from the line: the shop cuts 36 × 36 × 100 mm
-    // hardwood sticks, and a first job keeps every default.
+    // #1259 — THE SHELF'S OWN STICK, not a plate sized from the line: the shop's recorded stock
+    // holds the line, so a first job keeps every default. (The stick lies ALONG the jaws: 36 mm
+    // between them (X), 100 mm along them (Y), 36 tall.)
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
+      'From your shelf: hardwood block, 36 × 100 × 36 mm.',
     );
-    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('hardwood');
-    expect(screen.getByTestId('start-wizard-form-block').getAttribute('aria-pressed')).toBe('true');
-    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
-    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
-    expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
-    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('36 × 100 × 36 mm');
 
     await leaveStock();
     // The hold follows from the blank the work asked for, and the last step creates the line.
@@ -203,7 +201,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
-  it('a job that states its own material keeps it, and the blank is still the house’s stock', () => {
+  it('a job that states its own material is held only by stock of it, so brass on the hardwood stick asks for the blank the work needs', () => {
+    seedTestShopShelf();
     const base = defaultEngraveJob();
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
     openWizard();
@@ -213,10 +212,12 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
-    // The proposal sizes the blank; it does not overrule the piece the job has named.
+    // The proposal does not overrule the piece the job has named, and a hardwood stick is not a
+    // piece of brass (#1259): nothing on the shelf holds this in brass.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
-    // …and because the step's answer still MATCHES the proposal, the sentence it came from stays.
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
+      'Nothing on your shelf holds this in brass.',
+    );
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {

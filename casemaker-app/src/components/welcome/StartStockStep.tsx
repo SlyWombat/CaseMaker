@@ -807,7 +807,9 @@ export function StartStockStep({
                     {MATERIAL_LABELS[seed.material]}
                   </div>
                   {seed.sentence !== undefined && (
-                    <div style={MUTED} data-testid="engrave-setup-stock-provenance">
+                    // The card is a button, whose text does not wrap; the sentence carries the size the work
+                    // needs (#1259), so it wraps and is read in full.
+                    <div style={{ ...MUTED, whiteSpace: 'normal' }} data-testid="engrave-setup-stock-provenance">
                       {seed.sentence}
                     </div>
                   )}

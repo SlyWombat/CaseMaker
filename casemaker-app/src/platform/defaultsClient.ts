@@ -360,6 +360,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(1).max(50),
     fallback: 10,
   },
+  // #1259 — the cap height a line of text is measured at before the operator has chosen a size, so
+  // the wizard can propose a blank for it from the shop's own shelf (#1207: a setting, not a number
+  // in code).
+  'wizard.defaultLetterSizeMm': {
+    label: 'the letter size a text job is measured at before one is chosen (chosen)',
+    unit: 'mm',
+    rule: z.number().min(1).max(200),
+    fallback: 10,
+  },
   // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
   'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
   'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },
@@ -765,6 +774,8 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   'registration.centreSearchMaxMm': { label: 'centre find, the most the search may travel (chosen)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 60 },
   // The stock proposal's scrap, and the preset's own (wider) scrap.
   'stock.workMarginMm': { label: 'scrap the stock proposal leaves each side of a mesh or a line of text (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 5 },
+  // #1259 — the material left under a pocket's floor (ruling: a registered key, read at both sites).
+  'stock.pocketFloorBodyMm': { label: 'material left under a pocket’s floor when the wizard sizes or accepts a blank (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 6 },
   'stock.presetMarginMm': { label: 'scrap a preset’s cut-out or pocket leaves each side (chosen)', unit: 'mm', rule: z.number().min(0).max(100), fallback: 10 },
   // The V-carve step-over, as a share of the groove's width at the colour plane.
   'vcarve.stepoverRatio': { label: 'V-carve step-over, as a share of the groove’s width (chosen)', unit: 'x', rule: z.number().min(0.1).max(1), fallback: 0.6 },

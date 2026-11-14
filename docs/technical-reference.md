@@ -242,6 +242,8 @@ The keys added since v0.2, with their recommendations:
 | `stock.shelfMatchMm` | 1 mm | 0–10 | A shelf blank within this of the proposal in either orientation is pre-selected on the Stock step. |
 | `stock.defaultPlateThicknessMm` | 12 mm | 1–100 | The plate a drawing is worked on when the shelf holds none that fits. |
 | `stock.signMarginMm` | 10 mm | 1–50 | The margin around a sign's line when the plate is sized from the text. |
+| `stock.pocketFloorBodyMm` | 6 mm | 0–100 | The material left under a pocket's floor when the wizard sizes or accepts a blank (#1259). |
+| `wizard.defaultLetterSizeMm` | 10 mm | 1–200 | The letter size a text job is measured at, before one is chosen, to propose a blank from the shelf (#1259). |
 | `tape.stripCount` | 5 strips | whole, 1–20 | The tape strips the run sheet states under a blank. |
 | `tape.stripWidthMm` | 20 mm | 1–200 | The tape strip width the sheet states (the house roll). |
 | `clamps.maxCount` | 4 clamps | whole, 1–8 | The most clamps one bracket job may state (`too-many-clamps` when exceeded). |
