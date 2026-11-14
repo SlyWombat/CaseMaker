@@ -265,6 +265,8 @@ export function StartWizard(): JSX.Element {
   // as they always have.
   const starter = useStartWizardStore((s) => s.starter);
   const starterRan = useRef(false);
+  // #1264 — ONE SCROLL CONTAINER FOR EVERY STEP: a step opens at its top, not where the last one was left.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const machine = useMachineStore((s) => s.machine);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
@@ -1221,6 +1223,9 @@ export function StartWizard(): JSX.Element {
       : null;
 
   const stepNumber = wizardStepNumber(step);
+  useEffect(() => {
+    if (bodyRef.current !== null) bodyRef.current.scrollTop = 0;
+  }, [step]);
 
   return createPortal(
     <div
@@ -1265,7 +1270,7 @@ export function StartWizard(): JSX.Element {
           </div>
         </div>
 
-        <div className="sw-body" data-testid="start-wizard-body">
+        <div className="sw-body" data-testid="start-wizard-body" ref={bodyRef}>
           {/* #490 — a throw in a step used to blank the hand-off; the body has its own boundary so a
               broken step leaves the modal (and its Close) in place. */}
           <PanelErrorBoundary name="Cut setup flow">{stepContent}</PanelErrorBoundary>

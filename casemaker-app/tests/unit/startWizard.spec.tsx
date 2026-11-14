@@ -676,6 +676,25 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
   });
 
+  it('#1264 — a step opens at its top: the scroll the last step was left at does not carry over', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    const body = screen.getByTestId('start-wizard-body');
+    body.scrollTop = 43;
+    expect(body.scrollTop).toBe(43); // the harness keeps a scroll it is given, so the zero below is the fix's
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('Step 2');
+    expect(body.scrollTop).toBe(0);
+    body.scrollTop = 43;
+    fireEvent.click(screen.getByTestId('start-wizard-preset-sign'));
+    fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'A block' } });
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('Step 3');
+    expect(body.scrollTop).toBe(0);
+  });
+
   it('a pocket from the Something else chips carries no numbers, so it proposes no blank (#1259)', () => {
     seedTestShopShelf();
     act(() => {
