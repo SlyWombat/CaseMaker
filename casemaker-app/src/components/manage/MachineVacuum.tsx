@@ -129,7 +129,7 @@ function VacuumSwitch({ host, port, label, locked }: { host: string; port: numbe
             title={
               locked
                 ? 'Locked while a program is running or while the machine is not answering'
-                : "Switch the machine's vacuum on (M331) — asked live, and refused unless the machine is idle with no program running"
+                : "Switch the machine's vacuum on (M851). Refused while a program is running."
             }
             onClick={() => void press(true)}
           >
@@ -144,7 +144,7 @@ function VacuumSwitch({ host, port, label, locked }: { host: string; port: numbe
             title={
               locked
                 ? 'Locked while a program is running or while the machine is not answering'
-                : "Switch the machine's vacuum off (M332) — asked live, and refused unless the machine is idle with no program running"
+                : "Switch the machine's vacuum off (M852). Refused while a program is running."
             }
             onClick={() => void press(false)}
           >

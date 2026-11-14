@@ -6,8 +6,8 @@
  * THE SEQUENCE.
  *   home `$H` → per setup: [remount] → probe in (home first after a cut, fit the probe, `M491`) →
  *   registration (the touches, plus the auto-level grid when it is on) → per program, one per tool
- *   (Q15): bit change (home first — the bench rule — fit Tn, `M491`) → [air run] → cut (`M331`, the
- *   program, `M332` and clearance) → finish (`M332`, spindle off, `G28`, `M370` if a grid was set).
+ *   (Q15): bit change (home first — the bench rule — fit Tn, `M491`) → [air run] → cut (`M851`, the
+ *   program, `M852` and clearance) → finish (`M852`, spindle off, `G28`, `M370` if a grid was set).
  *
  * WHERE EACH TIME COMES FROM (`TimeSource`):
  *   - MEASURED — a shop default the bench timed (dated, with a note): `$H`, `M491`, one probe touch;
@@ -323,13 +323,13 @@ export function planRun(input: RunPlanInput): RunPlan {
         });
       }
       const cutParts: PhasePart[] = [{ label: 'the program', who: 'machine', seconds: cut.seconds, source: 'estimated', from: cut.from }];
-      cutParts.push(fromDefault(vacuumOn ? 'vacuum off (M332), clearance' : 'clearance', 'machine', s.clearanceSeconds));
+      cutParts.push(fromDefault(vacuumOn ? 'vacuum off (M852), clearance' : 'clearance', 'machine', s.clearanceSeconds));
       add({
         id: `${pid}.cut`,
         kind: 'cut',
         setupIndex: setup.index,
         programId: p.id,
-        title: `${vacuumOn ? 'Vacuum on (M331), cut' : 'Cut'}: ${p.label}`,
+        title: `${vacuumOn ? 'Vacuum on (M851), cut' : 'Cut'}: ${p.label}`,
         needsDone: false,
         parts: cutParts,
       });
@@ -341,7 +341,7 @@ export function planRun(input: RunPlanInput): RunPlan {
     kind: 'finish',
     setupIndex: null,
     programId: null,
-    title: `Done: ${vacuumOn ? 'M332, ' : ''}spindle off, G28${autoLevelOn ? ', M370' : ''}`,
+    title: `Done: ${vacuumOn ? 'M852, ' : ''}spindle off, G28${autoLevelOn ? ', M370' : ''}`,
     needsDone: false,
     parts: [fromDefault('finish', 'machine', s.finishSeconds)],
   });

@@ -2,7 +2,7 @@
  * The machine strip's switches (#421, §5.8 "Where the machine's features live"): each machine feature
  * a job can use, its DEFAULT, and the REASON for that default, in words the strip prints. Pure.
  *
- *   - VACUUM — on for every cut (the maintainer): `M331` before play, `M332` after.
+ *   - VACUUM — on for every cut (the maintainer): `M851` before each program, `M852` after.
  *   - AIR RUN — Q14: on by default only for a program this machine has not run (by hash); an
  *     identical repeat defaults off. Either way it can be switched.
  *   - AUTO-LEVEL — Q13: OFF until #501 proves `G32 R1` / `M370` on this machine. Until then the switch
@@ -136,9 +136,9 @@ export function machineFeatures(input: FeatureInput): FeatureSwitch[] {
       // here that could be turned off would claim a control it does not have.
       available: false,
       defaultOn: true,
-      reason: 'On for every cut — the maintainer’s default: M331 before play, M332 after.',
-      note: 'Locked on: the run switches the vacuum on before every program today, and this switch takes effect only once the job flow passes it to the run.',
-      commands: 'M331 / M332',
+      reason: 'On for every cut: M851 before each program, M852 at the end.',
+      note: 'Locked on: a cut always switches the vacuum on before each program.',
+      commands: 'M851 / M852',
     },
     o.vacuum,
   );
