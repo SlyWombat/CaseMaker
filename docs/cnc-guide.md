@@ -683,7 +683,7 @@ of a corner — an edge too short keeps none, and a round outline keeps equal sp
 the outline is left longer than the shop's `tabs.maxSpanMm` (80 mm on stock 6 mm or thicker, 40 mm
 under 3 mm, linear between): the planner adds centred tabs beyond the count asked, so the count is
 a minimum, not a cap. When the stretch cannot take a corner-clear tab — a curve drawn in short
-segments, or edges too short for the margin — Generate stops and asks (#1258): a tab closer to a
+segments, or edges too short for the margin — Generate stops and asks: a tab closer to a
 corner than the edge's margin, or a longer unsupported stretch. The answer is stored on the job
 (the CLI takes `--tab-choice inside-margin|longer-stretch`; without it the run stops with the same
 question and never picks), and the run sheet states it with the numbers — which tab, how far from a
