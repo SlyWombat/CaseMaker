@@ -693,6 +693,8 @@ export interface ThroughCutFacts {
       at: { x: number; y: number };
       stretchMm: number;
       cornerMm: number;
+      /** #1258 — the corner margin of the edge the tab sits on, mm. */
+      marginMm?: number;
       /** Joins of the outline the tab's span crosses, and how many are sharper than the arc limit. */
       joins?: number;
       sharpJoins?: number;
@@ -8796,6 +8798,7 @@ async function generateOneProgram(
                       at: { x: tab.at[0], y: tab.at[1] },
                       stretchMm: tab.stretchMm,
                       cornerMm: tab.cornerMm,
+                      marginMm: tab.marginMm,
                       joins: tab.joins,
                       sharpJoins: tab.sharpJoins,
                     })),
