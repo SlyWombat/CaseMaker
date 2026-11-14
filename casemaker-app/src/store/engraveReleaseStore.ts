@@ -88,7 +88,8 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf } from '@/engine/cnc/machine';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
-import { firstRegistrationFor, setupRunGate } from './engraveRegistrationStore';
+import { firstRegistrationFor } from './engraveRegistrationStore';
+import { registrationGateNow } from './registrationGateNow';
 import { facingRegistrationBlocker } from './engraveRunGate';
 import { deleteMachineFile, listMachineFiles, recordUploadedFile } from '@/platform/machineFiles';
 
@@ -401,7 +402,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
   const registrationGateOf = (rec: ReleaseRecord): string | null => {
     const file = releaseNext(rec.files) ?? rec.files.at(-1) ?? null;
     if (file === null) return null;
-    return setupRunGate(rec.jobId, file.setupIndex, file.setupId, rec.target)?.sentence ?? null;
+    return registrationGateNow(rec.job, file.setupIndex, file.setupId, rec.target)?.sentence ?? null;
   };
 
   const say = (machine: string, line: string) => {
@@ -425,7 +426,7 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     // all. Refuse by name, before the vacuum or any line.
     // #1286 — AND SETUP 1'S TOO. Every setup needs its own registration, setup 1 included.
     {
-      const gate = setupRunGate(rec.jobId, file.setupIndex, file.setupId, rec.target);
+      const gate = registrationGateNow(rec.job, file.setupIndex, file.setupId, rec.target);
       if (gate !== null) {
         patch(machine, { phase: 'failed', active: null, next: null });
         say(machine, `Program ${file.index} did not start: ${gate.sentence}`);

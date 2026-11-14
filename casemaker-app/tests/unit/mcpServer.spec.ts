@@ -376,3 +376,12 @@ describe('#481 the mcp receipt variant', () => {
     }
   });
 });
+
+// #1286 (SAFETY) — the MCP server cannot reach the machine at all: no upload, no play. An agent has no
+// registration to speak of and cannot see the machine, so the surface stays closed by construction.
+import { TOOL_NAMES as MCP_TOOL_NAMES_1286 } from '../../scripts/lib/mcp/tools';
+describe('#1286 the MCP surface has no way to upload or play', () => {
+  it('lists no tool that moves the machine', () => {
+    for (const n of MCP_TOOL_NAMES_1286) expect(n).not.toMatch(/upload|play|probe|home|power|start|run_program|machine/i);
+  });
+});

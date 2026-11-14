@@ -74,10 +74,10 @@ import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/en
 import {
   useEngraveRegistrationStore,
   useFirstRegistration,
-  setupRunGate,
   useSetupRegistration,
   useSurfaceSpread,
 } from '@/store/engraveRegistrationStore';
+import { registrationGateNow, registrationNoteNow } from '@/store/registrationGateNow';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
@@ -1306,8 +1306,8 @@ export function EngraveCutSurface({
   const registered = registeredSetup !== null || (target === null && currentSetupIndex === 1 && anyRegistration !== null);
   const registeredDone = fitDone && registered;
   // #1286 (SAFETY) — ONE registration gate for every control that uploads or plays this setup's program.
-  const registrationGateSentence =
-    target === null ? null : (setupRunGate(job.id, currentSetupIndex, currentSetupId, target)?.sentence ?? null);
+  // No machine is NOT "nothing to ask": the gate says to choose one (fail closed).
+  const registrationGateSentence = registrationGateNow(job, currentSetupIndex, currentSetupId, target)?.sentence ?? null;
   const ran =
     registeredDone &&
     pkg !== null &&
@@ -1925,6 +1925,7 @@ export function EngraveCutSurface({
             // #819 — once THIS job's run has ended, the card draws no Start; the bit-change card
             // (programs left) or the end card (job over) owns the next press.
             noStart={runEnded}
+            registrationNote={registrationNoteNow(job, currentSetupIndex, currentSetupId, target)}
             blocker={cardStartBlocker({
               step1Blocker,
               programBlocker,

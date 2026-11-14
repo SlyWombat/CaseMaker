@@ -182,6 +182,8 @@ export interface CutRunCardProps {
   programs?: readonly ReleaseSource[];
   /** The step-3 gate the old block read; the Start states it as its visible reason. */
   blocker?: string | null;
+  /** #1286 — a line under Start about the registration that stands (no blank id yet); null otherwise. */
+  registrationNote?: string | null;
   /**
    * #819/#1123 item 39 — THIS JOB'S RUN HAS ENDED. On a finished job the press would start the
    * same program again; with programs left the bit-change card owns the next one. Either way this
@@ -214,6 +216,7 @@ export function CutRunCard({
   target,
   programs = [],
   blocker = null,
+  registrationNote = null,
   noStart = false,
   runTotalSeconds = null,
 }: CutRunCardProps): JSX.Element {
@@ -491,6 +494,11 @@ export function CutRunCard({
                   ? `Try again — program ${nextIndex ?? 1} of ${total}`
                   : `Start program ${nextIndex ?? 1} of ${total}`}
           </button>
+          {registrationNote !== null && startReason === null && (
+            <p data-testid="engrave-cut-card-registration-note" style={{ ...MUTED, fontSize: 12, margin: '4px 0 0' }}>
+              {registrationNote}
+            </p>
+          )}
           {startReason !== null && (
             <p data-testid="engrave-cut-card-start-reason" style={{ ...MUTED, fontSize: 12, margin: '4px 0 0' }}>
               {startReason}

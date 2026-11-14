@@ -134,7 +134,7 @@ describe('#1154 — the run keeps its own heartbeat, end to end', () => {
     const made = freezePackage(job, [program], '2026-11-10T00:00:00.000Z');
     if (!made.ok) throw new Error(made.reason);
     useEngraveJobStore.setState({ job: { ...job, package: made.package, runLog: undefined } });
-    registerForTest(job.id, TARGET, 'setup-1'); // #1286
+    registerForTest(job, TARGET, 'setup-1'); // #1286
     const ctx: RunContext = {
       nc: NC,
       jobId: job.id,

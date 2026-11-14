@@ -28,7 +28,7 @@ export interface CardStartGates {
   domeG32Blocker: string | null;
   cutterChecklistBlocker: string | null;
   /** #1286 — the registration gate: this setup has no usable origin on this machine (`setupRunGate`). */
-  registrationBlocker?: string | null;
+  registrationBlocker: string | null;
   /** True when this run is the release's (two or more programs in cut order). */
   multiProgram: boolean;
 }

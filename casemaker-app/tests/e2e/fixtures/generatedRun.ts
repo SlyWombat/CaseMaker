@@ -134,7 +134,10 @@ export async function registerCurrentJob(page: Page): Promise<void> {
     );
     if (!planned.ok) throw new Error(planned.reason);
     const target = { host: '192.0.2.10', port: 2222 };
-    reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, null);
-    for (const setup of job.setups ?? []) reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setup.id);
+    const stamp = { blankId: null, holdKey: reg.holdKeyOf(job) };
+    // Later setups first, then setup 1 and the job-keyed entry LAST: only the latest origin written on a
+    // machine counts, and the run these specs press is setup 1's.
+    for (const setup of [...(job.setups ?? [])].reverse()) reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setup.id, stamp);
+    reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, null, stamp);
   });
 }

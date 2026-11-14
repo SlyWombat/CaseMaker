@@ -3,13 +3,14 @@
 // Nothing is uploaded or played for a setup that has no registration, so a spec that exercises the
 // Start card, the release or the run store records one first. The e2e gate specs do NOT use this:
 // they register with real presses on the fake console.
-import { useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { holdKeyOf, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import type { EngraveJob } from '@/types/engraveJob';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import { planRegistration } from '@/engine/cnc/registration/plan';
 import { registrationSettings } from '@/engine/cnc/registration/settings';
 
 export function registerForTest(
-  jobId: string,
+  job: EngraveJob,
   target: { host: string; port: number } = { host: '192.0.2.10', port: 2222 },
   setupId: string | null = null,
 ): void {
@@ -37,5 +38,5 @@ export function registerForTest(
     settings,
   );
   if (!planned.ok) throw new Error(planned.reason);
-  useEngraveRegistrationStore.getState().record(jobId, target, planned.plan, outcome, null, setupId);
+  useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setupId, { blankId: null, holdKey: holdKeyOf(job) });
 }

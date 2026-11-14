@@ -7,16 +7,25 @@
 // The rule is `setupRunGate` (a code and a sentence) and every control that starts anything reads it:
 // the Cut card (`cardStartBlocker`), the release's upload / start / walks, and — last line — the run
 // store's `start` for any job-owned run. A registration counts only if it is this job's, this setup's
-// (each setup of a multi-setup job needs its own), on this machine, and usable.
+// (another setup's record never stands in), on this machine, usable, measured on this BLANK and this
+// HOLD, and the LATEST origin written on the machine.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cardStartBlocker } from '@/components/panels/cutCardGate';
-import { resetEngraveRegistrationStore, setupRunGate, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { holdKeyOf, resetEngraveRegistrationStore, setupRunGate, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetMachineRunStore, useMachineRunStore } from '@/store/machineRunStore';
+import type { EngraveJob } from '@/types/engraveJob';
 import { registerForTest } from '../tools/registeredJob';
 
 const TARGET = { host: '192.0.2.10', port: 2222 };
 const OTHER = { host: '192.0.2.99', port: 2222 };
+
+const jobA: EngraveJob = { ...defaultEngraveJob(), id: 'job-A' };
+const jobB: EngraveJob = { ...defaultEngraveJob(), id: 'job-B' };
+const gate = (job: EngraveJob, idx: number | null, setupId: string | null, target = TARGET as typeof TARGET | null, blankId: string | null = null) =>
+  setupRunGate({ job, setupIndex: idx, setupId, target, blankId });
 
 beforeEach(() => {
   resetEngraveRegistrationStore();
@@ -25,37 +34,96 @@ beforeEach(() => {
 
 describe('#1286 setupRunGate', () => {
   it('nothing on record: refused, with a code and a sentence that says what to do', () => {
-    const gate = setupRunGate('job-1', 1, 'setup-1', TARGET);
-    expect(gate?.code).toBe('registration-missing');
-    expect(gate?.sentence).toContain('Register this job first');
+    const g = gate(jobA, 1, 'setup-1');
+    expect(g?.code).toBe('registration-missing');
+    expect(g?.sentence).toContain('Register this job first');
+  });
+
+  it('no machine is a refusal, not "nothing to ask"; a program that names no setup is refused too', () => {
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null, null)?.code).toBe('registration-no-machine');
+    expect(gate(jobA, null, null)?.code).toBe('registration-no-setup');
   });
 
   it('a registration of THIS job on THIS machine opens it; another machine’s, another job’s do not', () => {
-    registerForTest('job-1', TARGET, null);
-    expect(setupRunGate('job-1', 1, 'setup-1', TARGET)).toBeNull();
-    expect(setupRunGate('job-1', 1, 'setup-1', OTHER)?.code).toBe('registration-missing');
-    expect(setupRunGate('job-2', 1, 'setup-1', TARGET)?.code).toBe('registration-missing');
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, 'setup-1')).toBeNull();
+    expect(gate(jobA, 1, 'setup-1', OTHER)?.code).toBe('registration-missing');
+    expect(gate(jobB, 1, 'setup-1')?.code).toBe('registration-missing');
   });
 
-  it('each setup needs its own: setup 1’s record does not stand in for side 2', () => {
-    registerForTest('job-1', TARGET, 'setup-1');
-    registerForTest('job-1', TARGET, null);
-    expect(setupRunGate('job-1', 2, 'setup-2', TARGET)?.sentence).toContain('Register side 2 first');
-    registerForTest('job-1', TARGET, 'setup-2');
-    expect(setupRunGate('job-1', 2, 'setup-2', TARGET)).toBeNull();
+  it('each setup needs its own: setup 1’s record does not stand in for side 2, nor side 2’s for setup 1', () => {
+    registerForTest(jobA, TARGET, 'setup-1');
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 2, 'setup-2')?.sentence).toContain('Register side 2 first');
+    useEngraveRegistrationStore.getState().recordSetup(
+      'job-A', 'setup-2', TARGET,
+      useEngraveRegistrationStore.getState().records['job-A']!.plan,
+      useEngraveRegistrationStore.getState().records['job-A']!.outcome,
+      null,
+      { blankId: null, holdKey: holdKeyOf(jobA) },
+    );
+    expect(gate(jobA, 2, 'setup-2')).toBeNull();
+    // The job-keyed entry names setup-1: asking for a first setup under another id is refused.
+    resetEngraveRegistrationStore();
+    registerForTest(jobA, TARGET, 'setup-1');
+    expect(gate(jobA, 1, 'setup-1')).toBeNull();
+    expect(gate(jobA, 1, 'setup-9')?.code).toBe('registration-missing');
   });
 
   it('a registration that was not usable is not a registration', () => {
-    registerForTest('job-1', TARGET, null);
-    const rec = useEngraveRegistrationStore.getState().records['job-1']!;
-    useEngraveRegistrationStore.setState({
-      records: { 'job-1': { ...rec, outcome: { ...rec.outcome, usable: false } } },
-    });
-    expect(setupRunGate('job-1', 1, null, TARGET)?.code).toBe('registration-unusable');
+    registerForTest(jobA, TARGET, null);
+    const rec = useEngraveRegistrationStore.getState().records['job-A']!;
+    useEngraveRegistrationStore.setState({ records: { 'job-A': { ...rec, outcome: { ...rec.outcome, usable: false } } } });
+    expect(gate(jobA, 1, null)?.code).toBe('registration-unusable');
+  });
+
+  it('BLANK: registered on blank A, now blank B → refused; a job that has no blank id keeps its session registration until it gets one', () => {
+    registerForTest(jobA, TARGET, null); // stamped blankId null (legacy)
+    expect(gate(jobA, 1, null, TARGET, null)).toBeNull();
+    expect(gate(jobA, 1, null, TARGET, 'blank-1')?.code).toBe('registration-other-blank');
+    // Measured on blank-1, now blank-2.
+    const rec = useEngraveRegistrationStore.getState().records['job-A']!;
+    useEngraveRegistrationStore.setState({ records: { 'job-A': { ...rec, stamp: { blankId: 'blank-1', holdKey: holdKeyOf(jobA) } } } });
+    expect(gate(jobA, 1, null, TARGET, 'blank-1')).toBeNull();
+    expect(gate(jobA, 1, null, TARGET, 'blank-2')?.code).toBe('registration-other-blank');
+  });
+
+  it('HOLD: a changed seat, mount or stock is not what was measured', () => {
+    registerForTest(jobA, TARGET, null);
+    const changed: EngraveJob = { ...jobA, stock: { ...jobA.stock, thickness: jobA.stock.thickness + 5 } };
+    expect(gate(changed, 1, null)?.code).toBe('registration-other-hold');
+    expect(gate(jobA, 1, null)).toBeNull();
+  });
+
+  it('SUPERSEDED: job A, then job B on the same machine, back to A → A’s Start refuses; side 1 after side 2 likewise', () => {
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null)).toBeNull();
+    registerForTest(jobB, TARGET, null);
+    expect(gate(jobB, 1, null)).toBeNull();
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+    // Re-registering A makes B's the stale one.
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null)).toBeNull();
+    expect(gate(jobB, 1, null)?.code).toBe('registration-superseded');
+    // Side 2 of A written after side 1: side 1 no longer describes the G54.
+    const s = useEngraveRegistrationStore.getState();
+    s.recordSetup('job-A', 'setup-2', TARGET, s.records['job-A']!.plan, s.records['job-A']!.outcome, null, { blankId: null, holdKey: holdKeyOf(jobA) });
+    expect(gate(jobA, 2, 'setup-2')).toBeNull();
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+  });
+
+  it('a record restored from the house’s note carries no blank stamp and never satisfies the gate', () => {
+    registerForTest(jobA, TARGET, null);
+    const rec = useEngraveRegistrationStore.getState().records['job-A']!;
+    const { stamp: _stamp, ...unstamped } = rec;
+    void _stamp;
+    useEngraveRegistrationStore.setState({ records: { 'job-A': unstamped } });
+    expect(gate(jobA, 1, null)?.code).toBe('registration-unstamped');
   });
 });
 
-describe('#1286 the card carries the gate', () => {
+describe('#1286 the card carries the gate (and the field is required)', () => {
   const clear = {
     step1Blocker: null,
     programBlocker: null,
@@ -71,28 +139,49 @@ describe('#1286 the card carries the gate', () => {
   it('every other gate clear, an unregistered setup still blocks Start, with its sentence', () => {
     expect(cardStartBlocker({ ...clear, registrationBlocker: 'Register this job first — …' })).toBe('Register this job first — …');
     expect(cardStartBlocker({ ...clear, registrationBlocker: null })).toBeNull();
-    // A more specific reason leads.
     expect(cardStartBlocker({ ...clear, cutterChecklistBlocker: 'locate the cutter', registrationBlocker: 'Register' })).toBe('locate the cutter');
   });
 });
 
-describe('#1286 the run store is the last line', () => {
-  it('a job-owned run with no registration is not started, and nothing is sent', () => {
+describe('#1286 the run store is the last line, and it speaks', () => {
+  const settings = { pollMs: 2000, noProgressMs: 30000, missLimit: 3 };
+  const entry = () => useMachineRunStore.getState().runs[`${TARGET.host}:${TARGET.port}`];
+
+  it('a job-owned run with no registration is not started, nothing is sent, and the run’s own transcript says why', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1', { nc: 'G0 X0\nM02\n', jobId: 'job-1', setupIndex: 1, setupId: 'setup-1' });
-    const started = useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 });
-    expect(started).toBe(false);
-    expect(useMachineRunStore.getState().runs[`${TARGET.host}:${TARGET.port}`]?.running).toBe(false);
+    useEngraveJobStore.setState({ job: jobA });
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1', { nc: 'G0 X0\nM02\n', jobId: 'job-A', setupIndex: 1, setupId: 'setup-1' });
+    expect(useMachineRunStore.getState().start(TARGET, settings)).toBe(false);
+    expect(entry()?.running).toBe(false);
+    expect(entry()?.lines.join('\n')).toContain('Not started: Register this job first');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('registration-missing'));
+    warn.mockRestore();
+  });
+
+  it('a job context that does not name its setup is refused (fail closed), registered or not', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useEngraveJobStore.setState({ job: jobA });
+    registerForTest(jobA, TARGET, null);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1', { nc: 'G0 X0\nM02\n', jobId: 'job-A' });
+    expect(useMachineRunStore.getState().start(TARGET, settings)).toBe(false);
+    expect(entry()?.lines.join('\n')).toContain('does not say which setup');
+    warn.mockRestore();
+  });
+
+  it('a run for a job that is not the open document is refused', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useEngraveJobStore.setState({ job: jobB });
+    registerForTest(jobA, TARGET, null);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'hash-1', { nc: 'G0 X0\nM02\n', jobId: 'job-A', setupIndex: 1, setupId: 'setup-1' });
+    expect(useMachineRunStore.getState().start(TARGET, settings)).toBe(false);
     warn.mockRestore();
   });
 
   it('a run with no job behind it (a loaded file) is not asked for a job origin', () => {
     useMachineRunStore.getState().prepare(TARGET, 'file.nc', 'hash-2', { nc: 'G0 X0\nM02\n' });
-    // It is allowed to start; the transport here is absent, so only the refusal path is observable.
-    const refused = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 });
-    expect(refused).not.toHaveBeenCalledWith(expect.stringContaining('registration-'));
-    refused.mockRestore();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    useMachineRunStore.getState().start(TARGET, settings);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('registration-'));
+    warn.mockRestore();
   });
 });

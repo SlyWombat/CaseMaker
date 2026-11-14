@@ -80,7 +80,8 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { registrationKey, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { holdKeyOf, registrationKey, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { currentBlankIdFor } from '@/store/registrationGateNow';
 // #1123-40 — THE REGISTRATION MEMO: the record kept on the house's machine record, restored on a
 // reload only while the machine's G54 X/Y still matches the one its origin write left.
 import {
@@ -1407,7 +1408,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       // read for side 1; side 2 is filed under its own setup id.
       if (flipRun) {
         if (selectedSetup !== null) {
-          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null);
+          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null, { blankId: currentBlankIdFor(job), holdKey: holdKeyOf(job) });
         }
       } else {
         record(
@@ -1420,6 +1421,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           result.spread === undefined ? null : surfaceFitForPost(result.spread),
           // #1088 — the setup this registration measured, so a per-setup reader asks and gets setup 1.
           job.setups?.[0]?.id ?? null,
+          // #1286 — the blank and the hold it was measured on: the run gate compares both with now.
+          { blankId: currentBlankIdFor(job), holdKey: holdKeyOf(job) },
         );
       }
       const memoSetup = flipRun ? selectedSetup : (job.setups?.[0] ?? null);

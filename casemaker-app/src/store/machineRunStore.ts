@@ -51,7 +51,7 @@ import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
 import { toolChangeIdentity } from '@/platform/toolChangeDry';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
-import { setupRunGate } from './engraveRegistrationStore';
+import { registrationGateNow } from './registrationGateNow';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
 import { RunTranscript, type RunTranscriptView } from './runTranscript';
 
@@ -678,8 +678,17 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       // whichever control asked (the card, the release, a restart, a stopped card's re-run). A run with
       // no job behind it (a loaded file, a walk the operator started by hand) has no job origin to ask.
       if (prepared.context?.jobId !== undefined) {
-        const gate = setupRunGate(prepared.context.jobId, prepared.context.setupIndex ?? 1, prepared.context.setupId ?? null, target);
+        // FAIL CLOSED: a job context that does not name its setup is refused, and so is a run for a job
+        // that is not the open document (its hold cannot be read).
+        const open = useEngraveJobStore.getState().job;
+        const ctx = prepared.context;
+        const gate =
+          open.id !== ctx.jobId
+            ? { code: 'registration-missing', sentence: 'This run belongs to a job that is not the open one — open the job to run it.' }
+            : registrationGateNow(open, ctx.setupIndex ?? null, ctx.setupId ?? null, target);
         if (gate !== null) {
+          // THE LAST LINE SPEAKS: the run's own transcript carries the refusal (the card shows it), not only the console.
+          patch(machine, { lines: [...prepared.lines, `Not started: ${gate.sentence}`] });
           // eslint-disable-next-line no-console
           console.warn(`[run] refused: ${gate.code} — ${gate.sentence}`);
           return false;
