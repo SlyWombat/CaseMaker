@@ -607,6 +607,9 @@ export function programFileNames(
   });
 }
 
+/** #1237 — what the run says (and the receipt records) when the location file has no settings section. */
+export const NO_SETTINGS_SECTION = 'this location file has no settings section; planned on the recommendations.';
+
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   const receipt: RunReceipt = {};
   try {
@@ -953,6 +956,15 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           : "no Makera catalogue in the app's data directory — feeds come from the shop's starting table";
     out.progress(where);
     runDiagnostics.push(diagnostic('feeds-no-catalogue', 'info', where, 'findings', null));
+  }
+
+  // #1237 — A LOCATION FILE WITH NO SETTINGS SECTION IS SAID, NOT ASSUMED. A pre-#412 house file states no
+  // settings (`defaults` is null by design) and names no location to the planner (see `shop` above), so
+  // the plan runs on the recommendations: one line says so, and the receipt records it as a run-level
+  // diagnostic, so a plan shaped by no shop settings never reads as one shaped by the shop's.
+  if (boot.location !== null && boot.location.defaults === null) {
+    out.progress(NO_SETTINGS_SECTION);
+    runDiagnostics.push(diagnostic('location-no-settings', 'info', NO_SETTINGS_SECTION, 'findings', null));
   }
 
   const readJson = (path: string): unknown => {
