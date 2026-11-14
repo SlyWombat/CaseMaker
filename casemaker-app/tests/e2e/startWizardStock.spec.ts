@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -117,8 +117,10 @@ test('without a shelf: the design proposal and Other size only', async ({ cm, pa
   await cm.ready();
   await page.getByTestId('welcome-start-cnc').click();
   await page.getByTestId('start-wizard-next').click();
-  await openSomethingElse(page);
-  await page.getByTestId('engrave-setup-what-pocket').click();
+  // #1259 — a line of text sizes a blank from its own extent, so the design proposal is on offer; a
+  // bare pocket states no size and proposes none.
+  await openSignCard(page);
+  await page.getByTestId('start-wizard-preset-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();
 
   await expect(page.getByTestId('start-wizard-step-stock')).toBeVisible();
