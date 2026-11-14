@@ -247,8 +247,10 @@ export const engraveGoalSchema = z
     leftoverTall: z
       .object({
         wallLineCells: z.number().int().nonnegative().describe('Tall cells whose goal height differs by ≥ 1 mm from a 4-neighbour’s: samples on near-vertical faces.'),
-        wallFootCells: z.number().int().nonnegative().describe('Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.'),
-        openCells: z.number().int().nonnegative().describe('Every other tall cell: material standing proud away from any wall.'),
+        wallFootCells: z.number().int().nonnegative().optional().describe('Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves. Absent when no cutter radius was given (`classified` false).'),
+        openCells: z.number().int().nonnegative().optional().describe('Every other tall cell: material standing proud away from any wall. Absent when no cutter radius was given (`classified` false): a cell is never called open for want of a cutter.'),
+        unclassifiedCells: z.number().int().nonnegative().describe('Tall cells that are not wall-line cells and were not classified because no cutter radius was given; 0 when `classified`.'),
+        classified: z.boolean().describe('True when a cutter radius was given, so every tall cell is wall line, wall foot or open.'),
         cellAreaMm2: z.number().describe('The goal grid’s cell area, mm².'),
       })
       .optional()

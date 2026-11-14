@@ -24,13 +24,13 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-const seen: Array<{ passCoverage?: number; leftoverBandsMm?: readonly number[] }> = [];
+const seen: Array<{ passCoverage?: number; leftoverBandsMm?: readonly number[]; smallestCutterRadiusMm?: number }> = [];
 vi.mock('@/engine/cnc/engrave/goalCheckInput', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/engine/cnc/engrave/goalCheckInput')>();
   return {
     ...real,
     goalCheckForProgram: (...args: Parameters<typeof real.goalCheckForProgram>) => {
-      if (args[2] !== undefined) seen.push({ passCoverage: args[2].passCoverage, leftoverBandsMm: args[2].leftoverBandsMm });
+      if (args[2] !== undefined) seen.push({ passCoverage: args[2].passCoverage, leftoverBandsMm: args[2].leftoverBandsMm, smallestCutterRadiusMm: args[2].smallestCutterRadiusMm });
       return real.goalCheckForProgram(...args);
     },
   };
@@ -89,6 +89,8 @@ describe('#1248 the CLI hands the check the shop\'s own bands', () => {
     await cutBlockAsync(path);
     expect(seen.length).toBeGreaterThan(0);
     for (const call of seen) expect(call.leftoverBandsMm).toEqual(recommended());
+    // #1248 (review) — the CLI states the smallest cutter's radius, so the tall split classifies.
+    for (const call of seen) expect(call.smallestCutterRadiusMm, 'the CLI passes the radius').toBeGreaterThan(0);
   }, 600_000);
 });
 
@@ -114,5 +116,14 @@ describe('#1248 no caller reads the band keys by hand', () => {
       expect(text, `${file} calls goalCheckShopOptions`).toMatch(/goalCheckShopOptions\(/);
       expect(text, `${file} names no leftover band key`).not.toMatch(/acceptance\.leftoverBand[123]Mm/);
     }
+  });
+
+  it('each production caller of the check passes the cutter radius through goalEdgeBreakOptions (run store, CLI, planEvaluate)', () => {
+    for (const file of CALLERS) {
+      const text = read(file);
+      expect(text, `${file} derives the radius with goalEdgeBreakOptions`).toMatch(/goalEdgeBreakOptions\(/);
+    }
+    // planEvaluate takes ONLY the radius from it (no edge-break allowance: no verdict moves).
+    expect(read('src/workers/sim/planEvaluate.ts')).toMatch(/smallestCutterRadiusMm/);
   });
 });

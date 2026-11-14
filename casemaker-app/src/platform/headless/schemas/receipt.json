@@ -309,14 +309,24 @@
                       "description": "The goal grid’s cell area, mm².",
                       "type": "number"
                     },
+                    "classified": {
+                      "description": "True when a cutter radius was given, so every tall cell is wall line, wall foot or open.",
+                      "type": "boolean"
+                    },
                     "openCells": {
-                      "description": "Every other tall cell: material standing proud away from any wall.",
+                      "description": "Every other tall cell: material standing proud away from any wall. Absent when no cutter radius was given (`classified` false): a cell is never called open for want of a cutter.",
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "unclassifiedCells": {
+                      "description": "Tall cells that are not wall-line cells and were not classified because no cutter radius was given; 0 when `classified`.",
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
                     "wallFootCells": {
-                      "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.",
+                      "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves. Absent when no cutter radius was given (`classified` false).",
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
@@ -330,8 +340,8 @@
                   },
                   "required": [
                     "wallLineCells",
-                    "wallFootCells",
-                    "openCells",
+                    "unclassifiedCells",
+                    "classified",
                     "cellAreaMm2"
                   ],
                   "type": "object"
@@ -1077,14 +1087,24 @@
                                 "description": "The goal grid’s cell area, mm².",
                                 "type": "number"
                               },
+                              "classified": {
+                                "description": "True when a cutter radius was given, so every tall cell is wall line, wall foot or open.",
+                                "type": "boolean"
+                              },
                               "openCells": {
-                                "description": "Every other tall cell: material standing proud away from any wall.",
+                                "description": "Every other tall cell: material standing proud away from any wall. Absent when no cutter radius was given (`classified` false): a cell is never called open for want of a cutter.",
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "unclassifiedCells": {
+                                "description": "Tall cells that are not wall-line cells and were not classified because no cutter radius was given; 0 when `classified`.",
                                 "maximum": 9007199254740991,
                                 "minimum": 0,
                                 "type": "integer"
                               },
                               "wallFootCells": {
-                                "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves.",
+                                "description": "Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves. Absent when no cutter radius was given (`classified` false).",
                                 "maximum": 9007199254740991,
                                 "minimum": 0,
                                 "type": "integer"
@@ -1098,8 +1118,8 @@
                             },
                             "required": [
                               "wallLineCells",
-                              "wallFootCells",
-                              "openCells",
+                              "unclassifiedCells",
+                              "classified",
                               "cellAreaMm2"
                             ],
                             "type": "object"

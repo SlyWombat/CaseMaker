@@ -70,7 +70,7 @@ describe('#1248 — the tall cells, split', () => {
     const goal = goalOf((i) => STEP(i));
     const cut = cutByColumn((i) => (i === 20 ? 0 : STEP(i)));
     const r = check(goal, cut, { radiusMm: 0.3 });
-    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 0, openCells: 0, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 0, openCells: 0, unclassifiedCells: 0, classified: true, cellAreaMm2: P * P });
   });
 
   it('2: the band beside the wall is the cutter’s foot', () => {
@@ -81,10 +81,10 @@ describe('#1248 — the tall cells, split', () => {
     const goal = goalOf((i) => STEP(i));
     const cut = cutByColumn((i) => (i === 20 ? 0 : i >= 21 && i <= 23 ? -1.5 : STEP(i)));
     const r = check(goal, cut, { radiusMm: 0.3 });
-    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 33, openCells: 0, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 33, openCells: 0, unclassifiedCells: 0, classified: true, cellAreaMm2: P * P });
     // The sentence gains the clause; the limit it states is the tall band the check was called with.
     expect(r.sentence).toMatch(
-      /of the 0\.44 mm² standing over 1 mm, 0\.11 mm² is on wall lines, 0\.33 mm² at the foot of walls and 0(\.00)? mm² in the open/,
+      / Of the 0\.44 mm² standing over 1 mm, 0\.11 mm² is on wall lines, 0\.33 mm² at the foot of walls and 0(\.00)? mm² in the open/,
     );
   });
 
@@ -96,7 +96,7 @@ describe('#1248 — the tall cells, split', () => {
     const goal = goalOf((i) => STEP(i));
     const cut = cutByColumn((i) => (i === 20 ? 0 : i >= 21 && i <= 23 ? -1.5 : STEP(i)));
     const r = check(goal, cut, { radiusMm: 0.15 });
-    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 11, openCells: 22, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 11, openCells: 22, unclassifiedCells: 0, classified: true, cellAreaMm2: P * P });
   });
 
   it('4: a proud patch in the open is open', () => {
@@ -109,22 +109,30 @@ describe('#1248 — the tall cells, split', () => {
       return i >= 8 && i <= 12 && j >= 8 && j <= 12 ? 2 : 0;
     };
     const r = check(goal, cut, { radiusMm: 0.3 });
-    expect(r.leftoverTall).toEqual({ wallLineCells: 0, wallFootCells: 0, openCells: 25, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 0, wallFootCells: 0, openCells: 25, unclassifiedCells: 0, classified: true, cellAreaMm2: P * P });
   });
 
   it('5: no tall cells — zeros, and the sentence gains no clause', () => {
     const goal = goalOf(() => 0, 21, 21);
     const r = check(goal, () => 0.5, { radiusMm: 0.3 });
-    expect(r.leftoverTall).toEqual({ wallLineCells: 0, wallFootCells: 0, openCells: 0, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 0, wallFootCells: 0, openCells: 0, unclassifiedCells: 0, classified: true, cellAreaMm2: P * P });
     expect(r.sentence).not.toMatch(/standing over/);
   });
 
-  it('6: no cutter known — the foot cells count as open', () => {
-    // Test 2's fields with NO smallestCutterRadiusMm: wall line 11; foot 0; open 33.
+  it('6: no cutter known — the rest is NOT classified (never called open for want of a cutter)', () => {
+    // Test 2's fields with NO smallestCutterRadiusMm: wall line 11; the 33 other tall cells are
+    // unclassified; foot and open are ABSENT, not 0 and not 33.
     const goal = goalOf((i) => STEP(i));
     const cut = cutByColumn((i) => (i === 20 ? 0 : i >= 21 && i <= 23 ? -1.5 : STEP(i)));
     const r = check(goal, cut);
-    expect(r.leftoverTall).toEqual({ wallLineCells: 11, wallFootCells: 0, openCells: 33, cellAreaMm2: P * P });
+    expect(r.leftoverTall).toEqual({ wallLineCells: 11, unclassifiedCells: 33, classified: false, cellAreaMm2: P * P });
+    expect(r.leftoverTall).not.toHaveProperty('wallFootCells');
+    expect(r.leftoverTall).not.toHaveProperty('openCells');
+    // Its own sentence, naming what was not done — and "in the open" is never printed.
+    expect(r.sentence).toContain(' Of the 0.44 mm² standing over 1 mm, 0.11 mm² is on wall lines; the rest is not classified (no cutter radius was given).');
+    expect(r.sentence).not.toMatch(/in the open/);
+    // The same fields WITH the radius classify the same cells: 33 → foot 33 (test 2).
+    expect(check(goal, cut, { radiusMm: 0.3 }).leftoverTall).toMatchObject({ classified: true, wallFootCells: 33, openCells: 0, unclassifiedCells: 0 });
   });
   it('7: the wall-line step IS the tall band — at 2 mm a 1.5 mm step is not a wall line and a 2.0 mm step is', () => {
     // Column i = 20 is left 1 mm ABOVE the stock top on a goal that steps down at x = 2.0, so it
@@ -132,24 +140,24 @@ describe('#1248 — the tall cells, split', () => {
     const STEP15 = (i: number): number => (i < 20 ? 0 : -1.5);
     const STEP20 = (i: number): number => (i < 20 ? 0 : -2);
     const proud = (zAt: (i: number) => number) => cutByColumn((i) => (i === 20 ? 1 : zAt(i)));
-    // At the 2 mm band: the 1.5 mm step is NOT a wall line (open — no cutter known), the 2.0 mm one is.
+    // At the 2 mm band: the 1.5 mm step is NOT a wall line (unclassified — no cutter known), the 2.0 mm one is.
     expect(check(goalOf(STEP15), proud(STEP15), { tallMm: 2 }).leftoverTall).toEqual({
       wallLineCells: 0,
-      wallFootCells: 0,
-      openCells: 11,
+      unclassifiedCells: 11,
+      classified: false,
       cellAreaMm2: P * P,
     });
     expect(check(goalOf(STEP20), proud(STEP20), { tallMm: 2 }).leftoverTall).toEqual({
       wallLineCells: 11,
-      wallFootCells: 0,
-      openCells: 0,
+      unclassifiedCells: 0,
+      classified: false,
       cellAreaMm2: P * P,
     });
     // At the recommended 1 mm band the same 1.5 mm step IS a wall line: the step moved with the band.
     expect(check(goalOf(STEP15), proud(STEP15), { tallMm: 1 }).leftoverTall).toEqual({
       wallLineCells: 11,
-      wallFootCells: 0,
-      openCells: 0,
+      unclassifiedCells: 0,
+      classified: false,
       cellAreaMm2: P * P,
     });
   });
@@ -162,5 +170,17 @@ describe('#1248 — the tall cells, split', () => {
     const proud = (zAt: (i: number) => number) => cutByColumn((i) => (i === 20 ? 1 : zAt(i)));
     expect(check(goalOf(exact), proud(exact)).leftoverTall?.wallLineCells).toBe(11);
     expect(check(goalOf(short), proud(short)).leftoverTall?.wallLineCells).toBe(0);
+  });
+  it('9: the clause is its own sentence — never a semicolon join — with and without the radius', () => {
+    const goal = goalOf((i) => STEP(i));
+    const cut = cutByColumn((i) => (i === 20 ? 0 : i >= 21 && i <= 23 ? -1.5 : STEP(i)));
+    const withRadius = check(goal, cut, { radiusMm: 0.3 });
+    expect(withRadius.sentence).toContain(
+      ' Of the 0.44 mm² standing over 1 mm, 0.11 mm² is on wall lines, 0.33 mm² at the foot of walls and 0.00 mm² in the open.',
+    );
+    // Every sentence before it ends with a full stop and the clause begins a new sentence.
+    expect(withRadius.sentence).not.toMatch(/\.;/);
+    expect(withRadius.sentence).not.toMatch(/; of the/);
+    expect(check(goal, cut).sentence).not.toMatch(/\.;/);
   });
 });

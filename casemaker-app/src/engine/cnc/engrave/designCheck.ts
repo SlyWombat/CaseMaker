@@ -880,10 +880,18 @@ export interface GoalCutIntoReport {
   leftoverTall?: {
     /** Cells whose goal height differs by more than the tall limit from a 4-neighbour's: a sample on a near-vertical face. */
     wallLineCells: number;
-    /** Not on a wall line, and within the smallest cutter radius the job used of a wall-line cell: the fillet that cutter leaves. */
-    wallFootCells: number;
-    /** Everything else: material standing proud away from any wall. */
-    openCells: number;
+    /**
+     * Not on a wall line, and within the smallest cutter radius the job used of a wall-line cell: the
+     * fillet that cutter leaves. ABSENT when no cutter radius was given (`classified` is false): a
+     * cell is never called "in the open" for want of a cutter.
+     */
+    wallFootCells?: number;
+    /** Everything else: material standing proud away from any wall. ABSENT when `classified` is false. */
+    openCells?: number;
+    /** Tall cells that are not wall-line cells and were NOT classified, because no cutter radius was given. 0 when `classified`. */
+    unclassifiedCells: number;
+    /** True when a cutter radius was given, so every tall cell is wall line, wall foot or open. */
+    classified: boolean;
     cellAreaMm2: number;
   };
   leftoverVolumeMm3: number;
@@ -1343,14 +1351,20 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     let wallLineCells = 0;
     let wallFootCells = 0;
     let openCells = 0;
+    let unclassifiedCells = 0;
     for (let k = 0; k < cells; k++) {
       const dk = dOf[k];
       if (sampled[k] !== 1 || dk === undefined || !(dk > tallLimit)) continue;
       if (wallLine[k] === 1) wallLineCells++;
-      else if (nearWall !== null && nearWall[k] === 1) wallFootCells++;
+      // No cutter radius: the rest is NOT classified — "in the open" is never said for want of a cutter.
+      else if (nearWall === null) unclassifiedCells++;
+      else if (nearWall[k] === 1) wallFootCells++;
       else openCells++;
     }
-    leftoverTall = { wallLineCells, wallFootCells, openCells, cellAreaMm2: cellArea };
+    leftoverTall =
+      nearWall === null
+        ? { wallLineCells, unclassifiedCells, classified: false, cellAreaMm2: cellArea }
+        : { wallLineCells, wallFootCells, openCells, unclassifiedCells: 0, classified: true, cellAreaMm2: cellArea };
   }
 
   const n = Math.max(covered, 1);
@@ -1878,11 +1892,16 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
   // #1248 — THE TALL CELLS, NAMED. One clause when any cell stands over the shop's tall limit:
   // how much of that material is on wall lines, at a wall's foot, and in the open. Reported only.
   const tallArea = (count: number): string => (count * cellArea).toFixed(2);
-  const tallClause =
-    leftoverTall === undefined ||
-    leftoverTall.wallLineCells + leftoverTall.wallFootCells + leftoverTall.openCells === 0
-      ? ''
-      : `; of the ${tallArea(leftoverTall.wallLineCells + leftoverTall.wallFootCells + leftoverTall.openCells)} mm² standing over ${tallMm} mm, ${tallArea(leftoverTall.wallLineCells)} mm² is on wall lines, ${tallArea(leftoverTall.wallFootCells)} mm² at the foot of walls and ${tallArea(leftoverTall.openCells)} mm² in the open.`;
+  const tallClause = ((): string => {
+    if (leftoverTall === undefined) return '';
+    const total = leftoverTall.wallLineCells + (leftoverTall.wallFootCells ?? 0) + (leftoverTall.openCells ?? 0) + leftoverTall.unclassifiedCells;
+    if (total === 0) return '';
+    const head = `Of the ${tallArea(total)} mm² standing over ${tallMm} mm, ${tallArea(leftoverTall.wallLineCells)} mm² is on wall lines`;
+    // Its own sentence (#1248 review): the clause is never joined with a semicolon.
+    return leftoverTall.classified
+      ? ` ${head}, ${tallArea(leftoverTall.wallFootCells ?? 0)} mm² at the foot of walls and ${tallArea(leftoverTall.openCells ?? 0)} mm² in the open.`
+      : ` ${head}; the rest is not classified (no cutter radius was given).`;
+  })();
   const sentence =
     (judgedCells > 0
       ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.${predictedNote}`
