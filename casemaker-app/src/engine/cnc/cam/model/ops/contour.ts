@@ -35,7 +35,7 @@ export interface ContourOpOptions {
   /** The blank's own thickness, mm (for the tab top: `-(thickness - tabs.height)`); absent → `depthMm` (no separate skin). */
   thicknessMm?: number;
   /** `{count: 0}` cuts the part free with no tabs. `maxSpanMm` is the shop's `tabs.maxSpanMm` (#1206). */
-  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; /** #1258 — the operator's answer for a stretch the corner margin leaves too long (`ask` when none). Absent: the pre-#1258 step-2 tab. */ tabChoice?: TabChoiceMode };
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; /** #1258 — the operator's answer for a stretch the corner margin leaves too long (`ask` when none). Absent: the pre-#1258 step-2 tab. */ tabChoice?: TabChoiceMode; /** #1269 — the machine's posted step, mm (corner detection skips a shorter segment's direction). */ axisStepMm?: number };
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
@@ -149,6 +149,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
             ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
             ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
             ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
+            ...(cut.tabs.axisStepMm === undefined ? {} : { axisStepMm: cut.tabs.axisStepMm }),
           }),
         )
       : [];

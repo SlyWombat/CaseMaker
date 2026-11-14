@@ -2270,8 +2270,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const tabChoiceMode: TabChoiceMode = input.tabChoice?.choice ?? 'ask';
     const tabSpec =
       tabs === undefined
-        ? { ...releaseTabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode }
-        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode };
+        ? { ...releaseTabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode, axisStepMm: 10 ** -axisPrecision }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode, axisStepMm: 10 ** -axisPrecision };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -3698,7 +3698,7 @@ export interface PlanPocketsOptions {
    * `tabs.heightMm` ({@link freeingTabsFrom}); a caller with no shop passes {@link DEFAULT_RELEASE_TABS}
    * (the labelled fallback) explicitly. The part must stay held until the last cut touches it.
    */
-  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode };
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode; axisStepMm?: number };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
