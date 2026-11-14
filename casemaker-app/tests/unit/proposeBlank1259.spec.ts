@@ -14,6 +14,8 @@ import {
   type WorkShape,
 } from '@/engine/cnc/stockProposal';
 import type { StockItem } from '@/platform/stockClient';
+import { proposedMaterialFor } from '@/components/welcome/workShape';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 
 const item = (
   id: string,
@@ -136,6 +138,29 @@ describe('#1259 — proposeBlank', () => {
     const p = proposeBlank(shallow, ctx(shelf))!;
     expect(p.source).toEqual({ case: 'shelf', itemId: 'stick' });
     expect(p).toMatchObject({ form: 'block', material: 'hardwood', length: 36, width: 100, thickness: 36, finish: 'finished' });
+  });
+
+  it('9. a job that states a material is held only by stock of that material: brass on the hardwood stick is case 2', () => {
+    const p = proposeBlank(TEXT, ctx([STICK], { jobMaterial: 'brass' as never }))!;
+    expect(p.source).toEqual({ case: 'recommended', shelfEmpty: false });
+    expect(p.material).toBe('brass');
+    expect(p.sentence).toBe(
+      'Nothing on your shelf holds this in brass. It needs a blank of at least 60 × 20 × 3 mm, brass. ' +
+        'Sized from the text: 50 × 10 mm, plus 5 mm each side.',
+    );
+    // …and a brass item on the same shelf does hold it.
+    const brass = item('brass', 'plate', { length: 80, width: 40, thickness: 6 }, { material: 'brass' as never });
+    expect(proposeBlank(TEXT, ctx([STICK, brass], { jobMaterial: 'brass' as never }))!.source).toEqual({ case: 'shelf', itemId: 'brass' });
+  });
+
+  it('10. an untouched demo job on a shelf of one aluminium plate: case 1, and the job takes aluminium', () => {
+    const plate = item('al', 'plate', { length: 200, width: 100, thickness: 6 }, { material: 'aluminium-6061' as never });
+    const p = proposeBlank(TEXT, ctx([plate]))!;
+    expect(p.source).toEqual({ case: 'shelf', itemId: 'al' });
+    expect(proposedMaterialFor(p, defaultEngraveJob())).toBe('aluminium-6061');
+    // With nothing on the shelf the default material stands.
+    const q = proposeBlank(TEXT, ctx([]))!;
+    expect(proposedMaterialFor(q, defaultEngraveJob())).toBe('hardwood');
   });
 
   it('work that sizes no blank proposes none, and circuit-board stock is only for board work', () => {

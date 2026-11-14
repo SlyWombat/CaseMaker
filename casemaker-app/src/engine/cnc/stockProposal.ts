@@ -312,7 +312,9 @@ function holds(need: StockProposal, i: StockItem, holdMm: number): boolean {
  * THE SHELF ITEM THAT HOLDS A NEED (#1259, generalising #1098's plate rule). Among the entries with
  * some left and none held back that hold the need (turned either way; a flat need by a plate, sheet
  * or block, a rod by a rod; circuit-board work only by board material and nothing else by it): the
- * material sought first (the job's stated one, else the default the work is sized in), then the least waste (item volume less the need's), then the
+ * material sought first — a FILTER when the job states a material (a piece of another material does
+ * not hold the job; `onlyMaterial`), a preference for the default the work is sized in when it states
+ * none — then the least waste (item volume less the need's), then the
  * shelf's own order — the sort is stable and adds no tie-break of ours. Null when none holds it.
  */
 export function shelfItemFor(
@@ -320,10 +322,15 @@ export function shelfItemFor(
   material: StockMaterial | null,
   shelf: readonly StockItem[],
   holdMm: number = need.thickness,
+  onlyMaterial: StockMaterial | null = null,
 ): StockItem | null {
   const wantsBoard = need.material === 'pcb';
   const candidates = shelf.filter(
-    (i) => freeOf(i) > 0 && (i.material === 'pcb') === wantsBoard && holds(need, i, holdMm),
+    (i) =>
+      freeOf(i) > 0 &&
+      (i.material === 'pcb') === wantsBoard &&
+      (onlyMaterial === null || i.material === onlyMaterial) &&
+      holds(need, i, holdMm),
   );
   const rank = (i: StockItem): number => (material !== null && i.material === material ? 0 : 1);
   const vol = needVolume(need);
@@ -364,7 +371,8 @@ export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankP
   // The material the blank is sought in: the job's stated one, else the one the work would be sized in
   // (the shop's default). A preference, not a filter — see shelfItemFor.
   const preferred = need.material === 'pcb' ? null : (ctx.jobMaterial ?? need.material);
-  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need));
+  const stated = need.material === 'pcb' ? null : (ctx.jobMaterial ?? null);
+  const held = shelfItemFor(need, preferred, shelf, holdThicknessFor(work, need), stated);
   if (held !== null) {
     const { length: l, width: w, thickness: t, diameter: d } = held.size;
     return {
@@ -383,7 +391,9 @@ export function proposeBlank(work: WorkShape, ctx: ProposalContext = {}): BlankP
   const material = need.material === 'pcb' ? need.material : (ctx.jobMaterial ?? need.material);
   const lead = shelfEmpty
     ? 'No stock is recorded for this shop yet.'
-    : 'Nothing on your shelf holds this.';
+    : stated !== null
+      ? `Nothing on your shelf holds this in ${stated}.`
+      : 'Nothing on your shelf holds this.';
   const size = need.form === 'rod'
     ? `a ⌀${n(need.length)} × ${n(need.thickness)} mm rod`
     : `a blank of at least ${n(need.length)} × ${n(need.width)} × ${n(need.thickness)} mm`;

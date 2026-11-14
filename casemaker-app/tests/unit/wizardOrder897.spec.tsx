@@ -201,7 +201,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(job.facing).toEqual({ enabled: false, depth: 0.2, source: 'seed' });
   });
 
-  it('a job that states its own material keeps it, and the blank is the one the work needs', () => {
+  it('a job that states its own material is held only by stock of it, so brass on the hardwood stick asks for the blank the work needs', () => {
     seedTestShopShelf();
     const base = defaultEngraveJob();
     useEngraveJobStore.setState({ job: { ...base, stock: { ...base.stock, material: 'brass' } } });
@@ -212,10 +212,12 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
-    // The proposal sizes the blank; it does not overrule the piece the job has named — the shelf's
-    // hardwood stick is not brass, but it still holds the line, so it is the proposal's blank.
+    // The proposal does not overrule the piece the job has named, and a hardwood stick is not a
+    // piece of brass (#1259): nothing on the shelf holds this in brass.
     expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('brass');
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('From your shelf: hardwood block');
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
+      'Nothing on your shelf holds this in brass.',
+    );
   });
 
   it('a mesh is seated on the blank its own box proposed, not on the one it was read against', async () => {

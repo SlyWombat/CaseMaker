@@ -15,6 +15,7 @@ import { isShippedDemoLabelSet } from '@/engine/cnc/engrave/blankLabelSeed';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import {
   WORK_STOCK_MATERIAL,
+  type BlankSource,
   type ProposalContext,
   type StockProposal,
   type WorkShape,
@@ -33,12 +34,15 @@ import type { OperationChoice } from './OperationStep';
  * exception: copper-clad IS what the work is, and the import does not restate it.
  */
 export function proposedMaterialFor(
-  proposal: StockProposal,
+  proposal: StockProposal & { source?: BlankSource },
   job: EngraveJob,
 ): EngraveJob['stock']['material'] {
   if (proposal.material === 'pcb') return 'pcb';
   const shipped = defaultEngraveJob();
   const untouchedDemo = isShippedDemoLabelSet(job) && job.stock.material === shipped.stock.material;
+  // #1259 — a job that states no material takes the shelf item's own when the shelf answers (an
+  // aluminium plate is cut as aluminium, not on hardwood feeds); otherwise the default.
+  if (untouchedDemo && proposal.source?.case === 'shelf') return proposal.material;
   return untouchedDemo ? WORK_STOCK_MATERIAL : job.stock.material;
 }
 
