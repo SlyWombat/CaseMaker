@@ -21,8 +21,9 @@
 import { probeHouse, type HouseFailure } from './houseClient';
 import {
   cancelRun,
+  fetchRunProgram,
   readRun,
-  readRunGenerated,
+  readRunResult,
   streamRunEvents,
   submitRun,
   type RunEvent,
@@ -118,6 +119,72 @@ function progressReporter(onProgress: ((progress: EngraveProgress) => void) | un
   };
 }
 
+/**
+ * #1126 slice 2 — REBUILD THE RESULT THE STORE CONSUMES FROM A v2 DOCUMENT.
+ *
+ * The document carries no NC text and no `camIr`; it names its files. Every named file is fetched
+ * (streamed, with the idle rule), then `nc` / `frameNc` / `facingNc` and each program's text are put
+ * back using the indices the CLI recorded — the top-level `nc` mirrors the FINISHING program when a
+ * goal is split, so matching "program 1" would hand the store another program's text. What the store
+ * receives is the same `EngraveGenerated` an in-page run returns; `camIr` stays absent because
+ * nothing in the browser reads it off a result (its only references are inside `engraveGenerate`).
+ */
+export async function assembleResult(
+  id: string,
+  doc: Record<string, unknown>,
+): Promise<EngraveGenerated> {
+  const files = Array.isArray(doc.files)
+    ? (doc.files as { name?: unknown; what?: unknown; index?: unknown }[])
+    : [];
+  const texts = new Map<string, string>();
+  for (const file of files) {
+    if (typeof file.name !== 'string') continue;
+    const got = await fetchRunProgram(id, file.name);
+    if (got.kind !== 'ok') throw new Error(houseFailureSentence(got));
+    texts.set(file.name, got.text);
+  }
+  const programName = new Map<number, string>();
+  const frameName = new Map<number, string>();
+  for (const file of files) {
+    if (typeof file.index !== 'number' || typeof file.name !== 'string') continue;
+    if (file.what === 'program') programName.set(file.index, file.name);
+    if (file.what === 'frame') frameName.set(file.index, file.name);
+  }
+  const rawPrograms = Array.isArray(doc.programs) ? doc.programs : [];
+  const programs = rawPrograms.map((entry, i) => {
+    const program = { ...(entry as Record<string, unknown>) };
+    const ncName = programName.get(i);
+    const frame = frameName.get(i);
+    program.nc = ncName === undefined ? null : (texts.get(ncName) ?? null);
+    program.frameNc = frame === undefined ? null : (texts.get(frame) ?? null);
+    return program;
+  });
+  const indexOf = (key: string): number | null =>
+    typeof doc[key] === 'number' ? (doc[key] as number) : null;
+  const ncProgram = indexOf('ncProgram');
+  const frameProgram = indexOf('frameProgram');
+  const facingProgram = indexOf('facingProgram');
+  const programNc = (i: number | null): string | null =>
+    i === null ? null : ((programs[i]?.nc as string | null | undefined) ?? null);
+  const programFrame = (i: number | null): string | null =>
+    i === null ? null : ((programs[i]?.frameNc as string | null | undefined) ?? null);
+  const {
+    resultVersion: _version,
+    files: _files,
+    ncProgram: _ncProgram,
+    frameProgram: _frameProgram,
+    facingProgram: _facingProgram,
+    ...rest
+  } = doc;
+  return {
+    ...rest,
+    nc: programNc(ncProgram),
+    frameNc: programFrame(frameProgram),
+    facingNc: programNc(facingProgram),
+    programs,
+  } as unknown as EngraveGenerated;
+}
+
 export interface HouseGenerateArgs {
   job: EngraveJob;
   tool: Tool | null;
@@ -191,9 +258,9 @@ export async function houseEngraveGenerate(args: HouseGenerateArgs): Promise<Eng
       const run = read.run;
       if (run.state === 'queued') queued(run.queuePosition);
       if (run.state === 'done') {
-        const result = await readRunGenerated(id);
+        const result = await readRunResult(id);
         if (result.kind !== 'ok') throw new Error(houseFailureSentence(result));
-        return result.generated as EngraveGenerated;
+        return assembleResult(id, result.result);
       }
       if (run.state === 'failed') {
         throw new Error(run.finding ?? 'the house run failed, and did not say why');
