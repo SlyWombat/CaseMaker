@@ -1911,15 +1911,17 @@ export function columnSweep(timeline: Timeline, tool: Tool, setup: Setup, opts?:
       });
     }
   }
-  // The thread mill's NECK (#382 review): the envelope is its cutting diameter all the way up, which
-  // is honest only as deep as the neck reaches. Past it the shank is wider and would rub, so the
-  // exact sweeper's own holder gate is asked — `holder-collision` past a stated shoulder/flute
-  // length, `holder-unproven` when the record states neither.
-  if (resolved.kind === 'thread-envelope') {
+  // THE HOLDER GATE, FOR EVERY CUTTER (#1282). The exact sweeper asks `holderGate` for every cutter:
+  // `holder-collision` past a stated shoulder/flute length, `holder-unproven` when the record states
+  // neither. This engine used to ask it only for a thread mill (#382 review: its envelope is honest
+  // only as deep as the neck reaches), so any other cutter it simulated passed with an unprovable
+  // holder clearance in silence while the exact sweeper warned for the same record — and which engine
+  // simulates a job is not the operator's choice. The one function, no second rule.
+  {
     let deepest: number | null = null;
     for (const m of allMoves()) if (m.z < grid.initial) deepest = Math.max(deepest ?? 0, grid.initial - m.z);
-    const neck = holderGate(tool, deepest);
-    if (neck) diagnostics.push(neck);
+    const holder = holderGate(tool, deepest);
+    if (holder) diagnostics.push(holder);
   }
   // #923 — fixture and holder collision, raised with the SAME codes and severities as the exact
   // sweeper's own (`tool-into-fixture`, `rapid-into-fixture`, `feed-into-fixture`,

@@ -28,8 +28,8 @@
     },
     {
       "path": "<out>/single-barrel-run-sheet.md",
-      "sha256": "f2fc362df190ae8d339a519c6c2c52af0a93614a76c81ca0511d4c5834183774",
-      "bytes": 18754
+      "sha256": "6845bd32c0ab18c963df3c9f15919fdb3fd6eadac886df49abd86910f6ca9f66",
+      "bytes": 19037
     }
   ],
   "diagnostics": [
@@ -86,6 +86,14 @@
       "guideRow": "tool-change-noop",
       "severity": "info",
       "message": "M6 to T1, which is already active: the firmware does nothing (no change, no length calibration)",
+      "source": "simulation",
+      "program": "single barrel"
+    },
+    {
+      "code": "holder-unproven",
+      "guideRow": "holder-unproven",
+      "severity": "warning",
+      "message": "the deepest cut is 1.000 mm below the stock top and tool \"Single Flute Engraving Bit 30 x 0.3\" states no shoulder or flute length: holder clearance cannot be proven",
       "source": "simulation",
       "program": "single barrel"
     }
