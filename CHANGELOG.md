@@ -6,6 +6,8 @@ All notable changes to Case Maker. The project follows the [Keep a Changelog](ht
 
 ## [Unreleased]
 
+**The memory warning beside Generate no longer quotes a size.** It reads "Memory is tight in this page. Generating anyway. If it stops, close other tabs and press Generate again."
+
 ### Milestone 1.5 — group 11: the tabs in the middle of each side, and the settings at the engine's edge (2026-11-12)
 
 **Holding tabs sit in the middle of each side.**
