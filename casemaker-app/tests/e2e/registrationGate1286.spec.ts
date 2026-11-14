@@ -233,7 +233,11 @@ async function writeOriginAndExpect(page: Page, fake: FakeConsole, z: string): P
 /** Step 3's cutter row, ticked with the card's own checkbox — a real press. */
 async function locateCutter(page: Page): Promise<void> {
   const row = page.getByTestId('engrave-cutter-row').first();
-  if (!(await row.isVisible())) await page.getByTestId('engrave-cut-step-3-summary').click();
+  // Step 3 may be open already, or folded: give the row a moment, then open the step once.
+  await row.waitFor({ state: 'visible', timeout: 8000 }).catch(async () => {
+    const step3 = page.getByTestId('engrave-cut-step-3');
+    if (!(await step3.evaluate((el) => (el as HTMLDetailsElement).open))) await page.getByTestId('engrave-cut-step-3-summary').click();
+  });
   await expect(row).toBeVisible({ timeout: 60_000 });
   const box = row.locator('input[type=checkbox]').first();
   if (!(await box.isChecked())) await box.check();
