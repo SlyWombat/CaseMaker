@@ -43,7 +43,7 @@ import type { ModelPlanInput, ModelPlanOutput } from '@/engine/cnc/cam/model/pla
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
-import { readDefault } from '@/platform/defaultsClient';
+import { goalCheckShopOptions, readDefault } from '@/platform/defaultsClient';
 import { vCone, vDepthLimit } from '@/engine/cnc/vProfile';
 import { toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
@@ -792,13 +792,12 @@ function sweepPlan(
           applied,
           gen.surface3d != null,
           {
+            // #1207 — the shop's own three goal bands come from the one place every caller of the check
+            // reads them (`goalCheckShopOptions`). The PASS LINE is read here by its own key on purpose:
+            // this evaluator is planning code, `goal.passCoverage` is on the planner-key list the
+            // receipt states, and `plannerDefaults1237.spec.ts` holds that list to its literal read sites.
             passCoverage: readDefault(ctx.shop.defaults ?? null, 'goal.passCoverage').value,
-            // #1207 — the shop's own three goal bands ride the check with the pass line.
-            leftoverBandsMm: [
-              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand1Mm').value,
-              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand2Mm').value,
-              readDefault(ctx.shop.defaults ?? null, 'acceptance.leftoverBand3Mm').value,
-            ],
+            leftoverBandsMm: goalCheckShopOptions(ctx.shop.defaults ?? null).leftoverBandsMm,
           },
           rotaryGoalMap === null ? null : { radius: rotaryGoalMap.radius, section: rotaryGoalMap.section },
         );
