@@ -7099,6 +7099,29 @@
           ],
           "type": "object"
         },
+        "tabChoice": {
+          "description": "The operator's answer to the tab question, when the corner margin and the span limit could not both be met.",
+          "properties": {
+            "answeredFor": {
+              "description": "The fingerprint of the question this answers; a changed outline or tab setting voids it.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "choice": {
+              "description": "The answer: a tab inside the corner margin, or a longer unsupported stretch.",
+              "enum": [
+                "insideMargin",
+                "longerStretch"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "choice",
+            "answeredFor"
+          ],
+          "type": "object"
+        },
         "targetObject": {
           "additionalProperties": false,
           "description": "Reference mesh the primitives are positioned against; omit for none.",
