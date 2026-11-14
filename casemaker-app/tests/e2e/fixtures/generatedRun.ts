@@ -64,6 +64,11 @@ export async function prepareFakeRun(page: Page): Promise<void> {
   }
   await expect(page.getByTestId('engrave-cut-confirm')).toBeVisible({ timeout: 30_000 });
 
+  // #1286 — nothing is uploaded or played for a job with no registration. These specs are about the
+  // run's states, not Register, so the job is registered through the store seam; the gate itself is
+  // walked with real presses in registrationGate1286.spec.ts.
+  await registerCurrentJob(page);
+
   // #1127 — a program is not uploaded until every cutter row is settled; the card's Start carries
   // the same gate the one-screen press did. The rows' UI is exercised by cutConfirm.spec; here the
   // entries are written through the job's own action (the same write a tick makes), because a UI
@@ -111,4 +116,25 @@ export async function prepareFakeRun(page: Page): Promise<void> {
   });
   // The patch itself re-renders the card; the caller's next press must land on an enabled Start.
   await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 30_000 });
+}
+
+
+/** #1286 — a usable registration on record for the open job, on the remembered machine. Seam, not a walk. */
+export async function registerCurrentJob(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const reg = (await import('/src/store/engraveRegistrationStore.ts' as string)) as any;
+    const jobs = (await import('/src/store/engraveJobStore.ts' as string)) as any;
+    const plan = (await import('/src/engine/cnc/registration/plan.ts' as string)) as any;
+    const settings = (await import('/src/engine/cnc/registration/settings.ts' as string)) as any;
+    const job = jobs.useEngraveJobStore.getState().job;
+    const outcome = { edges: [], offset: { x: 0, y: 0 }, measured: { x: true, y: true }, centre: { x: 19.05, y: 38.1 }, rotationDeg: null, rotationShiftMm: null, withinMargin: true, margin: 0.2, surfaceZ: -56.172, probeRefZ: -80, seekFromMachineZ: -3, currentG54: { x: -181.55, y: -184.8 }, correctedG54: { x: -181.55, y: -184.8 }, xyChecked: true, usable: true, problems: [], notes: [] };
+    const planned = plan.planRegistration(
+      { stock: { xMin: 0, yMin: 0, xMax: 38.1, yMax: 76.2, cornerRadius: 3 }, mount: 'vise', expectedSurface: { machineZ: outcome.surfaceZ, from: 'e2e' }, seekFromMachineZ: -3, fixtureBelowSurfaceMm: 0.72, cutCentre: { x: 24, y: 43 } },
+      settings.registrationSettings(null).settings,
+    );
+    if (!planned.ok) throw new Error(planned.reason);
+    const target = { host: '192.0.2.10', port: 2222 };
+    reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, null);
+    for (const setup of job.setups ?? []) reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setup.id);
+  });
 }

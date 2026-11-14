@@ -4,6 +4,7 @@
 // machine already finished. The upload and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerForTest } from '../tools/registeredJob';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { advanceUntil } from './helpers/fakeTime';
 import { EngraveReleaseStep } from '@/components/panels/EngraveReleaseStep';
@@ -455,7 +456,12 @@ function sourcesOf(programs: EngraveProgram[]): ReleaseSource[] {
  * `EngraveCutSurface` feeds it. Building them here through the production helpers keeps the spec
  * from testing a second, looser contract.
  */
-function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2]): RunPlan {
+function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2], opts: { registered?: boolean } = {}): RunPlan {
+  // #1286 — setup 1's origin is on record unless the test is about its absence.
+  if (opts.registered !== false) {
+    registerForTest(job.id, TARGET, job.setups?.[0]?.id ?? 'setup-1');
+    registerForTest(job.id, TARGET, null);
+  }
   const made = freezePackage(job, programs, '2026-10-17T14:02:00.000Z');
   if (!made.ok) throw new Error(made.reason);
   // #425 §6 — the release is the OPEN document's run, so its outcome has a document to land in.
@@ -968,7 +974,7 @@ describe('#469 the release step', () => {
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
     await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 5000 });
-    expect(record()?.notes.join('\n')).toContain('setup 2 is not registered — run the Register step for setup 2 first.');
+    expect(record()?.notes.join('\n')).toContain('Register side 2 first');
     // NOTHING SENT AT ALL: no play line, no vacuum word, no home — the gate is before every line.
     expect(sent.slice(before)).toEqual([]);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
@@ -1186,6 +1192,7 @@ describe('#469 the release step', () => {
     });
 
     // A plays and finishes; its outcome is set, its end-of-run write is still held.
+    registerForTest('job-A', TARGET); // #1286
     const ctxA: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-A', jobId: 'job-A', stockEntryId: 'stock-A' };
     expect(useMachineRunStore.getState().prepare(TARGET, 'A.nc', 'hash-A', ctxA)).toBe(true);
     expect(useMachineRunStore.getState().start(TARGET, runSettings(null))).toBe(true);
@@ -1281,6 +1288,7 @@ describe('#491 the release step names the cutter’s case', () => {
       new Map([[surfaceProgram.programHash, check]]),
     );
 
+    registerForTest(job.id, TARGET, setupId); // #1286
     await act(async () => {
       useEngraveReleaseStore.getState().plan(TARGET, job, sources);
       await useEngraveReleaseStore.getState().uploadAll(TARGET);
@@ -1357,6 +1365,8 @@ describe('#1179 C — the play line is the package-keyed file', () => {
       [P1.programHash, VERIFY],
       [P2.programHash, VERIFY],
     ] as const);
+    registerForTest(withPackage.id, TARGET, withPackage.setups?.[0]?.id ?? 'setup-1'); // #1286
+    registerForTest(withPackage.id, TARGET, null);
     const runPlan = cutPlan({ job: withPackage, pkg: made.package, finishedHashes: [], defaults: null });
     render(
       <EngraveReleaseStep

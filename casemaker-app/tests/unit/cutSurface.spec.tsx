@@ -32,6 +32,7 @@ import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engrav
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { registerForTest } from '../tools/registeredJob';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -420,7 +421,13 @@ function tickChecklistForStoredPackage(): void {
   useEngraveJobStore.setState({ job: { ...job, cutterChecklist: { ...(job.cutterChecklist ?? {}), [pkg.hash]: entries } } });
 }
 
-function draw(props: Props) {
+function draw(props: Props, opts: { registered?: boolean } = {}) {
+  // #1286 — a job's Start needs its setup's registration on this machine; these suites are about what
+  // the surface does once the operator has registered, so they do — except where a test says it has not.
+  if (opts.registered !== false) {
+    for (const setup of props.job.setups ?? []) registerForTest(props.job.id, TARGET, setup.id ?? null);
+    registerForTest(props.job.id, TARGET, null);
+  }
   // #425 — the document owns the package. Seed the open job so a freeze has somewhere to land.
   useEngraveJobStore.setState({ job: props.pkg === null ? props.job : withChecklistTicked({ ...props.job, package: props.pkg }, props.pkg) });
   const rendered = render(<Harness {...props} />);
@@ -1134,7 +1141,7 @@ describe('#419 §3 the Cut surface', () => {
 
     // A red gate folds the Register step (it is not the current step yet).
     passRun();
-    const view = draw({ job, report: red, pkg, generated: gen, canDrive: true });
+    const view = draw({ job, report: red, pkg, generated: gen, canDrive: true }, { registered: false });
     expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', false);
 
     // The gate clears: step ③ becomes the step the operator is on and opens itself, so its Start is
@@ -1473,7 +1480,7 @@ describe('#656 from the cutter prompt to the cut', () => {
     const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 };
     useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
 
-    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true }, { registered: false });
 
     await waitFor(() => expect(generateSpy).toHaveBeenCalledTimes(1));
     expect(generateSpy).toHaveBeenCalledWith(surface);
@@ -1494,7 +1501,7 @@ describe('#656 from the cutter prompt to the cut', () => {
     } as unknown as SurfaceSpreadAssessment);
     useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
 
-    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true }, { registered: false });
     await Promise.resolve();
     expect(generateSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId('engrave-cut-reseat').textContent).toContain(

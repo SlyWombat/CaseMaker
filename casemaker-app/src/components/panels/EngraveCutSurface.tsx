@@ -74,6 +74,7 @@ import { inputLabel, staleSentence, type EngraveInputKey } from '@/engine/cnc/en
 import {
   useEngraveRegistrationStore,
   useFirstRegistration,
+  setupRunGate,
   useSetupRegistration,
   useSurfaceSpread,
 } from '@/store/engraveRegistrationStore';
@@ -1304,6 +1305,9 @@ export function EngraveCutSurface({
   const registeredSetup = currentSetupIndex === 1 ? (currentSetupRegistration ?? firstRegistration) : currentSetupRegistration;
   const registered = registeredSetup !== null || (target === null && currentSetupIndex === 1 && anyRegistration !== null);
   const registeredDone = fitDone && registered;
+  // #1286 (SAFETY) — ONE registration gate for every control that uploads or plays this setup's program.
+  const registrationGateSentence =
+    target === null ? null : (setupRunGate(job.id, currentSetupIndex, currentSetupId, target)?.sentence ?? null);
   const ran =
     registeredDone &&
     pkg !== null &&
@@ -1931,6 +1935,7 @@ export function EngraveCutSurface({
               surfaceGate,
               domeG32Blocker,
               cutterChecklistBlocker,
+              registrationBlocker: registrationGateSentence,
               // #1123 item 8 — a multi-program job carries the RELEASE's gate; a single program the
               // upload's. Never both: `uploadBlocker` refuses >1 program by construction.
               multiProgram: releaseSources.length > 1,
@@ -2042,7 +2047,8 @@ export function EngraveCutSurface({
                       surfaceGate ??
                       // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
                       // until every row of the checklist is located or replaced.
-                      cutterChecklistBlocker
+                      cutterChecklistBlocker ??
+                      registrationGateSentence
                     }
                     dome={domeProps}
                     domeBlocker={domeG32Blocker}
@@ -2157,7 +2163,8 @@ export function EngraveCutSurface({
                         missingReportBlocker ??
                         surfaceGate ??
                         domeG32Blocker ??
-                        cutterChecklistBlocker
+                        cutterChecklistBlocker ??
+                        registrationGateSentence
                       }
                       machine={machine}
                       program={

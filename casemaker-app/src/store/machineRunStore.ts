@@ -51,6 +51,7 @@ import { buildStamp, withRoutineCompletion } from '@/platform/routineRecord';
 import { toolChangeIdentity } from '@/platform/toolChangeDry';
 import { useShopDefaultsStore } from './shopDefaultsStore';
 import { useEngraveJobStore } from './engraveJobStore';
+import { setupRunGate } from './engraveRegistrationStore';
 import { useMachineTranscriptStore } from './machineTranscriptStore';
 import { RunTranscript, type RunTranscriptView } from './runTranscript';
 
@@ -673,6 +674,17 @@ export const useMachineRunStore = create<MachineRunState>((set, get) => {
       const machine = machineKey(target);
       const prepared = get().runs[machine];
       if (!prepared || prepared.running) return false;
+      // #1286 (SAFETY) — THE LAST LINE: a JOB's program is not played without its setup's registration,
+      // whichever control asked (the card, the release, a restart, a stopped card's re-run). A run with
+      // no job behind it (a loaded file, a walk the operator started by hand) has no job origin to ask.
+      if (prepared.context?.jobId !== undefined) {
+        const gate = setupRunGate(prepared.context.jobId, prepared.context.setupIndex ?? 1, prepared.context.setupId ?? null, target);
+        if (gate !== null) {
+          // eslint-disable-next-line no-console
+          console.warn(`[run] refused: ${gate.code} — ${gate.sentence}`);
+          return false;
+        }
+      }
       // #1106 item 5 — a run that ACTUALLY STARTS is the strongest "last machine" there is; a
       // refused start (nothing prepared, or one already running) writes nothing.
       const at = machineAt(target);

@@ -27,6 +27,8 @@ export interface CardStartGates {
   surfaceGate: string | null;
   domeG32Blocker: string | null;
   cutterChecklistBlocker: string | null;
+  /** #1286 — the registration gate: this setup has no usable origin on this machine (`setupRunGate`). */
+  registrationBlocker?: string | null;
   /** True when this run is the release's (two or more programs in cut order). */
   multiProgram: boolean;
 }
@@ -42,6 +44,10 @@ export function cardStartBlocker(input: CardStartGates): string | null {
     input.missingReportBlocker ??
     input.surfaceGate ??
     input.domeG32Blocker ??
-    input.cutterChecklistBlocker
+    input.cutterChecklistBlocker ??
+    // #1286 — the origin is written by Register: nothing is uploaded or played before it. It reads
+    // after the reasons that name a more specific gap (the facing job's own registration sentence).
+    input.registrationBlocker ??
+    null
   );
 }

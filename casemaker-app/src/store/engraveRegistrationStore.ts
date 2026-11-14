@@ -282,6 +282,51 @@ export function setupRegistrationFor(
   return matching(useEngraveRegistrationStore.getState().bySetup[registrationKey(jobId, setupId)], target);
 }
 
+/**
+ * #1286 (SAFETY) — A PROGRAM IS NOT SENT TO THE MACHINE, AND NOT PLAYED, UNTIL ITS SETUP IS REGISTERED.
+ *
+ * Registration is what writes the work origin. A program uploaded and played without one runs at
+ * whatever G54 the controller last held: the cutter descends where nobody measured. Before this
+ * gate only the Register STEP read "refused" — the Start card, the release and the run store all
+ * went on without it (found by a no-seam walk, 2026-11-14).
+ *
+ * A registration counts only if it is THIS job's, THIS setup's (setup 1 is the job-keyed record or
+ * its own per-setup key; a later setup reads its own key and nothing else), measured on THIS
+ * machine, and usable. A refused, stopped or failed registration writes no record at all, so it
+ * cannot satisfy this. The answer is a code and a sentence, so every control that starts anything
+ * says the same words: `registration-missing` (nothing on record) or `registration-unusable`.
+ */
+export type RegistrationGate = { code: 'registration-missing' | 'registration-unusable'; sentence: string };
+
+export function setupRunGate(
+  jobId: string,
+  setupIndex: number,
+  setupId: string | null,
+  target: { host: string; port: number },
+): RegistrationGate | null {
+  const state = useEngraveRegistrationStore.getState();
+  const rec =
+    setupIndex <= 1
+      ? matching(state.records[jobId], target) ?? (setupId === null ? null : matching(state.bySetup[registrationKey(jobId, setupId)], target))
+      : setupId === null
+        ? null
+        : matching(state.bySetup[registrationKey(jobId, setupId)], target);
+  const which = setupIndex > 1 ? `side ${setupIndex}` : 'this job';
+  if (rec === null) {
+    return {
+      code: 'registration-missing',
+      sentence: `Register ${which} first — no origin is on record for it on this machine, so nothing is uploaded or played.`,
+    };
+  }
+  if (!rec.outcome.usable) {
+    return {
+      code: 'registration-unusable',
+      sentence: `The registration of ${which} did not give a usable origin — register it again before anything is uploaded or played.`,
+    };
+  }
+  return null;
+}
+
 /** The same question as a render subscription, so a later registration updates the card. */
 export function useSetupRegistration(
   jobId: string,

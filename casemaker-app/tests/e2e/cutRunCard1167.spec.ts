@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures/caseMaker';
+import { registerCurrentJob } from './fixtures/generatedRun';
 
 test.setTimeout(240_000);
 
@@ -259,6 +260,7 @@ test('#1167 — a 20-program two-sided job is one card: every program, the flip,
     await page.evaluate(() => document.querySelector<HTMLInputElement>('[data-testid="engrave-ack"]')?.click());
   }
   await expect(ack).toBeChecked();
+  await registerCurrentJob(page); // #1286 — registered, so Start is the card's own press
   // The seed's program 1 is already done, so READY names program 2 and the bit it needs.
   await expect(page.getByTestId('engrave-cut-card-ready')).toContainText('Ready · program 2 of 20 · next: ');
   await expect(page.getByTestId('engrave-cut-card-start')).toContainText('Start program 2 of 20');

@@ -6,6 +6,7 @@
 // and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerForTest } from '../tools/registeredJob';
 import { advanceUntil } from './helpers/fakeTime';
 import { setMachineConsoleLoader, type ConsoleSend, type MachineConsoleClient } from '@/platform/machineConsole';
 import { setMachineUploadLoader } from '@/platform/machineUpload';
@@ -134,6 +135,9 @@ const playedFiles = (): string[] => plays().map((line) => line.replace(/^play \/
  * own registration before its program may play (#1088), which is another spec's subject.
  */
 async function planAndUpload(job: EngraveJob): Promise<void> {
+  // #1286 — setup 1 is registered (nothing uploads or plays otherwise).
+  registerForTest(job.id, TARGET, 'setup-1');
+  registerForTest(job.id, TARGET, null);
   const sources = sourcesOf([
     { nc: NC1, setupId: 'setup-1' },
     { nc: NC2, setupId: 'setup-1' },
@@ -364,6 +368,7 @@ describe('#1146 — the walks ride the release, as files', () => {
       { nc: 'G0 X0 Y0\nM02\n', setupId: 'setup-1' },
       { nc: 'G0 X1 Y1\nM02\n', setupId: 'setup-1' },
     ]);
+    registerForTest(job.id, TARGET, 'setup-1'); // #1286
     useEngraveReleaseStore.getState().plan(TARGET, job, sources);
     expect(record()!.airOn).toBe(false);
     expect(record()!.walks.clean).not.toBeNull();

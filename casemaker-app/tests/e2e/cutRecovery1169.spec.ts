@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { registerCurrentJob } from './fixtures/generatedRun';
 import { installFakeConsole } from './fixtures/fakeConsole';
 import { houseHealth, locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { lanServerPort } from '../../scripts/e2ePort';
@@ -63,6 +64,7 @@ async function prepareFakeRun(page: Page): Promise<void> {
   // (#1123 item 8) is the press under test, and it must not be spent on an upload the fake console
   // does not serve.
   await expect(page.getByTestId('engrave-cutter-row').first()).toBeVisible({ timeout: 60_000 });
+  await registerCurrentJob(page); // #1286 — the run needs its registration (the gate is walked in registrationGate1286)
   await page.evaluate(async () => {
     const j = (await import('/src/store/engraveJobStore.ts' as string)) as {
       useEngraveJobStore: {

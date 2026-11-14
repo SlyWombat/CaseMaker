@@ -2,6 +2,7 @@
 // program, which copy it goes to, and the run store's hook — once per run, only on a real finish.
 
 import { readFileSync } from 'node:fs';
+import { registerForTest } from '../tools/registeredJob';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -298,6 +299,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     newId: () => 'stock-off1',
     now: () => '2026-10-16T12:00:00.000Z',
   };
+  registerForTest('job-1'); // #1286 — the job's setup 1 is registered on this machine
   const ctx: RunContext = { nc: CUT_OUT, jobId: 'job-1', stockEntryId: PLATE.id, stockXY: { x: 100, y: 100 }, toolRadius: 1.5, toolKey: 'inv:kz-a' };
   const last = { state: 'Idle', line: 9, percent: 100, elapsedS: 30 };
   const finished: RunOutcome = { kind: 'finished', last, homed: true, vacuumOff: true };

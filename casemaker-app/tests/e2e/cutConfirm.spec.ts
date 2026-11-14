@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect, openCutterGroup } from './fixtures/caseMaker';
+import { registerCurrentJob } from './fixtures/generatedRun';
 import { locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { rememberMachine } from './fixtures/rememberMachine';
 
@@ -77,6 +78,9 @@ test('#656 — the one screen names the frozen program and cutter, and ONE state
   const cutterCount = await cutterRows.count();
   expect(cutterCount, 'the checklist has a row per distinct cutter').toBeGreaterThan(0);
   for (let i = 0; i < cutterCount; i++) await cutterRows.nth(i).getByRole('checkbox').check();
+  // #1286 — the checklist alone does not arm it either: with no registration on record Start says why.
+  await expect(go).toBeDisabled();
+  await registerCurrentJob(page);
   await expect(go).toBeEnabled();
   await expect(details).not.toHaveAttribute('open');
   // #796 — THE THREE-STEP CUT, in the state the operator sees after a real Generate: step 1's
