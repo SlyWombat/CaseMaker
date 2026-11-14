@@ -6,10 +6,12 @@
 // fraction on real runs; this spec pins the STAMP ITSELF, cell for cell, on the same program and
 // the same goal grid, including the edge band's floor and wall cases.
 //
-// The Python half needs the bench's environment (numpy and Pillow, plus a location document for
-// `render.py`'s module-level read). Set `CM_BENCH_PYTHON` to that interpreter; without it the
-// spec tries `python3` and SKIPS when the imports are missing rather than failing on a machine
-// that does not carry the bench tools.
+// The Python half needs the bench's environment (numpy and Pillow; the location document for
+// `render.py`'s module-level read is the committed fixture below). The interpreter is `CM_PYTHON`
+// (the interpreter PATH, not a venv directory) when set, else `python3` — the same contract as
+// `pageChecker1267.spec.ts` (#1267): there is NO silent skip. When the interpreter cannot import
+// numpy and Pillow the first test FAILS and says how to fix it; the one way out is the explicit
+// `CM_SKIP_PAGE_CHECKER=1`, which runs a test that prints why nothing ran. Gate runs never set it.
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +31,8 @@ const NY = 3;
 const R = 1.5875;
 const BAND = 0.001;
 
-const PY = process.env.CM_BENCH_PYTHON ?? 'python3';
+const PY = process.env.CM_PYTHON || 'python3';
+const SKIP = process.env.CM_SKIP_PAGE_CHECKER === '1';
 const TOOLS = fileURLToPath(new URL('../../../docs/bench/2026-10-28-z1-real-jobs/tools', import.meta.url));
 const LOCATION = fileURLToPath(new URL('./fixtures/location-doc.json', import.meta.url));
 const env = { ...process.env, CM_LOCATION: LOCATION };
@@ -113,16 +116,32 @@ function expectSameCells(goal: Float32Array, qx: number): void {
   expect(stampedPy).toEqual(stampedTs);
 }
 
-describe.skipIf(probe.status !== 0)('#1251 the edge band: the app’s stamp and goal_check.py agree cell for cell', () => {
-  it('a floor at the edge — the tray top’s fin case', () => {
+const FIX =
+  `The edge-band parity spec needs numpy and Pillow. Point CM_PYTHON at an interpreter that has both ` +
+  `(the interpreter path, not the venv directory): dave-1 ~/casemaker-manager/venv/bin/python, ` +
+  `k3 ~/v02-stage/venv/bin/python. To run without them deliberately, set CM_SKIP_PAGE_CHECKER=1 ` +
+  `(it prints why it skipped; gate runs never set it).`;
+
+describe('#1251 the edge band: the app’s stamp and goal_check.py agree cell for cell', () => {
+  it.runIf(SKIP)('CM_SKIP_PAGE_CHECKER=1 — the edge-band parity (app stamp vs goal_check.py) was NOT run', () => {
+    console.warn(
+      '#1251: CM_SKIP_PAGE_CHECKER=1 — the app-versus-page edge-band parity spec was NOT run. A gate run must not set this.',
+    );
+  });
+
+  it.skipIf(SKIP)('the checker’s Python can import numpy and Pillow', () => {
+    expect(probe.status, `${PY} cannot import numpy/Pillow (${String(probe.stderr || probe.error || '').trim().split('\n').pop()}). ${FIX}`).toBe(0);
+  });
+
+  it.skipIf(SKIP)('a floor at the edge — the tray top’s fin case', () => {
     expectSameCells(goalGrid(() => -5), 64.012);
   });
 
-  it('a wall at the edge — the clamp cards’ gouge case', () => {
+  it.skipIf(SKIP)('a wall at the edge — the clamp cards’ gouge case', () => {
     expectSameCells(goalGrid((x) => (x < 65.6 - 1e-9 ? -5 : 0)), 64.013);
   });
 
-  it('a real cut-in past the band is charged by both', () => {
+  it.skipIf(SKIP)('a real cut-in past the band is charged by both', () => {
     expectSameCells(goalGrid((x) => (x < 65.6 - 1e-9 ? -5 : 0)), 64.02);
   });
 });
