@@ -613,10 +613,13 @@ export const NO_SETTINGS_SECTION = 'this location file has no settings section; 
 /**
  * #1126 slice 2 — THE RESULT WITHOUT THE BYTES.
  *
- * `--generated` used to write the whole `EngraveGenerated`: 229 MB for the set B tray bottom, of
- * which `camIr` (an internal IR no browser code reads off a document) was ~95 %, and every NC text
- * appeared twice (the top-level adapter and the program it mirrors) on top of the files already
- * written under `--out`. v2 nulls those and lists the files by the names `writeProgram` gave them.
+ * `--generated` used to write the whole `EngraveGenerated`: 229 MB for the set B tray bottom. WHAT
+ * THE WEIGHT ACTUALLY IS, measured on that job (D, 2026-11-10 — the first guess, from a badge, was
+ * wrong): `planIdeal` 141.1 MB and `plan` 82.6 MB, almost all of it each setup's `programs` (the
+ * ToolpathIR the post consumed); everything else together — programs' nc/verify/cam, predicted,
+ * surface3d, statements, findings — is under 25 KB. The NC text is listed as files and the plans'
+ * IRs are dropped: the browser reads a plan for its outcome, statements and tradeoff, and the QA
+ * window for `perSetup[].notes`; nothing reads `perSetup[].programs` or `camIr`.
  *
  * The TOP-LEVEL ALIASES ARE MATCHED, NOT ASSUMED: the generator's `nc` describes the finishing
  * program of a split goal, not program 1, so `ncProgram`/`frameProgram`/`facingProgram` name the
@@ -632,6 +635,25 @@ export interface ResultFileRef {
   name: string;
   what: 'program' | 'frame';
   index: number;
+}
+
+/**
+ * A plan as the result needs it: every field except each setup's ToolpathIR list. The IR is the
+ * plan's own posted toolpath — already served as the program's NC — and no browser reader takes it
+ * from here (the store reads `outcome`/`statements`; `windowApi` reads `perSetup[].notes`).
+ */
+function planWithoutIr(plan: unknown): unknown {
+  if (plan === null || plan === undefined) return plan;
+  const record = plan as { perSetup?: unknown };
+  if (!Array.isArray(record.perSetup)) return plan;
+  return {
+    ...record,
+    perSetup: record.perSetup.map((setup) => {
+      if (setup === null || typeof setup !== 'object') return setup;
+      const { programs: _programs, ...rest } = setup as { programs?: unknown };
+      return rest;
+    }),
+  };
 }
 
 export function resultDocument(
@@ -663,6 +685,8 @@ export function resultDocument(
   };
   return {
     ...rest,
+    plan: planWithoutIr(generated.plan),
+    planIdeal: planWithoutIr(generated.planIdeal),
     resultVersion: RESULT_VERSION,
     nc: null,
     frameNc: null,
