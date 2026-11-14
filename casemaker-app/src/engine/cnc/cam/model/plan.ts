@@ -1141,13 +1141,12 @@ function fnv1a(text: string): string {
 /**
  * #1258 — the tab question the planned setups raised, or null when no contour left a stretch too
  * long. The fingerprint is what the question was asked about: each such setup's outline points,
- * `tabs.maxSpanMm`, the tab count and width (the corner margin's two numbers are still written in
- * the placement code, #1262; when they become settings they join this).
+ * `tabs.maxSpanMm`, the tab count and width, and the shop's two corner-margin numbers (#1262).
  */
-function collectTabQuestion(perSetup: readonly SetupPlan[], cornerDeg: number): TabChoiceNeeded | null {
+function collectTabQuestion(perSetup: readonly SetupPlan[], cornerDeg: number, marginRule: readonly [number, number]): TabChoiceNeeded | null {
   const stretches: (TabStretch & { setupIndex: number; cut: TabCut })[] = [];
   const drawn: TabChoiceNeeded['setups'] = [];
-  const parts: unknown[] = [cornerDeg];
+  const parts: unknown[] = [cornerDeg, marginRule];
   let limitMm = 0;
   for (const setup of perSetup) {
     for (const op of setup.ops) {
@@ -2240,13 +2239,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
     // #1207 — the corner angle travels with the same spec, so the plan and the cut agree.
     const tabCornerDeg = readDefault(input.defaults ?? null, 'tabs.cornerDeg').value;
+    // #1262 — and the corner margin's two numbers, from the same map (never an ambient read).
+    const tabMarginWidths = readDefault(input.defaults ?? null, 'tabs.cornerMarginTabWidths').value;
+    const tabMarginFraction = readDefault(input.defaults ?? null, 'tabs.cornerMarginEdgeFraction').value;
     // #1258 — THE OPERATOR'S ANSWER for a stretch the corner margin leaves too long rides the same
     // spec; with none the contour ASKS (no tab placed for it, the stretch reported).
     const tabChoiceMode: TabChoiceMode = input.tabChoice?.choice ?? 'ask';
     const tabSpec =
       tabs === undefined
-        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode }
-        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode };
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, cornerMarginTabWidths: tabMarginWidths, cornerMarginEdgeFraction: tabMarginFraction, tabChoice: tabChoiceMode }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, cornerMarginTabWidths: tabMarginWidths, cornerMarginEdgeFraction: tabMarginFraction, tabChoice: tabChoiceMode };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -3082,7 +3084,10 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // too long. With no valid answer the plan hands back the question and NO programs; with a valid
   // one it goes on (the contour already tabbed or left each stretch as the answer said).
   {
-    const asked = collectTabQuestion(perSetup, readDefault(input.defaults ?? null, 'tabs.cornerDeg').value);
+    const asked = collectTabQuestion(perSetup, readDefault(input.defaults ?? null, 'tabs.cornerDeg').value, [
+      readDefault(input.defaults ?? null, 'tabs.cornerMarginTabWidths').value,
+      readDefault(input.defaults ?? null, 'tabs.cornerMarginEdgeFraction').value,
+    ]);
     if (asked !== null) {
       const answer = input.tabChoice;
       if (answer === undefined) return { perSetup: [], tabChoiceNeeded: asked };
@@ -3666,7 +3671,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; cornerMarginTabWidths?: number; cornerMarginEdgeFraction?: number; tabChoice?: TabChoiceMode };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
