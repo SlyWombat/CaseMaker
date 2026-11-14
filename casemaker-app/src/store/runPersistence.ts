@@ -34,6 +34,7 @@ import { useEngraveJobStore } from './engraveJobStore';
 import { useEngraveRunStore, recheckRunInputs, type EngraveRunState } from './engraveRunStore';
 import { useToolRegistryStore } from './toolRegistryStore';
 import { useLocationStore } from './locationStore';
+import { useShopDefaultsStore } from './shopDefaultsStore';
 import { jobFingerprint } from '@/engine/cnc/engrave/package';
 import type { EngraveRunInputs } from '@/engine/cnc/engrave/runInputs';
 import type { EngraveJob } from '@/types/engraveJob';
@@ -342,6 +343,8 @@ function shopSettled(): boolean {
   const tools = useToolRegistryStore.getState().status;
   const location = useLocationStore.getState().status;
   if (tools === 'checking') return false;
+  // #1276 — the settings map is one of the reads the recheck compares (its status is in the stamp).
+  if (useShopDefaultsStore.getState().status === 'unknown') return false;
   if (location !== 'unknown') return true;
   return tools === 'absent';
 }
@@ -376,8 +379,10 @@ function deferRecheck(
   if (deferredRecheck !== null) return;
   let unsubTool: (() => void) | null = null;
   let unsubLocation: (() => void) | null = null;
+  let unsubShop: (() => void) | null = null;
   const cleanup = (): void => {
     unsubTool?.();
+    unsubShop?.();
     unsubLocation?.();
     deferredRecheck = null;
   };
@@ -391,6 +396,7 @@ function deferRecheck(
   };
   unsubTool = useToolRegistryStore.subscribe(run);
   unsubLocation = useLocationStore.subscribe(run);
+  unsubShop = useShopDefaultsStore.subscribe(run);
   deferredRecheck = cleanup;
   run(); // the reads may have settled between the wait ending and this subscription
 }
@@ -405,6 +411,8 @@ export async function restoreOpenRun(options: RestoreRunOptions = {}): Promise<R
   // Wait briefly for the reads the RECHECK compares. An unanswered house no longer blocks the
   // restore (the key is job+build): restore anyway, skip the one-shot comparison, and let the live
   // watchers judge each input as its store settles.
+  // #1276 — a restore does not wait on a read nothing started: ask for the settings now.
+  if (options.settle !== false && useShopDefaultsStore.getState().status === 'unknown') void useShopDefaultsStore.getState().refresh();
   const settled = options.settle === false ? true : await waitForShopSettled(options.waitMs ?? 3000);
   const job = options.job ?? useEngraveJobStore.getState().job;
   const jobSha = options.jobSha ?? jobFingerprint(job);
