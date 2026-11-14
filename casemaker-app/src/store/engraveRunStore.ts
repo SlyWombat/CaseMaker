@@ -1037,7 +1037,16 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         }
       };
       // #1293 — which side plans, said once at the start of the run on its own progress line.
-      if (planning !== null) onProgress({ stage: 'prepare', label: planning });
+      // It is the page speaking, not the worker: it goes to the progress line and the Log directly,
+      // never through `onProgress`, which would count as worker progress and end the queued-behind-
+      // another-job wait (`heardGenerateProgress`) and re-arm the stall clock. The worker's own first
+      // stage report replaces the line, as it replaces 'starting the worker'.
+      if (planning !== null && mine === seq) {
+        set({
+          progress: { stage: 'prepare', label: planning },
+          log: appendRunLog(get().log, planning, Date.now(), logStartedAt),
+        });
+      }
       // The service's own sentence is for whoever fixes the install: the run's Log, not its line.
       if (planningDetail !== null && mine === seq) {
         set({ log: appendRunLog(get().log, planningDetail, Date.now(), logStartedAt) });
