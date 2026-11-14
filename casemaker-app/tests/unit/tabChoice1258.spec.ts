@@ -239,6 +239,13 @@ describe('#1258 the plan asks, and an answer is for the job it was given for', (
       const out = await planModelCam(planInput({ tabChoice: { choice, answeredFor: fingerprint } }));
       expect(out.tabChoiceNeeded).toBeUndefined();
       expect(out.perSetup[0]!.programs.length).toBeGreaterThan(0);
+      // An answered plan carries the question it was answered for, beside its programs (plain data),
+      // so a reopened job can still show the answer and offer to change it.
+      expect(out.tabChoiceApplied).toBeDefined();
+      expect(out.tabChoiceApplied!.choice).toBe(choice);
+      expect(out.tabChoiceApplied!.fingerprint).toBe(fingerprint);
+      expect(out.tabChoiceApplied!.stretches).toEqual(asked.tabChoiceNeeded!.stretches);
+      expect(structuredClone(out.tabChoiceApplied)).toEqual(out.tabChoiceApplied);
       const said = out.perSetup.flatMap((s) => s.statements.map((st) => st.text)).join('\n');
       expect(said).toMatch(/of the outline has no tab/);
     }

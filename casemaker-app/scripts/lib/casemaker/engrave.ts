@@ -2123,6 +2123,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           // #1134 — the FULL evaluations plan the program the cut would post: the run shop, mount
           // included. The pick's own score keeps the picker's shop (the both-doors rule, #947).
           runShop: { ...shop, mount: mountFor(job) },
+          ...(args.tabChoice === undefined ? {} : { tabChoice: { choice: args.tabChoice } }),
           floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
         });
         const searchMs = Date.now() - searchStart;
@@ -2181,6 +2182,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         Object.assign(job, applied);
         // #1134 — the pick's winning full plan is the cut's owned plan: hand it to the run.
         reusedOwnedPlan = chosen.evaluation.ownedPlan ?? null;
+        // #1258 — the pick measured this cutter under a PROVISIONAL tab answer (it had none), so its
+        // plan is withheld: the cut plans again with this cutter under the operator's answer, or asks.
+        if (chosen.evaluation.tabQuestion === true) {
+          out.progress(`  tab rule   the pick ranked the cutters under a provisional tab answer; the cut asks the question for this cutter`);
+        }
         if (reusedOwnedPlan !== null) {
           out.progress(`  reuse     the pick's plan reused — the cut posts the measured plan, not a re-plan`);
         }
