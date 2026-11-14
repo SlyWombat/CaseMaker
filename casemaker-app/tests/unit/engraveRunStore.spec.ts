@@ -51,6 +51,11 @@ import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/st
 import type { FeedRow } from '@/platform/feedClient';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { Z1_FRAME_REPLIES } from './fixtures/z1Frame';
+import { beforeEach as beforeEachSettled } from 'vitest';
+import { settleShopSettings } from '../tools/settledShop';
+
+// #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
+beforeEachSettled(() => settleShopSettings());
 
 const NOTHING: EngraveGenerated = {
   ok: false,

@@ -24,6 +24,11 @@ import {
 import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRunStore';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { EngravePickSummary } from '@/workers/sim/smartPickRun';
+import { beforeEach as beforeEachSettled } from 'vitest';
+import { settleShopSettings } from '../tools/settledShop';
+
+// #1276 — Generate waits for / refuses without the shop's settings: these specs run with them settled.
+beforeEachSettled(() => settleShopSettings());
 
 const TOTAL = 5;
 

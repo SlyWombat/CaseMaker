@@ -100,6 +100,11 @@ export interface RunInputSources {
   calibration: MachineCalibration | null;
   /** The location's defaults document, as the run read it. */
   shopDefaults: ShopDefaults | null;
+  /**
+   * #1276 — the settings store's STATE at that read. A null map is `unknown`, `absent` and `error`
+   * alike; the stamp carries which, so a result planned under one state is stale under another.
+   */
+  shopStatus: 'unknown' | 'present' | 'absent' | 'error';
   /** `resolvedFeedsTable().table` at run time. */
   feeds: readonly FeedsEntry[];
   /** `feedCatalogueRows()` at run time. */
@@ -117,7 +122,7 @@ export function runInputs(sources: RunInputSources): EngraveRunInputs {
     job: jobFingerprint(sources.job),
     margins: marginsKey(sources.margins),
     machine: machineKey(sources.calibration),
-    shop: shopKey(sources.shopDefaults),
+    shop: shopSettingsKey(sources.shopStatus, sources.shopDefaults),
     feeds: feedsKey(sources.feeds),
     catalogue: catalogueKey(sources.catalogue),
     cutters: cuttersKey(sources.tools, sources.conditions),
@@ -158,6 +163,11 @@ export function machineKey(calibration: MachineCalibration | null): string {
  * this same document, so any value the program reads is in here. The entries' sources and reading
  * times are not: re-measuring a default to the same number does not change the program.
  */
+/** #1276 — the settings' state and values in one stamp, so `absent`/`error` → `present` marks a run stale. */
+export function shopSettingsKey(status: 'unknown' | 'present' | 'absent' | 'error', defaults: ShopDefaults | null): string {
+  return `${status}:${shopKey(defaults)}`;
+}
+
 export function shopKey(defaults: ShopDefaults | null): string {
   if (defaults === null) return 'none';
   const values = Object.entries(defaults)

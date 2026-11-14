@@ -255,6 +255,10 @@ export interface CaseMakerTestApi {
     canSave: boolean;
     saveReason: string | null;
     error: string | null;
+    /** #1276 — the run's progress words (e.g. "reading the shop's settings" while the read is out). */
+    progressLabel: string | null;
+    /** #1276 — the shop signature stored with the run: it carries the settings' state and version. */
+    shopSignature: string | null;
     /**
      * #1032 — each program's own sweep facts, in cut order: the engine that swept it, whether it
      * restarted from the blank, and whether the earlier setup's carried floor was still supplied
@@ -764,6 +768,8 @@ export function installCaseMakerTestApi(): void {
         canSave: saveBlocker(view) === null,
         saveReason: saveBlocker(view),
         error: r.error,
+        progressLabel: r.progress?.label ?? null,
+        shopSignature: r.shopSignature ?? null,
         simPrograms: r.simPrograms.map((p) => ({ label: p.label, engine: p.engine, fromBlank: p.fromBlank, carriedFloor: p.carriedFloor === true, seedFrom: p.seedFrom ?? null, seedRoute: p.seedRoute ?? null })),
         planNotes: r.generated?.plan?.perSetup.flatMap((setup) => setup.notes) ?? [],
         planStatementCodes: (r.generated?.planStatements ?? []).map((statement) => statement.code),

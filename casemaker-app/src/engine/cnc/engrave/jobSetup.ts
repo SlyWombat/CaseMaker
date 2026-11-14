@@ -115,6 +115,9 @@ export type JobFindingCode =
   // #1042 — the job's chosen cutter is not in this shop's inventory; it cuts as stated, and the
   // plan says so (the #1041 rule makes the owned house the shop's own records).
   | 'goal-cutter-not-owned'
+  // #1276 — a run planned with no shop connected (no house service): the recommended settings were the
+  // truth, said on the run and its sheet; the CLI's receipt diagnostic of the same code covers a house file.
+  | 'location-no-settings'
   // #1047 — a house cutter set aside before the search: neither its own catalogue row nor the
   // starting table can feed it for this material (the plan's info statement, one per cutter).
   | 'goal-cutter-unfeedable'
