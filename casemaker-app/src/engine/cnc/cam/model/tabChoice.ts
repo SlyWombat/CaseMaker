@@ -21,9 +21,12 @@ export function tabChoiceSentence(needed: TabChoiceNeeded, stale = false): strin
   const lines = needed.stretches.map((s) => {
     const where = needed.stretches.length > 1 ? `stretch ${s.index + 1}: ` : '';
     const tab =
-      s.candidate === null
+      s.candidates.length === 0
         ? 'no place for a tab'
-        : `a tab ${mm(s.candidate.fromCornerMm)} mm from the corner (margin ${mm(s.candidate.marginMm)} mm) leaves ${mm(s.candidate.leavesSpansMm[0])} mm and ${mm(s.candidate.leavesSpansMm[1])} mm`;
+        : `${s.candidates.length === 1 ? 'a tab' : `${s.candidates.length} tabs`} ` +
+          `${s.candidates.map((c) => `${mm(c.fromCornerMm)} mm`).join(' and ')} from ${s.candidates.length === 1 ? 'a corner' : 'corners'} ` +
+          `(the edges' margins ${s.candidates.map((c) => `${mm(c.marginMm)} mm`).join(' and ')}) leave ${s.leavesSpansMm.map((v) => `${mm(v)} mm`).join(', ')}` +
+          (s.stillOverLimit ? ' — still past the limit' : '');
     return `${where}${mm(s.spanMm)} mm without a tab against the ${mm(needed.limitMm)} mm limit — ${tab}`;
   });
   return (

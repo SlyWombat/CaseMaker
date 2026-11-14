@@ -232,7 +232,8 @@ export function contour(opts: ContourOpOptions): OpOutcome {
       });
       tabNotes.push(
         `${ringOf(i)}Tab ${n} sits ${mm(tab.cornerMm)} mm from a corner, closer than the edge's ${mm(tab.marginMm)} mm margin — the operator's choice. ` +
-          `Longest stretch without a tab: ${mm(longest)} mm.`,
+          `Longest stretch without a tab: ${mm(longest)} mm. ` +
+          `It crosses ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline, ${tab.sharpJoins === 0 ? 'none' : tab.sharpJoins} sharp.`,
       );
     }
   });
@@ -257,9 +258,13 @@ export function contour(opts: ContourOpOptions): OpOutcome {
         tabNotes.push(
           `${where}${mm(stretch.spanMm)} mm of the outline has no tab; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm — the operator's choice.`,
         );
-      } else if (stretch.candidate === null) {
+      } else if (stretch.candidates.length === 0) {
         tabNotes.push(
           `${where}${mm(stretch.spanMm)} mm of the outline has no tab and no tab fits there; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm.`,
+        );
+      } else if (stretch.stillOverLimit) {
+        tabNotes.push(
+          `${where}${mm(Math.max(...stretch.leavesSpansMm))} mm of the outline still has no tab after the tabs placed; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm.`,
         );
       }
     }
