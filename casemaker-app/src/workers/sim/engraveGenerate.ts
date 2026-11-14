@@ -268,6 +268,7 @@ import { tabChoiceSentence } from '@/engine/cnc/cam/model/tabChoice';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
+import { cutterStanding, isUnlisted, unlistedSentence } from '@/engine/cnc/engrave/cutterStanding';
 import type { EdgeBreakSpec, ModelPlanProgress, ModelTolerances, PlanStatement } from '@/engine/cnc/cam/model/types';
 // #966 — the real reach-aware top+bottom decision (#965), replacing this file's own hardcoded
 // single `top` `SetupSpec` below (`buildModelPlanInputForGoal`'s own doc on why).
@@ -1329,6 +1330,26 @@ export interface EngraveRegions {
 function cutterWords(toolKey: string): string | null {
   const entry = entryFor(toolKey);
   return entry === null ? null : toolDisplayName(entry.tool);
+}
+
+/**
+ * #1281 — THE STANDING FINDING. A posted cutter the catalogue does not stand behind for the job's
+ * material (`cutterStanding`: not carried, listed for other materials, or on a seeded feed) is said
+ * once, in one sentence — whether the pick chose it because no listed cutter could do the job, or the
+ * operator chose it (their choice is left alone). With no catalogue synced nothing is rated, so
+ * nothing is said. The same standing rule the pick ranks by.
+ */
+function unlistedCutterFindings(
+  job: EngraveJob,
+  tool: Tool | null,
+  catalogue: readonly FeedCatalogueRow[],
+  defaults: ShopDefaults | null,
+  table: readonly FeedsEntry[] | null | undefined,
+): JobFinding[] {
+  if (tool === null) return [];
+  const standing = cutterStanding(job, { key: cutterKeyOf(tool), tool } as ToolLibraryEntry, catalogue, defaults, table);
+  if (!isUnlisted(standing)) return [];
+  return [{ severity: 'warning', code: 'tool-unlisted', message: unlistedSentence(job, [standing]) }];
 }
 
 function metalLineFindings(job: EngraveJob, tool: Tool | null, catalogue: readonly FeedCatalogueRow[]): JobFinding[] {
@@ -2713,6 +2734,7 @@ export function engraveRegions(
     // own erosion removes. Empty on every job but a male half.
     ...inlayPlugFaceFindings(measureInlayPlugs(tl, plan), shop.lostDetailWarnRatio ?? null),
     ...metalLineFindings(job, tool, catalogue),
+    ...unlistedCutterFindings(job, tool, catalogue, shop.defaults ?? null, shop.feeds),
     // #741 — a V-cut past the cutter's cone is not a V, so it is refused by name before the CAM.
     ...depthFindings,
     ...carveFindings,
@@ -7168,6 +7190,7 @@ async function generateFaceProgram(
     // #407/#834 — Makera's "for Metal" line is refused by name on a blank that is not metal, in
     // this program as in every other: the pair is the finding, whatever the cutter's shape.
     ...metalLineFindings(job, tool, catalogue),
+    ...unlistedCutterFindings(job, tool, catalogue, shop.defaults ?? null, shop.feeds),
     ...(faceJobRefusal(job, shop.defaults ?? null) === null ? [] : [faceJobRefusal(job, shop.defaults ?? null)!]),
   ]);
   if (documentFindings.some((f) => f.severity === 'error')) {

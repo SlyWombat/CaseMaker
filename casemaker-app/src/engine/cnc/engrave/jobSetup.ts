@@ -259,6 +259,10 @@ export type JobFindingCode =
   // A warning, not an error: the cut is the user's to make, but they are told what the box says the
   // bit is for.
   | 'tool-metal-line'
+  // #1281 — A cutter the catalogue does not stand behind for the job's material: not carried, listed
+  // for other materials, or running on the shop's seeded starting feed. A warning: the cut is the
+  // operator's (or the pick's last resort) to make, but the run says so once.
+  | 'tool-unlisted'
   // Under-surface voids (#171, built on #231's keep-outs). The warning for cutting over a
   // membrane that spans an unsupported void: a fact about OVERLAP, not depth — the material has
   // nothing under it however shallow the cut. There is deliberately no error twin here: a cut

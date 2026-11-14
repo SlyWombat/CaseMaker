@@ -44,6 +44,7 @@ import {
   type PlannedCutter,
 } from './cutterPlan';
 import { goalSideNeedMm } from './goalReach';
+import { cutterStanding, isUnlisted, type CutterStanding } from './cutterStanding';
 import { jobHasItems, jobTargetObjects, pureGoalObject } from './jobSetup';
 import { bossBeforeThread } from './threadFit';
 
@@ -137,6 +138,12 @@ export interface ScoredPlan {
   raisedJoined: number;
   /** True when every cutter in the plan is an owned one. */
   owned: boolean;
+  /**
+   * #1281 — THE PLAN'S CUTTERS THE CATALOGUE DOES NOT STAND BEHIND for the job's material (not
+   * carried, listed for other materials, or running on a seeded feed). Empty = every cutter is
+   * Listed (or no catalogue is synced, so nothing is rated). A plan with any entry is UNLISTED.
+   */
+  unlisted?: readonly CutterStanding[];
   /** The item the worst fidelity belongs to, for the sentence. */
   worstItem: EvaluatedItem | null;
 }
@@ -775,6 +782,13 @@ export function planCostSeconds(evaluation: PlanEvaluation, toolChangeSeconds: n
 function byObjective(a: ScoredPlan, b: ScoredPlan, toolChangeSeconds: number = TOOL_CHANGE_SECONDS): number {
   const fidelity = byFidelity(a, b);
   if (fidelity !== 0) return fidelity;
+  // #1281 — WITHIN THE FIDELITY TIER every plan the catalogue stands behind ranks ahead of one it does
+  // not; then an owned plan ahead of a catalogue one (the slots the real plans take are the ones
+  // this order hands out, and a `cat:` key sorts before an `inv:` key — the old tie-break). Inside
+  // one standing the objective below is unchanged.
+  const standing = Number((a.unlisted?.length ?? 0) > 0) - Number((b.unlisted?.length ?? 0) > 0);
+  if (standing !== 0) return standing;
+  if (a.owned !== b.owned) return a.owned ? -1 : 1;
   const cost = (s: ScoredPlan): number => planCostSeconds(s.evaluation, toolChangeSeconds);
   const ca = round6(cost(a));
   const cb = round6(cost(b));
@@ -808,6 +822,21 @@ export async function smartPick(
   const rulePlan = rulePlanOf(job, tools, catalogue, defaults, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
   const exactWhenEmpty = faceWorkOf(job, defaults) !== null;
+  // #1281 — each cutter's standing for the job's material, once; a plan's is the unlisted subset.
+  const standingByKey = new Map<string, CutterStanding>();
+  const standingOf = (key: string): CutterStanding | null => {
+    const known = standingByKey.get(key);
+    if (known !== undefined) return known;
+    const entry = tools.find((t) => t.key === key);
+    if (entry === undefined) return null;
+    const made = cutterStanding(job, entry, catalogue, defaults, table);
+    standingByKey.set(key, made);
+    return made;
+  };
+  const scored = (plan: CandidatePlan, evaluation: PlanEvaluation): ScoredPlan => {
+    const unlisted = plan.cutters.map((c) => standingOf(c.key)).filter((x): x is CutterStanding => x !== null && isUnlisted(x));
+    return { ...toScored(plan, evaluation, exactWhenEmpty), unlisted };
+  };
   const plans = candidatePlans(job, tools, catalogue, defaults, conditions, table, opts.floors).slice(0, maxCandidates);
   // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
   // plan). The count first, then one row per simulated candidate, then the end.
@@ -852,12 +881,12 @@ export async function smartPick(
   // COARSE FIRST — measure-only: every candidate is scored cheaply, and the top few are promoted
   // to a FULL evaluation, which is the level that says whether a plan actually posts.
   const verdicts = new Map<string, ScoredPlan>();
-  for (const plan of plans) verdicts.set(planKey(plan), toScored(plan, await evaluateAsync(plan, 'coarse'), exactWhenEmpty));
+  for (const plan of plans) verdicts.set(planKey(plan), scored(plan, await evaluateAsync(plan, 'coarse')));
   // COARSE ok IS NOT POSTING: it says the plan is structurally evaluable. Only a full verdict's
   // `ok` is the generator's fact (slice A's seam), so the posting pool is drawn from this set.
   const fullDone = new Set<string>();
   const full = async (plan: CandidatePlan): Promise<ScoredPlan> => {
-    const scoredFull = toScored(plan, await evaluateAsync(plan, 'full'), exactWhenEmpty);
+    const scoredFull = scored(plan, await evaluateAsync(plan, 'full'));
     verdicts.set(planKey(plan), scoredFull);
     fullDone.add(planKey(plan));
     return scoredFull;
@@ -938,7 +967,7 @@ export async function smartPick(
       throw new Error(`the batch evaluator answered ${results.length} of ${pendingFinalists.length} finalists`);
     }
     pendingFinalists.forEach((finalist, i) => {
-      verdicts.set(planKey(finalist.plan), toScored(finalist.plan, results[i]!, exactWhenEmpty));
+      verdicts.set(planKey(finalist.plan), scored(finalist.plan, results[i]!));
       fullDone.add(planKey(finalist.plan));
     });
   }
