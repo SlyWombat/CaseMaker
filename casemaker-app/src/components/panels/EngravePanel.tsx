@@ -1,4 +1,5 @@
 import { pickUnderProgress } from '@/store/generatePick';
+import { EngraveTabChoice } from './EngraveTabChoice';
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
@@ -98,6 +99,7 @@ import {
 } from '@/engine/cnc/vCarveGeometry';
 import { jobVise, validateVise } from '@/engine/cnc/fixture';
 import {
+  cutoutOperationName,
   keepOutLimitParts,
   keepOutMembrane,
   labelGlyphMeasure,
@@ -5398,6 +5400,11 @@ export function EngravePanel(): JSX.Element {
             button is the step. #794/#803 — the Ready card is the FACT above it, and it precedes
             the action. */}
       <div data-testid="engrave-generate-slot">
+        {/* #1258 — the tab question, at the point Generate stopped (its own card, never a findings row). */}
+        <EngraveTabChoice
+          onGenerate={() => void generate()}
+          cutNames={(job.cutouts ?? []).map((c) => cutoutOperationName(c, c.of === 'stock-inset' ? null : (cutoutTargets.find((t) => t.id === c.of)?.label ?? null)))}
+        />
         {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
             be — and was — shown beside "0 errors" (audit B9). */}

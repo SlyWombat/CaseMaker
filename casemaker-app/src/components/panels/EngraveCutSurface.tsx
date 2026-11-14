@@ -1250,7 +1250,8 @@ export function EngraveCutSurface({
     hasProgram: pkg !== null,
     packageCurrent,
     staleSince: staleSince ?? null,
-    runRefused: generated !== null && !generated.ok,
+    // A run that ASKED (the tab question) is not a refusal (#1258): the card is the one voice.
+    runRefused: generated !== null && !generated.ok && generated.tabChoiceNeeded === undefined,
     errorCount: otherErrorCount,
     designErrorCount,
     simStopped: runSimStopped,

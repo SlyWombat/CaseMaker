@@ -399,9 +399,32 @@ interface CutRun {
   stderr: string;
   receiptPath: string;
   outDir: string;
+  /** #1258 — set when the run first stopped to ask the tab question and the harness answered it. */
+  tabChoiceNote?: string;
 }
 
+/**
+ * #1258 — A SAMPLE THAT NEEDS THE OPERATOR'S TAB CHOICE is run twice, in the open: first with no
+ * answer (the CLI stops with its question, and that receipt is kept as `receipt-asked.json`), then
+ * with the harness's answer, `inside-margin` — what #1206 always did, so the programs are the ones
+ * the sample has always posted. The plan stage says so; the harness never answers silently.
+ */
 function runCut(jobPath: string, outDir: string, opts: { location: string | null; catalogue: string | null; timeoutMs: number }): CutRun {
+  const first = runCutOnce(jobPath, outDir, opts, null);
+  const asked = Array.isArray(first.receipt?.['refusals'])
+    && (first.receipt['refusals'] as Record<string, unknown>[]).some((r) => r['code'] === 'tab-choice-needed');
+  if (!asked) return first;
+  writeFileSync(join(outDir, 'receipt-asked.json'), `${JSON.stringify(first.receipt, null, 2)}\n`);
+  const second = runCutOnce(jobPath, outDir, opts, 'inside-margin');
+  return { ...second, tabChoiceNote: "needs the operator's choice — harness chose inside-margin" };
+}
+
+function runCutOnce(
+  jobPath: string,
+  outDir: string,
+  opts: { location: string | null; catalogue: string | null; timeoutMs: number },
+  tabChoice: 'inside-margin' | 'longer-stretch' | null,
+): CutRun {
   ensureDir(outDir);
   // scripts/casemaker.ts through tsx, the way the bin starts it — but WITHOUT the bin's own
   // spawnSync layer: a timeout must reach the process that is actually planning, or a hung sample
@@ -410,6 +433,7 @@ function runCut(jobPath: string, outDir: string, opts: { location: string | null
   const args = ['--import', tsxEntry, join(APP, 'scripts', 'casemaker.ts'), 'cut', jobPath, '--out', outDir, '--json'];
   if (opts.location !== null) args.push('--location', opts.location);
   if (opts.catalogue !== null) args.push('--catalogue', opts.catalogue);
+  if (tabChoice !== null) args.push('--tab-choice', tabChoice);
   let rc = 0;
   let stdout = '';
   let stderr = '';
@@ -509,7 +533,7 @@ function planStageOf(run: CutRun): StageResult {
     ok ? 'pass' : 'fail',
     `${programs.length} program(s)${stageWord === null ? '' : `, stage ${stageWord}`}, rc ${run.rc}${
       codes.length === 0 ? '' : `; ${codes.join(', ')}`
-    }`,
+    }${run.tabChoiceNote === undefined ? '' : `; ${run.tabChoiceNote}`}`,
     run.receiptPath,
   );
 }

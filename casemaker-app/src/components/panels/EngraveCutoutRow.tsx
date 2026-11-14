@@ -1,3 +1,4 @@
+import { useTabChoiceSuffix } from './useTabChoiceSuffix';
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import { EngraveItemRow } from '@/components/panels/EngraveItemRow';
 import { cutoutOperationName } from '@/engine/cnc/engrave/partPlan';
@@ -56,6 +57,8 @@ export function EngraveCutoutRow({
   findingAction,
 }: EngraveCutoutRowProps): JSX.Element {
   const tabCount = cutout.tabs.count;
+  // #1258 — the operator's answer to the tab question stays visible on the row.
+  const choiceSuffix = useTabChoiceSuffix(index);
   return (
     <EngraveItemRow
       id={cutout.id}
@@ -66,7 +69,7 @@ export function EngraveCutoutRow({
       kindWord="Cut-out"
       typeLabel="Profile"
       name={cutoutOperationName(cutout, cutout.of === 'stock-inset' ? null : (targets.find((t) => t.id === cutout.of)?.label ?? null))}
-      summary={tabCount === 0 ? 'no tabs' : `${tabCount} tab${tabCount === 1 ? '' : 's'}`}
+      summary={`${tabCount === 0 ? 'no tabs' : `${tabCount} tab${tabCount === 1 ? '' : 's'}`}${choiceSuffix === null ? '' : ` · ${choiceSuffix}`}`}
       enabled={cutout.enabled}
       enabledTitle="A disabled cut-out is kept in the job but not cut."
       removeTitle="Remove this cut-out."

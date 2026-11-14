@@ -72,6 +72,7 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
 import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
+import { tabChoiceSentence, TAB_CHOICE_FLAG_VALUES } from '../../../src/engine/cnc/cam/model/tabChoice';
 // #766 — the measured search: slice A scores a candidate plan, B chooses, C writes the sentences.
 // #922 — THE PICK IS THE APP'S OWN: one builder in smartPickRun.ts (the worker's caller uses it
 // too) supplies the conditions map, the feed table, the five-argument candidate list and the
@@ -275,6 +276,12 @@ interface Args {
   generated?: string;
   /** #1046 — measure the standard rest rungs on the owned plan (the virtual ladder). */
   restLadder?: boolean;
+  /**
+   * #1258 — the operator's answer when the tab rules cannot both be met (`--tab-choice
+   * inside-margin|longer-stretch`). Absent, a job that needs it stops with the question and its two
+   * answers named; the CLI never picks.
+   */
+  tabChoice?: 'insideMargin' | 'longerStretch';
 }
 
 /** Exported for the CLI's own spec (#1052, #1046): the flag set is pinned by parsing, not by running the wasm pipeline. */
@@ -325,6 +332,12 @@ export function parseArgs(argv: string[]): Args {
     else if (a === '--mem-trace') args.memTrace = argv[++i];
     else if (a === '--generated') args.generated = argv[++i];
     else if (a === '--rest-ladder') args.restLadder = true;
+    else if (a === '--tab-choice') {
+      const v = argv[++i] ?? '';
+      const choice = (TAB_CHOICE_FLAG_VALUES as Record<string, 'insideMargin' | 'longerStretch'>)[v];
+      if (choice === undefined) throw new Error(`--tab-choice is "inside-margin" or "longer-stretch", not "${v}"`);
+      args.tabChoice = choice;
+    }
     else if (a === '--location') args.location = argv[++i];
     else if (a === '--catalogue') args.catalogue = argv[++i];
     else if (a === '--tools') args.tools = argv[++i];
@@ -362,7 +375,7 @@ export function eventProgress(options: CommandOptions): EngraveProgressFn | unde
 }
 
 const USAGE =
-  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank] [--generated <path>]\n' +
+  'usage: casemaker cut <job.json> [--out <dir>] [--defer-ideal] [--parallel-rank] [--generated <path>] [--tab-choice inside-margin|longer-stretch]\n' +
   '       casemaker cut --coupon <coupon-spec.json> [--out <dir>]\n' +
   '       casemaker cut --from-gerber <file> [<file> ...] --blank <L>x<W>x<T> [--out <dir>]\n' +
   '       casemaker cut --from-3mf <design.3mf> [--turn ccw|cw] [--tool <key>]\n' +
@@ -379,6 +392,12 @@ interface EngraveFailure {
   gate: Receipt['gate'];
   diagnostics: ReceiptDiagnostic[];
   refusals: ReceiptRefusal[];
+  /**
+   * #1258 — the failed generate result, carried ONLY when the run stopped to ask the tab question, so
+   * `--generated` can hand a house-backed run the structured question (`tabChoiceNeeded`, with its
+   * stretches and the drawing data) and not just the receipt's sentence.
+   */
+  generated?: EngraveGenerated;
 }
 
 /**
@@ -1293,6 +1312,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           ...(args.deferIdeal === true ? { deferIdeal: true } : {}),
           ...(args.parallelRank === true ? { measureRankCandidates: rankPoolSeam() } : {}),
           ...(args.restLadder === true ? { restLadder: true } : {}),
+          ...(args.tabChoice === undefined ? {} : { tabChoice: { choice: args.tabChoice } }),
         },
       );
       if (args.restLadder === true && generated.plan?.ladderRows !== undefined) runLadder = generated.plan.ladderRows;
@@ -1321,10 +1341,16 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           stage: generated.stage,
           gate: gateForStage(generated.stage),
           diagnostics: generatedDiagnostics(job, generated, null),
-          refusals: [
-            { code: 'stopped', reason: `stopped at ${generated.stage}` },
-            ...generated.errors.map((e) => ({ code: 'stage-error', reason: stageErrorReason(e.message) })),
-          ],
+          refusals:
+            // #1258 — THE RUN ASKED: its own code, the question's sentence with each stretch's
+            // numbers and the two flag values. Not a stage error, and never answered here.
+            generated.tabChoiceNeeded !== undefined
+              ? [{ code: 'tab-choice-needed', reason: tabChoiceSentence(generated.tabChoiceNeeded, generated.tabChoiceStale === true) }]
+              : [
+                  { code: 'stopped', reason: `stopped at ${generated.stage}` },
+                  ...generated.errors.map((e) => ({ code: 'stage-error', reason: stageErrorReason(e.message) })),
+                ],
+          ...(generated.tabChoiceNeeded === undefined ? {} : { generated }),
         },
       };
     }
@@ -1944,7 +1970,14 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         ? {}
         : { reusedOwnedPlan: opts.reusedOwnedPlan },
     );
-    if (!prepared.ok) return prepared;
+    if (!prepared.ok) {
+      // #1258 — a run that STOPPED TO ASK still writes its generated document: a house-backed run
+      // draws the card from it. (Every other failure writes none, as before.)
+      if (opts.generatedFile !== undefined && prepared.failure.generated !== undefined) {
+        writeFileSync(opts.generatedFile, JSON.stringify(prepared.failure.generated));
+      }
+      return prepared;
+    }
     if (opts.generatedFile !== undefined) {
       // The browser's worker returns this same plain-data object; the house writes it beside the
       // programs so the panel settles a house run exactly as it settles an in-page one.
@@ -2104,6 +2137,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
           // #1134 — the FULL evaluations plan the program the cut would post: the run shop, mount
           // included. The pick's own score keeps the picker's shop (the both-doors rule, #947).
           runShop: { ...shop, mount: mountFor(job) },
+          ...(args.tabChoice === undefined ? {} : { tabChoice: { choice: args.tabChoice } }),
           floors: supportingFloors(tl, toPartPlan(job, { defaults: shopDefaults })),
         });
         const searchMs = Date.now() - searchStart;
@@ -2162,6 +2196,11 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         Object.assign(job, applied);
         // #1134 — the pick's winning full plan is the cut's owned plan: hand it to the run.
         reusedOwnedPlan = chosen.evaluation.ownedPlan ?? null;
+        // #1258 — the pick measured this cutter under a PROVISIONAL tab answer (it had none), so its
+        // plan is withheld: the cut plans again with this cutter under the operator's answer, or asks.
+        if (chosen.evaluation.tabQuestion === true) {
+          out.progress(`  tab rule   the pick ranked the cutters under a provisional tab answer; the cut asks the question for this cutter`);
+        }
         if (reusedOwnedPlan !== null) {
           out.progress(`  reuse     the pick's plan reused — the cut posts the measured plan, not a re-plan`);
         }

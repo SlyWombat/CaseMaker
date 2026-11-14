@@ -39,7 +39,7 @@ import type { EngraveJob } from '@/types/engraveJob';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { FeedCatalogueRow, FeedsEntry } from '@/engine/cnc/feeds';
 import type { MachineCalibration } from '@/engine/cnc/calibration';
-import type { ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
+import type { ModelPlanInput, ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import type { Tool } from '@/engine/cnc/tool';
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -222,6 +222,14 @@ export interface PlanEvaluation {
    * ruling; the ideal still runs, because the tradeoff is a maintainer requirement).
    */
   ownedPlan?: ModelPlanOutput | null;
+  /**
+   * #1258 — THE CANDIDATE RAISED THE TAB QUESTION and the search had no answer, so it was MEASURED
+   * UNDER A PROVISIONAL `insideMargin` (a plan that asks has no programs to score). The provisional
+   * answer is a ranking aid ONLY: nothing made under it is ever returned or reused as the final
+   * plan — `ownedPlan` is withheld here, so the cut plans again with the chosen cutter under the
+   * operator's real answer, or asks.
+   */
+  tabQuestion?: true;
 }
 
 /** Everything the evaluator may read, handed in by the caller. */
@@ -239,6 +247,8 @@ export interface EvalContext {
    * plan (the reused owned plan, byte for byte). Absent: the pick shop, as before.
    */
   runShop?: EngraveShopOpts | null;
+  /** #1258 — the operator's answer to the tab question, when the caller has one (the CLI's `--tab-choice`). */
+  tabChoice?: ModelPlanInput['tabChoice'];
   calibration: MachineCalibration | null;
   /** The house's feed table, when the caller has one; absent = the worker's fallback. */
   table?: readonly FeedsEntry[] | null;
@@ -316,6 +326,7 @@ function contextSignature(ctx: EvalContext, level: 'coarse' | 'full'): string {
     // #1134 — the run shop changes a FULL evaluation's generated plan; the cache must not share
     // a verdict across two different ones.
     runShop: ctx.runShop ?? null,
+    tabChoice: ctx.tabChoice ?? null,
     calibration: ctx.calibration === null ? null : [ctx.calibration.machineId, ctx.calibration.measuredAt],
     table: ctx.table?.length ?? null,
     conditions: ctx.conditions === undefined || ctx.conditions === null ? null : [...ctx.conditions.keys()],
@@ -632,6 +643,7 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
           conditions: ctx.conditions ?? ctx.runShop.conditions ?? null,
           ...(ctx.table === undefined ? {} : { feeds: ctx.table }),
         };
+  const answer = ctx.tabChoice ?? job.tabChoice;
   const gen = await engraveGenerate(
     ctx.tl,
     applied,
@@ -646,8 +658,29 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
     // CLI hands it to `engraveGenerate` as `reusedOwnedPlan` — the cut posts these bytes.
     undefined,
     ctx.tools.map((entry) => entry.tool),
-    { ownedOnly: true },
+    // #1258 — the caller's answer, when it has one: a candidate is evaluated under the answer the
+    // cut will carry. With none, a PROVISIONAL `insideMargin` so a candidate that would ask is still
+    // measured and ranked (flagged below; never reused as the final plan).
+    // The answer a candidate is measured under: the caller's explicit one (the CLI's flag), else the
+    // JOB's saved one (the app — the pick is handed no explicit answer), else a provisional
+    // `insideMargin` so a candidate that would ask is still ranked. ONLY THE CHOICE reaches a
+    // candidate, never `answeredFor`: a fingerprint describes one question, and a candidate with a
+    // different cutter radius would read it as stale and ask — `invalid-job` again.
+    { ownedOnly: true, tabChoice: { choice: answer?.choice ?? 'insideMargin' } },
   );
+  // THE PICK'S PLAN IS REUSED AS THE FINAL ONE ONLY WHEN IT IS PROVEN FOR THIS QUESTION: no question
+  // arose, or the explicit answer carries no fingerprint (the CLI's, for the job as it stands), or the
+  // plan's own question carries the fingerprint the saved answer was given for. Otherwise (a
+  // provisional answer, an unproven or stale one) it is flagged and withheld: the cut plans again
+  // under the full answer — or asks, naming the stale answer.
+  const asked = gen.plan?.tabChoiceApplied;
+  const questionArose =
+    gen.plan !== undefined &&
+    gen.plan !== null &&
+    gen.plan.perSetup.some((setup) => setup.ops.some((op) => op.outcome.tabChoice !== undefined));
+  const proven =
+    answer !== undefined && (answer.answeredFor === undefined || (asked !== undefined && asked.fingerprint === answer.answeredFor));
+  const tabQuestion = questionArose && !proven;
   const seconds = gen.ok ? gen.programs.reduce((sum, program) => sum + (program.cam?.estimatedSeconds ?? 0), 0) : null;
   const refusal = gen.ok
     ? null
@@ -675,7 +708,7 @@ async function evaluateFull(job: EngraveJob, plan: CandidatePlan, ctx: EvalConte
   );
   // #1134 — the plan itself rides the evaluation: the pick's winning full plan IS the cut's owned
   // plan (the CLI hands it through as `reusedOwnedPlan` and posts these bytes).
-  return { ...coarse, ok: gen.ok, refusal, items, seconds, sweep, sweepNote, ownedPlan: gen.plan ?? null };
+  return { ...coarse, ok: gen.ok, refusal, items, seconds, sweep, sweepNote, ownedPlan: tabQuestion ? null : (gen.plan ?? null), ...(tabQuestion ? { tabQuestion: true as const } : {}) };
 }
 
 /**

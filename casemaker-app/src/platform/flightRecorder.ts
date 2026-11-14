@@ -454,7 +454,8 @@ export function noteFinding(finding: { code: string; severity: string; message: 
 }
 
 /** The work ended (successfully or refused); the marker says nothing is running. */
-export function noteWorkEnd(work: WorkScope, outcome: 'done' | 'refused' | 'failed' | 'cancelled'): void {
+/** `asked` — the plan stopped to ask the operator (the tab question): its own outcome, not a refusal. */
+export function noteWorkEnd(work: WorkScope, outcome: 'done' | 'refused' | 'failed' | 'cancelled' | 'asked'): void {
   recordCrumb({ kind: 'work', work, stage: 'end', data: { outcome } });
   if (session !== null) {
     session = { ...session, work: null, stage: null, label: null };

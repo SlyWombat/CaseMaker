@@ -1065,6 +1065,11 @@ export interface EngraveJobState {
    * A patch that changes the thickness carries the SHIPPED-DEFAULT vise with it, re-deriving its
    * `stockProud` from the new blank (#344). A saved or measured vise is never touched.
    */
+  /**
+   * #1258 — write (or, with null, clear) the answer to the tab question. The job changes, so the
+   * generated programs read as stale and the next Generate plans with the answer.
+   */
+  setTabChoice: (answer: EngraveJob['tabChoice'] | null) => void;
   setStock: (
     patch: Partial<EngraveJob['stock']>,
     source?: FieldSource | Partial<Record<keyof EngraveJob['stock'], FieldSource>>,
@@ -1701,6 +1706,13 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
 
     // #347 — the id alone, and no other field. See the interface's own doc for why.
     setMachine: (id) => apply((job) => (job.machineId === id ? job : { ...job, machineId: id })),
+
+    setTabChoice: (answer) =>
+      apply((job) => {
+        const { tabChoice: _old, ...rest } = job;
+        if (answer === null) return _old === undefined ? job : (rest as EngraveJob);
+        return { ...rest, tabChoice: answer } as EngraveJob;
+      }),
 
     setStock: (patch, source = 'user') =>
       apply((job) => {

@@ -251,6 +251,7 @@ import {
   type RankMeasureRequest,
   type ModelPlanInput,
   type ModelPlanOutput,
+  type TabChoiceNeeded,
   type PlanTiming,
   type PlannedOp,
   type SetupSpec,
@@ -260,6 +261,7 @@ import { bandHalfThicknessMm, planTabRelease, tabReleaseIr, type TabReleaseProgr
 import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
 import { planOwnedOnly, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
+import { tabChoiceSentence } from '@/engine/cnc/cam/model/tabChoice';
 import { comparePlanOutcomes, type PlanTradeoff } from '@/engine/cnc/cam/model/tradeoff';
 import type { FeatureSource } from '@/engine/cnc/cam/model/features';
 import { cutterKeyOf, type CutterCandidates } from '@/engine/cnc/cam/model/sequence';
@@ -691,6 +693,8 @@ export interface ThroughCutFacts {
       at: { x: number; y: number };
       stretchMm: number;
       cornerMm: number;
+      /** #1258 — the corner margin of the edge the tab sits on, mm. */
+      marginMm?: number;
       /** Joins of the outline the tab's span crosses, and how many are sharper than the arc limit. */
       joins?: number;
       sharpJoins?: number;
@@ -837,6 +841,14 @@ export interface EngraveGenerated {
    * Never part of the job fingerprint or a re-freeze: it is a fact about this result, not the job.
    */
   idealDeferred?: boolean;
+  /**
+   * #1258 — THE RUN STOPPED AND ASKS: tabs at full corner margins cannot bring every stretch under
+   * the shop's span limit, and the job carries no (current) answer. Its own outcome — `ok` is false
+   * and no program posted, but this is not a refusal: the operator answers and generates again.
+   * `tabChoiceStale` — an answer was given for an outline or tab settings that have since changed.
+   */
+  tabChoiceNeeded?: TabChoiceNeeded;
+  tabChoiceStale?: true;
   cam: EngraveCamSummary | null;
   /**
    * #250 — the rough/finish split of the program this object describes (the FIRST program for the
@@ -6246,9 +6258,15 @@ export async function generateGoalProgram(
      * reference run). Absent/false: the pre-#1046 plan, byte-identical.
      */
     restLadder?: boolean;
+    /**
+     * #1258 — the operator's answer to the tab question, as plain data on the plan's input (see
+     * `ModelPlanInput.tabChoice`). Absent: a job whose corner margin leaves a stretch too long stops
+     * and asks (`EngraveGenerated.tabChoiceNeeded`).
+     */
+    tabChoice?: ModelPlanInput['tabChoice'];
   },
 ): Promise<EngraveGenerated> {
-  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder } = opts;
+  const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder, tabChoice } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
   // it returned one (a program that fails to post/verify once the plan itself is sound); every
@@ -6417,6 +6435,9 @@ export async function generateGoalProgram(
   let input: ModelPlanInput;
   try {
     input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools, feedCatalogue);
+    // #1258 — the answer on the job is the plan's answer; an explicit option (the CLI's flag) wins.
+    const answer = tabChoice ?? job.tabChoice;
+    if (answer !== undefined) input = { ...input, tabChoice: answer };
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -6487,6 +6508,15 @@ export async function generateGoalProgram(
     }
   } catch (e) {
     return fail('cam', `cam/model seam (#966): planModelCam refused — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // #1258 — THE PLAN ASKED. No program posted; the run's status is its own outcome, with the
+  // question's sentence and the numbers. It is not a refusal: the answer is a flag away.
+  if (output.tabChoiceNeeded !== undefined) {
+    return {
+      ...fail('cam', tabChoiceSentence(output.tabChoiceNeeded, output.tabChoiceStale === true), null, output, []),
+      tabChoiceNeeded: output.tabChoiceNeeded,
+      ...(output.tabChoiceStale === true ? { tabChoiceStale: true as const } : {}),
+    };
   }
   // #1117 — THE FREEING CONTOUR AGAINST THE VISE'S JAWS, BEFORE ANYTHING POSTS. A vise job whose
   // contour follows a silhouette closer to the stock's edge than the cutter's SHANK radius drives
@@ -6684,7 +6714,7 @@ async function generateGoalPrograms(
   };
 
   const firstSide = sides[0]!;
-  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
+  const first = await generateGoalProgram(job, firstSide.goal, tool, calibration, { shop: shopForSide(firstSide), sideFace: sideFaceFor(firstSide), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}), ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }), });
   const firstPrograms = sidePrograms(first, firstSide);
   if (firstPrograms === null) return { ...first, programs: [] };
   const programs: EngraveProgram[] = [...firstPrograms];
@@ -6711,7 +6741,7 @@ async function generateGoalPrograms(
     programs.push(locating.program);
   }
   for (const side of sides.slice(1)) {
-    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}) });
+    const one = await generateGoalProgram(job, side.goal, tool, calibration, { shop: shopForSide(side), sideFace: sideFaceFor(side), catalogueTools, ...(onProgress === undefined ? {} : { onProgress }), feedCatalogue, ...(options.reusedOwnedPlan === undefined ? {} : { reusedOwnedPlan: options.reusedOwnedPlan }), ...(options.ownedOnly === true ? { ownedOnly: true } : {}), ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }), ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }), ...(options.restLadder === true ? { restLadder: true } : {}), ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }), });
     const sideList = sidePrograms(one, side);
     // A side that failed stops the run: this result's `programs` are the run's so far, but no run
     // total is stated for an incomplete run — `one`'s own side-total would read as the run's.
@@ -7445,6 +7475,11 @@ export interface EngraveGenerateOptions {
   measureRankCandidates?: (request: RankMeasureRequest) => RankMeasureHandle;
   /** #1046 — the virtual ladder on the OWNED plan (the run-sheet press, the CLI's flag). */
   restLadder?: boolean;
+  /**
+   * #1258 — the operator's answer to the tab question (see `ModelPlanInput.tabChoice`): forwarded to
+   * every goal program's plan. Absent: a job that needs the answer stops and asks.
+   */
+  tabChoice?: ModelPlanInput['tabChoice'];
 }
 
 export async function engraveGenerate(
@@ -7696,6 +7731,7 @@ export async function engraveGenerate(
         ...(options.deferIdeal === undefined ? {} : { deferIdeal: options.deferIdeal }),
         ...(options.measureRankCandidates === undefined ? {} : { measureRankCandidates: options.measureRankCandidates }),
         ...(options.restLadder === true ? { restLadder: true } : {}),
+        ...(options.tabChoice === undefined ? {} : { tabChoice: options.tabChoice }),
       })),
       surface: null,
     };
@@ -8770,6 +8806,7 @@ async function generateOneProgram(
                       at: { x: tab.at[0], y: tab.at[1] },
                       stretchMm: tab.stretchMm,
                       cornerMm: tab.cornerMm,
+                      marginMm: tab.marginMm,
                       joins: tab.joins,
                       sharpJoins: tab.sharpJoins,
                     })),

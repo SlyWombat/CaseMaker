@@ -20,7 +20,7 @@ import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { CutParams } from '@/engine/cnc/feeds';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import { zPasses } from '@/engine/cnc/cam/engraveJob';
-import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabPlacement } from '@/engine/cnc/cam/profile';
+import { generateProfile, longestTabGap, placeTabs, profilePath, type ProfileCut, type TabChoiceMode, type TabPlacement, type TabStretch } from '@/engine/cnc/cam/profile';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import { cutterKeyOf } from '../sequence';
 import type { FeatureTree } from '../features';
@@ -35,7 +35,7 @@ export interface ContourOpOptions {
   /** The blank's own thickness, mm (for the tab top: `-(thickness - tabs.height)`); absent → `depthMm` (no separate skin). */
   thicknessMm?: number;
   /** `{count: 0}` cuts the part free with no tabs. `maxSpanMm` is the shop's `tabs.maxSpanMm` (#1206). */
-  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; /** #1258 — the operator's answer for a stretch the corner margin leaves too long (`ask` when none). Absent: the pre-#1258 step-2 tab. */ tabChoice?: TabChoiceMode };
   offset: OffsetFn;
   params: CutParams;
   rapid: RapidEstimate;
@@ -148,6 +148,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           placeTabs(ring, cut.tabs.count, cut.tabs.width, toolRadius, {
             ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
             ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
+            ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
           }),
         )
       : [];
@@ -156,7 +157,10 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   // that leaves a stretch of outline longer than the shop's limit is a REFUSAL with its reason,
   // never a quieter program. (The limit is what `placeTabs` tried to meet; it can fail when the
   // edges' corner margins leave no room for the tabs the gaps ask for.)
-  if (cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
+  // #1258 — with a choice mode stated the stretches the margin leaves are REPORTED (and, per the
+  // answer, tabbed or left long and stated), never a refusal: a stretch with no place for a tab is
+  // the operator's question, not an error.
+  if (cut.tabs.tabChoice === undefined && cut.tabs.count > 0 && cut.tabs.maxSpanMm !== undefined && cut.tabs.maxSpanMm > 0) {
     path.forEach((ring, i) => {
       const spans = placements[i]!.spans;
       if (spans.length === 0) return;
@@ -198,19 +202,79 @@ export function contour(opts: ContourOpOptions): OpOutcome {
           `release tabs: ${asked} asked, ${placed} placed — the remaining edges are too short for another tab clear of the corners`,
         ]
       : [];
-  // #1206 (the analyst's step 2) — A TIGHT TAB IS NAMED, with its distances: it sits inside the
-  // corner margin on purpose, closing a stretch the margin-respecting tabs could not.
-  const tight = placements.flatMap((placement) => placement.tight);
-  for (const tab of tight) {
-    const mm = (v: number): string => String(Number(v.toFixed(1)));
-    tabNotes.push(
-      `a tight tab at X ${mm(tab.at[0])} Y ${mm(tab.at[1])} closes a ${mm(tab.stretchMm)} mm stretch, ` +
-        `${mm(tab.cornerMm)} mm from the nearest corner (inside the usual corner margin — holding the part comes first)` +
-        `; it spans ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline` +
-        (tab.sharpJoins > 0
-          ? `, ${tab.sharpJoins} of them sharper than the smooth-arc limit`
-          : ''),
-    );
+  // #1258 (the analyst's ruling, stated ONCE here) — A TAB INSIDE THE CORNER MARGIN IS NAMED, one
+  // sentence per tab: which tab it is, how far from a corner, the margin of ITS OWN edge, and the
+  // longest stretch the outline is left with. A job with several cut-outs names each sentence's.
+  const mm = (v: number): string => String(Number(v.toFixed(1)));
+  const ringOf = (i: number): string => (path.length > 1 ? `Cut-out ${i + 1}: ` : '');
+  const perimeterOf = (ring: readonly (readonly [number, number])[]): number => {
+    let total = 0;
+    for (let k = 0; k < ring.length; k++) {
+      const a = ring[k]!;
+      const b = ring[(k + 1) % ring.length]!;
+      total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+    return total;
+  };
+  // The sentences are written in TAB-NUMBER order (per cut-out), not in the order the loop placed them.
+  const tabSentences: { ring: number; n: number; text: string }[] = [];
+  placements.forEach((placement, i) => {
+    if (placement.tight.length === 0) return;
+    const centres = placement.spans.map((span) => midpointOfRun(span.points));
+    const longest = longestTabGap(placement.spans, perimeterOf(path[i]!));
+    for (const tab of placement.tight) {
+      let n = 0;
+      let nearest = Infinity;
+      centres.forEach((c, k) => {
+        const d = Math.hypot(c[0] - tab.at[0], c[1] - tab.at[1]);
+        if (d < nearest) {
+          nearest = d;
+          n = k + 1;
+        }
+      });
+      tabSentences.push({
+        ring: i,
+        n,
+        text:
+          `${ringOf(i)}Tab ${n} sits ${mm(tab.cornerMm)} mm from a corner, closer than the edge's ${mm(tab.marginMm)} mm margin — the operator's choice. ` +
+          `Longest stretch without a tab: ${mm(longest)} mm. ` +
+          `It crosses ${tab.joins} join${tab.joins === 1 ? '' : 's'} of the outline, ${tab.sharpJoins === 0 ? 'none' : tab.sharpJoins} sharp.`,
+      });
+    }
+  });
+  tabSentences.sort((a, b) => a.ring - b.ring || a.n - b.n);
+  for (const s of tabSentences) tabNotes.push(s.text);
+
+  // #1258 — THE STRETCHES THE MARGIN LEFT, across every ring (re-indexed in ring order), and what
+  // the answer did with them. `ask` states nothing here: the plan stops and asks. `insideMargin`'s
+  // placed tabs are named above; a stretch no tab fits in, and every stretch the operator chose to
+  // leave long, is stated with its length against the limit.
+  const stretches: TabStretch[] = placements
+    .flatMap((placement, ring) => (placement.stretches ?? []).map((stretch) => ({ ...stretch, ring })))
+    .map((stretch, index) => ({ ...stretch, index }));
+  // …and where the tabs already stand, so a card can draw the outline to scale: each placed span's
+  // centre (the point half-way along its own centre-path run).
+  const tabsByRing: [number, number][][] = placements.map((placement) =>
+    placement.spans.map((span) => midpointOfRun(span.points)),
+  );
+  const tabsAt: [number, number][] = tabsByRing.flat();
+  if (cut.tabs.tabChoice === 'insideMargin' || cut.tabs.tabChoice === 'longerStretch') {
+    for (const stretch of stretches) {
+      const where = ringOf(stretch.ring ?? 0);
+      if (cut.tabs.tabChoice === 'longerStretch') {
+        tabNotes.push(
+          `${where}${mm(stretch.spanMm)} mm of the outline has no tab; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm — the operator's choice.`,
+        );
+      } else if (stretch.candidates.length === 0) {
+        tabNotes.push(
+          `${where}${mm(stretch.spanMm)} mm of the outline has no tab and no tab fits there; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm.`,
+        );
+      } else if (stretch.stillOverLimit) {
+        tabNotes.push(
+          `${where}${mm(Math.max(...stretch.leavesSpansMm))} mm of the outline still has no tab after the tabs placed; the shop's limit is ${mm(cut.tabs.maxSpanMm ?? 0)} mm.`,
+        );
+      }
+    }
   }
 
   const clampedTabHeightMm =
@@ -223,8 +287,24 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0, path, tabsAt, tabsByRing } }),
     ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
+}
+
+/** The point half-way along a polyline's own length. */
+function midpointOfRun(points: readonly [number, number][]): [number, number] {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  let left = total / 2;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (left <= len && len > 0) return [a[0] + ((b[0] - a[0]) * left) / len, a[1] + ((b[1] - a[1]) * left) / len];
+    left -= len;
+  }
+  return points[points.length - 1] ?? [0, 0];
 }
 
 export interface ThroughHoleOpOptions {

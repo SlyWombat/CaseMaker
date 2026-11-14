@@ -2525,6 +2525,13 @@ export interface EngraveJob {
    */
   stockEntry?: JobStockEntry;
   /**
+   * #1258 — THE ANSWER TO THE TAB QUESTION. When tabs at the shop's full corner margins cannot keep a
+   * stretch of outline under its span limit, Generate stops and asks; the operator's answer is kept
+   * here and honoured on regenerate until the outline or the tab settings change (`answeredFor` is
+   * the question's fingerprint, echoed back). One answer applies to every stretch.
+   */
+  tabChoice?: { choice: 'insideMargin' | 'longerStretch'; answeredFor: string };
+  /**
    * The files this job was made from (#425 §6). OPTIONAL, and absent on every v2 document and on
    * a job built only from typed items — which is what the byte-for-byte rule for those documents
    * requires. Records are content-addressed, so the same file named twice appears once.

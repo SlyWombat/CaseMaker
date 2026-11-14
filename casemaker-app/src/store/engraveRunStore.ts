@@ -1094,7 +1094,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     for (const f of generated.findings) noteFinding(f);
     if (!generated.ok || generated.nc === null) {
       set({ phase: 'blocked' });
-      noteWorkEnd('generate', 'refused');
+      // The tab question is the plan asking, not refusing (#1258): its own outcome in the record.
+      noteWorkEnd('generate', generated.tabChoiceNeeded === undefined ? 'refused' : 'asked');
       activeClient = null;
       return;
     }

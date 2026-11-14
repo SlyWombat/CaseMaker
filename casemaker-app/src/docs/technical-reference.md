@@ -261,7 +261,7 @@ The keys added since v0.2, with their recommendations:
 | `registration.faceAngleLevelBandMm` | 0.02 mm | 0.001–1 | The face-angle step: the level band on `\|Z+ − Z−\|`. |
 | `plan.leftoverEquivalencePct` | 0.5 % | 0–5 | The cutter-chain rank (#1217): sets of cutters whose leftover differs by no more than this share of the covered surface count as equal on that key, and the faster set is chosen. |
 | `plan.leftoverTallMm` | 1 mm | 0.1–50 | The same rank (#1224): material standing taller than this is never given up for a faster set, however much time the trade would save. |
-| `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch still too long gets a named tight tab before the job is ever refused. |
+| `tabs.maxSpanMm` | 80 mm | 10–400 | The longest stretch of outline left between two holding tabs before the planner adds a centred one (#1206); the recommendation scales with stock thickness — 80 mm on 6 mm or thicker, 40 mm under 3 mm, linear between — and a stretch the corner margin leaves too long stops Generate and asks the operator to choose — a tab inside the margin, or the longer stretch — an answer that is kept with the job and voided when the outline or the tab settings change. |
 
 The rotary limits are carried, not read where they are used: `toSetup` puts `RotaryMap.limits`
 into the rotary-chuck workholding, and the verifier and both simulators read the setup's copy, so
