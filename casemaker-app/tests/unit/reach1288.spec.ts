@@ -210,3 +210,23 @@ describe('#1288 the refusal says what would finish the region — once, after th
     expect(infos.map((st) => st.text).join('\n')).toMatch(/short ⌀1 × 3[\s\S]*shorter ⌀1 × 2|shorter ⌀1 × 2[\s\S]*short ⌀1 × 3/);
   }, 180_000);
 });
+
+describe('#1288 the "needs" clause is written once per region, from what is left unreached (9b)', () => {
+  const rest2 = ballOf(2, { number: 8, id: 'rest-2', name: 'rest ⌀2 × 20', fluteLength: 20 });
+  const rest1Long = ballOf(1, { number: 9, id: 'rest-1-long', name: 'rest ⌀1 × 30', fluteLength: 30 });
+
+  it('a LARGER ball posts after a ⌀1 ball is refused: the clause names the ⌀1 that is still unreached', () => {
+    const result = plan([shortBall, rest2]);
+    const warnings = result.statements.filter((st) => st.code === 'goal-finish-unreachable' && st.severity === 'warning');
+    expect(warnings, 'one clause for the region').toHaveLength(1);
+    expect(warnings[0]!.text).toContain(
+      'the rest ⌀2 × 20 finished what it can enter; the narrower places need a ⌀1 mm ball with at least 4.1 mm of reach, and none on the shelf has it.',
+    );
+  }, 180_000);
+
+  it('the posting ball is the SAME diameter as the refused one: no clause at all', () => {
+    const result = plan([shortBall, rest1Long]);
+    expect(restOps(result).some((op) => op.outcome.cutter === rest1Long.id)).toBe(true);
+    expect(result.statements.filter((st) => st.severity === 'warning' && st.code === 'goal-finish-unreachable')).toHaveLength(0);
+  }, 180_000);
+});

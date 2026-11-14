@@ -6474,11 +6474,21 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // A rest ball that did not post leaves no CL for the crease pass to ride (it rides the finish's).
       if (!restPosted) restBallCl = undefined;
     }
-    // The candidates are exhausted and none posted: say once, from what is left unreached, what it would take.
-    if (!restPosted && restRefused.length > 0) {
-      const text = `"${ref.id}": not finished by a rest ball — ${restRefused.length} tried, none reaches; ${reachClauseFor(restRefused)}`;
-      notes.push(text);
-      statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: Math.max(...restRefused.map((r) => r.postedMm)), usableMm: Math.max(...restRefused.map((r) => r.usable)) });
+    // The candidates are tried: say ONCE per region, from what is left unreached, what it would take — when
+    // NOTHING posted, or when the ball that posted is LARGER than the smallest ball refused for reach (the
+    // narrower places it cannot enter stay unreached). Not when it posted at the same diameter or smaller.
+    if (restRefused.length > 0) {
+      const refusedDiameters = restRefused.map((r) => cuttingDiameter(r.cutter)).filter((d): d is number => d !== null);
+      const smallestRefused = refusedDiameters.length === 0 ? null : Math.min(...refusedDiameters);
+      const postedDiameter = restPostedTool === undefined ? null : cuttingDiameter(restPostedTool);
+      const leftUnreached = !restPosted || (smallestRefused !== null && postedDiameter !== null && postedDiameter > smallestRefused + 1e-9);
+      if (leftUnreached) {
+        const text = !restPosted
+          ? `"${ref.id}": not finished by a rest ball — ${restRefused.length} tried, none reaches; ${reachClauseFor(restRefused)}`
+          : `"${ref.id}": the ${restPostedTool!.name || restPostedTool!.shape} finished what it can enter; the narrower places need a ⌀${Number(smallestRefused!.toFixed(2))} mm ball with at least ${Math.ceil(Math.max(...restRefused.map((r) => r.postedMm)) * 10 - 1e-6) / 10} mm of reach, and none on the shelf has it.`;
+        notes.push(text);
+        statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: Math.max(...restRefused.map((r) => r.postedMm)), usableMm: Math.max(...restRefused.map((r) => r.usable)) });
+      }
     }
 
     // 3c. THE CREASE PASS (#965, the review session's step 2; the vendor's own figure method): a
