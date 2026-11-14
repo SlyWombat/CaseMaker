@@ -420,6 +420,11 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     expect(screen.queryByTestId('engrave-setup-machine-now')).toBeNull();
     expect(screen.getByTestId('engrave-setup-holding-ask-sentence').textContent).toBe('No machine is recorded for this shop yet.');
     expect(screen.getByTestId('engrave-setup-holding-ask-action').textContent).toBe('Add the machine');
+    // The approved mock-up: the action is the PRIMARY style; the old sub-heading is hidden while the ask
+    // shows; a row that cannot be chosen shows its name and its need only (no glossary under the bracket).
+    expect(screen.getByTestId('engrave-setup-holding-ask-action').className).toContain('sw-btn--primary');
+    expect(screen.queryByTestId('engrave-setup-holding-heading')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-anchor-gloss')).toBeNull();
     expect(screen.getByTestId('engrave-setup-holding-ask-caption').textContent).toContain('You can also choose one yourself');
     for (const m of ['ledge', 'board', 'block', 'bed-tape', 'bed-bracket', 'rotary'] as const) {
       expect(radio(m).checked, `${m} must not be selected`).toBe(false);

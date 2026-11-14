@@ -478,6 +478,12 @@ export function boardChoices(profile: BedProfile | null): BoardChoice[] {
 
 // ── The options ────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * #1273 — what the Holding step reports to the shell while it is ASKING (nothing recorded and no seat
+ * chosen): Create waits, and the ask itself is the explanation, so the shell draws no second line.
+ */
+export const HOLDING_ASK_BLOCK = 'ask';
+
 export interface MountOption {
   mount: HoldingMount;
   label: string;

@@ -125,6 +125,7 @@ import {
   locateTape,
   underFieldWords,
   underWords,
+  HOLDING_ASK_BLOCK,
   type BedMount,
   type HoldingMount,
   type MountOption,
@@ -1831,7 +1832,7 @@ export function HoldingStep({
   const askShown = noRecord && (nothingChosen || answers.vise.assumed === true);
   const selected: HoldingMount | null = nothingChosen ? null : current;
   const mountBlocked = nothingChosen
-    ? 'Choose how the stock is held.'
+    ? HOLDING_ASK_BLOCK
     : currentOption !== null && currentOption.disabled && !(noRecord && currentOption.unrecorded === true)
       ? (currentOption.reason ?? 'Choose how the stock is held.')
       : null;
@@ -2789,9 +2790,12 @@ export function HoldingStep({
 
       {/* #875 — the step's heading sits above BOTH columns, so the phone's order is heading, then
           the picture, then the mount question. */}
-      <span style={{ fontSize: 12, fontWeight: 500 }} data-testid="engrave-setup-holding-heading">
-        {heading}
-      </span>
+      {/* #1273 — the ask is the question while it shows; the old sub-heading would say it twice. */}
+      {!askShown && (
+        <span style={{ fontSize: 12, fontWeight: 500 }} data-testid="engrave-setup-holding-heading">
+          {heading}
+        </span>
+      )}
       <div
         data-testid="engrave-setup-holding-columns"
         style={{
@@ -2816,7 +2820,7 @@ export function HoldingStep({
                 <div>
                   <button
                     type="button"
-                    className="sw-btn btn btn--sm"
+                    className="sw-btn sw-btn--primary"
                     data-testid="engrave-setup-holding-ask-action"
                     onClick={() => onOpenManage?.()}
                   >
@@ -3262,7 +3266,7 @@ function MountRow({
         </div>
       )}
       {/* #1109 item 9 — the bracket row's refusal is the step's first "anchor 1". */}
-      {option.mount === 'bed-bracket' && option.disabled && (
+      {option.mount === 'bed-bracket' && option.disabled && option.unrecorded !== true && (
         <div style={{ marginLeft: 22 }} data-testid="engrave-setup-anchor-gloss">
           <Explain term="anchor-1" />
         </div>

@@ -589,6 +589,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     // A run that began here CREATES the job; only a re-entry adds an operation (#681/#685).
     expect(screen.getByTestId('engrave-setup-next').textContent).toBe('Create the job');
     // #1273 — nothing recorded is not "a vise": the step asks, Create waits, the operator chooses.
+    // While the step asks, the shell draws no second line (the ask is the explanation).
+    expect(screen.queryByTestId('start-wizard-holding-unblock')).toBeNull();
     pickAssumedMount('ledge');
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();

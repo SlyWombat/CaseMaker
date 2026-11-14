@@ -49,7 +49,7 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { openMachineChange } from '@/components/machine-change';
-import { boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
+import { HOLDING_ASK_BLOCK, boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
 import { accessoryFor, activeProfileOf } from '@/platform/machineChange';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
@@ -1332,7 +1332,7 @@ export function StartWizard(): JSX.Element {
               {sentence(holdingBlock)}
             </p>
           )}
-          {holdingBlock === null && mountBlocked !== null && (
+          {holdingBlock === null && mountBlocked !== null && mountBlocked !== HOLDING_ASK_BLOCK && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-unblock">
               {sentence(mountBlocked)}
             </p>
