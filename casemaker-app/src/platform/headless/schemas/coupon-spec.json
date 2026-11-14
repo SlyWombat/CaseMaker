@@ -7412,12 +7412,14 @@
                 },
                 "heightMm": {
                   "description": "Material those tabs leave under their top, mm; omit to follow the shop’s `tabs.heightMm`.",
-                  "exclusiveMinimum": 0,
+                  "maximum": 20,
+                  "minimum": 0.1,
                   "type": "number"
                 },
                 "widthMm": {
                   "description": "Width of those tabs in material, mm; omit to follow the shop’s `tabs.freeingWidthMm`.",
-                  "exclusiveMinimum": 0,
+                  "maximum": 50,
+                  "minimum": 0.1,
                   "type": "number"
                 }
               },
@@ -7797,12 +7799,14 @@
                   },
                   "heightMm": {
                     "description": "Material those tabs leave under their top, mm; omit to follow the shop’s `tabs.heightMm`.",
-                    "exclusiveMinimum": 0,
+                    "maximum": 20,
+                    "minimum": 0.1,
                     "type": "number"
                   },
                   "widthMm": {
                     "description": "Width of those tabs in material, mm; omit to follow the shop’s `tabs.freeingWidthMm`.",
-                    "exclusiveMinimum": 0,
+                    "maximum": 50,
+                    "minimum": 0.1,
                     "type": "number"
                   }
                 },

@@ -107,6 +107,21 @@ export interface KnownDefault {
   fallback: number;
 }
 
+/**
+ * The numeric bounds a registered key's rule states, for a control that must not offer more than the
+ * rule allows (#1207: the bound is stated once, here). Read from the rule's JSON Schema (Zod 4);
+ * a bound the rule does not state is absent. An exclusive bound is reported as is (`exclusive*`).
+ */
+export function ruleBounds(key: string): { min?: number; max?: number } {
+  const rule = KNOWN_DEFAULTS[key]?.rule;
+  if (rule === undefined) return {};
+  const schema = z.toJSONSchema(rule) as { minimum?: number; maximum?: number };
+  return {
+    ...(schema.minimum === undefined ? {} : { min: schema.minimum }),
+    ...(schema.maximum === undefined ? {} : { max: schema.maximum }),
+  };
+}
+
 export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // #416 — how long switching on waits for the controller to answer.
   'power.onWaitSeconds': {

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import { GoalFreeingTabs, freeingTabsSentence, type FreeingTabsShop } from '@/components/panels/GoalFreeingTabs';
+import { KNOWN_DEFAULTS, ruleBounds } from '@/platform/defaultsClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -51,6 +52,42 @@ describe('#1271 the group follows the shop and stores only what is typed', () =>
     render(<GoalFreeingTabs target={{ tabs: { count: 2, widthMm: 8 } }} index={0} shop={SHOP} counts={null} onChange={onChange} />);
     fireEvent.change(screen.getByTestId('engrave-goal-tabs-width'), { target: { value: '' } });
     expect(onChange).toHaveBeenLastCalledWith({ count: 2 });
+  });
+});
+
+describe('#1271 the bounds are the registry’s, stated once (#1207)', () => {
+  it('ruleBounds reads each key’s rule: count 0–64, freeing width 0.1–50, height 0.1–20', () => {
+    expect(ruleBounds('tabs.count')).toEqual({ min: 0, max: 64 });
+    expect(ruleBounds('tabs.freeingWidthMm')).toEqual({ min: 0.1, max: 50 });
+    expect(ruleBounds('tabs.heightMm')).toEqual({ min: 0.1, max: 20 });
+    expect(ruleBounds('no.such.key')).toEqual({});
+  });
+  it('the inputs offer exactly those bounds', () => {
+    render(<GoalFreeingTabs target={{}} index={0} shop={SHOP} counts={null} onChange={vi.fn()} />);
+    const c = screen.getByTestId('engrave-goal-tabs-count') as HTMLInputElement;
+    const w = screen.getByTestId('engrave-goal-tabs-width') as HTMLInputElement;
+    const h = screen.getByTestId('engrave-goal-tabs-height') as HTMLInputElement;
+    expect([c.min, c.max]).toEqual(['0', '64']);
+    expect([w.min, w.max]).toEqual(['0.1', '50']);
+    expect([h.min, h.max]).toEqual(['0.1', '20']);
+  });
+  it('a typed value outside the rule is not stored', () => {
+    const onChange = vi.fn();
+    render(<GoalFreeingTabs target={{}} index={0} shop={SHOP} counts={null} onChange={onChange} />);
+    fireEvent.change(screen.getByTestId('engrave-goal-tabs-count'), { target: { value: '500' } });
+    fireEvent.change(screen.getByTestId('engrave-goal-tabs-width'), { target: { value: '500' } });
+    fireEvent.change(screen.getByTestId('engrave-goal-tabs-height'), { target: { value: '25' } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it('the job schema refuses what the rule refuses, so a typed 500 cannot be stored by any door', () => {
+    const doc = JSON.parse(JSON.stringify(blockJob())) as { targetObject: Record<string, unknown> };
+    for (const bad of [{ count: 500 }, { widthMm: 500 }, { heightMm: 25 }, { widthMm: 0 }, { count: -1 }, { count: 1.5 }]) {
+      doc.targetObject.tabs = bad;
+      expect(parseEngraveJob(doc).ok, JSON.stringify(bad)).toBe(false);
+    }
+    doc.targetObject.tabs = { count: 64, widthMm: 50, heightMm: 20 };
+    expect(parseEngraveJob(doc).ok).toBe(true);
+    expect(KNOWN_DEFAULTS['tabs.count']).toBeDefined();
   });
 });
 

@@ -15,7 +15,7 @@ import type { CSSProperties, JSX } from 'react';
 
 // The registry first: `tabSettings` and `defaultsClient` are an import cycle, and the registry must
 // finish evaluating before `tabSettings` is entered from here.
-import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, ruleBounds, type ShopDefaults } from '@/platform/defaultsClient';
 import { freeingTabsFrom } from '@/engine/cnc/cam/tabSettings';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
@@ -66,6 +66,13 @@ const FIELD: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 2,
 const OWN = { border: '2px solid #4d8eff' } as const;
 const MUTED: CSSProperties = { margin: '6px 0 0', fontSize: 12, color: '#c8d3de', lineHeight: 1.45 };
 
+/** The registry's own bounds for the three keys, one source (#1207): the inputs offer no more than the rules allow. */
+const BOUNDS = {
+  count: ruleBounds('tabs.count'),
+  widthMm: ruleBounds('tabs.freeingWidthMm'),
+  heightMm: ruleBounds('tabs.heightMm'),
+} as const;
+
 const mmWords = (v: number): string => `${Number(v.toFixed(1))} mm`;
 const tabsWords = (n: number): string => `${n} tab${n === 1 ? '' : 's'}`;
 
@@ -102,11 +109,13 @@ export function GoalFreeingTabs({ target, index, shop, counts, onChange }: GoalF
     else {
       const v = Number(text);
       if (!Number.isFinite(v)) return;
+      // A typed value outside the registry's rule is not stored (the schema would refuse it too).
+      const b = BOUNDS[field];
+      if ((b.min !== undefined && v < b.min) || (b.max !== undefined && v > b.max)) return;
       if (field === 'count') {
-        if (!Number.isInteger(v) || v < 0) return;
+        if (!Number.isInteger(v)) return;
         next.count = v;
       } else {
-        if (!(v > 0)) return;
         next[field] = v;
       }
     }
@@ -138,8 +147,8 @@ export function GoalFreeingTabs({ target, index, shop, counts, onChange }: GoalF
           <span>tabs</span>
           <input
             type="number"
-            min={0}
-            max={64}
+            min={BOUNDS.count.min}
+            max={BOUNDS.count.max}
             step={1}
             value={typed.count ?? shop.count}
             data-testid="engrave-goal-tabs-count"
@@ -154,7 +163,8 @@ export function GoalFreeingTabs({ target, index, shop, counts, onChange }: GoalF
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input
               type="number"
-              min={0.1}
+              min={BOUNDS.widthMm.min}
+              max={BOUNDS.widthMm.max}
               step="any"
               value={typed.widthMm ?? shop.widthMm}
               data-testid="engrave-goal-tabs-width"
@@ -171,7 +181,8 @@ export function GoalFreeingTabs({ target, index, shop, counts, onChange }: GoalF
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input
               type="number"
-              min={0.1}
+              min={BOUNDS.heightMm.min}
+              max={BOUNDS.heightMm.max}
               step="any"
               value={typed.heightMm ?? shop.heightMm}
               data-testid="engrave-goal-tabs-height"
