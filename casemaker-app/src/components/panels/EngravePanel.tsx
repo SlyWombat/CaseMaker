@@ -1,3 +1,4 @@
+import { pickUnderProgress } from '@/store/generatePick';
 import { featureSim } from '@/platform/features';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type JSX, type ReactNode, type RefObject } from 'react';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
@@ -2971,11 +2972,18 @@ export function EngravePanel(): JSX.Element {
     }
     const source = job.sources?.tool;
     if (job.toolKey === '' && source !== 'user' && source !== 'measured') {
-      const pick = await useEngravePreviewStore.getState().measureNow(job);
+      // #1270 — the pick is part of the press: the run is `generating` (button disabled, a second
+      // press refused, a progress line) for as long as it takes.
+      const outcome = await pickUnderProgress(() => useEngravePreviewStore.getState().measureNow(job));
+      if (!outcome.started) return;
+      if (outcome.cancelled) return;
+      const pick = outcome.value;
       if (pick !== null) {
         applyCutterPlan(pick.cutters, 'computed', 0, pick.goalRoughKey);
       } else {
         const key = rec?.key ?? (await awaitPreviewRecommendationKey());
+        // A Stop pressed while the rule's answer was awaited ends the press here (#1270).
+        if (useEngraveRunStore.getState().phase !== 'generating') return;
         if (key) setTool(key, 'computed');
       }
     }
