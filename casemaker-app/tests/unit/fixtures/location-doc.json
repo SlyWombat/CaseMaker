@@ -2012,6 +2012,20 @@
       "unit": "mm",
       "note": "chosen, not measured: how far a tab bridge overshoots the cutter's radius past the tab's edge, so the bridge takes the wall cleanly"
     },
+    "tabs.cornerMarginTabWidths": {
+      "value": 2.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "tab widths",
+      "note": "chosen, not measured: how many tab widths a holding tab's span must stand from a corner (the larger of this and the edge share applies) \u2014 a tab near a corner is cut where the cutter changes direction and its load is highest"
+    },
+    "tabs.cornerMarginEdgeFraction": {
+      "value": 0.1,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "x",
+      "note": "chosen, not measured: the share of an edge's length a holding tab's span must stand from a corner (the larger of this and the tab-width margin applies) \u2014 a tab near a corner is cut where the cutter changes direction and its load is highest"
+    },
     "tabs.cornerDeg": {
       "value": 20.0,
       "source": "seeded",
