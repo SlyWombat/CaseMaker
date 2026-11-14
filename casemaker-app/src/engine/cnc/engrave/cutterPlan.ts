@@ -162,7 +162,7 @@ export function goalRoughOptions(
   table?: readonly FeedsEntry[],
   ballDiameter = 0,
 ): GoalRoughOptions | null {
-  const ballWork = kindedWork(job).filter((w) => w.kind === 'ball');
+  const ballWork = kindedWork(job, defaults).filter((w) => w.kind === 'ball');
   if (ballWork.length === 0) return null;
   const needed = ballWork.reduce((m, w) => Math.max(m, w.reachMm), 0);
   const sizeOf = (entry: ToolLibraryEntry): number => statedCuttingSize(entry.tool) ?? cuttingDiameter(entry.tool) ?? 0;
@@ -236,7 +236,7 @@ export interface FaceWorkFacts {
 }
 
 /** The face work the job states, or null when it has none (or is not round stock in the chuck). */
-export function faceWorkOf(job: EngraveJob, defaults: ShopDefaults | null = null): FaceWorkFacts | null {
+export function faceWorkOf(job: EngraveJob, defaults: ShopDefaults | null): FaceWorkFacts | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
   // #1244 — the map is the caller's; the read is a PREDICATE (is this a chuck job?), which the
@@ -328,7 +328,7 @@ export function faceCutterOptions(
    */
   allowMixed = false,
 ): FaceCutterOptions | null {
-  const facts = faceWorkOf(job);
+  const facts = faceWorkOf(job, defaults);
   if (facts === null) return null;
   if (jobHasItems(job) && !allowMixed) return null;
   const eligible = tools.filter(
@@ -413,9 +413,10 @@ function sideGoalObject(job: EngraveJob): EngraveTargetObject | null {
  */
 export function kindedWork(
   job: EngraveJob,
+  // #1244/#1256 — the map from the caller's edge, REQUIRED: `null` = a caller with no location (the
+  // recommendations, stated). Nothing here defaults it, so a site that forgets it does not compile.
+  defaults: ShopDefaults | null,
   floors?: ReadonlyMap<string, number> | null,
-  // #1244 — the map from the caller's edge; the read is a job-decided predicate (see faceWorkOf).
-  defaults: ShopDefaults | null = null,
 ): KindedItem[] {
   const through = r3(job.stock.thickness + job.breakthrough);
   const out: KindedItem[] = [];
@@ -532,8 +533,8 @@ export function kindedWork(
  * serves), `'cone'` when its regions need a cone's flank, else `'flat'`. Null when there is no
  * work at all.
  */
-export function kindForJob(job: EngraveJob): WorkKind | null {
-  const work = kindedWork(job);
+export function kindForJob(job: EngraveJob, defaults: ShopDefaults | null): WorkKind | null {
+  const work = kindedWork(job, defaults);
   if (work.length === 0) return null;
   if (work.some((w) => w.kind === 'ball')) return 'ball';
   if (work.some((w) => w.kind === 'thread')) return 'thread';
@@ -678,7 +679,7 @@ export function planCutters(
       : tools;
   const registryStandsIn = meshGoal && ownedRecords.length === 0;
 
-  const work = kindedWork(job, floors, defaults);
+  const work = kindedWork(job, defaults, floors);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];
   const reachByKey = new Map(reach === null ? [] : reach.cutters.map((c) => [c.key, c]));
@@ -1131,7 +1132,7 @@ export function kindOnlyPick(
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
 ): { key: string; reason: string; kind: WorkKind } | null {
-  const work = kindedWork(job);
+  const work = kindedWork(job, defaults);
   const kind = work[0]?.kind;
   if (kind !== 'ball' && kind !== 'thread') return null;
   if (!work.every((w) => w.kind === kind)) return null;

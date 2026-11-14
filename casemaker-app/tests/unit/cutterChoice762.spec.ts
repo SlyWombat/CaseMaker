@@ -195,7 +195,7 @@ describe('#762 the picker reads the item kind first', () => {
   it('reads a variable-depth V-carve as cone work', () => {
     const job = base();
     job.shapes = [{ id: 'v', kind: 'circle', position: { x: 50, y: 30 }, rotation: 0, depth: 4, enabled: true, diameter: 10, vCarveDepth: 'variable' }];
-    expect(kindedWork(job)[0]!.kind).toBe('cone');
+    expect(kindedWork(job, null)[0]!.kind).toBe('cone');
   });
 
   it('reads a cut-out as work for a flat, at the through depth, in kindedWork', () => {
@@ -204,7 +204,7 @@ describe('#762 the picker reads the item kind first', () => {
     job.breakthrough = 0.3;
     job.shapes = [{ id: 'part', kind: 'rect', position: { x: 50, y: 30 }, rotation: 0, depth: 4, enabled: true, construction: true, width: 80, height: 40, cornerRadius: 0 }];
     job.cutouts = [{ kind: 'cutout', id: 'cut', enabled: true, of: 'part', side: 'outside', inset: 0, tabs: { count: 0, width: 0, height: 0 } }];
-    const cut = kindedWork(job).find((w) => w.id === 'cut')!;
+    const cut = kindedWork(job, null).find((w) => w.id === 'cut')!;
     expect(cut.kind).toBe('flat');
     expect(cut.reachMm).toBe(18.3);
   });

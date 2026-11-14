@@ -359,7 +359,7 @@ export function candidatePlans(
   // could: it is the SPLIT the operator means — the named cutter for its own holes/threads, and a
   // flat (or the kind plan's other cutters) for the rest. The mixed-tool refusal then has nothing
   // left to refuse, because each program has one cutter that can do its work.
-  const work = kindedWork(job);
+  const work = kindedWork(job, defaults);
   const named = tools.find((t) => t.key === job.toolKey);
   const drillIds = new Set(
     (job.drills ?? []).filter((d) => d.enabled).map((d) => d.id),
@@ -807,7 +807,7 @@ export async function smartPick(
   const notes: string[] = [];
   const rulePlan = rulePlanOf(job, tools, catalogue, defaults, conditions, table, opts.floors);
   // #834 — a face job's plans have no items to score; their fidelity is the face's (see fidelityOf).
-  const exactWhenEmpty = faceWorkOf(job, null) !== null;
+  const exactWhenEmpty = faceWorkOf(job, defaults) !== null;
   const plans = candidatePlans(job, tools, catalogue, defaults, conditions, table, opts.floors).slice(0, maxCandidates);
   // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
   // plan). The count first, then one row per simulated candidate, then the end.
@@ -1010,7 +1010,7 @@ export function candidateRefusals(
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[] | null,
 ): CandidateRefusal[] {
-  const work = kindedWork(job);
+  const work = kindedWork(job, defaults);
   const shapes: Record<string, readonly string[]> = { ball: ['ball', 'bull'], flat: ['flat'], thread: ['thread'] };
   const fits = (entry: ToolLibraryEntry, kind: string): boolean =>
     kind === 'cone' ? vCone(entry.tool) !== null : (shapes[kind] ?? []).includes(entry.tool.shape);

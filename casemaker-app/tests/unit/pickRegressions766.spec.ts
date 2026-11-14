@@ -107,7 +107,7 @@ describe('#766 regressions — jobs that generated under #762 must still generat
       { id: 'initial', kind: 'vector', sourceName: 'x.svg', name: 'initial', position: { x: 50, y: 30 }, rotation: 0, depth: 14, vCarveDepth: 'variable', enabled: true, contours: [], fillRule: 'NonZero', width: 20, height: 20 },
       { id: 'script', kind: 'vector', sourceName: 'x.svg', name: 'script', position: { x: 50, y: 30 }, rotation: 0, depth: 14, vCarveDepth: 'variable', enabled: true, contours: [], fillRule: 'NonZero', width: 20, height: 20 },
     ];
-    const kinds = new Map(kindedWork(job).map((w) => [w.id, w.kind] as const));
+    const kinds = new Map(kindedWork(job, null).map((w) => [w.id, w.kind] as const));
     expect(kinds.get('initial')).toBe('cone');
     expect(kinds.get('script')).toBe('cone');
     expect(kinds.get('outline')).toBe('flat');

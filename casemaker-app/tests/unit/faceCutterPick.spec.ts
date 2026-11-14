@@ -51,7 +51,7 @@ const hex: EngraveFaceOp = { id: 'hex', kind: 'faces-all-round', a: 0, count: 6,
 
 describe('#834 the face work and the cutters that fit it', () => {
   it('reads the narrowest face chord and the hole sizes from the job', () => {
-    const facts = faceWorkOf(faceJob([hex, { id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }]))!;
+    const facts = faceWorkOf(faceJob([hex, { id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 }]), null)!;
     expect(facts.chordMm).toBeCloseTo(10, 2); // the hexagon's side on ⌀20
     expect(facts.faceCount).toBe(6);
     expect(facts.holesMm).toEqual([3.175]);

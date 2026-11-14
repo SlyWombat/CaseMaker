@@ -217,7 +217,7 @@ describe('#910 2 — the search states its refusal', () => {
 
 describe('#910 3 — a goal’s ball reaches the goal, not the blank', () => {
   it('the elephant asks for its own 31.73 mm, not the 33 mm blank', () => {
-    const [work] = kindedWork(elephant());
+    const [work] = kindedWork(elephant(), null);
     expect(work!.kind).toBe('ball');
     expect(work!.reachMm).toBe(31.73);
   });
@@ -225,7 +225,7 @@ describe('#910 3 — a goal’s ball reaches the goal, not the blank', () => {
   it('a goal sunk into the blank needs its lowest point, and a split side only its band', () => {
     const sunk = elephant();
     sunk.targetObject = { ...sunk.targetObject!, position: { ...sunk.targetObject!.position, z: -1 } };
-    expect(kindedWork(sunk)[0]!.reachMm).toBe(32.73);
+    expect(kindedWork(sunk, null)[0]!.reachMm).toBe(32.73);
     // The band is measured from the goal's own top, so a sunk goal's 20 mm band reaches 21 mm.
     expect(goalSideNeedMm({ ...sunk.targetObject, bandMm: 20 })).toBeCloseTo(21, 6);
     expect(goalSideNeedMm({ ...sunk.targetObject, bandMm: 40 })).toBeCloseTo(32.73, 6);
@@ -270,7 +270,7 @@ describe('#910 — elephant- and panther-class hardwood goals propose a ⌀6 bal
     for (const index of [0, 1]) {
       const side = setupWorkJob(flipped, LIBRARY, index);
       if (side === null) throw new Error(`side ${index + 1} has no work`);
-      const [work] = kindedWork(side);
+      const [work] = kindedWork(side, null);
       expect(work?.kind).toBe('ball');
       // Each side cuts its 26 mm band (the flipped side's from the goal's own top, under the
       // 0.88 mm the blank stands proud of the figure).

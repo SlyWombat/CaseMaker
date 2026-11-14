@@ -57,7 +57,7 @@ const CTX: EvalContext = { tl, tools: [O, C, F], catalogue: [], shop: {}, calibr
 
 /** The flat work as the kind plan sees it, so the plan owns every item exactly once. */
 function planWith(rest: ToolLibraryEntry): CandidatePlan {
-  const ids = kindedWork(j20()).map((w) => w.id);
+  const ids = kindedWork(j20(), null).map((w) => w.id);
   const cutters = [
     { key: O.key, items: ids },
     { key: rest.key, items: [] as string[] },

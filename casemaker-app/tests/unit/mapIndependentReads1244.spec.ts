@@ -6,7 +6,9 @@
  *
  *   - the run record's §9 rows — item DEPTHS (`recordDepths`);
  *   - the rest facts' `traceOnly` — item PRESENCE (does the document hold any engrave?);
- *   - the pick's `faceWorkOf` / `planCutters` — a job-decided PREDICATE (holding + section).
+ *   - the pick's `faceWorkOf` / `planCutters` — a job-decided PREDICATE (holding + section). Since
+ *     #1256 the pick passes the shop's real map (the parameter is required); the pin stays, because
+ *     the answer must not depend on it.
  *
  * The analyst's ruling: each gets ONE test asserting the result is identical with no map and with
  * a map in which every rotary/face-angle key differs from its recommendation. A callee that later
