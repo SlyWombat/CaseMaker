@@ -36,7 +36,16 @@
 }
 
 .sw-head { flex: none; padding: 12px 12px 10px; }
-.sw-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+.sw-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 12px; }
+/* #1123-72/73 — every row and field stays INSIDE the dialog's content box: border-box sizing (a 100%
+   button with a border and padding ran 12+ px past the right edge, its border cut off) and grid/flex
+   children allowed to shrink (a long unbroken note widened the whole column and scrolled the content
+   sideways when a row was picked). Long words wrap instead of widening the row. */
+.sw-body, .sw-body * { box-sizing: border-box; }
+.sw-body > *, .sw-body [data-testid$="-list"] > *, .sw-body [data-testid$="-shelf"] > * { min-width: 0; max-width: 100%; }
+.sw-body button, .sw-body label { overflow-wrap: anywhere; }
+/* The row buttons carry sentences (a shelf row, a machine card): they wrap, they are not one line. */
+.sw-body .sw-btn { white-space: normal; }
 .sw-foot {
   flex: none;
   display: flex;
@@ -124,3 +133,8 @@
   .sw-thumb { flex-direction: column; }
   .sw-thumb__side { flex: initial; }
 }
+
+/* #1123-74 — ONE type size in the dialog: the native selects and inputs drew at the browser's 13px against
+   11–12px labels, and the picture captions inherited the page's larger hint size. */
+.sw-body select, .sw-body input[type='text'], .sw-body input[type='number'] { font-size: 12px; }
+.sw-body .hint { font-size: 12px; line-height: 1.45; }

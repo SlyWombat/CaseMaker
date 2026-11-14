@@ -124,7 +124,7 @@ test('#1101 — the rotary: Chuck end and Text reads, no hold cards, no fixed ja
   await page.getByTestId('welcome-start-cnc').click();
   await expect(page.getByTestId('start-wizard')).toBeVisible();
   await page.getByTestId('start-wizard-next').click();
-  await expect(page.getByTestId('start-wizard-rotary-intents')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-rotary-intent-dowel')).toBeVisible();
   await page.getByTestId('start-wizard-rotary-intent-dowel').click();
   await page.getByTestId('start-wizard-op-text').fill('Hello');
   await page.getByTestId('start-wizard-operation-next').click();

@@ -62,10 +62,12 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
   const topH = 150;
   // The margins are written OUTSIDE the blank: a 5 mm band is a few pixels at this scale, and a
   // number sitting on the part's edge is not a dimension.
+  // #1123-78 — the left/right numbers ("12.9 mm") need room beside the blank: more padding across than down.
+  const padX = 52;
   const pad = 34;
   const bLength = Math.max(blank.length, 0.001);
   const bWidth = Math.max(blank.width, 0.001);
-  const scale = Math.min((W - pad * 2) / bLength, (topH - pad * 2) / bWidth);
+  const scale = Math.min((W - padX * 2) / bLength, (topH - pad * 2) / bWidth);
   const bw = bLength * scale;
   const bh = bWidth * scale;
   const bx = (W - bw) / 2;
@@ -127,7 +129,7 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
       </svg>
       {/* The side strip: the blank's thickness, the work standing above it and the skin under it. */}
       <svg
-        viewBox="0 0 260 52"
+        viewBox="0 0 300 64"
         width="100%"
         role="img"
         aria-label="Side view: the blank's thickness and the work standing above it"
@@ -160,7 +162,7 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
                   </text>
                 </>
               )}
-              <text x="8" y="50" fontSize="10" fill="#9aa4b0">
+              <text x="8" y="58" fontSize="10" fill="#9aa4b0">
                 {n(blank.thickness)} mm blank
                 {hPx > 0 && height !== null ? ` · ${n(height)} mm part` : ''}
               </text>
@@ -170,8 +172,8 @@ export function BlankWithPart({ blank, part }: BlankWithPartProps): JSX.Element 
       </svg>
       {part !== null && (
         <span data-testid="blank-with-part-facts" style={{ fontSize: 11, color: '#9aa4b0' }}>
-          blank {n(blank.length)} × {n(blank.width)} × {n(blank.thickness)} mm · part {n(part.length)} × {n(part.width)}
-          {part.height === null ? '' : ` × ${n(part.height)}`} mm
+          blank {n(blank.length)} × {n(blank.width)} × {n(blank.thickness)} mm · part {one(part.length)} × {one(part.width)}
+          {part.height === null ? '' : ` × ${one(part.height)}`} mm
         </span>
       )}
       {overrun !== null && (

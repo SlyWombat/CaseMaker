@@ -35,21 +35,24 @@ const lastChoice = (spy: ReturnType<typeof vi.fn>): OperationChoice | null =>
   spy.mock.calls[spy.mock.calls.length - 1]?.[0] as OperationChoice | null;
 
 describe('#1107 — the question step knows the rotary', () => {
-  it('renders the On a rod group before the picker when the rotary is on the pins', () => {
+  it('#1123-92/93 the rod tiles sit in the ONE grid — no "On a rod" section — and Something else… is the last tile', () => {
     renderStep();
-    const group = screen.getByTestId('start-wizard-rotary-intents');
-    const cards = screen.getByTestId('start-wizard-presets');
-    // #1100 folded the rod intents into the card list: with the machine in the chuck the rod
-    // group is listed FIRST, above the flat cards.
-    expect(group.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    for (const id of ['dowel', 'faces', 'relief']) {
-      expect(screen.getByTestId(`start-wizard-rotary-intent-${id}`)).toBeDefined();
-    }
+    const grid = screen.getByTestId('start-wizard-presets');
+    // No separate group and no heading.
+    expect(screen.queryByTestId('start-wizard-rotary-intents')).toBeNull();
+    expect(document.body.textContent).not.toContain('On a rod');
+    const ids = Array.from(grid.querySelectorAll('button[data-testid]')).map((b) => b.getAttribute('data-testid'));
+    for (const id of ['dowel', 'faces', 'relief']) expect(ids).toContain(`start-wizard-rotary-intent-${id}`);
+    // The rod tiles come after the flat intents and before Something else…, which is last.
+    expect(ids[ids.length - 1]).toBe('start-wizard-preset-something-else');
+    expect(ids.indexOf('start-wizard-rotary-intent-dowel')).toBeGreaterThan(ids.indexOf('start-wizard-preset-sign'));
   });
 
-  it('is absent when the house owns no rotary', () => {
+  it('shows no rod tile when the house owns no rotary', () => {
     renderStep({ owned: false, onPins: false });
-    expect(screen.queryByTestId('start-wizard-rotary-intents')).toBeNull();
+    expect(screen.queryByTestId('start-wizard-rotary-intent-dowel')).toBeNull();
+    const ids = Array.from(screen.getByTestId('start-wizard-presets').querySelectorAll('button[data-testid]')).map((b) => b.getAttribute('data-testid'));
+    expect(ids[ids.length - 1]).toBe('start-wizard-preset-something-else');
   });
 
   it('picking Name on a dowel reports a rotary text choice and shows the rotary field', () => {

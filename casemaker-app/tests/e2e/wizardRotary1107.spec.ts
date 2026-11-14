@@ -117,7 +117,7 @@ test('#1107 — a new run reaches a rotary text job from the On a rod group', as
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   // The house owns the rotary: the rod intents are there, before the flat picker.
-  await expect(page.getByTestId('start-wizard-rotary-intents')).toBeVisible();
+  await expect(page.getByTestId('start-wizard-rotary-intent-dowel')).toBeVisible();
   // The folded list: the rod cards sit in the SAME question as the eight flat intents.
   await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
   // #1107 item 6 — step 2 WITH the rotary, pinned.
@@ -158,6 +158,6 @@ test('#1107 — step 2 without the rotary: no rod intents, and the step pinned',
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 2 of 4 · What are you making?');
 
   await expect(page.getByTestId('start-wizard-presets')).toBeVisible();
-  await expect(page.getByTestId('start-wizard-rotary-intents')).toHaveCount(0);
+  await expect(page.getByTestId('start-wizard-rotary-intent-dowel')).toHaveCount(0);
   await expect(page.getByTestId('engrave-setup-step-what')).toHaveScreenshot('step2-without-rotary.png');
 });

@@ -136,10 +136,10 @@ test('step 2 refuses a new run with nothing picked, and a pick walks on (#1107 s
   await expect(page.getByTestId('start-wizard-progress')).toHaveText(
     'Step 2 of 4 · What are you making?',
   );
-  // Nothing picked: the primary still reads Create the job, and it carries its reason.
+  // Nothing picked: the primary reads Next: stock (#1123-76: never "Create the job", that is the last step's), and carries its reason.
   // #1109 item 8 — the reason is a VISIBLE line now, not only the button's title.
   const next = page.getByTestId('start-wizard-operation-next');
-  await expect(next).toHaveText('Create the job');
+  await expect(next).toHaveText('Next: stock');
   await expect(next).toBeDisabled();
   await expect(page.getByTestId('start-wizard-operation-unblock')).toHaveText('Pick what to make first.');
 

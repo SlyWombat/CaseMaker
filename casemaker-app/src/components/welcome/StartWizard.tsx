@@ -1423,11 +1423,9 @@ export function StartWizard(): JSX.Element {
                 disabled={operationCreateBlocked(operationChoice, { reEntry: jobStarted }) !== null}
                 onClick={next}
               >
-                {operationChoice === null
-                  ? jobStarted
-                    ? 'Done'
-                    : 'Create the job'
-                  : wizardNextLabel('operation', reEntry)}
+                {/* #1123-76 — nothing picked on a NEW run reads "Next: stock" (disabled, with its reason in the
+                    title), the same word it has once a card is picked: "Create the job" belongs to the last step. */}
+                {operationChoice === null && jobStarted ? 'Done' : wizardNextLabel('operation', reEntry)}
               </button>
             )}
           </div>

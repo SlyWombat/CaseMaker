@@ -17,7 +17,7 @@
  * exit.
  */
 
-import { useLayoutEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { newItemDepthFor, newTargetObjectId, useEngraveJobStore } from '@/store/engraveJobStore';
 import type { PcbAlignmentOffer } from '@/engine/import/pcbAlignment';
@@ -840,29 +840,24 @@ export function OperationStep({
   const faceField = rotary && (rotaryPicked === 'flat' || rotaryPicked === 'faces-all-round' || rotaryPicked === 'cross-hole');
   const sideGrid = useSelectionChipGrid();
   // #1107 — the rod intents as cards in the question's own list.
-  const rodCards = (
-    <div data-testid="start-wizard-rotary-intents" role="group" aria-label="On a rod" style={{ margin: '0 0 8px' }}>
-      <div style={FIELD_HEADING}>On a rod</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 4 }}>
-        {ROD_INTENTS.map((intent) => (
-          <button
-                className="sw-btn"
-            key={intent.id}
-            type="button"
-            data-testid={`start-wizard-rotary-intent-${intent.id}`}
-            onClick={() => startRotary(intent.pick)}
-            style={PRESET}
-          >
-            <span style={{ color: '#c9d4e2', lineHeight: 0 }}>
-              <PresetArt id={intent.art} />
-            </span>
-            <b style={{ fontSize: 12, fontWeight: 600 }}>{intent.title}</b>
-            <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{intent.blurb}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+  // #1123-92 — the rod intents are TILES IN THE ONE GRID (no "On a rod" section, no heading): after the
+  // flat intents, before "Something else…", which is always the last tile (#1123-93).
+  const rodTiles = ROD_INTENTS.map((intent) => (
+    <button
+      className="sw-btn"
+      key={intent.id}
+      type="button"
+      data-testid={`start-wizard-rotary-intent-${intent.id}`}
+      onClick={() => startRotary(intent.pick)}
+      style={PRESET}
+    >
+      <span style={{ color: '#c9d4e2', lineHeight: 0 }}>
+        <PresetArt id={intent.art} />
+      </span>
+      <b style={{ fontSize: 12, fontWeight: 600 }}>{intent.title}</b>
+      <span style={{ fontSize: 11, color: '#9aa4b0', lineHeight: 1.35 }}>{intent.blurb}</span>
+    </button>
+  ));
 
       const surfaceFieldNode = surfaceField ? (
         <div data-testid="start-wizard-op-field" style={FIELD_BOX}>
@@ -1215,7 +1210,6 @@ export function OperationStep({
         <>
           {/* #1107 — the rod intents are CARDS IN THE SAME LIST: first when the rotary is on the
               pins, after the flat intents otherwise. One door into the question, not two. */}
-          {rotaryFacts.owned && rotaryFacts.onPins && rodCards}
           {/* #1100 — WHAT ARE YOU MAKING? Eight intents, each with a visible blurb; the sixteen
               engine chips are under Something else…, where the panel's vocabulary belongs. */}
           <div
@@ -1225,7 +1219,8 @@ export function OperationStep({
             style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, margin: '4px 0 8px' }}
           >
 
-            {WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true).map((p) => {
+            {[...WIZARD_PRESETS.filter((p) => p.rotaryOnly !== true && p.id !== 'something-else'), ...(rotaryFacts.owned ? (['rods'] as const) : []), ...WIZARD_PRESETS.filter((p) => p.id === 'something-else')].map((p) => {
+              if (p === 'rods') return <Fragment key="rods">{rodTiles}</Fragment>;
               const card = (
                 <button
                   key={p.id}
@@ -1259,7 +1254,6 @@ export function OperationStep({
             })}
 
           </div>
-          {rotaryFacts.owned && !rotaryFacts.onPins && rodCards}
           {preset === 'something-else' && (
             frameRotary ? (
               <RotaryOperationPicker

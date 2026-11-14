@@ -76,8 +76,9 @@ afterEach(() => cleanup());
 describe('#1180 — #1107 supersedes item 3’s empty job on a new run', () => {
   it('an untouched step 2 is refused with its reason, and no empty job is made', () => {
     openAtQuestion();
-    // The primary still reads Create the job, and it carries the reason it cannot press.
-    expect(primary().textContent).toBe('Create the job');
+    // #1123-76 — the primary reads Next: stock (the word it has once a card is picked), never "Create the job"
+    // (that is the last step's), and it carries the reason it cannot press.
+    expect(primary().textContent).toBe('Next: stock');
     expect(primary().disabled).toBe(true);
     // #1109 item 8 — the reason is a VISIBLE line above the footer, never only a title.
     expect(primary().getAttribute('title')).toBeNull();

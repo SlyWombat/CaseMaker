@@ -24,7 +24,7 @@ export function PresetArt({ id }: { id: PresetId }): JSX.Element {
       return (
         <svg {...common}>
           <rect x="8" y="12" width="48" height="24" rx="2" />
-          <path d="M16 30V18h6m-6 6h5M26 30l4-12 4 12m-6-4h4M38 30V18h4a3 3 0 0 1 0 6h-4M46 18v12" />
+          <path d="M16 30l4-12 4 12m-6-4h4M28 30V18h4a3 3 0 0 1 0 6h-4m4 0a3 3 0 0 1 0 6h-4M46 19.5a6 6 0 1 0 0 9" />
         </svg>
       );
     case 'design-file':
