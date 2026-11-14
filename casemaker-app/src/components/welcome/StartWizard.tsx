@@ -49,7 +49,7 @@ import { MachineStep } from './MachineStep';
 import { StockStep } from './StockStep';
 import { HoldingStep } from './HoldingStep';
 import { openMachineChange } from '@/components/machine-change';
-import { boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
+import { HOLDING_ASK_BLOCK, boardChoices, currentMount, facingForSeat, machineNow, mechanismOf, rodViseProblem, seatShopFrom } from './holdingMounts';
 import { accessoryFor, activeProfileOf } from '@/platform/machineChange';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
@@ -392,8 +392,14 @@ export function StartWizard(): JSX.Element {
   // app's own vise model is, and a bed job has no jaw tops to clear.
   const viseOnPins = useMemo(() => {
     const now = machineNow(machineForJob(location, job.machineId));
-    return now === null || now.mount === 'vise';
-  }, [location, job.machineId]);
+    // #1273 — nothing recorded is not "a vise": no jaws are the fixture over this blank, unless the
+    // job states a vise of its own (a file, a saved job, the operator's pick).
+    if (now === null) {
+      const hold = job.workholding;
+      return hold.kind === 'vise' && (hold.vise.source === 'saved' || hold.vise.assumed === true);
+    }
+    return now.mount === 'vise';
+  }, [location, job.machineId, job.workholding]);
   // #1107 — the ROTARY facts the question step offers its rod intents from: whether the house
   // owns one (the location's accessories) and whether it is on the pins (the machine's state).
   const rotaryFacts = useMemo(() => {
@@ -1326,7 +1332,7 @@ export function StartWizard(): JSX.Element {
               {sentence(holdingBlock)}
             </p>
           )}
-          {holdingBlock === null && mountBlocked !== null && (
+          {holdingBlock === null && mountBlocked !== null && mountBlocked !== HOLDING_ASK_BLOCK && (
             <p style={UNBLOCK} data-testid="start-wizard-holding-unblock">
               {sentence(mountBlocked)}
             </p>

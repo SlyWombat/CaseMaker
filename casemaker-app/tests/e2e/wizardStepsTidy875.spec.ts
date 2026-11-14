@@ -7,7 +7,7 @@
 // "not read from a machine record" on every job without one.
 
 import type { Page } from '@playwright/test';
-import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.use({ viewport: { width: 400, height: 900 } });
 
@@ -59,6 +59,7 @@ test('#875 — phone step 3: the picture first, the hold fold shut with its answ
   await toStock(page);
   await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  await pickAssumedMount(page, 'ledge'); // #1273 — nothing recorded: no picture until a seat is chosen
 
   // The picture is the FIRST thing the step offers on a phone: above the mount radios.
   const picture = page.getByTestId('engrave-setup-holding-picture');

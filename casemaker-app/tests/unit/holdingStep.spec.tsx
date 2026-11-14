@@ -410,14 +410,51 @@ describe('#684 — the machine’s state and the stock’s numbers decide the mo
     });
   });
 
-  it('no machine record: the app’s three vise mounts still work, with no dead escape', () => {
+  // #1273 — was "the app's three vise mounts still work" with the ledge preselected: nothing recorded
+  // was treated as a vise. Now the step ASKS: every mount the product knows is listed, none is
+  // selected, Create waits, and the operator's own pick is carried as their assumption.
+  it('#1273 no machine record: the step asks, lists every mount, selects none, and carries a pick as an assumption', () => {
     openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
 
     // #875 — no record, no band: a line that fired on every such job said nothing.
     expect(screen.queryByTestId('engrave-setup-machine-now')).toBeNull();
-    expect(radio('ledge').checked).toBe(true);
-    expect(screen.queryByTestId('engrave-setup-mount-bed-tape')).toBeNull();
-    expect(screen.queryByTestId('engrave-setup-change-machine')).toBeNull();
+    expect(screen.getByTestId('engrave-setup-holding-ask-sentence').textContent).toBe('No machine is recorded for this shop yet.');
+    expect(screen.getByTestId('engrave-setup-holding-ask-action').textContent).toBe('Add the machine');
+    // The approved mock-up: the action is the PRIMARY style; the old sub-heading is hidden while the ask
+    // shows; a row that cannot be chosen shows its name and its need only (no glossary under the bracket).
+    expect(screen.getByTestId('engrave-setup-holding-ask-action').className).toContain('sw-btn--primary');
+    expect(screen.queryByTestId('engrave-setup-holding-heading')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-anchor-gloss')).toBeNull();
+    expect(screen.getByTestId('engrave-setup-holding-ask-caption').textContent).toContain('You can also choose one yourself');
+    for (const m of ['ledge', 'board', 'block', 'bed-tape', 'bed-bracket', 'rotary'] as const) {
+      expect(radio(m).checked, `${m} must not be selected`).toBe(false);
+    }
+    for (const m of ['ledge', 'board', 'block'] as const) expect(radio(m).disabled).toBe(false);
+    for (const m of ['bed-tape', 'bed-bracket', 'rotary'] as const) expect(radio(m).disabled).toBe(true);
+    expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId('engrave-setup-holding-assumed')).toBeNull();
+    expect(useEngraveJobStore.getState().job.workholding.kind).toBe('vise');
+
+    act(() => {
+      fireEvent.click(radio('board'));
+    });
+    expect(radio('board').checked).toBe(true);
+    expect(screen.getByTestId('engrave-setup-holding-assumed').textContent).toBe(
+      'You chose this yourself; no machine is recorded. The piece’s fit cannot be checked until it is.',
+    );
+    expect((screen.getByTestId('engrave-setup-next') as HTMLButtonElement).disabled).toBe(false);
+    const wh = useEngraveJobStore.getState().job.workholding;
+    expect(wh.kind === 'vise' && wh.vise.assumed === true).toBe(true);
+  });
+
+  it('#1273 a machine recorded with no bed profile: the ask says the bed is not described, and Describe the bed is the action', () => {
+    seedLocation(machineWith(null, (m) => {
+      delete (m as { bedProfiles?: unknown }).bedProfiles;
+    }));
+    openHolding(dj({ length: 76.2, width: 38.1, thickness: 3.81 }));
+    expect(screen.getByTestId('engrave-setup-holding-ask-sentence').textContent).toBe('The machine is recorded, but its bed is not described yet.');
+    expect(screen.getByTestId('engrave-setup-holding-ask-action').textContent).toBe('Describe the bed');
+    expect(radio('ledge').checked).toBe(false);
   });
 
   it('#1104 — a build that cannot drive a machine keeps the machine-only rows, disabled, and never offers the change wizard', () => {
@@ -1062,20 +1099,18 @@ describe('#1104 items 2, 4, 6 — the actions in place, the web build’s rows, 
     expect(useManageModeStore.getState().scope).toBe('machines');
   });
 
-  it('a cell with no rows renders the guard and its actions; Back to the stock step goes to Stock', () => {
-    // A 150 mm rod with no machine record: no vise seat exists for it, and no rotary is offered
-    // without a machine — the cell is empty, and says what to do instead of a silent gap.
+  it('#1273 a 150 mm rod with no machine record: no vise seat, the chuck listed and waiting for the machine, and the ask\'s action goes to Manage', () => {
+    // Was the empty-cell guard (#1104): with every mount now listed, the rotary row stands in the cell,
+    // disabled with its reason, and the ask's one action is Add the machine. No caption: no seat to choose.
     const rod: JobStockEntry = { kind: 'made', shelfId: null, file: null, form: 'rod', finish: 'rough', conductive: false };
     openHolding(dj({ length: 12, width: 12, thickness: 150, shape: 'cylinder' as const, diameter: 12 }, rod));
-    const guard = screen.getByTestId('engrave-setup-no-hold');
-    expect(guard.textContent).toContain('Nothing set up here can hold a');
-    fireEvent.click(screen.getByTestId('engrave-setup-no-hold-add-machine'));
+    expect(screen.queryByTestId('engrave-setup-no-hold')).toBeNull();
+    expect(screen.queryByTestId('engrave-setup-mount-ledge')).toBeNull();
+    expect(radio('rotary').disabled).toBe(true);
+    expect(rowText('rotary')).toContain('comes with the machine');
+    expect(screen.queryByTestId('engrave-setup-holding-ask-caption')).toBeNull();
+    fireEvent.click(screen.getByTestId('engrave-setup-holding-ask-action'));
     expect(useManageModeStore.getState().scope).toBe('machines');
-    act(() => {
-      useManageModeStore.getState().closeManage();
-    });
-    fireEvent.click(screen.getByTestId('engrave-setup-no-hold-back'));
-    expect(screen.getByTestId('start-wizard-progress').textContent).toContain('Stock');
   });
 
   it('item 1 — a disc’s caption says "or tape it" only while the tape row is on offer', () => {

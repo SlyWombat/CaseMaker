@@ -3,6 +3,7 @@
 // the project's part sized to the stock. The shelf is a fake house client (as `stockShelf.spec.ts`
 // fakes it); `scheduleImmediate` is mocked because jsdom has no geometry worker.
 
+import { pickAssumedMount } from '../tools/holdingPick';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -198,6 +199,7 @@ describe('the material-first start (#418)', () => {
     expect(svc.calls.filter((c) => !c.startsWith('GET'))).toEqual([]);
 
     // The last step's Create makes the one operation asked for at the question and lands in Design.
+    pickAssumedMount('ledge'); // #1273 — nothing recorded: the step asks; the operator chooses
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
     expect(screen.queryByTestId('start-wizard')).toBeNull();
 

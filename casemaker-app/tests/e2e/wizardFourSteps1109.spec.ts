@@ -31,5 +31,8 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
   await page.getByTestId('start-wizard-make-thickness').fill('36');
   await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1273 — nothing recorded: the step shows the ask, with no seat selected and Create waiting.
+  await expect(page.getByTestId('engrave-setup-holding-ask')).toBeVisible();
+  await expect(page.getByTestId('engrave-setup-next')).toBeDisabled();
   await expect(page).toHaveScreenshot('1109-step4-holding.png');
 });

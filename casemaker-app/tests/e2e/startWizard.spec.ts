@@ -9,7 +9,7 @@
 // never block.
 
 import { fileURLToPath } from 'node:url';
-import { test, expect, openSomethingElse, openSignCard, stockNext } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, openSignCard, stockNext, pickAssumedMount } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -254,7 +254,10 @@ test('#897 — a mesh goal proposes its box, and is centred on the blank it land
   await expect(reason).toBeVisible();
   await expect(reason).toContainText('Recommended:');
   await expect(reason).toContainText('2.1 mm of the cut would be below the jaw tops');
-  // The recommended seat is the one the step arrives in: the board row, selected.
+  // #1273 — nothing recorded: the step arrives ASKING with no seat selected; the recommendation is
+  // advice, and the operator takes it by choosing the board row.
+  await expect(page.getByTestId('engrave-setup-mount-board')).not.toBeChecked();
+  await pickAssumedMount(page, 'board');
   await expect(page.getByTestId('engrave-setup-mount-board')).toBeChecked();
   await page.getByTestId('engrave-setup-step-holding').screenshot({ path: 'test-results/1103-holding-seat.png' });
   await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
@@ -302,6 +305,9 @@ test('#698 — the orientation fold draws the three landmarks, on the desktop an
   // The badge starter brings a printed blank — a face worth telling apart — and lands on Holding.
   await page.getByTestId('welcome-starter-badge-blank').click();
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
+  // #1273 — nothing recorded: no which-way-round fold until a seat is chosen.
+  await expect(page.getByTestId('engrave-setup-hold-fold')).toHaveCount(0);
+  await pickAssumedMount(page, 'ledge');
 
   // #1101 — the hold cards and the landmarks are ONE fold now, "Which way round".
   const fold = page.getByTestId('engrave-setup-hold-fold');

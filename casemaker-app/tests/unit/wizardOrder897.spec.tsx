@@ -17,6 +17,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { resetStartWizard, useStartWizardStore } from '@/store/startWizardStore';
 import { resetStockStore } from '@/store/stockStore';
+import { pickAssumedMount } from '../tools/holdingPick';
 
 vi.mock('@/engine/jobs/JobScheduler', () => ({ scheduleImmediate: vi.fn(async () => {}) }));
 // The board's chip drives the store's real import action. Its PLANNER needs the Manifold runtime
@@ -192,6 +193,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
     expect(screen.queryByTestId('start-wizard-holding-block')).toBeNull();
     expect(screen.getByTestId('engrave-setup-next').textContent).toBe('Create the job');
+    pickAssumedMount('ledge'); // #1273 — nothing recorded: the step asks, the operator chooses
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
 
     const job = useEngraveJobStore.getState().job;
@@ -247,6 +249,7 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
 
     await leaveStock();
     expect(screen.getByTestId('engrave-setup-step-holding')).toBeDefined();
+    pickAssumedMount('ledge'); // #1273 — nothing recorded: the step asks, the operator chooses
     fireEvent.click(screen.getByTestId('engrave-setup-next'));
 
     const job = useEngraveJobStore.getState().job;
