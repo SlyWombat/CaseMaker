@@ -610,6 +610,71 @@ export function programFileNames(
 /** #1237 — what the run says (and the receipt records) when the location file has no settings section. */
 export const NO_SETTINGS_SECTION = 'this location file has no settings section; planned on the recommendations.';
 
+/**
+ * #1126 slice 2 — THE RESULT WITHOUT THE BYTES.
+ *
+ * `--generated` used to write the whole `EngraveGenerated`: 229 MB for the set B tray bottom, of
+ * which `camIr` (an internal IR no browser code reads off a document) was ~95 %, and every NC text
+ * appeared twice (the top-level adapter and the program it mirrors) on top of the files already
+ * written under `--out`. v2 nulls those and lists the files by the names `writeProgram` gave them.
+ *
+ * The TOP-LEVEL ALIASES ARE MATCHED, NOT ASSUMED: the generator's `nc` describes the finishing
+ * program of a split goal, not program 1, so `ncProgram`/`frameProgram`/`facingProgram` name the
+ * index each alias mirrors — found by the same text match `writeProgram` makes for `sweptIndex`.
+ * A reader that rebuilds by "program 1" would hand the store a different program's text.
+ *
+ * Everything else — findings, verify, cam, plans, goal checks, predicted/designItems — stays: the
+ * store settles, gates and prints from those without re-deriving anything.
+ */
+export const RESULT_VERSION = 2;
+
+export interface ResultFileRef {
+  name: string;
+  what: 'program' | 'frame';
+  index: number;
+}
+
+export function resultDocument(
+  jobName: string,
+  generated: EngraveGenerated,
+): Record<string, unknown> & { resultVersion: number; files: ResultFileRef[] } {
+  const names = programFileNames(jobName, generated.programs);
+  const files: ResultFileRef[] = [];
+  const programs = generated.programs.map((program, index) => {
+    const { nc: _nc, camIr: _camIr, ...rest } = program as GeneratedProgram & { camIr?: unknown };
+    files.push({ name: names[index]!.ncFile, what: 'program', index });
+    if (program.frameNc !== null && names[index]!.frameFile !== null) {
+      files.push({ name: names[index]!.frameFile!, what: 'frame', index });
+    }
+    return { ...rest, nc: null, frameNc: null };
+  });
+  const {
+    nc,
+    frameNc,
+    facingNc,
+    camIr: _ir,
+    programs: _programs,
+    ...rest
+  } = generated as EngraveGenerated & { camIr?: unknown };
+  const engraving = (program: GeneratedProgram): boolean => (program.kind ?? 'engrave') !== 'facing';
+  const match = (predicate: (program: GeneratedProgram) => boolean): number | null => {
+    const found = generated.programs.findIndex(predicate);
+    return found < 0 ? null : found;
+  };
+  return {
+    ...rest,
+    resultVersion: RESULT_VERSION,
+    nc: null,
+    frameNc: null,
+    facingNc: null,
+    ncProgram: nc === null ? null : match((p) => engraving(p) && p.nc === nc),
+    frameProgram: frameNc === null ? null : match((p) => engraving(p) && p.frameNc === frameNc),
+    facingProgram: facingNc === null ? null : match((p) => p.nc === facingNc),
+    programs,
+    files,
+  };
+}
+
 export async function engraveJobMain(argv: string[], options: CommandOptions = HUMAN): Promise<number> {
   const receipt: RunReceipt = {};
   try {
@@ -1979,7 +2044,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       preview?: boolean;
       /** #1134 — the pick's measured owned plan (see `prepare`). */
       reusedOwnedPlan?: ModelPlanOutput | null;
-      /** #1126 — write the run's whole generated document here (JSON). */
+      /** #1126 — write the run's RESULT DOCUMENT here (JSON, `resultDocument`'s v2 shape). */
       generatedFile?: string;
     },
   ): Promise<JobResult> {
@@ -1997,24 +2062,22 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       }
       return prepared;
     }
-    if (opts.generatedFile !== undefined) {
-      // The browser's worker returns this same plain-data object; the house writes it beside the
-      // programs so the panel settles a house run exactly as it settles an in-page one.
-      writeFileSync(opts.generatedFile, JSON.stringify(prepared.generated));
-    }
     const sampling = samplingRows(prepared.generated);
     if (sampling !== undefined) runSampling = sampling;
-    return {
-      ok: true,
-      ...writeProgram(prepared, outDir, {
-        writeJobDocument: opts.writeJobDocument,
-        note: opts.note,
-        ...(opts.reachability === undefined
-          ? {}
-          : { sheetOptions: { reachability: opts.reachability, ...(opts.unreachable ? { unreachable: opts.unreachable } : null) } }),
-        ...(opts.preview === true ? { preview: true } : null),
-      }),
-    };
+    const written = writeProgram(prepared, outDir, {
+      writeJobDocument: opts.writeJobDocument,
+      note: opts.note,
+      ...(opts.reachability === undefined
+        ? {}
+        : { sheetOptions: { reachability: opts.reachability, ...(opts.unreachable ? { unreachable: opts.unreachable } : null) } }),
+      ...(opts.preview === true ? { preview: true } : null),
+    });
+    if (opts.generatedFile !== undefined) {
+      // #1126 slice 2 — after the programs are written, so every name the result lists exists on
+      // disk; the document itself carries no NC text and no `camIr` (see `resultDocument`).
+      writeFileSync(opts.generatedFile, JSON.stringify(resultDocument(job.name, prepared.generated)));
+    }
+    return { ok: true, ...written };
   }
 
 
