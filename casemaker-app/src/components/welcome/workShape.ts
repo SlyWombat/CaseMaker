@@ -24,73 +24,6 @@ import type { StockItem } from '@/platform/stockClient';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { OperationChoice } from './OperationStep';
 
-/** The cap height a proposed blank is sized for, mm; the label's own fit resizes the line to it. */
-export const PROPOSED_TEXT_SIZE_MM = 10;
-
-/**
- * #930 — THE HOUSE'S STOCK, in one place: a 36 × 36 × 100 mm hardwood stick, the shop's material
- * (maintainer, 2026-11-02) and the blank the milestone's samples are cut on.
- *
- * The wizard PROPOSES this for work that does not size its own blank (a line of text, a pocket,
- * a chamfer …). Before #930 a line of text proposed a plate sized from its ink — 60.3 × 20.1 ×
- * 1.5 mm for "Zoomba" — which the wizard's own facing pass then drove into the vise jaws, and the
- * pocket proposed nothing at all. A first job is cut from the stick the shop has on the shelf, so
- * that is what the blank step opens on; the operator can change every number.
- *
- * THE STICK LIES ALONG THE JAWS: 100 mm along Y (the jaws are 100 mm long, a calipered product
- * constant), 36 mm along X (between them). The other way round — 100 mm between the jaws — would
- * need a maximum opening nobody has measured, so only this orientation rests on known numbers.
- * That is the `block` form, worked on its 36 × 100 face; its 36 mm height puts it on the vise's
- * body (16 mm above the jaw tops) rather than on the 3.1 mm ledge.
- */
-export const HOUSE_STOCK = {
-  form: 'block' as const,
-  material: 'hardwood' as const,
-  length: 36,
-  width: 100,
-  thickness: 36,
-} as const;
-
-/** The blank step's proposal for the house stock, with the sentence that says where it came from. */
-export function houseStockProposal(): StockProposal {
-  return {
-    ...HOUSE_STOCK,
-    // #934 — THE STICKS ARE TAKEN AS PLANED STOCK (maintainer, 2026-11-02): a finished face is cut
-    // as it is, so the first-job path does not face — and the post-facing re-touch, which this
-    // milestone hides until its bench run, is not on it. The operator can still choose "as bought".
-    finish: 'finished',
-    sentence: 'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
-  };
-}
-
-/**
- * #930 — the blank a new job is proposed: the work's own when it sizes one (a mesh's box, a
- * board's outline), the house's stick for everything else. A job already held in the rotary chuck
- * keeps its own start (`workShapeFor` answers `none` for it), so nothing here invents a stick.
- */
-export function proposedStockFor(
-  work: WorkShape,
-  job: EngraveJob,
-  proposed: StockProposal | null,
-): StockProposal | null {
-  // #1098 — a drawing is work that sizes its own blank, exactly as a mesh or a board does.
-  // #1100 — a cut-out and a pocket size their own too (the presets' proposals).
-  // #1107 — a rod answer sizes the rod.
-  if (
-    work.kind === 'mesh' ||
-    work.kind === 'pcb' ||
-    work.kind === 'outline' ||
-    work.kind === 'cutout' ||
-    work.kind === 'pocket' ||
-    work.kind === 'rod' ||
-    (work.kind === 'text' && work.sign === true)
-  ) {
-    return proposed;
-  }
-  if (rotaryMapOf(job, liveShopDefaults()) !== null) return proposed;
-  return houseStockProposal();
-}
-
 /**
  * The material a proposed blank opens on.
  *
@@ -146,7 +79,11 @@ export function partFootprintFor(work: WorkShape): PartFootprint | null {
 }
 
 /** What this step's answer is, for the stock proposal. */
-export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): WorkShape {
+export function workShapeFor(
+  choice: OperationChoice | null,
+  job: EngraveJob,
+  defaults: ShopDefaults | null = liveShopDefaults(),
+): WorkShape {
   if (choice === null) return { kind: 'none' };
   // A ROD in the chuck is sized by its own start (the dowel/template flow), not by its goal's box.
   if (rotaryMapOf(job, liveShopDefaults()) !== null) return { kind: 'none' };
@@ -187,7 +124,7 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
       // #1100 — the shape the card drew, through the blank.
       return { kind: 'cutout', length: choice.length, width: choice.width };
     case 'pocket':
-      // A bare pocket chip carries no numbers (it keeps the house's stick); the preset's does.
+      // A bare pocket chip carries no numbers (its blank is the shelf's, or the default); the preset's does.
       return choice.length === undefined || choice.width === undefined || choice.depth === undefined
         ? { kind: 'none' }
         : { kind: 'pocket', length: choice.length, width: choice.width, depth: choice.depth };
@@ -201,8 +138,8 @@ export function workShapeFor(choice: OperationChoice | null, job: EngraveJob): W
         choice.font,
         'bold',
         // #1100 — the sign card's letter size is the size the blank is sized for; the other
-        // engrave entries keep the proposal's documented 10 mm cap.
-        choice.sizeMm ?? PROPOSED_TEXT_SIZE_MM,
+        // engrave entries are measured at the shop's default letter size (#1259).
+        choice.sizeMm ?? readDefault(defaults, 'wizard.defaultLetterSizeMm').value,
         labelGlyphMeasure(job.customFonts ?? []),
       );
       return {

@@ -62,8 +62,8 @@ export interface PresetAnswers {
   /** The sign's (or dowel's) text. */
   text: string;
   /**
-   * #1100 item 3 (ruling b) — UNCHOSEN by default: the line is then fitted to the house's stick
-   * (#930's rule). Only CHOOSING a size asks for the plate sized from the line.
+   * #1100 item 3 (ruling b) — UNCHOSEN by default: the line is then measured at the shop's default letter size and
+   * fitted to the blank the shelf gives (#1259). Only CHOOSING a size asks for the plate sized from the line.
    */
   letterSize: LetterSizeId | null;
   font: TextFont;
@@ -117,7 +117,7 @@ export function presetChoice(id: PresetId, answers: PresetAnswers): OperationCho
     case 'sign':
       // The empty text still yields the engrave choice, so the step's own gate can say "Type the
       // text to engrave." rather than the footer silently offering an empty job.
-      // Ruling b — no size chosen is #930's default: the house's stick, the letters fitted to it.
+      // Ruling b — no size chosen: the line is measured at the shop's default letter size (#1259) and fitted to the blank.
       return {
         type: 'engrave',
         text: answers.text,
@@ -152,7 +152,7 @@ export function presetWorkShape(id: PresetId, answers: PresetAnswers): WorkShape
     case 'sign': {
       if (answers.text.trim() === '') return null;
       // Ruling b — the size is optional; without one the work shape does NOT size the blank
-      // (the house stick stands, #930), so only a chosen size carries the sign marker.
+      // (the blank comes from the shelf, #1259), so only a chosen size carries the sign marker.
       const sized = answers.letterSize !== null;
       const size = answers.letterSize === null ? 10 : letterSizeMm(answers.letterSize);
       // The line's extent is measured per character conservatively: the real measure runs where a

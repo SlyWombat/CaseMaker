@@ -11,8 +11,9 @@ import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import { operationCreateBlocked } from '@/components/welcome/operationCreate';
 import { WIZARD_PRESETS, defaultPresetAnswers, presetChoice, presetWorkShape } from '@/components/welcome/presets';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
-import { proposeStock } from '@/engine/cnc/stockProposal';
-import { proposedStockFor } from '@/components/welcome/workShape';
+import { proposeBlank, proposeStock } from '@/engine/cnc/stockProposal';
+import { testShopStickRecord } from '../tools/testShopStock';
+import type { StockItem } from '@/platform/stockClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { inkBoxOf } from '@/engine/cnc/engrave/inkBox';
 import { labelGlyphMeasure } from '@/engine/cnc/engrave/partPlan';
@@ -23,9 +24,9 @@ afterEach(cleanup);
 const answers = defaultPresetAnswers();
 
 describe('#1100 — the preset answers', () => {
-  // #1100 item 3, ruling b — THE DEFAULT SIGN IS #930's: no size chosen, so the line is fitted
-  // to the house's stick and nothing is sized from the text.
-  it('an unchosen letter size proposes the house stick, not a plate', () => {
+  // #1100 item 3, ruling b — no size chosen, so the line is measured at the shop's default letter
+  // size and the blank is the shelf's (#1259): on a shop whose shelf states one stick, that stick.
+  it('an unchosen letter size proposes the shelf’s stick, not a plate', () => {
     const a = { ...answers, text: 'Hello' };
     expect(a.letterSize).toBeNull();
     const choice = presetChoice('sign', a)!;
@@ -34,11 +35,13 @@ describe('#1100 — the preset answers', () => {
     const shape = presetWorkShape('sign', a)!;
     expect(shape.kind).toBe('text');
     if (shape.kind === 'text') expect(shape.sign).toBeUndefined();
-    // The wizard's own opening rule keeps the house stick for a text line (#930).
-    expect(proposedStockFor(shape, defaultEngraveJob(), proposeStock(shape))).toMatchObject({
+    const shelf = [testShopStickRecord()] as unknown as StockItem[];
+    expect(proposeBlank(shape, { shelf })).toMatchObject({
       form: 'block',
       length: 36,
       width: 100,
+      finish: 'finished',
+      source: { case: 'shelf', itemId: 'stock-test-shop-stick' },
     });
   });
 
@@ -54,7 +57,8 @@ describe('#1100 — the preset answers', () => {
     const blank = proposeStock(shape, { signMarginMm: 10 })!;
     expect(blank.width).toBeCloseTo(80, 5);
     expect(blank.width - shape.size.width).toBeCloseTo(20, 5);
-    expect(proposedStockFor(shape, defaultEngraveJob(), blank)).toEqual(blank);
+    // A sign's blank is sized from its line; with nothing on the shelf the proposal is that need.
+    expect(proposeStock(shape, { signMarginMm: 10 })).toEqual(blank);
   });
 
   // #1100 item 3 — THE RE-SEAT ON A BLANK CHANGE (the merge defect): a chosen size is the

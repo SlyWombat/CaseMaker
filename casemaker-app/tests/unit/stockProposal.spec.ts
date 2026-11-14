@@ -12,12 +12,13 @@ import {
   WORK_STOCK_SKIN_MM,
   proposeStock,
   proposedThickness,
-  shelfPlateFor,
+  shelfItemFor,
   type WorkShape,
 } from '@/engine/cnc/stockProposal';
 import { KNOWN_DEFAULTS } from '@/platform/defaultsClient';
 import { PCB_BLANK_MARGIN_MM, PCB_STANDARD_THICKNESS_MM } from '@/engine/cnc/stockStart';
-import { PROPOSED_TEXT_SIZE_MM, workShapeFor } from '@/components/welcome/workShape';
+import { workShapeFor } from '@/components/welcome/workShape';
+import { readDefault } from '@/platform/defaultsClient';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
 import type { OperationChoice } from '@/components/welcome/OperationStep';
@@ -68,7 +69,8 @@ describe('#897 — the proposed blank', () => {
       finish: 'rough',
     });
     expect(p.sentence).toBe(
-      `Sized from the mesh: 40 × 30 × 12 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side and ${WORK_STOCK_SKIN_MM} mm under it.`,
+      'No stock is recorded for this shop yet. It needs a blank of at least 50 × 40 × 13 mm, hardwood. ' +
+        `Sized from the mesh: 40 × 30 × 12 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side and ${WORK_STOCK_SKIN_MM} mm under it.`,
     );
   });
 
@@ -114,7 +116,11 @@ describe('#897 — the proposed blank', () => {
       thickness: HOUSE_PLATE_THICKNESS_MM,
       finish: 'rough',
     });
-    expect(p.sentence).toBe(`Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`);
+    // #1259 — the sentence now leads with why: nothing on the shelf held it.
+    expect(p.sentence).toBe(
+      'No stock is recorded for this shop yet. It needs a blank of at least 70 × 70 × 12 mm, hardwood. ' +
+        `Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`,
+    );
   });
 
   it('#1098 — a pocket outline proposes the same plate: the pocket bites into it', () => {
@@ -164,7 +170,7 @@ describe('#897 — the work, in the terms a blank is sized from', () => {
       expect(shape.size.length).toBeGreaterThan(0);
       expect(shape.size.width).toBeGreaterThan(0);
       // The proposed size is the cap height the line is laid out for; the blank follows it.
-      expect(PROPOSED_TEXT_SIZE_MM).toBeGreaterThan(0);
+      expect(readDefault(null, 'wizard.defaultLetterSizeMm').value).toBeGreaterThan(0);
     }
   });
 
@@ -220,6 +226,26 @@ const plate = (id: string, l: number, w: number, t: number, over: Partial<StockI
 
 describe('#1098 — an outline takes the smallest shelf plate that holds it', () => {
   const extent = { length: 60, width: 60 };
+  // #1259 — the same rule through the general function: the need is the extent plus the margin.
+  const shelfPlateFor = (
+    e: { length: number; width: number },
+    needMm: number,
+    material: string | null,
+    shelf: StockItem[],
+  ): StockItem | null =>
+    shelfItemFor(
+      {
+        form: 'plate',
+        material: 'hardwood',
+        length: e.length + 2 * WORK_STOCK_MARGIN_MM,
+        width: e.width + 2 * WORK_STOCK_MARGIN_MM,
+        thickness: needMm,
+        finish: 'rough',
+        sentence: '',
+      },
+      material as never,
+      shelf,
+    );
   it('prefers the smallest area that holds extent + the margin each side, then the thinnest', () => {
     const shelf = [plate('big', 300, 200, 6), plate('fit', 72, 70, 9), plate('fit-thin', 72, 70, 6), plate('small', 60, 60, 12)];
     expect(shelfPlateFor(extent, 0, null, shelf)?.id).toBe('fit-thin');
@@ -254,7 +280,11 @@ describe('#1098 — an outline takes the smallest shelf plate that holds it', ()
   it('no shelf plate fits: the default thickness, which is a shop setting', () => {
     const p = proposeStock(OUTLINE, { shelf: [plate('tiny', 20, 20, 9)], plateThicknessMm: 15 })!;
     expect(p).toMatchObject({ length: 70, width: 70, thickness: 15 });
-    expect(p.sentence).toBe(`Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`);
+    // #1259 — the sentence now leads with why: nothing on the shelf held it.
+    expect(p.sentence).toBe(
+      'Nothing on your shelf holds this. It needs a blank of at least 70 × 70 × 15 mm, hardwood. ' +
+        `Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`,
+    );
     expect(proposeStock(OUTLINE)!.thickness).toBe(HOUSE_PLATE_THICKNESS_MM);
   });
 });

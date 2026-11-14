@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
 import { test, expect, openSomethingElse, openSignCard } from './fixtures/caseMaker';
+import { testShopStickRecord } from '../tools/testShopStock';
 
 test.setTimeout(300_000);
 
@@ -74,7 +75,8 @@ async function fakeLocation(page: Page): Promise<void> {
     if (path === '/health') return json(HEALTH);
     if (path === '/tools') return json([]);
     if (path === '/inventory') return json(DOC.inventory ?? []);
-    if (path === '/stock') return json(DOC.stock ?? []);
+    // #1259 — the shop this walk runs on states its stock: our location's one planed stick.
+    if (path === '/stock') return json([...(DOC.stock ?? []), testShopStickRecord()]);
     if (path === '/defaults') return json(DOC.defaults ?? {});
     if (path === '/location' && req.method() === 'GET') return json(view);
     if (req.method() !== 'GET') return json({ ok: true });
@@ -113,15 +115,13 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   }
   await page.getByTestId('start-wizard-operation-next').click();
 
-  // Step 3 — the house's stick, proposed for both kinds of work.
+  // Step 3 — the shop's recorded stick. A line of text is held by it, so it is the proposal
+  // (#1259); a bare pocket states no size, so the operator picks the stick from the shelf.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
-  await expect(page.getByTestId('engrave-setup-stock-provenance')).toHaveText(
-    'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick, worked on its 36 × 100 face.',
-  );
+  if (kind === 'pocket') await page.getByTestId('start-wizard-shelf-item-stock-test-shop-stick').click();
+  // The stick is the answer either way (a picked card says so in the summary line).
   await expect(page.getByTestId('start-wizard-form-block')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('start-wizard-make-length')).toHaveValue('36');
-  await expect(page.getByTestId('start-wizard-make-width')).toHaveValue('100');
-  await expect(page.getByTestId('start-wizard-make-thickness')).toHaveValue('36');
+  await expect(page.getByTestId('start-wizard-stock-summary')).toContainText('36 × 100 × 36 mm');
   await expect(page.getByTestId('start-wizard-stock-unblock')).toHaveCount(0);
   expectCleanText(`${kind} stock`, await page.getByTestId('start-wizard-body').innerText());
   await page.getByTestId('start-wizard-stock-next').click();
@@ -148,7 +148,7 @@ async function walkToTicks(page: Page, kind: 'engrave' | 'pocket'): Promise<void
   expectCleanText(`${kind} run`, await page.getByTestId('engrave-panel').innerText());
 }
 
-test('#930 — the engrave default reaches four ticks on the house’s stick', async ({ cm, page }) => {
+test('#930 — the engrave default reaches four ticks on the shop’s recorded stick', async ({ cm, page }) => {
   await fakeLocation(page);
   await cm.ready();
   await walkToTicks(page, 'engrave');

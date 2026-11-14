@@ -7,8 +7,7 @@
  * Approved on #1109 (the maintainer tweaked "boss": a raised post or stud, not a pocket island).
  *
  * #1109 item 9 — ONLY TERMS A STEP SHOWS: a term whose word was replaced by the approved plain copy
- * is not in this table (the wizard says "knows where it is", "the address you wrote", "the stock
- * this workshop keeps"; the bore chip's blurb carries "helixed" in plain words; no
+ * is not in this table (the wizard says "knows where it is", "the address you wrote"; the bore chip's blurb carries "helixed" in plain words; no
  * wizard step says "medial axis" or "run-out"). `tests/unit/glossaryTerms.json` is the
  * checked-in list, and `wizardCopy.spec.tsx` fails if a step renders a listed term without this
  * table's line beside it, or if this table has a term no step renders.

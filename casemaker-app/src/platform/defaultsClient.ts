@@ -360,6 +360,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     rule: z.number().min(1).max(50),
     fallback: 10,
   },
+  // #1259 — the cap height a line of text is measured at before the operator has chosen a size, so
+  // the wizard can propose a blank for it from the shop's own shelf (#1207: a setting, not a number
+  // in code).
+  'wizard.defaultLetterSizeMm': {
+    label: 'the letter size a text job is measured at before one is chosen (chosen)',
+    unit: 'mm',
+    rule: z.number().min(1).max(200),
+    fallback: 10,
+  },
   // #1102 — what the run sheet says about the tape under a blank: how many strips, how wide.
   'tape.stripCount': { label: 'tape strips under a blank (chosen)', unit: 'strips', rule: z.number().int().min(1).max(20), fallback: 5 },
   'tape.stripWidthMm': { label: 'tape strip width (the house roll)', unit: 'mm', rule: z.number().min(1).max(200), fallback: 20 },

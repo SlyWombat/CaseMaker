@@ -1046,6 +1046,13 @@
       "unit": "mm",
       "note": "chosen, not measured: the margin the sign preset's proposed plate leaves on every side of its line"
     },
+    "wizard.defaultLetterSizeMm": {
+      "value": 10.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "mm",
+      "note": "chosen, not measured: the letter size the wizard measures a text job at to propose a blank from the shelf, until the operator chooses a size"
+    },
     "tape.stripCount": {
       "value": 5.0,
       "source": "seeded",

@@ -330,6 +330,13 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
         "mm",
         "chosen, not measured: the margin the sign preset's proposed plate leaves on every side of its line",
     ),
+    // #1259 — the cap height a line of text is measured at before a size is chosen.
+    (
+        "wizard.defaultLetterSizeMm",
+        10.0,
+        "mm",
+        "chosen, not measured: the letter size the wizard measures a text job at to propose a blank from the shelf, until the operator chooses a size",
+    ),
     (
         "tape.stripWidthMm",
         20.0,
@@ -1216,6 +1223,7 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "tape.insetMm" => Some(need(n.is_some_and(|v| (0.0..=50.0).contains(&v)), "0 to 50 mm")),
         "stock.defaultPlateThicknessMm" => Some(need(n.is_some_and(|v| (1.0..=100.0).contains(&v)), "1 to 100 mm")),
         "stock.signMarginMm" => Some(need(n.is_some_and(|v| (1.0..=50.0).contains(&v)), "1 to 50 mm")),
+        "wizard.defaultLetterSizeMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
         "tape.stripCount" => Some(need(n.is_some_and(|v| (1.0..=20.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 20")),
         "tape.stripWidthMm" => Some(need(n.is_some_and(|v| (1.0..=200.0).contains(&v)), "1 to 200 mm")),
         "clamps.maxCount" => Some(need(n.is_some_and(|v| (1.0..=8.0).contains(&v) && v.fract() == 0.0), "a whole number, 1 to 8")),

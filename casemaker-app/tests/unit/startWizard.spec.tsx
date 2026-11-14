@@ -6,6 +6,8 @@
 // hand-off does not depend on the rebuild finishing.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { resetStockStore } from '@/store/stockStore';
+import { seedTestShopShelf } from '../tools/testShopStock';
 import { jobVise } from '@/engine/cnc/fixture';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -123,6 +125,7 @@ beforeEach(() => {
   // saved frame rather than inheriting the previous one's.
   useSettingsStore.getState().resetSettings();
   resetStartWizard();
+  resetStockStore();
   useClient(unansweredClient());
   useProjectStore.setState({ project: createDefaultProject('rpi-4b'), welcomeMode: true });
   useViewportStore.setState({ activeSidebarSection: null, selection: null });
@@ -605,7 +608,8 @@ describe('#681 — the wizard with nothing to lean on', () => {
     expect(job.labels[0]!.text).toBe('No bit yet');
   });
 
-  it('the stock step arrives with the house’s stock, and says where it came from', () => {
+  it('the stock step arrives with the shelf’s stick when the shop records one, and says where it came from', () => {
+    seedTestShopShelf();
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
@@ -617,14 +621,32 @@ describe('#681 — the wizard with nothing to lean on', () => {
     // The button that leaves the stock step says what it leads to.
     // #1105 — the press CREATES the job, and now says so.
     expect(next.textContent).toBe('Next: holding — starts the job');
-    // #930 — the shop's 36 × 36 × 100 mm hardwood stick, and the sentence says so.
+    // #1259 — the shop's own recorded stick, and the sentence says so.
     expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain(
-      'The stock this workshop keeps: a 36 × 36 × 100 mm hardwood stick',
+      'From your shelf: hardwood block, 36 × 100 × 36 mm.',
     );
-    // The stick lies ALONG the jaws: 36 mm between them (X), 100 mm along them (Y), 36 tall.
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('36 × 100 × 36 mm');
+    // "edit" opens the numbers, seeded with the stick's: 36 mm between the jaws (X), 100 mm along
+    // them (Y), 36 tall — the entry becomes the operator's own.
+    fireEvent.click(screen.getByTestId('start-wizard-stock-summary-edit'));
     expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('36');
     expect((screen.getByTestId('start-wizard-make-width') as HTMLInputElement).value).toBe('100');
     expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).toBe('36');
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('#1259 — a shop that records no stock is told so, and still gets a blank to start from', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+    const said = screen.getByTestId('engrave-setup-stock-provenance').textContent ?? '';
+    expect(said.startsWith('No stock is recorded for this shop yet. It needs a blank of at least ')).toBe(true);
+    expect(said).toContain('Sized from the text:');
+    // Next is never blocked by it, and no built-in stick appears.
+    expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('start-wizard-make-thickness') as HTMLInputElement).value).not.toBe('36');
 
     // #1109 — the sentence survives typing: a slip must not lose where the numbers came from.
     typePiece();
@@ -642,18 +664,20 @@ describe('#681 — the wizard with nothing to lean on', () => {
     render(<WizardHost />);
     skipToStockStep();
 
-    const length = screen.getByTestId('start-wizard-make-length');
+    const length = screen.getByTestId('start-wizard-make-length') as HTMLInputElement;
+    const seed = length.value;
     fireEvent.change(length, { target: { value: '3' } });
-    fireEvent.change(length, { target: { value: '36' } });
+    fireEvent.change(length, { target: { value: seed } });
     fireEvent.blur(length);
     expect(screen.getByTestId('engrave-setup-stock-provenance')).toBeTruthy();
 
-    fireEvent.change(length, { target: { value: '40' } });
+    fireEvent.change(length, { target: { value: String(Number(seed) + 10) } });
     fireEvent.blur(length);
     expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
   });
 
-  it('a pocket proposes the house’s stock too: Next is ready, with the sentence it came from', () => {
+  it('a pocket from the Something else chips carries no numbers, so it proposes no blank (#1259)', () => {
+    seedTestShopShelf();
     act(() => {
       useStartWizardStore.getState().openWizard();
     });
@@ -661,15 +685,12 @@ describe('#681 — the wizard with nothing to lean on', () => {
     fireEvent.click(screen.getByTestId('start-wizard-next'));
     // #1100 — the engine chips are under Something else… now.
     fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
-    // A pocket sizes no blank of its own; #930 proposes the stock the shop keeps on the shelf.
+    // A bare pocket sizes no blank of its own, and the shelf is not guessed at for work that states
+    // no size: the operator types the piece, or picks one.
     fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
-    const next = screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement;
-    expect(next.disabled).toBe(false);
-    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('The stock this workshop keeps');
-    expect(screen.queryByTestId('start-wizard-stock-unblock')).toBeNull();
-
+    expect(screen.queryByTestId('engrave-setup-stock-provenance')).toBeNull();
     typePiece();
     expect((screen.getByTestId('start-wizard-stock-next') as HTMLButtonElement).disabled).toBe(false);
   });

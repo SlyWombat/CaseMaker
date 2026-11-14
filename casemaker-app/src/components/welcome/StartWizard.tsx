@@ -55,8 +55,8 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
 import type { PendingStock, StartStockSeed } from './StartStockStep';
-import { proposeStock, type StockProposal } from '@/engine/cnc/stockProposal';
-import { partFootprintFor, proposalContextFor, proposedMaterialFor, proposedStockFor, workShapeFor } from './workShape';
+import { proposeBlank, type StockProposal } from '@/engine/cnc/stockProposal';
+import { partFootprintFor, proposalContextFor, proposedMaterialFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
 import { readLastMachineId, writeLastMachineId } from '@/platform/lastMachine';
 import type { MachineRecord } from '@/platform/locationClient';
@@ -374,14 +374,14 @@ export function StartWizard(): JSX.Element {
       live = false;
     };
   }, [operationChoice, job.customFonts]);
+  const shopDefaultsForProposal = useShopDefaultsStore((s) => s.defaults);
   const work = useMemo(() => {
     void fontEpoch; // a parsed face changes the MEASUREMENT, not the choice or the job
-    return workShapeFor(operationChoice, job);
-  }, [operationChoice, job, fontEpoch]);
+    return workShapeFor(operationChoice, job, shopDefaultsForProposal ?? null);
+  }, [operationChoice, job, fontEpoch, shopDefaultsForProposal]);
   const shelfItems = useStockStore((s) => s.items);
-  const shopDefaultsForProposal = useShopDefaultsStore((s) => s.defaults);
   const proposal = useMemo(
-    () => proposedStockFor(work, job, proposeStock(work, proposalContextFor(job, shelfItems, shopDefaultsForProposal ?? null))),
+    () => proposeBlank(work, proposalContextFor(job, shelfItems, shopDefaultsForProposal ?? null)),
     [work, job, shelfItems, shopDefaultsForProposal],
   );
   // #930 — whether the vise's jaws are the fixture over this blank: with no machine record the
