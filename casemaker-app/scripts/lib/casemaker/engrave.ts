@@ -184,7 +184,7 @@ import type { OracleReport } from '../../../src/engine/cnc/engrave/oracle';
 import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/platform/headless/bootstrap';
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
-import type { ModelPlanOutput, PlanOutcome } from '../../../src/engine/cnc/cam/model/plan';
+import type { PlanOutcome } from '../../../src/engine/cnc/cam/model/plan';
 import { buildPcbJob, jobDocumentProblem, type PcbJobFile } from './pcbJob';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../../../src/engine/cnc/engrave/fromDesign';
