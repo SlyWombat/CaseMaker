@@ -4,6 +4,7 @@
 // machine already finished. The upload and the console are fake clients; nothing reaches a machine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerForTest } from '../tools/registeredJob';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { advanceUntil } from './helpers/fakeTime';
 import { EngraveReleaseStep } from '@/components/panels/EngraveReleaseStep';
@@ -50,6 +51,7 @@ import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaul
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import {
+  holdKeyOf,
   resetEngraveRegistrationStore,
   useEngraveRegistrationStore,
 } from '@/store/engraveRegistrationStore';
@@ -196,7 +198,7 @@ function seedRegistration(job: EngraveJob, outcome: RegistrationOutcome = FIRST_
     settings,
   );
   if (!planned.ok) throw new Error(planned.reason);
-  useEngraveRegistrationStore.getState().record(job.id, TARGET, planned.plan, outcome);
+  useEngraveRegistrationStore.getState().record(job.id, TARGET, planned.plan, outcome, null, null, { blankId: null, holdKey: holdKeyOf(job) });
 }
 
 /**
@@ -218,7 +220,7 @@ function seedSetupRegistration(job: EngraveJob, setupId: string, outcome: Regist
     settings,
   );
   if (!planned.ok) throw new Error(planned.reason);
-  useEngraveRegistrationStore.getState().recordSetup(job.id, setupId, TARGET, planned.plan, outcome);
+  useEngraveRegistrationStore.getState().recordSetup(job.id, setupId, TARGET, planned.plan, outcome, null, { blankId: null, holdKey: holdKeyOf(job) });
 }
 
 const sent: string[] = [];
@@ -455,7 +457,12 @@ function sourcesOf(programs: EngraveProgram[]): ReleaseSource[] {
  * `EngraveCutSurface` feeds it. Building them here through the production helpers keeps the spec
  * from testing a second, looser contract.
  */
-function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2]): RunPlan {
+function renderStep(job: EngraveJob, programs: EngraveProgram[] = [P1, P2], opts: { registered?: boolean } = {}): RunPlan {
+  // #1286 — setup 1's origin is on record unless the test is about its absence.
+  if (opts.registered !== false) {
+    registerForTest(job, TARGET, job.setups?.[0]?.id ?? 'setup-1');
+    registerForTest(job, TARGET, null);
+  }
   const made = freezePackage(job, programs, '2026-10-17T14:02:00.000Z');
   if (!made.ok) throw new Error(made.reason);
   // #425 §6 — the release is the OPEN document's run, so its outcome has a document to land in.
@@ -541,7 +548,6 @@ describe('#469 the release step', () => {
   it('uploads every program, plays them in order, and re-states M851 before each — never M852 between them', async () => {
     const job = twoSetupJob();
     // #1088 — program 2 is setup 2's, and a later setup's program now needs that setup's record.
-    seedSetupRegistration(job, 'setup-2');
     renderStep(job);
     await uploadAndStart();
 
@@ -573,6 +579,8 @@ describe('#469 the release step', () => {
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
     expect((screen.getByTestId('engrave-release-change-done') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
+    // #1286 — side 2 can only be registered after side 1 is cut, and its origin then replaces side 1's.
+    seedSetupRegistration(job, 'setup-2');
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
     expect(useMachineRunStore.getState().runs[`${TARGET.host}:${TARGET.port}`]?.context).toMatchObject({
       vacuumOwned: true,
@@ -931,9 +939,9 @@ describe('#469 the release step', () => {
     await useLocationStore.getState().refresh();
 
     const job = twoSetupJob();
-    // #1088 — the resume plays program 2, which is setup 2's and needs setup 2's record.
-    seedSetupRegistration(job, 'setup-2');
+    // #1088 — the resume plays program 2, which is setup 2's and needs setup 2's record (#1286: the latest origin).
     renderStep(job);
+    seedSetupRegistration(job, 'setup-2');
     await advanceUntil(() => screen.getByTestId('engrave-release-upload'));
   fireEvent.click(screen.getByTestId('engrave-release-upload'));
     fireEvent.click(screen.getByTestId('engrave-release-upload-confirm-send'));
@@ -946,6 +954,8 @@ describe('#469 the release step', () => {
     await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 5000 });
     expect(sent.filter((l) => l.startsWith('play'))).toEqual([]);
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    // #1286 — side 2 can only be registered after side 1 is cut, and its origin then replaces side 1's.
+    seedSetupRegistration(job, 'setup-2');
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
     await advanceUntil(() => screen.getByTestId('engrave-release-done'), { timeoutMs: 10000 });
 
@@ -968,7 +978,7 @@ describe('#469 the release step', () => {
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
     await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 5000 });
-    expect(record()?.notes.join('\n')).toContain('setup 2 is not registered — run the Register step for setup 2 first.');
+    expect(record()?.notes.join('\n')).toContain('Register side 2 first');
     // NOTHING SENT AT ALL: no play line, no vacuum word, no home — the gate is before every line.
     expect(sent.slice(before)).toEqual([]);
     expect(sent.filter((l) => l.startsWith('play'))).toEqual(['play /sd/gcodes/Two-setup-job-p1.nc']);
@@ -1028,7 +1038,6 @@ describe('#469 the release step', () => {
 
   it('#1123 item 41 — a red-button alarm, then Try again: the retry re-states M851 before it plays', async () => {
     const job = twoSetupJob();
-    seedSetupRegistration(job, 'setup-2');
     // The red button is a STATE, not a poll count (#1153): the controller is in an alarm from the
     // moment the program is played, and stays there. The release ends failed with the vacuum's
     // state UNKNOWN — no claim survives the alarm.
@@ -1050,7 +1059,6 @@ describe('#469 the release step', () => {
 
   it('a play refused AFTER the run re-stated M851 closes the span it left on', async () => {
     const job = twoSetupJob();
-    seedSetupRegistration(job, 'setup-2'); // #1088 — setup 2 is registered; this test is not the gate.
     renderStep(job);
     await uploadAndStart();
     await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 10000 });
@@ -1061,12 +1069,17 @@ describe('#469 the release step', () => {
       useEngraveReleaseStore.getState().stop(TARGET);
     });
     await advanceUntil(() => expect(record()?.phase).toBe('stopped'), { timeoutMs: 5000 });
+    seedSetupRegistration(job, 'setup-2'); // #1286 — side 2 registered after side 1 was cut
     fireEvent.click(screen.getByTestId('engrave-release-at-machine'));
     fireEvent.click(screen.getByTestId('engrave-release-start'));
     await advanceUntil(() => screen.getByTestId('engrave-release-change'), { timeoutMs: 5000 });
     setMachineConsoleLoader(async () => controller(2, { playError: true }));
     const before = sent.length;
     fireEvent.click(screen.getByTestId('engrave-release-change-ok'));
+    // #1286 — side 2 can only be registered after side 1 is cut, and its origin then replaces side 1's.
+    seedSetupRegistration(job, 'setup-2');
+    // #1286 — side 2 can only be registered after side 1 is cut, and its origin then replaces side 1's.
+    seedSetupRegistration(job, 'setup-2');
     fireEvent.click(screen.getByTestId('engrave-release-change-done'));
 
     await advanceUntil(() => expect(record()?.phase).toBe('failed'), { timeoutMs: 5000 });
@@ -1186,7 +1199,11 @@ describe('#469 the release step', () => {
     });
 
     // A plays and finishes; its outcome is set, its end-of-run write is still held.
-    const ctxA: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-A', jobId: 'job-A', stockEntryId: 'stock-A' };
+    // #1286 — the run store reads the OPEN job's hold, so job-A is the open document and registered.
+    const jobA: EngraveJob = { ...defaultEngraveJob(), id: 'job-A' };
+    useEngraveJobStore.setState({ job: jobA });
+    registerForTest(jobA, TARGET, 'setup-1');
+    const ctxA: RunContext = { nc: 'G0 X1 Y1\nM02\n', programHash: 'hash-A', jobId: 'job-A', setupIndex: 1, setupId: 'setup-1', stockEntryId: 'stock-A' };
     expect(useMachineRunStore.getState().prepare(TARGET, 'A.nc', 'hash-A', ctxA)).toBe(true);
     expect(useMachineRunStore.getState().start(TARGET, runSettings(null))).toBe(true);
     await advanceUntil(() => expect(useMachineRunStore.getState().runs[key]?.running).toBe(false), { timeoutMs: 15000 });
@@ -1281,6 +1298,7 @@ describe('#491 the release step names the cutter’s case', () => {
       new Map([[surfaceProgram.programHash, check]]),
     );
 
+    registerForTest(job, TARGET, null); // #1286 — an implicit setup is filed with no id, as the Register card files it
     await act(async () => {
       useEngraveReleaseStore.getState().plan(TARGET, job, sources);
       await useEngraveReleaseStore.getState().uploadAll(TARGET);
@@ -1357,6 +1375,8 @@ describe('#1179 C — the play line is the package-keyed file', () => {
       [P1.programHash, VERIFY],
       [P2.programHash, VERIFY],
     ] as const);
+    registerForTest(withPackage, TARGET, withPackage.setups?.[0]?.id ?? 'setup-1'); // #1286
+    registerForTest(withPackage, TARGET, null);
     const runPlan = cutPlan({ job: withPackage, pkg: made.package, finishedHashes: [], defaults: null });
     render(
       <EngraveReleaseStep

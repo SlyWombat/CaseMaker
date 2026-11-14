@@ -88,7 +88,8 @@ import { jobMachine } from '@/engine/cnc/calibration';
 import { clearanceZOf } from '@/engine/cnc/machine';
 import { readDefault, readFlag } from '@/platform/defaultsClient';
 import { useShopDefaultsStore } from './shopDefaultsStore';
-import { firstRegistrationFor, setupRegistrationFor } from './engraveRegistrationStore';
+import { firstRegistrationFor } from './engraveRegistrationStore';
+import { registrationGateNow } from './registrationGateNow';
 import { facingRegistrationBlocker } from './engraveRunGate';
 import { deleteMachineFile, listMachineFiles, recordUploadedFile } from '@/platform/machineFiles';
 
@@ -394,6 +395,16 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       return rec === undefined ? s : { records: { ...s.records, [machine]: { ...rec, ...p } } };
     });
 
+  /**
+   * #1286 — THE REGISTRATION GATE OF A RELEASE: the setup of the next program to cut (the last one
+   * when everything is cut) must have its own registration on this machine. Null = clear.
+   */
+  const registrationGateOf = (rec: ReleaseRecord): string | null => {
+    const file = releaseNext(rec.files) ?? rec.files.at(-1) ?? null;
+    if (file === null) return null;
+    return registrationGateNow(rec.job, file.setupIndex, file.setupId, rec.target)?.sentence ?? null;
+  };
+
   const say = (machine: string, line: string) => {
     const rec = get().records[machine];
     if (rec !== undefined) patch(machine, { notes: [...rec.notes, line] });
@@ -413,14 +424,12 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
     // clamping on the turned blank: setup 1's origin does not describe it, and before this gate
     // nothing stopped the program — a non-facing flip job would cut side 2 with no registration at
     // all. Refuse by name, before the vacuum or any line.
-    if (file.setupIndex > 1) {
-      const reg = setupRegistrationFor(rec.jobId, file.setupId, rec.target);
-      if (reg === null || !reg.outcome.usable) {
+    // #1286 — AND SETUP 1'S TOO. Every setup needs its own registration, setup 1 included.
+    {
+      const gate = registrationGateNow(rec.job, file.setupIndex, file.setupId, rec.target);
+      if (gate !== null) {
         patch(machine, { phase: 'failed', active: null, next: null });
-        say(
-          machine,
-          `Program ${file.index} did not start: setup ${file.setupIndex} is not registered — run the Register step for setup ${file.setupIndex} first.`,
-        );
+        say(machine, `Program ${file.index} did not start: ${gate.sentence}`);
         return;
       }
     }
@@ -594,6 +603,8 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
           console: { send: (line, timing) => handle.send(line, timing) },
           operator: (step) => askOperator(machine, step),
           liveClearanceZ,
+          // #1286 — the post-facing retouch writes the origin again: the machine is this job's.
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(rec.target, rec.jobId, null),
         },
         { confirmed: true },
       );
@@ -658,6 +669,14 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       patch(machine, { phase: restore, walk: null });
       say(machine, `The ${what} did not start: it was not planned for this release.`);
       return;
+    }
+    {
+      const regBlock = registrationGateOf(rec);
+      if (regBlock !== null) {
+        patch(machine, { phase: restore, walk: null });
+        say(machine, `The ${what} did not start: ${regBlock}`);
+        return;
+      }
     }
     if (walk.upload !== 'uploaded' && walk.upload !== 'present') {
       patch(machine, { phase: restore, walk: null });
@@ -1043,6 +1062,12 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
         rec.phase === 'cleaning'
       )
         return;
+      // #1286 — nothing is uploaded for a setup that has no registration.
+      const regBlock = registrationGateOf(rec);
+      if (regBlock !== null) {
+        say(machine, `Nothing was uploaded: ${regBlock}`);
+        return;
+      }
       const files = rec.files.map((f) => ({ ...f }));
       patch(machine, { phase: 'uploading', uploading: null, stopAsked: false });
       say(machine, `Uploading ${files.length} program${files.length === 1 ? '' : 's'} in cut order — nothing has run.`);
@@ -1183,6 +1208,11 @@ export const useEngraveReleaseStore = create<ReleaseState>((set, get) => {
       const blocked = facingRegistrationBlocker(rec.job, rec.files, first);
       if (blocked !== null) {
         say(machine, `The release did not start: ${blocked}.`);
+        return;
+      }
+      const regBlock = registrationGateOf(rec);
+      if (regBlock !== null) {
+        say(machine, `The release did not start: ${regBlock}`);
         return;
       }
       const next = releaseNext(rec.files);

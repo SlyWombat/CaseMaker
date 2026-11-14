@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { markMachineChanged } from '@/store/engraveRegistrationStore';
 import { create } from 'zustand';
 import { attachConsole, type ConsoleHandle } from '@/platform/machineConsole';
 import { runMountTap, type OperatorStep } from '@/engine/cnc/registration';
@@ -265,7 +266,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
         { x: tap.x, y: tap.y, fromMachineZ: tap.fromMachineZ },
         inputs.clearanceZ,
         inputs.settings,
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ, onFirstSend: () => { if (inputs.target !== null) markMachineChanged(inputs.target); } },
         inputs.floor,
         mountKindOf(tap.reference),
         // #1070 — the probe is stated (null here: the hook's caller carries no instrument object;
@@ -441,7 +442,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           mode: 'bed-setup',
           probeTouches: probeFor(activeRecord)?.touches ?? 'z-only',
         },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ, onFirstSend: () => { if (inputs.target !== null) markMachineChanged(inputs.target); } },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {
@@ -520,7 +521,7 @@ export function useMountTap(inputs: MountTapInputs): MountTapApi {
           touchFeed: req.touchFeed,
           ...(req.levelBandMm === undefined ? {} : { levelBandMm: req.levelBandMm }),
         },
-        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ },
+        { console: { send: (line, timing) => handle.send(line, timing) }, operator: askOperator, liveClearanceZ: inputs.clearanceZ, onFirstSend: () => { if (inputs.target !== null) markMachineChanged(inputs.target); } },
       );
       useMachineTranscriptStore.getState().setRegistration(r.transcript.map((t) => `> ${t.line}\n${t.reply}`).join('\n'));
       if (!r.ok) {

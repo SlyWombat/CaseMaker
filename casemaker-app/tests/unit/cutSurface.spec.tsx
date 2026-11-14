@@ -32,6 +32,7 @@ import { resetEngraveReleaseStore, useEngraveReleaseStore } from '@/store/engrav
 import { resetShopDefaultsStore, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { ShopDefaultsSchema } from '@/platform/defaultsClient';
 import { resetEngravePackageStore, useEngravePackageStore } from '@/store/engravePackageStore';
+import { registerForTest } from '../tools/registeredJob';
 import { resetEngraveRegistrationStore, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
@@ -420,7 +421,13 @@ function tickChecklistForStoredPackage(): void {
   useEngraveJobStore.setState({ job: { ...job, cutterChecklist: { ...(job.cutterChecklist ?? {}), [pkg.hash]: entries } } });
 }
 
-function draw(props: Props) {
+function draw(props: Props, opts: { registered?: boolean } = {}) {
+  // #1286 — a job's Start needs its setup's registration on this machine; these suites are about what
+  // the surface does once the operator has registered, so they do — except where a test says it has not.
+  if (opts.registered !== false) {
+    for (const setup of props.job.setups ?? []) registerForTest(props.job, TARGET, setup.id ?? null);
+    registerForTest(props.job, TARGET, null);
+  }
   // #425 — the document owns the package. Seed the open job so a freeze has somewhere to land.
   useEngraveJobStore.setState({ job: props.pkg === null ? props.job : withChecklistTicked({ ...props.job, package: props.pkg }, props.pkg) });
   const rendered = render(<Harness {...props} />);
@@ -1134,7 +1141,7 @@ describe('#419 §3 the Cut surface', () => {
 
     // A red gate folds the Register step (it is not the current step yet).
     passRun();
-    const view = draw({ job, report: red, pkg, generated: gen, canDrive: true });
+    const view = draw({ job, report: red, pkg, generated: gen, canDrive: true }, { registered: false });
     expect(screen.getByTestId('engrave-cut-step-2')).toHaveProperty('open', false);
 
     // The gate clears: step ③ becomes the step the operator is on and opens itself, so its Start is
@@ -1473,7 +1480,7 @@ describe('#656 from the cutter prompt to the cut', () => {
     const surface = { plane: { offset: 0, slopeX: 0.01, slopeY: 0 }, z0: -55 };
     useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
 
-    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true }, { registered: false });
 
     await waitFor(() => expect(generateSpy).toHaveBeenCalledTimes(1));
     expect(generateSpy).toHaveBeenCalledWith(surface);
@@ -1494,7 +1501,7 @@ describe('#656 from the cutter prompt to the cut', () => {
     } as unknown as SurfaceSpreadAssessment);
     useEngraveRegistrationStore.getState().record(job.id, TARGET, {} as never, {} as never, surface);
 
-    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true });
+    draw({ job, report: reportOf(), pkg, generated: generated([P1]), canDrive: true }, { registered: false });
     await Promise.resolve();
     expect(generateSpy).not.toHaveBeenCalled();
     expect(screen.getByTestId('engrave-cut-reseat').textContent).toContain(
@@ -2527,24 +2534,24 @@ describe('#1123 item 8 the card start gate', () => {
   const COUNT = 'this job is 2 programs; the app plays one';
 
   it('a multi-program job takes the RELEASE gate, never the single-file count refusal', () => {
-    expect(cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: null })).toBeNull();
-    expect(cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'the registration first' })).toBe(
+    expect(cardStartBlocker({ ...NONE, registrationBlocker: null, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: null })).toBeNull();
+    expect(cardStartBlocker({ ...NONE, registrationBlocker: null, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'the registration first' })).toBe(
       'the registration first',
     );
     // The release gate's own refusal still shows, with the count sentence still absent.
     expect(
-      cardStartBlocker({ ...NONE, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'release gate' }),
+      cardStartBlocker({ ...NONE, registrationBlocker: null, multiProgram: true, uploadBlocker: COUNT, releaseBlocker: 'release gate' }),
     ).not.toContain('the app plays one');
   });
 
   it('a single program still takes the upload gate', () => {
-    expect(cardStartBlocker({ ...NONE, multiProgram: false, uploadBlocker: 'upload gate', releaseBlocker: 'release gate' })).toBe(
+    expect(cardStartBlocker({ ...NONE, registrationBlocker: null, multiProgram: false, uploadBlocker: 'upload gate', releaseBlocker: 'release gate' })).toBe(
       'upload gate',
     );
   });
 
   it('the reasons before the run gates still come first', () => {
-    expect(cardStartBlocker({ ...NONE, multiProgram: true, step1Blocker: 'Clear step 1 first.', uploadBlocker: COUNT })).toBe(
+    expect(cardStartBlocker({ ...NONE, registrationBlocker: null, multiProgram: true, step1Blocker: 'Clear step 1 first.', uploadBlocker: COUNT })).toBe(
       'Clear step 1 first.',
     );
   });

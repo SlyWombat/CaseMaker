@@ -80,7 +80,8 @@ import { jobVise } from '@/engine/cnc/fixture';
 import { cuttingDiameter } from '@/engine/cnc/tool';
 import { shopDefault, useShopDefaultsStore } from '@/store/shopDefaultsStore';
 import { useEngraveJobStore } from '@/store/engraveJobStore';
-import { registrationKey, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { holdKeyOf, registrationKey, useEngraveRegistrationStore } from '@/store/engraveRegistrationStore';
+import { currentBlankIdFor } from '@/store/registrationGateNow';
 // #1123-40 — THE REGISTRATION MEMO: the record kept on the house's machine record, restored on a
 // reload only while the machine's G54 X/Y still matches the one its origin write left.
 import {
@@ -990,6 +991,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         { ctx: attempt.attempt.ctx, z0: attempt.attempt.z0 },
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1286 — the run's first line marks the machine (G92.1 and the homing change the offsets).
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, selectedSetup?.id ?? null),
           // #1199 item 2 — the LIVE machine's clearance, so the plan is proven against the machine
           // as it is now, not only against the value it was planned with.
           liveClearanceZ: seekFromMachineZ,
@@ -1147,6 +1150,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         effectivePlan,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          // #1286 — the run's first line marks the machine, before any origin write.
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, job.setups?.[0]?.id ?? null),
           // #1199 item 2 — the LIVE machine's clearance at run time.
           liveClearanceZ: seekFromMachineZ,
           // #933 — the operator's Stop: checked before every line, and the flag outlives the
@@ -1358,6 +1363,13 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     if (refusal !== null && !(force && marginRefusal(result.outcome))) return;
     setPhase('writing');
     setError(null);
+    // #1286 — from the first line of the origin write the machine's G54 is no longer the previous job's,
+    // whether or not this write finishes: mark the machine now.
+    useEngraveRegistrationStore.getState().markWriting(
+      target,
+      job.id,
+      flipRun ? (selectedSetup?.id ?? null) : (job.setups?.[0]?.id ?? null),
+    );
     const handle = handleRef.current ?? attachConsole(target);
     handleRef.current = handle;
     // #1123 items 31/34 — THE CUTTER THE PROGRAM RUNS, named and numbered. The write's M491
@@ -1378,6 +1390,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
         result.outcome,
         {
           console: { send: (line, timing) => handle.send(line, timing) },
+          onFirstSend: () => useEngraveRegistrationStore.getState().markWriting(target, job.id, flipRun ? (selectedSetup?.id ?? null) : (job.setups?.[0]?.id ?? null)),
           operator: askOperator,
           // #1199 — the live machine's clearance, even for the origin write's session.
           liveClearanceZ: seekFromMachineZ,
@@ -1407,7 +1420,7 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
       // read for side 1; side 2 is filed under its own setup id.
       if (flipRun) {
         if (selectedSetup !== null) {
-          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null);
+          recordSetup(job.id, selectedSetup.id, target, runPlan, result.outcome, null, { blankId: currentBlankIdFor(job), holdKey: holdKeyOf(job) });
         }
       } else {
         record(
@@ -1420,6 +1433,8 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
           result.spread === undefined ? null : surfaceFitForPost(result.spread),
           // #1088 — the setup this registration measured, so a per-setup reader asks and gets setup 1.
           job.setups?.[0]?.id ?? null,
+          // #1286 — the blank and the hold it was measured on: the run gate compares both with now.
+          { blankId: currentBlankIdFor(job), holdKey: holdKeyOf(job) },
         );
       }
       const memoSetup = flipRun ? selectedSetup : (job.setups?.[0] ?? null);

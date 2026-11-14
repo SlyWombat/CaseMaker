@@ -2,6 +2,10 @@
 // program, which copy it goes to, and the run store's hook — once per run, only on a real finish.
 
 import { readFileSync } from 'node:fs';
+import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
+import { useEngraveJobStore } from '@/store/engraveJobStore';
+import type { EngraveJob } from '@/types/engraveJob';
+import { registerForTest } from '../tools/registeredJob';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -298,6 +302,10 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
     newId: () => 'stock-off1',
     now: () => '2026-10-16T12:00:00.000Z',
   };
+  // #1286 — the run store reads the OPEN job's hold: job-1 is the open document, registered on this machine.
+  const job1: EngraveJob = { ...defaultEngraveJob(), id: 'job-1' };
+  useEngraveJobStore.setState({ job: job1 });
+  registerForTest(job1, TARGET, 'setup-1');
   const ctx: RunContext = { nc: CUT_OUT, jobId: 'job-1', stockEntryId: PLATE.id, stockXY: { x: 100, y: 100 }, toolRadius: 1.5, toolKey: 'inv:kz-a' };
   const last = { state: 'Idle', line: 9, percent: 100, elapsedS: 30 };
   const finished: RunOutcome = { kind: 'finished', last, homed: true, vacuumOff: true };
@@ -537,7 +545,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
 
   it('end to end through start(): the run is over (session closed, not running) before the end-of-run saves', () => withFakeTimers(async () => {
     setMachineConsoleLoader(async () => z1('finish'));
-    useMachineRunStore.getState().prepare(TARGET, 'job.nc', programHash(ctx.nc), ctx);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', programHash(ctx.nc), { ...ctx, setupIndex: 1, setupId: 'setup-1' });
     expect(useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 })).toBe(true);
     await waitForEnd();
     const run = useMachineRunStore.getState().runs[M]!;
@@ -554,7 +562,7 @@ describe('#414 the run store: once per run, and only on a real finish', () => {
 
   it('end to end: an alarm changes nothing', () => withFakeTimers(async () => {
     setMachineConsoleLoader(async () => z1('alarm'));
-    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', ctx);
+    useMachineRunStore.getState().prepare(TARGET, 'job.nc', 'h', { ...ctx, setupIndex: 1, setupId: 'setup-1' });
     useMachineRunStore.getState().start(TARGET, { pollMs: 2000, noProgressMs: 30000, missLimit: 3 });
     await waitForEnd();
     expect(useMachineRunStore.getState().runs[M]!.end?.kind).toBe('nothing');

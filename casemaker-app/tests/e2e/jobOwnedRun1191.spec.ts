@@ -13,6 +13,7 @@ import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
 import { test, expect } from './fixtures/caseMaker';
+import { registerCurrentJob } from './fixtures/generatedRun';
 import { locationDocument, serveHouse } from './fixtures/fakeHouse';
 import { rememberMachine } from './fixtures/rememberMachine';
 import { installFakeConsole } from './fixtures/fakeConsole';
@@ -355,6 +356,7 @@ test('#1191 — a job that started on build A continues on program 2 under build
       },
     });
   });
+  await registerCurrentJob(page); // #1286 — the continued job's setup is registered on this machine
   // #1123 — THE CARD IS GATED ON THE RESTORED RUN'S OWN RE-CHECK: until this build's verifier and
   // simulate-only sweep have read the stored bytes, its start reason reads "checking the restored
   // run against this shop…" and no release record is planned. Wait for THAT gate to clear (the

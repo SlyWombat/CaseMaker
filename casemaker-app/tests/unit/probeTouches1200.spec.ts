@@ -242,7 +242,7 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
   it('THE EMITTED LINES: a restricted tape run has no sideways G38.3 at all, and still touches top-down', async () => {
     const p = plan('tape', RESTRICTED);
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     const side = z1.lines.filter((l) => /^G38\.3 [XY]/.test(l));
     expect(side, 'no sideways G38.3 on a top-touches-only unit').toEqual([]);
@@ -258,7 +258,7 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     expect(p.notes.join(' ')).not.toContain('restricted to top touches');
     expect(p.notes.join(' ')).not.toContain('first-run guard');
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
-    const r = await runRegistration(p, { liveClearanceZ: -3, console: z1.console, operator: yes });
+    const r = await runRegistration(p, { onFirstSend: () => undefined, liveClearanceZ: -3, console: z1.console, operator: yes });
     if (!r.ok) throw new Error(r.reason);
     expect(z1.lines.filter((l) => /^G38\.3 [XY]-?[\d.]+ F/.test(l))).toHaveLength(p.scans.length);
   });
@@ -270,7 +270,7 @@ describe('#1200 a probe restricted to top touches plans no sideways seek', () =>
     const z1 = fakeZ1({ actual: BLANK, ballR: 1.5, rim: 1.5 });
     const prompts: string[] = [];
     const r = await runRegistration(p, {
-      liveClearanceZ: -3,
+      onFirstSend: () => undefined, liveClearanceZ: -3,
       console: z1.console,
       operator: async (step) => {
         prompts.push(step.text);

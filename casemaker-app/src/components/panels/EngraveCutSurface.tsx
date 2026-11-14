@@ -77,6 +77,7 @@ import {
   useSetupRegistration,
   useSurfaceSpread,
 } from '@/store/engraveRegistrationStore';
+import { registrationGateNow, registrationNoteNow } from '@/store/registrationGateNow';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { RunProgressLine } from './RunProgressLine';
 import { RunLogFold } from './RunLogFold';
@@ -1304,6 +1305,9 @@ export function EngraveCutSurface({
   const registeredSetup = currentSetupIndex === 1 ? (currentSetupRegistration ?? firstRegistration) : currentSetupRegistration;
   const registered = registeredSetup !== null || (target === null && currentSetupIndex === 1 && anyRegistration !== null);
   const registeredDone = fitDone && registered;
+  // #1286 (SAFETY) — ONE registration gate for every control that uploads or plays this setup's program.
+  // No machine is NOT "nothing to ask": the gate says to choose one (fail closed).
+  const registrationGateSentence = registrationGateNow(job, currentSetupIndex, currentSetupId, target)?.sentence ?? null;
   const ran =
     registeredDone &&
     pkg !== null &&
@@ -1921,6 +1925,7 @@ export function EngraveCutSurface({
             // #819 — once THIS job's run has ended, the card draws no Start; the bit-change card
             // (programs left) or the end card (job over) owns the next press.
             noStart={runEnded}
+            registrationNote={registrationNoteNow(job, currentSetupIndex, currentSetupId, target)}
             blocker={cardStartBlocker({
               step1Blocker,
               programBlocker,
@@ -1931,6 +1936,7 @@ export function EngraveCutSurface({
               surfaceGate,
               domeG32Blocker,
               cutterChecklistBlocker,
+              registrationBlocker: registrationGateSentence,
               // #1123 item 8 — a multi-program job carries the RELEASE's gate; a single program the
               // upload's. Never both: `uploadBlocker` refuses >1 program by construction.
               multiProgram: releaseSources.length > 1,
@@ -2042,7 +2048,8 @@ export function EngraveCutSurface({
                       surfaceGate ??
                       // #1127 — the ONE Cut press is the first Load: no bit goes to the machine
                       // until every row of the checklist is located or replaced.
-                      cutterChecklistBlocker
+                      cutterChecklistBlocker ??
+                      registrationGateSentence
                     }
                     dome={domeProps}
                     domeBlocker={domeG32Blocker}
@@ -2157,7 +2164,8 @@ export function EngraveCutSurface({
                         missingReportBlocker ??
                         surfaceGate ??
                         domeG32Blocker ??
-                        cutterChecklistBlocker
+                        cutterChecklistBlocker ??
+                        registrationGateSentence
                       }
                       machine={machine}
                       program={

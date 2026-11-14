@@ -30,6 +30,8 @@ import { create } from 'zustand';
 import type { SurfaceSpreadAssessment } from '@/engine/cnc/engrave/surfaceSpread';
 import type { RegistrationOutcome } from '@/engine/cnc/registration/outcome';
 import type { RegistrationPlan } from '@/engine/cnc/registration/plan';
+import type { EngraveJob } from '@/types/engraveJob';
+import { jobHold } from '@/engine/cnc/engrave/stockHold';
 
 export interface FirstRegistration {
   jobId: string;
@@ -58,6 +60,14 @@ export interface FirstRegistration {
    * the blank on the table; the laser's panel prints this so the operator sees how old the reading is.
    */
   measuredAt: string;
+  /**
+   * #1286 — WHAT THIS REGISTRATION WAS MEASURED ON. The blank (the machine's `currentBlank` id for the
+   * job at that moment, or null when the job had none) and the HOLD (`holdKeyOf(job)`: how the piece
+   * was seated). The run gate compares both with now: a re-seated or new stick, or a changed seat, is
+   * not what was measured. Absent on a record that came back from the house's memo, which stamps
+   * neither — such a record never satisfies the gate.
+   */
+  stamp?: { blankId: string | null; holdKey: string };
   /**
    * #1123-40 — how this record got here, when it did not come from a run in THIS session: the memo
    * on the house's machine record was restored after the machine's live G54 X/Y was checked against
@@ -111,6 +121,8 @@ interface EngraveRegistrationState {
     surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
     /** The setup this registration measured; given, the record is also filed under it. */
     setupId?: string | null,
+    /** #1286 — the blank and the hold this was measured on. */
+    stamp?: { blankId: string | null; holdKey: string },
   ) => void;
   /** #1088 — file a LATER setup's registration (side 2's) without touching the job-keyed entry. */
   recordSetup: (
@@ -120,7 +132,20 @@ interface EngraveRegistrationState {
     plan: RegistrationPlan,
     outcome: RegistrationOutcome,
     surface?: { plane: { offset: number; slopeX: number; slopeY: number }; z0: number } | null,
+    /** #1286 — the blank and the hold this was measured on. */
+    stamp?: { blankId: string | null; holdKey: string },
   ) => void;
+  /**
+   * #1286 — THE LATEST ORIGIN WRITTEN ON EACH MACHINE (key `host:port`): which job and setup wrote
+   * the controller's G54 last. Only that registration describes the origin the machine holds now;
+   * job A, then job B on the same machine, back to A → A's origin is gone.
+   */
+  latest: Record<string, { jobId: string; setupKey: string }>;
+  /**
+   * #1286 — THE MOMENT A REGISTRATION STARTS WRITING THE ORIGIN, the machine's G54 stops being the previous
+   * job's, whether or not the write then succeeds, is stopped or fails. Called before the first G10 goes out.
+   */
+  markWriting: (target: { host: string; port: number }, jobId: string, setupKey: string | null) => void;
   /**
    * #1123-40 — put a side-1 record back from the house's memo, EXACTLY as it was measured (its own
    * `measuredAt`, not now). When the record names its setup it is filed there too, as `record` does.
@@ -142,16 +167,28 @@ interface EngraveRegistrationState {
 /** #1088 — the per-setup key: a job id and a setup id cannot collide with a job id alone. */
 export const registrationKey = (jobId: string, setupId: string): string => `${jobId}::${setupId}`;
 
+const machineKeyOf = (t: { host: string; port: number }): string => `${t.host}:${t.port}`;
+/** The `latest` key of a job's first setup when the record names no setup id. */
+const FIRST_SETUP = '(first setup)';
+/** The `latest` owner after its job's records were cleared: nobody's origin. */
+const CLEARED = '(cleared)';
+
 export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set) => ({
   records: {},
   bySetup: {},
   surfaces: {},
 
-  record: (jobId, target, plan, outcome, surface = null, setupId = null) =>
+  latest: {},
+
+  markWriting: (target, jobId, setupKey) =>
+    set((s) => ({ latest: { ...s.latest, [machineKeyOf(target)]: { jobId, setupKey: setupKey ?? FIRST_SETUP } } })),
+
+  record: (jobId, target, plan, outcome, surface = null, setupId = null, stamp) =>
     set((s) => {
       const rec: FirstRegistration = {
         jobId,
         ...(setupId === null ? {} : { setupId }),
+        ...(stamp === undefined ? {} : { stamp }),
         target: { host: target.host, port: target.port },
         plan,
         outcome,
@@ -161,16 +198,19 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
       return {
         records: { ...s.records, [jobId]: rec },
         ...(setupId === null ? {} : { bySetup: { ...s.bySetup, [registrationKey(jobId, setupId)]: rec } }),
+        latest: { ...s.latest, [machineKeyOf(target)]: { jobId, setupKey: setupId ?? FIRST_SETUP } },
       };
     }),
 
-  recordSetup: (jobId, setupId, target, plan, outcome, surface = null) =>
+  recordSetup: (jobId, setupId, target, plan, outcome, surface = null, stamp) =>
     set((s) => ({
+      latest: { ...s.latest, [machineKeyOf(target)]: { jobId, setupKey: setupId } },
       bySetup: {
         ...s.bySetup,
         [registrationKey(jobId, setupId)]: {
           jobId,
           setupId,
+          ...(stamp === undefined ? {} : { stamp }),
           target: { host: target.host, port: target.port },
           plan,
           outcome,
@@ -182,6 +222,7 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
 
   restoreJob: (rec) =>
     set((s) => ({
+      latest: { ...s.latest, [machineKeyOf(rec.target)]: { jobId: rec.jobId, setupKey: rec.setupId ?? FIRST_SETUP } },
       records: { ...s.records, [rec.jobId]: rec },
       ...(rec.setupId == null
         ? {}
@@ -191,7 +232,10 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
   restoreSetup: (rec) => {
     const setupId = rec.setupId;
     if (setupId == null) return;
-    set((s) => ({ bySetup: { ...s.bySetup, [registrationKey(rec.jobId, setupId)]: rec } }));
+    set((s) => ({
+      latest: { ...s.latest, [machineKeyOf(rec.target)]: { jobId: rec.jobId, setupKey: setupId } },
+      bySetup: { ...s.bySetup, [registrationKey(rec.jobId, setupId)]: rec },
+    }));
   },
 
   measureSurface: (jobId, target, assessment, probeRefZ = null) =>
@@ -210,7 +254,12 @@ export const useEngraveRegistrationStore = create<EngraveRegistrationState>((set
       const bySetup = Object.fromEntries(Object.entries(s.bySetup).filter(([key]) => !key.startsWith(prefix)));
       const surfaces = { ...s.surfaces };
       delete surfaces[jobId];
-      return { records, bySetup, surfaces };
+      // Clearing a job's records must NOT erase "the origin on this machine is no longer another job's":
+      // where this job held the mark, the mark becomes an owner nobody is, so every other job is refused.
+      const latest = Object.fromEntries(
+        Object.entries(s.latest).map(([k, v]) => [k, v.jobId === jobId ? { jobId: CLEARED, setupKey: '' } : v]),
+      );
+      return { records, bySetup, surfaces, latest };
     }),
 }));
 
@@ -282,6 +331,131 @@ export function setupRegistrationFor(
   return matching(useEngraveRegistrationStore.getState().bySetup[registrationKey(jobId, setupId)], target);
 }
 
+/**
+ * #1286 (SAFETY) — A PROGRAM IS NOT SENT TO THE MACHINE, AND NOT PLAYED, UNTIL ITS SETUP IS REGISTERED.
+ *
+ * Registration is what writes the work origin. A program uploaded and played without one runs at
+ * whatever G54 the controller last held: the cutter descends where nobody measured. Before this
+ * gate only the Register STEP read "refused" — the Start card, the release and the run store all
+ * went on without it (found by a no-seam walk, 2026-11-14).
+ *
+ * A registration counts only if it is THIS job's, THIS setup's, on THIS machine, usable, measured on
+ * THIS blank and THIS hold, and the LATEST origin written on the machine. A refused, stopped or failed
+ * registration writes no record at all, so it cannot satisfy this. Every answer is a code and a
+ * sentence, so every control that starts anything says the same words:
+ *   registration-missing · registration-unusable · registration-other-blank · registration-other-hold ·
+ *   registration-superseded · registration-unstamped · registration-no-machine · registration-no-setup
+ */
+/** The `latest` owner of a machine whose offsets a bed-setup measurement (a tap, a centre find) touched: no job's. */
+export const MACHINE_SETUP_OWNER = '(machine setup)';
+
+/** A run that is not a job's registration (a bed-setup measurement, a retouch) changed the machine's offsets. */
+export function markMachineChanged(target: { host: string; port: number }): void {
+  useEngraveRegistrationStore.getState().markWriting(target, MACHINE_SETUP_OWNER, null);
+}
+
+export type RegistrationGateCode =
+  | 'registration-missing'
+  | 'registration-unusable'
+  | 'registration-other-blank'
+  | 'registration-other-hold'
+  | 'registration-superseded'
+  | 'registration-unstamped'
+  | 'registration-no-machine'
+  | 'registration-no-setup';
+export type RegistrationGate = { code: RegistrationGateCode; sentence: string };
+
+/** How the piece is seated, as far as the origin is concerned: the stock, and the mount's own facts. */
+export function holdKeyOf(job: EngraveJob): string {
+  const w = job.workholding;
+  const mount =
+    w.kind === 'vise'
+      ? { kind: 'vise', seat: w.vise.seat, proud: w.vise.stockProud, board: job.sacrificial?.under?.thickness ?? null }
+      : w.kind === 'bracket'
+        ? { kind: 'bracket', anchor: w.bracket.anchor, placement: w.bracket.placement ?? 'anchored', variant: w.bracket.variant }
+        : { kind: w.kind };
+  return JSON.stringify({ stock: [job.stock.length, job.stock.width, job.stock.thickness], hold: jobHold(job), mount });
+}
+
+export interface RunGateInput {
+  job: EngraveJob;
+  /** 1-based, the frozen programs' own numbering. */
+  setupIndex: number | null;
+  setupId: string | null;
+  target: { host: string; port: number } | null;
+  /** The machine's current blank id for this job (`currentBlank[jobId]`), or null when it has none. */
+  blankId: string | null;
+}
+
+export function setupRunGate(input: RunGateInput): RegistrationGate | null {
+  const { job, setupIndex, setupId, target, blankId } = input;
+  if (target === null) {
+    return { code: 'registration-no-machine', sentence: 'Choose the machine first — registration is a measurement on a machine.' };
+  }
+  if (setupIndex === null) {
+    return { code: 'registration-no-setup', sentence: 'This program does not say which setup it cuts, so its registration cannot be checked — generate the job again.' };
+  }
+  const state = useEngraveRegistrationStore.getState();
+  const first = setupIndex <= 1;
+  // The first setup is the JOB's first (`job.setups[0]`), whatever id the program carries; a record that
+  // names another setup never stands in for it, and a record that names none is the job-keyed entry of a
+  // job that states no setups.
+  const firstId = job.setups?.[0]?.id ?? null;
+  const own = (rec: FirstRegistration | undefined): FirstRegistration | null => {
+    const m = matching(rec, target);
+    if (m === null) return null;
+    if (first) return (m.setupId ?? null) === firstId ? m : null;
+    return m.setupId === setupId ? m : null;
+  };
+  const rec = first
+    ? (own(state.records[job.id]) ?? (firstId === null ? null : own(state.bySetup[registrationKey(job.id, firstId)])))
+    : setupId === null
+      ? null
+      : own(state.bySetup[registrationKey(job.id, setupId)]);
+  const which = first ? 'this job' : `side ${setupIndex}`;
+  if (rec === null) {
+    return {
+      code: 'registration-missing',
+      sentence: `Register ${which} first — no origin is on record for it on this machine, so nothing is uploaded or played.`,
+    };
+  }
+  if (!rec.outcome.usable) {
+    return {
+      code: 'registration-unusable',
+      sentence: `The registration of ${which} did not give a usable origin — register it again before anything is uploaded or played.`,
+    };
+  }
+  if (rec.stamp === undefined) {
+    return {
+      code: 'registration-unstamped',
+      sentence: `The registration of ${which} came back from the house's note without the blank it was measured on — register it again.`,
+    };
+  }
+  if (rec.stamp.blankId !== blankId) {
+    return {
+      code: 'registration-other-blank',
+      sentence: `This blank has not been registered — ${which} was measured on ${rec.stamp.blankId === null ? 'a blank the machine had no name for' : 'an earlier blank'}. Register it again.`,
+    };
+  }
+  if (rec.stamp.holdKey !== holdKeyOf(job)) {
+    return {
+      code: 'registration-other-hold',
+      sentence: `The hold of ${which} has changed since it was registered (the seat, the mount or the stock) — register it again.`,
+    };
+  }
+  const key = machineKeyOf(target);
+  const latest = state.latest[key];
+  const keys = first ? [FIRST_SETUP, firstId] : [setupId];
+  // UNDEFINED is a refusal too: with no mark on the machine nothing says whose origin it holds.
+  if (latest === undefined || !(latest.jobId === job.id && keys.includes(latest.setupKey))) {
+    return {
+      code: 'registration-superseded',
+      sentence: `Another registration has been written on this machine since — its origin is not ${which}'s any more. Register ${which} again.`,
+    };
+  }
+  return null;
+}
+
 /** The same question as a render subscription, so a later registration updates the card. */
 export function useSetupRegistration(
   jobId: string,
@@ -295,5 +469,5 @@ export function useSetupRegistration(
 
 /** Test seam: forget every registration and every cut-extent measurement. */
 export function resetEngraveRegistrationStore(): void {
-  useEngraveRegistrationStore.setState({ records: {}, bySetup: {}, surfaces: {} });
+  useEngraveRegistrationStore.setState({ records: {}, bySetup: {}, surfaces: {}, latest: {} });
 }
