@@ -43,6 +43,7 @@ import { createRequire } from 'node:module';
 
 import { defaultEngraveJob, newEngraveCutoutId, newEngraveShapeId, newEngraveTraceId } from '../../src/engine/cnc/engrave/defaults';
 import { proposeStock } from '../../src/engine/cnc/stockProposal';
+import { assertStaged, stagedMaterial } from './stageStock';
 import { defaultSacrificialUnder, noneSacrificial } from '../../src/engine/cnc/sacrificial';
 import { parseStl, type ParsedMesh } from '../../src/engine/import/stlParser';
 import { parse3MF } from '../../src/engine/import/threeMfParser';
@@ -98,6 +99,8 @@ interface ManifestSample {
   owner?: string;
   licence?: string;
   note?: string;
+  /** The material the manifest states for the sample, when it does (none of them does today). */
+  material?: string;
   bytes?: number;
   sha256?: string;
 }
@@ -305,6 +308,14 @@ async function readTargetFile(path: string, opts: { scaleTo?: number } = {}): Pr
  * Jobs.
  * ------------------------------------------------------------------------------------------- */
 
+/** Samples whose material the HARNESS chose (the manifest states none): named in each sample's own line. */
+const harnessChose = new Map<string, string>();
+function chooseMaterial(sample: ManifestSample): NonNullable<EngraveJob['stock']['material']> {
+  const staged = stagedMaterial(sample);
+  if (staged.chosen) harnessChose.set(sample.id, String(staged.material));
+  return staged.material as NonNullable<EngraveJob['stock']['material']>;
+}
+
 function meshJob(sample: ManifestSample, read: Extract<ReadTarget, { ok: true }>, rotary: boolean, coarse: boolean): EngraveJob {
   const job = defaultEngraveJob();
   job.id = `job-${sample.id}`;
@@ -321,7 +332,7 @@ function meshJob(sample: ManifestSample, read: Extract<ReadTarget, { ok: true }>
       thickness: ROD_DIAMETER_MM,
       diameter: ROD_DIAMETER_MM,
       shape: 'cylinder',
-      material: 'hardwood',
+      material: chooseMaterial(sample),
     };
     job.workholding = {
       kind: 'rotary-chuck',
@@ -334,7 +345,7 @@ function meshJob(sample: ManifestSample, read: Extract<ReadTarget, { ok: true }>
   } else {
     const proposal = proposeStock({ kind: 'mesh', size });
     if (proposal === null) throw new Error('the mesh proposed no blank');
-    job.stock = { ...job.stock, length: proposal.length, width: proposal.width, thickness: proposal.thickness, material: proposal.material };
+    job.stock = { ...job.stock, length: proposal.length, width: proposal.width, thickness: proposal.thickness, material: sample.material ?? proposal.material ?? chooseMaterial(sample) };
     job.workholding = {
       kind: 'tape',
       tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'default' },
@@ -361,7 +372,7 @@ function outlineJob(sample: ManifestSample, outline: OutlineImport): EngraveJob 
   const margin = 5;
   const length = Number((outline.width + 2 * margin).toFixed(1));
   const width = Number((outline.height + 2 * margin).toFixed(1));
-  job.stock = { ...job.stock, length, width, thickness: 12, material: 'hardwood' };
+  job.stock = { ...job.stock, length, width, thickness: 12, material: chooseMaterial(sample) };
   job.workholding = {
     kind: 'tape',
     tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'default' },
@@ -571,6 +582,7 @@ async function runMeshLike(
   const jobDir = ensureDir(join(ctx.out, sample.id));
   const job = meshJob(sample, read, rotary, ctx.coarse);
   const jobPath = join(jobDir, 'job.json');
+  assertStaged(job);
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
   const importNote = `${read.target.format.toUpperCase()}: ${read.mesh.triangleCount} triangles, ${read.target.size.x} × ${read.target.size.y} × ${read.target.size.z} mm${
     sample.health === undefined ? '' : `, ${sample.health}`
@@ -612,6 +624,7 @@ async function runOutlineLike(
   const jobDir = ensureDir(join(ctx.out, sample.id));
   const job = outlineJob(sample, outline);
   const jobPath = join(jobDir, 'job.json');
+  assertStaged(job);
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
   const tooBig = exceedsMachine(job);
   const importStage = stage('pass', importNote, fileReceipt(jobPath));
@@ -721,6 +734,7 @@ async function runStepPair(sample: ManifestSample, ctx: { root: string; out: str
   const jobDir = ensureDir(join(ctx.out, sample.id));
   const job = meshJob(sample, read, false, ctx.coarse);
   const jobPath = join(jobDir, 'job.json');
+  assertStaged(job);
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
   const tooBig = exceedsMachine(job);
   const importStage = stage('pass', `${read.target.format.toUpperCase()} read: ${read.mesh.triangleCount} triangles, ${read.target.size.x} × ${read.target.size.y} × ${read.target.size.z} mm`, fileReceipt(jobPath));
@@ -765,7 +779,7 @@ async function runPriorArt(sample: ManifestSample, ctx: { root: string; out: str
   job.name = sample.id;
   job.labels = [];
   job.shapes = [];
-  job.stock = { ...job.stock, length: 100, width: 60, thickness: 10, material: 'hardwood' };
+  job.stock = { ...job.stock, length: 100, width: 60, thickness: 10, material: chooseMaterial(sample) };
   job.workholding = { kind: 'tape', tape: { width: 20, thickness: 0.2, inset: 2, where: null, squareTo: 'front', source: 'default' } };
   // The gbox sample states a 6 mm bit; the built-in 6 mm flat is the bench's stand-in when the
   // registry has no 6 mm entry. The note names the cutter used.
@@ -843,6 +857,7 @@ async function runGearOutlineLike(
   const jobDir = ensureDir(join(ctx.out, sample.id));
   const job = outlineJob(sample, silhouette.outline);
   const jobPath = join(jobDir, 'job.json');
+  assertStaged(job);
   writeFileSync(jobPath, `${JSON.stringify(job, null, 1)}\n`);
   const run = runCut(jobPath, join(jobDir, 'run'), { location: ctx.location, catalogue: ctx.catalogue, timeoutMs: ctx.timeoutMs });
   return {
@@ -928,7 +943,7 @@ async function main(): Promise<void> {
     }
     const r = samples[sample.id]!;
     console.log(
-      `${sample.id}: import ${r.import.status} / plan ${r.plan.status} / check ${r.check.status} (${((Date.now() - at) / 1000).toFixed(0)} s)`,
+      `${sample.id}: import ${r.import.status} / plan ${r.plan.status} / check ${r.check.status} (${((Date.now() - at) / 1000).toFixed(0)} s)${harnessChose.has(sample.id) ? `; harness chose ${harnessChose.get(sample.id)}` : ''}`,
     );
   }
   const results = {
