@@ -110,6 +110,7 @@ function fakeService(
       base: '',
       health: {
         ok: true,
+        runs: true,
         schemaVersion: HOUSE_SCHEMA_VERSION,
         build: 'v-test',
         hasCatalogue: false,

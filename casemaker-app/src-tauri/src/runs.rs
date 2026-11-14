@@ -126,6 +126,15 @@ pub struct RunsConfig {
 impl RunsConfig {
     /// Resolve from the environment; Err is the sentence the service answers with.
     pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<RunsConfig, String> {
+        Self::resolve_coded(env).map_err(|(_, sentence)| sentence)
+    }
+
+    /// `resolve`, with a stable kebab-case code per failure branch (#1293): `node-missing`,
+    /// `cli-missing`, `setting-not-a-number`. The code is what a client may branch on; the
+    /// sentence is for whoever fixes the install.
+    pub fn resolve_coded(
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<RunsConfig, (&'static str, String)> {
         let node = env(NODE_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(default_node()));
@@ -133,25 +142,36 @@ impl RunsConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(default_cli()));
         if !node.is_file() {
-            return Err(format!(
-                "the house's Node is not at {} — set {NODE_ENV} to the node binary, or install the house package",
-                node.display()
+            return Err((
+                "node-missing",
+                format!(
+                    "the house's Node is not at {} — set {NODE_ENV} to the node binary, or install the house package",
+                    node.display()
+                ),
             ));
         }
         if !cli.is_file() {
-            return Err(format!(
-                "the house's casemaker CLI is not at {} — set {CLI_ENV} to the built scripts entry",
-                cli.display()
+            return Err((
+                "cli-missing",
+                format!(
+                    "the house's casemaker CLI is not at {} — set {CLI_ENV} to the built scripts entry",
+                    cli.display()
+                ),
             ));
         }
         let root = env(ROOT_ENV).map(PathBuf::from).unwrap_or_else(default_root);
-        let number = |key: &str, default: u64| -> Result<u64, String> {
+        let number = |key: &str, default: u64| -> Result<u64, (&'static str, String)> {
             match env(key) {
                 None => Ok(default),
                 Some(raw) => raw
                     .trim()
                     .parse::<u64>()
-                    .map_err(|_| format!("{key} is \"{raw}\", which is not a whole number")),
+                    .map_err(|_| {
+                        (
+                            "setting-not-a-number",
+                            format!("{key} is \"{raw}\", which is not a whole number"),
+                        )
+                    }),
             }
         };
         Ok(RunsConfig {
@@ -246,20 +266,31 @@ pub enum SubmitOutcome {
     BadRequest(String),
 }
 
-static RUNS: OnceLock<Result<Arc<Runs>, String>> = OnceLock::new();
+static RUNS: OnceLock<Result<Arc<Runs>, (&'static str, String)>> = OnceLock::new();
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn env_lookup(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
-fn manager() -> &'static Result<Arc<Runs>, String> {
-    RUNS.get_or_init(|| RunsConfig::resolve(&env_lookup).map(|config| Arc::new(Runs::new(config))))
+fn manager() -> &'static Result<Arc<Runs>, (&'static str, String)> {
+    RUNS.get_or_init(|| RunsConfig::resolve_coded(&env_lookup).map(|config| Arc::new(Runs::new(config))))
 }
 
 /// Whether this service can generate: the health field and the gate on POST /runs.
 pub fn capability() -> bool {
     manager().is_ok()
+}
+
+/// Why this service cannot generate: the same sentence `RunsConfig::resolve` produced, so health
+/// can say it beside `runs: false`. `None` when the service can run.
+pub fn unavailable_reason() -> Option<String> {
+    manager().as_ref().err().map(|(_, sentence)| sentence.clone())
+}
+
+/// The stable code for that reason (`node-missing`, `cli-missing`, `setting-not-a-number`).
+pub fn unavailable_code() -> Option<&'static str> {
+    manager().as_ref().err().map(|(code, _)| *code)
 }
 
 /// The runs state, applied to the runs router's own state type. `house_api` merges that router
@@ -277,7 +308,7 @@ pub fn submit(body: &Value) -> Response<Body> {
             runs: Some(runs.clone()),
             unavailable: None,
         },
-        Err(sentence) => RunsState {
+        Err((_, sentence)) => RunsState {
             runs: None,
             unavailable: Some(sentence.clone()),
         },
@@ -315,7 +346,7 @@ pub fn router() -> Router {
             runs: Some(runs.clone()),
             unavailable: None,
         },
-        Err(sentence) => RunsState {
+        Err((_, sentence)) => RunsState {
             runs: None,
             unavailable: Some(sentence.clone()),
         },
@@ -1053,6 +1084,26 @@ mod tests {
         let env = |_key: &str| None::<String>;
         let err = RunsConfig::resolve(&env).expect_err("no node/cli configured");
         assert!(err.contains("Node is not at"), "{err}");
+    }
+
+    #[test]
+    fn each_failure_branch_has_its_own_stable_code() {
+        let exe = std::env::current_exe().unwrap().display().to_string();
+        let missing = "/nonexistent/casemaker-1293".to_owned();
+        let code = |node: &str, cli: &str, conc: Option<&str>| {
+            let (node, cli, conc) = (node.to_owned(), cli.to_owned(), conc.map(str::to_owned));
+            let env = move |key: &str| match key {
+                k if k == NODE_ENV => Some(node.clone()),
+                k if k == CLI_ENV => Some(cli.clone()),
+                k if k == CONCURRENCY_ENV => conc.clone(),
+                _ => None,
+            };
+            RunsConfig::resolve_coded(&env).err().map(|(code, _)| code)
+        };
+        assert_eq!(code(&missing, &exe, None), Some("node-missing"));
+        assert_eq!(code(&exe, &missing, None), Some("cli-missing"));
+        assert_eq!(code(&exe, &exe, Some("many")), Some("setting-not-a-number"));
+        assert_eq!(code(&exe, &exe, None), None);
     }
 
     #[test]

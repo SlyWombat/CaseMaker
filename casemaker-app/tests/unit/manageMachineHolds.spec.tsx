@@ -31,6 +31,7 @@ const MACHINE_ID = VIEW.machines[0]!.id;
 
 const HEALTH: HouseHealth = {
   ok: true,
+  runs: true,
   schemaVersion: 1,
   build: 'v-test',
   hasCatalogue: false,

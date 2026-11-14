@@ -16,6 +16,7 @@ import { useToolRegistryStore } from '@/store/toolRegistryStore';
 function healthWith(build: string) {
   return {
     ok: true,
+    runs: true,
     schemaVersion: 1,
     build,
     hasCatalogue: false,
