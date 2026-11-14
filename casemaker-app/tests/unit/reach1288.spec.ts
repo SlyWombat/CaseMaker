@@ -92,7 +92,7 @@ function plan(restBalls: readonly Tool[]) {
     offset: makeClipperOffset(tl),
     flat: flat6,
     ball: ball2,
-    ...(restBalls.length === 0 ? {} : { restBall: restBalls[0], restBalls }),
+    ...(restBalls.length === 0 ? {} : { restBalls }),
     stepDownMm: 1.5,
     bandMm: 0.3,
     feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
@@ -173,5 +173,27 @@ describe('#1288 the rest ball: the posted depth decides', () => {
     const result = plan([longBall]);
     expect(restOps(result).some((op) => op.outcome.cutter === longBall.id)).toBe(true);
     expect(result.statements.some((s) => s.code === 'goal-finish-unreachable')).toBe(false);
+  }, 180_000);
+});
+
+describe('#1288 the refusal says what would finish the region', () => {
+  const catalogueLong = ballOf(1, { number: 6, id: '161032105031', name: '6*1*30.5mm Ball Nose Engraving', fluteLength: 30.5 });
+
+  it('no cutter on the shelf or in the catalogue reaches: it says what it would take', () => {
+    const result = plan([shortBall]);
+    const said = result.statements.find((s) => s.code === 'goal-finish-unreachable');
+    expect(said?.text).toMatch(/no cutter on the shelf or in the catalogue reaches it — it needs a ⌀1 mm ball with at least 4\.1 mm of reach/);
+  }, 180_000);
+
+  it('a catalogue ball of that diameter that reaches: the buy-this path, naming it', () => {
+    const result = planCurvedForTree(tree(), {
+      geometry: { triangles: plateWithSlot() }, offset: makeClipperOffset(tl), flat: flat6, ball: ball2,
+      restBalls: [shortBall], catalogueBalls: [catalogueLong],
+      stepDownMm: 1.5, bandMm: 0.3, feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 }, rapid: RAPID, spindleRpm: 12000, air: true,
+      safeZMm: 5, hopZMm: 1, edgeBreak: { legMm: 0 }, toolNumberFor: (t: Tool) => t.number ?? 1,
+    } as never);
+    const said = result.statements.find((s) => s.code === 'goal-finish-unreachable');
+    expect(said?.text).toContain("the catalogue's 6*1*30.5mm Ball Nose Engraving reaches it (30.5 mm) — add it to the shop's list");
+    expect(said?.text).not.toMatch(/no cutter on the shelf/);
   }, 180_000);
 });

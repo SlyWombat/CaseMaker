@@ -45,7 +45,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
-import { eligibleByReach, postedDepthMm, postedReachShortfall } from './reach';
+import { eligibleByReach, postedDepthMm, postedReachShortfall, usableLengthMm } from './reach';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -1956,7 +1956,8 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             ? {}
             : { flat: input.curvedRoughTool }),
       ...(b === undefined ? {} : { ball: b }),
-      ...(restBallFor(b) === undefined ? {} : { restBall: restBallFor(b), restBalls: restBallsFor(b) }),
+      ...(restBallFor(b) === undefined ? {} : { restBalls: restBallsFor(b) }),
+      catalogueBalls: input.cutters.catalogue.filter((t) => t.shape === 'ball'),
       // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
       // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
       ...(b === undefined ? { finishFlat: finishFlat ?? primary } : {}),
@@ -5331,9 +5332,10 @@ export interface PlanCurvedOptions {
    * time over the cells where the main ball's OWN CL still stands above the design by more than the
    * band, at its own radius' footprint — the sequence's rest rule, no new op.
    */
-  restBall?: Tool;
-  /** #1288 — every rest ball eligible for the remainder, in the order they are tried (`restBall` is the first); a ball whose posted depth is past its length yields to the next. */
+  /** #1288 — every rest ball eligible for the remainder, in the order they are tried; a ball whose posted depth is past its length yields to the next. */
   restBalls?: readonly Tool[];
+  /** #1288 — the catalogue's ball cutters (not on the shelf), so a refusal can say whether one would reach (the buy-this path) or none does. */
+  catalogueBalls?: readonly Tool[];
   /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
    * all (the property specs' house holds no V and asks for none). */
   vbit?: Tool;
@@ -5542,8 +5544,19 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const usable = postedReachShortfall(cutter, postedMm);
     if (usable === null) return true;
     const cutterName = cutter.name || cutter.shape;
+    // What would finish it (9b's ruling): a catalogue ball of this cutting diameter that reaches (the
+    // buy-this path), else the plain statement that nothing reaches and what it would take.
+    const diameter = cuttingDiameter(cutter);
+    const reaching = (opts.catalogueBalls ?? []).filter(
+      (t) => diameter !== null && Math.abs((cuttingDiameter(t) ?? -1) - diameter) < 0.05 && (usableLengthMm(t) ?? 0) + 1e-9 >= postedMm,
+    );
+    const needMm = Math.ceil(postedMm * 10 - 1e-6) / 10;
+    const remedy =
+      reaching.length > 0
+        ? `the catalogue's ${reaching[0]!.name || reaching[0]!.id} reaches it (${usableLengthMm(reaching[0]!)} mm) — add it to the shop's list to finish this region`
+        : `no cutter on the shelf or in the catalogue reaches it — it needs a ⌀${diameter === null ? '?' : Number(diameter.toFixed(2))} mm ball with at least ${needMm} mm of reach`;
     const text =
-      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm — use a longer-flute cutter, or let a ball finish it`;
+      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm; ${remedy}`;
     notes.push(text);
     statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: postedMm, usableMm: usable });
     return false;
@@ -6359,8 +6372,9 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     // The sequence's rest rule, no new op; the reach is the one that qualified it.
     // #1288 — the rest balls in the order they are tried: the first whose POSTED depth is within its
     // length takes the region; one that is not yields to the next (its refusal is stated).
-    const restCandidates: readonly Tool[] = opts.restBalls ?? (opts.restBall === undefined ? [] : [opts.restBall]);
+    const restCandidates: readonly Tool[] = opts.restBalls ?? [];
     let restPosted = false;
+    let restPostedTool: Tool | undefined;
     for (const restBallTool of restCandidates) {
       if (restPosted) break;
       const ballMaskRadiusMm = (cuttingDiameter(restBallTool) ?? 0) / 2;
@@ -6409,6 +6423,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
         if (postedWithinReach('rest', restBallTool, ref, restBallMemo.outcome)) {
           pushStage('rest', ref, restBallMemo.outcome, true);
           restPosted = true;
+          restPostedTool = restBallTool;
         } else {
           restBallCl = undefined;
         }
@@ -6449,6 +6464,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
           return withOverrun(out, restOverrun, ballMaskRadiusMm);
         });
       }
+      if (restPosted) restPostedTool ??= restBallTool;
       // A rest ball that did not post leaves no CL for the crease pass to ride (it rides the finish's).
       if (!restPosted) restBallCl = undefined;
     }
@@ -6478,7 +6494,7 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
       // #1054 — keyed by the V and the CL chain it rides (the rest ball's when there is one, else
       // the finish ball's), which `restBallCl`/`clBall()` carry.
       const creaseKey = stageKey('pencil-v', cutterKeyOf(vTool), {
-        prevCl: opts.restBall !== undefined && restBallCl !== undefined ? `rest:${cutterKeyOf(opts.restBall)}` : `ball:${finishCutterKey}`,
+        prevCl: restPostedTool !== undefined && restBallCl !== undefined ? `rest:${cutterKeyOf(restPostedTool)}` : `ball:${finishCutterKey}`,
         pitch: vPitch,
         feeds: feedsOf(paramsFor(vTool)),
         safeZ: opts.safeZMm,

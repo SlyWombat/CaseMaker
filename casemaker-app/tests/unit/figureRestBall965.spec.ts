@@ -87,7 +87,7 @@ function plan(withRestBall: boolean) {
     offset: makeClipperOffset(tl),
     flat: flat6,
     ball: ball2,
-    ...(withRestBall ? { restBall: ball1 } : {}),
+    ...(withRestBall ? { restBalls: [ball1] } : {}),
     stepDownMm: 1.5,
     bandMm: 0.3,
     feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
