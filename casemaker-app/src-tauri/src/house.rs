@@ -585,6 +585,11 @@ pub struct Health {
     /// a LAN client may write) can never name an executable. Defaulted for old reports.
     #[serde(default)]
     pub runs: bool,
+    /// #1293 — WHY `runs` is false, in the service's own sentence (the missing Node or CLI, the
+    /// unreadable setting). Absent when `runs` is true and on a service from before the field, so
+    /// the schema version stays and an older client simply never reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_reason: Option<String>,
     pub has_catalogue: bool,
     /// How many feed rows the stored catalogue holds (#310). A catalogue synced before the feed tier
     /// existed reports `has_catalogue: true` with `feedRows: 0`, which is exactly the state a re-sync
@@ -1206,6 +1211,7 @@ impl HouseStore {
             material_spec_rows: inner.catalogue.material_specs.len(),
             catalogue_synced_at: inner.catalogue.synced_at.clone(),
             runs: crate::runs::capability(),
+            runs_reason: crate::runs::unavailable_reason(),
             last_sync: inner.catalogue.last_sync.clone(),
             problems: [&inner.location_problem, &inner.catalogue_problem]
                 .iter()
@@ -2404,6 +2410,19 @@ mod tests {
         // Not a report, not stored: the kind is checked before the disk is touched.
         assert!(matches!(store.save_crash_report(br#"{"kind":"other"}"#), Err(HouseError::BadEntry(_))));
         assert!(matches!(store.save_crash_report(b"not json"), Err(HouseError::BadEntry(_))));
+    }
+
+    #[tokio::test]
+    async fn health_carries_the_reason_exactly_when_runs_is_false() {
+        let (_dir, store) = store();
+        let h = store.health().await;
+        // One fact, two fields: a house that cannot run says why; one that can says nothing.
+        assert_eq!(h.runs, h.runs_reason.is_none());
+        let json = serde_json::to_value(&h).unwrap();
+        match &h.runs_reason {
+            Some(reason) => assert_eq!(json["runsReason"], serde_json::json!(reason)),
+            None => assert!(json.get("runsReason").is_none()),
+        }
     }
 
     #[tokio::test]

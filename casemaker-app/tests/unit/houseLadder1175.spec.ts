@@ -20,7 +20,7 @@ const houseCalls: Array<Record<string, unknown>> = [];
 
 vi.mock('@/platform/houseGenerate', () => ({
   // The service reports `runs: true`, so the run store takes the house branch.
-  houseGenerationAvailable: async () => true,
+  houseGenerationStatus: async () => ({ available: true, sentence: 'Planning on the house.' }),
   houseEngraveGenerate: async (args: Record<string, unknown>) => {
     houseCalls.push(args);
     return {

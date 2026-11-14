@@ -71,6 +71,28 @@ export async function houseGenerationAvailable(): Promise<boolean> {
   return probe.kind === 'present' && probe.health.runs === true;
 }
 
+/**
+ * #1293 — WHICH SIDE PLANS, in one sentence for the run's progress line. Never a silent fallback:
+ * a house that cannot run says why, in the service's own words, and a missing house says so.
+ */
+export async function houseGenerationStatus(): Promise<{ available: boolean; sentence: string }> {
+  const probe = await probeHouse();
+  if (probe.kind === 'present' && probe.health.runs === true) {
+    return { available: true, sentence: 'Planning on the house.' };
+  }
+  if (probe.kind !== 'present') {
+    return { available: false, sentence: 'Planning in this page — no house answered.' };
+  }
+  const reason = (probe.health.runsReason ?? '').trim().replace(/[.\s]+$/, '');
+  return {
+    available: false,
+    sentence:
+      reason === ''
+        ? "Planning in this page — the house can't run jobs yet."
+        : `Planning in this page — the house can't run jobs yet: ${reason}.`,
+  };
+}
+
 /** Cancel the run this page is following, if any. Fire-and-forget: the caller is a stall path. */
 export function cancelActiveHouseRun(): void {
   const id = activeRunId;

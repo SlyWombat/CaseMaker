@@ -195,6 +195,11 @@ const HouseHealthSchema = z.object({
    */
   runs: z.boolean().optional(),
   /**
+   * #1293 — WHY `runs` is false, in the service's own sentence. Absent when it can run and on a
+   * service from before the field; the page says it beside the side it plans on.
+   */
+  runsReason: z.string().optional(),
+  /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
    */

@@ -15,7 +15,7 @@
  */
 
 import { featureSim } from '@/platform/features';
-import { cancelActiveHouseRun, houseEngraveGenerate, houseGenerationAvailable } from '@/platform/houseGenerate';
+import { cancelActiveHouseRun, houseEngraveGenerate, houseGenerationStatus } from '@/platform/houseGenerate';
 import { create } from 'zustand';
 import type { EngraveJob, EngraveMargins, EngraveTargetObject } from '@/types/engraveJob';
 import type { Tool } from '@/engine/cnc/tool';
@@ -279,14 +279,20 @@ function shopSettingsNow(): ShopSettingsRead {
   return { status: s.status, defaults: s.defaults, etag: s.etag };
 }
 
-async function clientForGenerate(): Promise<EngraveRunClient> {
+async function clientForGenerate(): Promise<{ client: EngraveRunClient; planning: string }> {
   const base = await clientLoader();
   // #1175 — THE PUBLISH SWITCH. `true` forces the in-page worker for every Generate, exactly as a
   // service that reports `runs: false`: the house branch below is skipped and nothing else changes.
   const HOUSE_GENERATION_FORCED_OFF = false;
-  if (HOUSE_GENERATION_FORCED_OFF || !(await houseGenerationAvailable())) return base;
+  // #1293 — the side is stated, never assumed: the sentence rides with the client to the run's line.
+  const status = HOUSE_GENERATION_FORCED_OFF
+    ? { available: false, sentence: 'Planning in this page.' }
+    : await houseGenerationStatus();
+  if (!status.available) return { client: base, planning: status.sentence };
   const { engravePlanIdeal: _idealOnTheBrowser, ...rest } = base;
   return {
+    planning: status.sentence,
+    client: {
     ...rest,
     // #1175 — ALL TEN ARGUMENTS OF THE BROWSER CALL ARE HONOURED. The tools list (8th) and the
     // ladder press (10th) ride the submit to the service and the CLI; `deferIdeal` (9th) has no
@@ -319,6 +325,7 @@ async function clientForGenerate(): Promise<EngraveRunClient> {
     cancelGenerate: () => {
       cancelActiveHouseRun();
       base.cancelGenerate?.();
+    },
     },
   };
 }
@@ -984,7 +991,14 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
     try {
       // #1126/#1175 — the house's planner when the service can run one, else the page's worker.
       // A simulate-only pass never generates, so it keeps the plain client.
-      client = simulateOnly ? await clientLoader() : await clientForGenerate();
+      let planning: string | null = null;
+      if (simulateOnly) {
+        client = await clientLoader();
+      } else {
+        const chosen = await clientForGenerate();
+        client = chosen.client;
+        planning = chosen.planning;
+      }
       activeClient = client;
       if (simulateOnly) {
         // #893 — nothing to generate: the program the row shows is this job's own.
@@ -1018,6 +1032,8 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           );
         }
       };
+      // #1293 — which side plans, said once at the start of the run on its own progress line.
+      if (planning !== null) onProgress({ stage: 'prepare', label: planning });
       try {
         // #961 — the ideal plan's candidate set: the app's own tool library (the same list every
         // picker shows, the house `cat:` rows included). The worker cannot see it from its realm.
@@ -1764,7 +1780,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
           set({ buildCompare: { status: 'kept', changed: 0, total: restored.programs.length } });
           return;
         }
-        const client = await clientForGenerate();
+        const { client } = await clientForGenerate();
         const fresh = await client.engraveGenerate(
           job,
           tool,

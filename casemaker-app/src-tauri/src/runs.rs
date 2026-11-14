@@ -262,6 +262,12 @@ pub fn capability() -> bool {
     manager().is_ok()
 }
 
+/// Why this service cannot generate: the same sentence `RunsConfig::resolve` produced, so health
+/// can say it beside `runs: false`. `None` when the service can run.
+pub fn unavailable_reason() -> Option<String> {
+    manager().as_ref().err().cloned()
+}
+
 /// The runs state, applied to the runs router's own state type. `house_api` merges that router
 /// AFTER applying its store state, so the two halves never share a state.
 #[derive(Clone)]
