@@ -109,6 +109,9 @@ function refusalOf(dir: string, run: string): string | null {
   const r = readJson(join(dir, 'tray', run, 'receipt.json'));
   if (!r || r.ok !== false) return null;
   const first = Array.isArray(r.refusals) ? ((r.refusals as Json[]).find((x) => x.code !== 'stopped') ?? (r.refusals as Json[])[0]) : null;
+  // #1258 — A RUN THAT STOPPED TO ASK THE TAB QUESTION IS NOT A REFUSAL: its own words, so a table
+  // never counts it with the runs the planner turned down.
+  if (first !== null && first.code === 'tab-choice-needed') return "needs the operator's choice";
   return `refused at ${String(r.stage ?? '?')}${first ? `: ${String(first.reason ?? first.code).replace(/\s+/g, ' ').slice(0, 110)}` : ''}`;
 }
 
