@@ -1226,11 +1226,8 @@ export function traceSelfOverlaps(
  * them, because `JobFindingCode` (`jobSetup.ts`) is owned by another slot; when those two members
  * are added there, the objects below are already the right shape (`{ severity, code, labelId,
  * message }`).
- *
- * `trace-outside-stock` is NOT produced here: it needs the swept region intersected with the
- * stock, which is a CrossSection evaluation the worker does (#201), not this pure module.
  */
-export type TraceFindingCode = 'trace-outside-stock' | 'trace-self-overlap';
+export type TraceFindingCode = 'trace-self-overlap';
 
 /**
  * `trace-self-overlap` findings for every enabled, non-construction trace in the job. A warning,

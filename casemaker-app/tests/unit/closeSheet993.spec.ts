@@ -110,7 +110,7 @@ describe('#993 the door splits a knife edge', () => {
     // A flap hinged on the box's top edge (0,0,10)-(10,0,10): that edge now has three triangles.
     const flap = { positions: [[0, 0, 10], [10, 0, 10], [5, -5, 15]] as P[], indices: [0, 1, 2] };
     expect(() => closeOpenSheet(tl, merge(one, flap), { skirtTo: 'lowestBoundary' })).toThrow(
-      /1 edge where more than two faces meet — the model’s parts touch along an edge without sharing it, so there is no single inside to cut; the first at \(.*\), z 10\.000–10\.000\. Re-export the model as one solid \(in the slicer or CAD tool, union or merge the bodies and weld the vertices\), or run it through a mesh repair, then import it again\./,
+      /1 edge\(s\) shared by more than two triangles — the mesh is not a surface; the first at \(.*\), z 10\.000–10\.000/,
     );
   }, 120_000);
 });

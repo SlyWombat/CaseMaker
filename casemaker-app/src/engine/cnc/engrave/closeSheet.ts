@@ -285,7 +285,7 @@ export function closeOpenSheet(tl: ManifoldToplevel, mesh: ParsedMesh, opts: Clo
   if (overused > 0) {
     const at = firstOverused === null ? '' :
       `; the first at (${weldedPos[3 * firstOverused.from]!.toFixed(3)}, ${weldedPos[3 * firstOverused.from + 1]!.toFixed(3)}), z ${weldedPos[3 * firstOverused.from + 2]!.toFixed(3)}–${weldedPos[3 * firstOverused.to + 2]!.toFixed(3)}`;
-    throw new UnclosableOpenMeshError(`${overused} edge${overused === 1 ? '' : 's'} where more than two faces meet — the model’s parts touch along an edge without sharing it, so there is no single inside to cut${at}. Re-export the model as one solid (in the slicer or CAD tool, union or merge the bodies and weld the vertices), or run it through a mesh repair, then import it again.`);
+    throw new UnclosableOpenMeshError(`${overused} edge(s) shared by more than two triangles — the mesh is not a surface${at}`);
   }
   if (boundary.length === 0) {
     if (splitEdgeCount === 0 && duplicateTriangles === 0) {
