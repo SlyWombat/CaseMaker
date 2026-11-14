@@ -56,11 +56,17 @@ describe('#1237 the install and the guard', () => {
     );
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toMatch(/\/tmp\/location\.json/);
-    // A location WITH no defaults section passes `defaults: null` and is not the guard's business.
-    const later = await planModelCam({ defaultsFrom: '/tmp/location.json', defaults: null } as unknown as ModelPlanInput).catch(
+    // #1237 (made reachable): `null` with a location stated is refused too — the builder turns an absent
+    // map into null, and a guard that tests only `undefined` could never fire for a built input.
+    const nulled = await planModelCam({ defaultsFrom: '/tmp/location.json', defaults: null } as unknown as ModelPlanInput).catch(
       (e: Error) => e,
     );
-    expect((later as Error).message).not.toMatch(/no shop defaults/);
+    expect((nulled as Error).message).toMatch(/no shop defaults/);
+    // A location that states no overrides passes `{}`: that is the recommendations, stated, and passes the guard.
+    const empty = await planModelCam({ defaultsFrom: '/tmp/location.json', defaults: {} } as unknown as ModelPlanInput).catch(
+      (e: Error) => e,
+    );
+    expect((empty as Error).message).not.toMatch(/no shop defaults/);
   });
 });
 

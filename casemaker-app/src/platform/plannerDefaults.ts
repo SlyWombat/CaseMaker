@@ -86,6 +86,10 @@ export const PLANNER_DEFAULTS_KEYS: readonly string[] = [
   'tabs.bridgeOvershootMm',
   // #1206 — the freeing contour's unsupported-span limit (read by planModelCam from its input).
   'tabs.maxSpanMm',
+  // #1271 — the freeing contour's own tabs: count, the freeing width, and height (planModelCam reads them).
+  'tabs.count',
+  'tabs.freeingWidthMm',
+  'tabs.heightMm',
   'toolChange.seconds',
   'vise.defaultStockProudMm',
   'vise.minCoverageFraction',

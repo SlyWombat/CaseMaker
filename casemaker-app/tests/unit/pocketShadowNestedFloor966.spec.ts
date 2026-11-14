@@ -11,6 +11,7 @@
  * floor and the child's own deeper floor hit this independently (`plan.ts`'s `allPockets` plans
  * every `PocketNode`, including every child, as its own separate `pocket()` call).
  */
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 import { describe, expect, it } from 'vitest';
 
 import { tl, type ManifoldInstance } from './helpers/manifoldExec';
@@ -78,6 +79,7 @@ function treeOf(mesh: ParsedMesh): FeatureTree {
 
 function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMesh'> {
   return {
+    tabs: DEFAULT_RELEASE_TABS,
     offset,
     houseFlats,
     stepDownMm: 2,

@@ -37,6 +37,7 @@ import {
   resetRotationPatch,
 } from '@/engine/cnc/engrave/goalPlacement';
 import type { TargetObjectPatch } from '@/store/engraveJobStore';
+import { GoalFreeingTabs, type FreeingTabCounts, type FreeingTabsShop } from './GoalFreeingTabs';
 import type { EngraveSurfaceSettings, EngraveTargetObject, GoalUndersideKind } from '@/types/engraveJob';
 
 /**
@@ -144,6 +145,11 @@ export interface EngraveTargetObjectRowProps {
    * "Fit to the stock" (the row then still scales by hand).
    */
   stock?: { length: number; width: number; thickness: number; edgeMargin: number };
+  /**
+   * #1271 — the shop's freeing tabs, the span limit and the last Generate's tab counts, for the
+   * "Tabs holding the part" group of a goal part. Absent hides the group.
+   */
+  freeingTabs?: { shop: FreeingTabsShop; counts: FreeingTabCounts | null };
 }
 
 const AXIS_WORD = { x: 'width', y: 'length', z: 'height' } as const;
@@ -668,6 +674,7 @@ export function EngraveTargetObjectRow({
   relief = null,
   onCutterChange,
   stock,
+  freeingTabs,
 }: EngraveTargetObjectRowProps): JSX.Element {
   // #1207 — the pencil crease's UI fallback is the shop’s `finish.pencilCreaseDeg`.
   const pencilCreaseDefault = useShopDefault('finish.pencilCreaseDeg').value;
@@ -902,6 +909,17 @@ export function EngraveTargetObjectRow({
           />
           <span style={{ fontSize: 11, color: '#9aa4b0' }}>mm</span>
         </label>
+      )}
+
+      {/* #1271 — the tabs that hold a goal part while its outline is cut free. */}
+      {showsUnderside && freeingTabs !== undefined && (
+        <GoalFreeingTabs
+          target={target}
+          index={index}
+          shop={freeingTabs.shop}
+          counts={freeingTabs.counts}
+          onChange={(tabs) => onChange({ tabs })}
+        />
       )}
 
       {/* #722 — a mesh's size on the blank; a picture keeps its own width field below. */}

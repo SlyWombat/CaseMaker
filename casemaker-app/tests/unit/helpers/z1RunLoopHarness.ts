@@ -13,16 +13,15 @@
 // trace's own replies, in order. Nothing here touches a machine: the address is a loopback socket the
 // test opened, and the trace file is written to a temp directory rather than the repo's traces.
 //
-// Not covered here: Ctrl-C. On Windows `child.kill('SIGINT')` terminates the process outright instead
-// of delivering the signal (Node maps it to `TerminateProcess`), so the abort path cannot be driven
-// from a test — at the bench it is a real keypress and a real trace line, and the two things the
-// #386 review changed there (a 30 s reply window, and `M332` only after the queue is drained) are
-// reasoned from the 2026-10-12 observation rather than exercised here.
+// Ctrl-C: on Windows `child.kill('SIGINT')` terminates the process outright instead of delivering the
+// signal (Node maps it to `TerminateProcess`), so the abort path cannot be driven there; on Linux and
+// macOS it is (`z1RunLoopAbort.spec.ts`, which names its own Windows skip). At the bench it is a real
+// keypress and a real trace line.
 //
 // The rest of that review IS exercised: the pre-play `Idle` gate, a `play` the controller never
 // answers, a `play` it answers with an error, and the bound on a job that reports no `P` at all.
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -99,7 +98,8 @@ export async function fakeController(
           const line = decodeText(frame.data).trim();
           seen.push(line);
           played = true;
-          const said = opts.playReply === undefined ? 'File size 791\r\n' : opts.playReply;
+          // An `abort` line is answered the way the controller does (2026-10-12: it says "aborted playing").
+          const said = line === 'abort' ? 'ok\r\naborted playing\r\n' : opts.playReply === undefined ? 'File size 791\r\n' : opts.playReply;
           if (said !== null) socket.write(Buffer.from(reply(said)));
         }
       }
@@ -120,6 +120,8 @@ export async function fakeController(
 export async function runHarness(
   port: number,
   extra: string[],
+  /** Hands the spawned child to the caller (a spec that must signal it, e.g. SIGINT for the abort path). */
+  onChild?: (child: ChildProcess) => void,
 ): Promise<{ code: number | null; stdout: string; stderr: string; trace: string }> {
   const trace = join(mkdtempSync(join(tmpdir(), 'casemaker-386-run-')), 'trace.log');
   const child = spawn(
@@ -156,6 +158,7 @@ export async function runHarness(
     ],
     { cwd: APP },
   );
+  onChild?.(child);
   let stdout = '';
   let stderr = '';
   child.stdout.setEncoding('utf8');

@@ -277,6 +277,8 @@ export type TargetObjectPatch = Partial<
   chamfer?: EngraveGoalChamfer;
   /** #898 — the goal's underside choice (`undefined` removes it: the cut as the mesh is). */
   underside?: EngraveTargetObject['underside'];
+  /** #1271 — the goal's own freeing tabs, only the fields typed (`undefined`, or none typed, removes the block: follow the shop). */
+  tabs?: EngraveTargetObject['tabs'];
   /** #672 — a picture's placed size in millimetres (the width field; the aspect is the row's). */
   size?: EngraveTargetObject['size'];
   /**
@@ -2451,6 +2453,11 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
         // #898 — 'not chosen' REMOVES the underside block, so a goal back on the plain cut
         // serialises exactly as one that never carried it.
         if ('underside' in patch && patch.underside === undefined) delete next.underside;
+        // #1271 — the operator's freeing tabs: stored only for the fields they typed; none typed = absent.
+        if ('tabs' in patch) {
+          const t = patch.tabs;
+          if (t === undefined || (t.count === undefined && t.widthMm === undefined && t.heightMm === undefined)) delete next.tabs;
+        }
         // #785 — the top-band choice is stored only when it is ON, so a goal that never chose it
         // serialises without gaining a key (and turning it off returns the refusal).
         if ('cutWithinReach' in patch && patch.cutWithinReach !== true) delete next.cutWithinReach;

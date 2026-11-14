@@ -30,6 +30,7 @@ import {
 } from '@/engine/cnc/cam/fields/shadowSelector';
 import type { TraceRow } from '../../tools/plan-counts/summarize';
 import { tl } from './helpers/manifoldExec';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 function flat(id: string, diameter: number, opts: Partial<Tool> = {}): Tool {
   return flatEndMill(diameter, { id, name: `${diameter} mm flat (${id})`, number: 1, ...opts });
@@ -186,7 +187,7 @@ function facingTree(skinMm: number): FeatureTree {
 
 function planFace(): PlanPocketsResult {
   return planPocketsForTree(facingTree(0.8), {
-    offset: makeClipperOffset(tl),
+    tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
     houseFlats: [FLAT6],
     stepDownMm: 1.0,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

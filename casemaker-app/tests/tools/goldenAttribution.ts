@@ -34,6 +34,7 @@ import { Z1 } from '@/engine/cnc/machine';
 import { TOOL_CHANGE_SECONDS } from '@/engine/cnc/engrave/smartPick';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const HOUSE: Tool[] = [
   flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6' }),
@@ -75,7 +76,7 @@ export function regenerateGoldenPins(tl: ManifoldToplevel, outDir: string): Gold
   for (const c of GOLDEN_ATTRIBUTION_CASES) {
     const part = buildRandomPart(c.seed, c.kind, tl);
     const result = planPocketsForTree(part.tree, {
-      offset: makeClipperOffset(tl),
+      tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
       houseFlats: HOUSE,
       stepDownMm: 1.5,
       feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

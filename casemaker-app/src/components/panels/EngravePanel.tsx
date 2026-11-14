@@ -186,6 +186,7 @@ import { nearestThreadMill, threadBoss } from '@/engine/cnc/engrave/threadFit';
 import { fmtPitch, threadSpec } from '@/engine/cnc/threadTable';
 import { EngravePrimitiveRow } from './EngravePrimitiveRow';
 import { EngraveTargetObjectRow } from './EngraveTargetObjectRow';
+import { freeingCountsOf, freeingTabsShopFrom } from './GoalFreeingTabs';
 import { OperationPicker } from './OperationPicker';
 import { addOperationOfType, jobHasOperations, operationType, type OperationOptionDef, type OperationTypeId } from './operationTypes';
 import {
@@ -4429,6 +4430,15 @@ export function EngravePanel(): JSX.Element {
                 : undefined
             }
             surfaceFacts={target.role === 'goal' ? (run.generated?.surface3d ?? null) : null}
+            freeingTabs={
+              target.role === 'goal'
+                ? {
+                    // #1271 — the shop's three freeing-tab keys and the span limit, read here at the edge.
+                    shop: freeingTabsShopFrom(shopDefaults ?? null),
+                    counts: run.staleSince === null ? freeingCountsOf(run.generated) : null,
+                  }
+                : undefined
+            }
             relief={reliefFacts}
             onCutterChange={(key) => setTool(key)}
           />

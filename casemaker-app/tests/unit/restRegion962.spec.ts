@@ -24,6 +24,7 @@ import { planPocketsForTree, type PlanPocketsResult } from '@/engine/cnc/cam/mod
 import { Z1 } from '@/engine/cnc/machine';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import { tl } from './helpers/manifoldExec';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
@@ -54,7 +55,7 @@ const STRIP_AREA = 8;
 
 function plan(mask: [number, number][][], restDilationMm?: number): PlanPocketsResult {
   return planPocketsForTree(tree(), {
-    offset: makeClipperOffset(tl),
+    tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
     houseFlats: [FLAT6, FLAT3175],
     stepDownMm: 1.0,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
