@@ -896,6 +896,7 @@ describe('#469 the release step', () => {
         base: '',
         health: {
           ok: true,
+          runs: true,
           schemaVersion: HOUSE_SCHEMA_VERSION,
           build: 'v-test',
           hasCatalogue: false,
@@ -1556,6 +1557,7 @@ describe('#1202 the walks’ first run', () => {
         base: '',
         health: {
           ok: true,
+          runs: true,
           schemaVersion: HOUSE_SCHEMA_VERSION,
           build: 'v-test',
           hasCatalogue: false,

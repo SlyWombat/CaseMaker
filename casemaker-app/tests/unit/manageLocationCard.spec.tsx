@@ -72,6 +72,7 @@ describe('#412 the location card', () => {
     useToolRegistryStore.setState({
       health: {
         ok: true,
+        runs: true,
         schemaVersion: 1,
         build: 'v-test',
         hasCatalogue: false,
@@ -106,6 +107,7 @@ describe('#412 the location card', () => {
       useToolRegistryStore.setState({
         health: {
           ok: true,
+          runs: true,
           schemaVersion: 1,
           build: 'v-test',
           hasCatalogue: false,

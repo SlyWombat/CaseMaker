@@ -67,6 +67,7 @@ function stubFetch(
 
 const HEALTH = {
   ok: true,
+  runs: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
   // #566 — the commit the service was built from. The client treats it as a late field like the
   // others, so a report without it still parses (see the "service that has none" test below).
@@ -190,6 +191,16 @@ describe('probeHouse', () => {
     if (probe.kind !== 'error') throw new Error('unreachable');
     expect(probe.detail).toContain(`version ${HOUSE_SCHEMA_VERSION + 1}`);
     expect(probe.detail).toContain(`reads version ${HOUSE_SCHEMA_VERSION}`);
+  });
+
+  it('#1293 a house that cannot run always says why; one that can never does', async () => {
+    const serve = (health: object) => stubFetch(() => ({ contentType: 'application/json', body: JSON.stringify(health) }));
+    serve({ ...HEALTH, runs: false });
+    expect((await probeHouse({ base: BASE })).kind).toBe('error');
+    serve({ ...HEALTH, runs: false, runsReason: 'the house\'s Node is not there', runsReasonCode: 'node-missing' });
+    expect((await probeHouse({ base: BASE })).kind).toBe('present');
+    serve({ ...HEALTH, runs: true, runsReason: 'x', runsReasonCode: 'node-missing' });
+    expect((await probeHouse({ base: BASE })).kind).toBe('error');
   });
 
   it('is an error when the JSON is not a health report', async () => {

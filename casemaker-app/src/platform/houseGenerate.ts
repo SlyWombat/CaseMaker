@@ -88,14 +88,10 @@ export async function houseGenerationStatus(): Promise<{
   if (probe.kind !== 'present') {
     return { available: false, sentence: 'Planning in this page — no house answered.' };
   }
-  const { runsReasonCode: code, runsReason: reason } = probe.health;
-  if (code === undefined || code === '') {
-    return { available: false, sentence: "Planning in this page — the house can't run jobs yet." };
-  }
   return {
     available: false,
     sentence: "Planning in this page — this house's install cannot plan jobs.",
-    ...(reason === undefined || reason.trim() === '' ? {} : { detail: reason.trim() }),
+    detail: probe.health.runsReason ?? probe.health.runsReasonCode ?? '',
   };
 }
 

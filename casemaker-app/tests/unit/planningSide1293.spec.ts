@@ -44,9 +44,7 @@ describe('#1293 houseGenerationStatus', () => {
       detail: REASON,
     });
   });
-  it('an older service (no code), and no house at all, keep their plain sentences', async () => {
-    probe.mockResolvedValue({ kind: 'present', health: { runs: false } as never, base: '' });
-    expect(await houseGenerationStatus()).toEqual({ available: false, sentence: "Planning in this page — the house can't run jobs yet." });
+  it('no house at all says so', async () => {
     probe.mockResolvedValue({ kind: 'absent', reason: 'none' });
     expect((await houseGenerationStatus()).sentence).toBe('Planning in this page — no house answered.');
   });

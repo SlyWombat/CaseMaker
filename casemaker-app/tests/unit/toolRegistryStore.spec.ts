@@ -24,6 +24,7 @@ import { conditionForKey } from '@/engine/cnc/toolCondition';
 
 const HEALTH: HouseHealth = {
   ok: true,
+  runs: true,
   schemaVersion: HOUSE_SCHEMA_VERSION,
   build: 'v-test',
   hasCatalogue: false,
