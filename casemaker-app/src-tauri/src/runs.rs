@@ -654,8 +654,9 @@ impl Runs {
             .filter(|p| p.is_file())
     }
 
-    /// The run's own generated document (#1126): the plain-data result the browser's worker returns,
-    /// written by the CLI beside the programs.
+    /// The run's RESULT document (#1126 slice 2): `resultVersion: 2`, the plain-data object the
+    /// browser's worker returns MINUS its bytes — no NC text, no `camIr` — naming the files it wrote,
+    /// which /programs/:name serves. The path keeps its old name; the payload is versioned.
     pub fn generated_path(&self, id: &str) -> Option<PathBuf> {
         let inner = self.inner.lock().expect("runs lock");
         inner
@@ -988,7 +989,7 @@ async fn run_generated(State(state): State<RunsState>, Path(id): Path<String>) -
     let Some(path) = path else {
         return error_sentence(
             StatusCode::NOT_FOUND,
-            "this run has no generated document".to_owned(),
+            "this run has no result document".to_owned(),
         );
     };
     match std::fs::read(&path) {
@@ -1000,7 +1001,7 @@ async fn run_generated(State(state): State<RunsState>, Path(id): Path<String>) -
         }
         Err(e) => error_sentence(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("the generated document could not be read: {e}"),
+            format!("the result document could not be read: {e}"),
         ),
     }
 }
