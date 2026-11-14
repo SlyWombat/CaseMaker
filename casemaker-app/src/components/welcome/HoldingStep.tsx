@@ -1824,14 +1824,16 @@ export function HoldingStep({
   // selected until the operator picks one (or the job already states its own hold — a file, a saved
   // job — which is kept). The pick is carried as the operator's assumption (`vise.assumed`).
   const noRecord = now === null;
-  const holdStated = job.workholding.kind !== 'vise' || answers.vise.source !== 'default' || answers.vise.assumed === true;
+  // A MEASURED vise is the machine's own calibration, not this job's answer (#725 W10): only a vise
+  // the operator saved or assumed, or a hold that is not the vise, is the job's own statement.
+  const holdStated = job.workholding.kind !== 'vise' || answers.vise.source === 'saved' || answers.vise.assumed === true;
   const nothingChosen = noRecord && !holdStated;
   const askShown = noRecord && (nothingChosen || answers.vise.assumed === true);
   const selected: HoldingMount | null = nothingChosen ? null : current;
   const mountBlocked = nothingChosen
-    ? 'choose how the stock is held'
+    ? 'Choose how the stock is held.'
     : currentOption !== null && currentOption.disabled && !(noRecord && currentOption.unrecorded === true)
-      ? (currentOption.reason ?? 'choose how the stock is held')
+      ? (currentOption.reason ?? 'Choose how the stock is held.')
       : null;
   useEffect(() => {
     onMountBlocked?.(mountBlocked);

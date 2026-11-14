@@ -396,7 +396,7 @@ export function StartWizard(): JSX.Element {
     // job states a vise of its own (a file, a saved job, the operator's pick).
     if (now === null) {
       const hold = job.workholding;
-      return hold.kind === 'vise' && (hold.vise.source !== 'default' || hold.vise.assumed === true);
+      return hold.kind === 'vise' && (hold.vise.source === 'saved' || hold.vise.assumed === true);
     }
     return now.mount === 'vise';
   }, [location, job.machineId, job.workholding]);
