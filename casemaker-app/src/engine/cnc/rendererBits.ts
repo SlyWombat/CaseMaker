@@ -52,8 +52,9 @@ export const BROWSER_32_BIT_REFUSAL: RendererRefusal = {
  * just now, but a 64-bit renderer under transient pressure is not a verdict — Generate proceeds and
  * the operator is told, so a real OOM reads as the cause rather than a mystery mid-plan failure.
  */
-export const BROWSER_MEMORY_SHORT_WARNING =
-  "This page couldn't reserve the planner's ~450 MiB just now; generating anyway";
+export const MEMORY_TIGHT_TITLE = 'Memory is tight in this page';
+export const MEMORY_TIGHT_BODY = 'Generating anyway. If it stops, close other tabs and press Generate again.';
+export const BROWSER_MEMORY_SHORT_WARNING = `${MEMORY_TIGHT_TITLE}. ${MEMORY_TIGHT_BODY}`;
 
 /**
  * The run's own out-of-memory failure, in the operator's words: the raw text of the bench's

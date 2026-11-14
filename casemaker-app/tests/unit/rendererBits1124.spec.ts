@@ -11,6 +11,7 @@ import {
   getRendererVerdict,
   probeAddressSpace,
   readRendererBitness,
+  MEMORY_TIGHT_TITLE,
   recheckRendererForGenerate,
   resetRendererCheck,
   startRendererCheck,
@@ -187,5 +188,13 @@ describe('#1124 — the browser bitness reader', () => {
     expect(await readRendererBitness(navWithBitness('32'))).toBe('32');
     expect(await readRendererBitness(navWithBitness('64'))).toBe('64');
     expect(await readRendererBitness(navWithBitness('arm'))).toBeNull();
+  });
+});
+
+describe('#1185 — the memory warning is a title and what to do', () => {
+  it('has no bare size', () => {
+    expect(BROWSER_MEMORY_SHORT_WARNING.startsWith(MEMORY_TIGHT_TITLE)).toBe(true);
+    expect(BROWSER_MEMORY_SHORT_WARNING).toContain('close other tabs and press Generate again');
+    expect(BROWSER_MEMORY_SHORT_WARNING).not.toMatch(/MiB|\d{3}/);
   });
 });
