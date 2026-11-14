@@ -224,6 +224,11 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   const stretches: TabStretch[] = placements
     .flatMap((placement) => placement.stretches ?? [])
     .map((stretch, index) => ({ ...stretch, index }));
+  // …and where the tabs already stand, so a card can draw the outline to scale: each placed span's
+  // centre (the point half-way along its own centre-path run).
+  const tabsAt: [number, number][] = placements.flatMap((placement) =>
+    placement.spans.map((span) => midpointOfRun(span.points)),
+  );
   if (cut.tabs.tabChoice === 'insideMargin' || cut.tabs.tabChoice === 'longerStretch') {
     const mm = (v: number): string => String(Number(v.toFixed(1)));
     for (const stretch of stretches) {
@@ -249,9 +254,24 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
-    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0 } }),
+    ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0, path, tabsAt } }),
     ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };
+}
+
+/** The point half-way along a polyline's own length. */
+function midpointOfRun(points: readonly [number, number][]): [number, number] {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  let left = total / 2;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (left <= len && len > 0) return [a[0] + ((b[0] - a[0]) * left) / len, a[1] + ((b[1] - a[1]) * left) / len];
+    left -= len;
+  }
+  return points[points.length - 1] ?? [0, 0];
 }
 
 export interface ThroughHoleOpOptions {
