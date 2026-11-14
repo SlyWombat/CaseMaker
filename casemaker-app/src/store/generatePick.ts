@@ -12,7 +12,7 @@ import { useEngraveRunStore } from '@/store/engraveRunStore';
 export type PickOutcome<T> =
   /** A run was already in flight: nothing started. */
   | { started: false }
-  /** The pick ran; `cancelled` says the operator stopped the press meanwhile (the value is then not to be applied). */
+  /** The pick ran; `cancelled` says the press is over — stopped by the operator, or the pick threw (the value is then not to be applied). */
   | { started: true; cancelled: boolean; value: T };
 
 export async function pickUnderProgress<T>(measure: () => Promise<T>): Promise<PickOutcome<T>> {
@@ -28,6 +28,11 @@ export async function pickUnderProgress<T>(measure: () => Promise<T>): Promise<P
   try {
     const value = await measure();
     return { started: true, cancelled: !useEngraveRunStore.getState().pickIsCurrent(token), value };
+  } catch (e) {
+    // A pick that throws must not leave the run `generating` for ever (the button dead, the line
+    // frozen): the press ends, and the error is said where a failed Generate says it.
+    useEngraveRunStore.getState().failPick(token, e);
+    return { started: true, cancelled: true, value: undefined as T };
   } finally {
     unsubscribe();
   }
