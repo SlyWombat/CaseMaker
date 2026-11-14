@@ -66,17 +66,17 @@ const feedMoves = (out: ReturnType<typeof runContour>): string =>
 describe('#1258 placement: the stretches are reported, and placed only when the operator says so', () => {
   const ring = teeth()[0]!;
 
-  it('ask reports every stretch with its candidate and places no step-2 tab', () => {
+  it('ask reports every stretch with its candidates and places no step-2 tab', () => {
     const asked = placeTabs(ring, 4, 6, 3, { maxSpanMm: 80, tabChoice: 'ask' });
     expect(asked.tight).toEqual([]);
     expect(asked.stretches!.length).toBeGreaterThan(0);
     for (const s of asked.stretches!) {
       expect(s.spanMm).toBeGreaterThan(80);
-      expect(s.candidate).not.toBeNull();
-      const c = s.candidate!;
-      expect(c.fromCornerMm).toBeLessThan(c.marginMm);
-      expect(c.leavesSpansMm[0]).toBeGreaterThan(0);
-      expect(c.leavesSpansMm[1]).toBeGreaterThan(0);
+      expect(s.candidates.length).toBeGreaterThan(0);
+      for (const c of s.candidates) expect(c.fromCornerMm).toBeLessThan(c.marginMm);
+      // one length left on either side of each tab, and every one of them within the limit here
+      expect(s.leavesSpansMm).toHaveLength(s.candidates.length + 1);
+      expect(s.stillOverLimit).toBe(false);
     }
     expect(asked.stretches!.map((s) => s.index)).toEqual(asked.stretches!.map((_, i) => i));
   });
@@ -88,6 +88,35 @@ describe('#1258 placement: the stretches are reported, and placed only when the 
     expect(legacy.tight.length).toBeGreaterThan(0);
     expect(chosen.spans).toEqual(legacy.spans);
     expect(chosen.tight).toEqual(legacy.tight);
+  });
+
+  it('a stretch that needs several tabs lists EVERY one, and insideMargin places exactly those, leaving exactly the spans stated', () => {
+    // The teeth outline's one 157 mm stretch needs five tabs to come under 80 mm: the question must
+    // show all five (not the first), because the answer then places all five.
+    const asked = placeTabs(ring, 4, 6, 3, { maxSpanMm: 80, tabChoice: 'ask' });
+    const placed = placeTabs(ring, 4, 6, 3, { maxSpanMm: 80, tabChoice: 'insideMargin' });
+    expect(asked.stretches).toHaveLength(1);
+    const stretch = asked.stretches![0]!;
+    expect(stretch.candidates).toHaveLength(5);
+    expect(placed.tight).toHaveLength(5);
+    const key = (p: readonly [number, number]): string => `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+    expect(placed.tight.map((t) => key(t.at)).sort()).toEqual(stretch.candidates.map((c) => key(c.atXY)).sort());
+    // The spans left are the real gaps between the placed spans, in that stretch.
+    let perimeter = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]!;
+      const b = ring[(i + 1) % ring.length]!;
+      perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+    const spans = [...placed.spans].sort((x, y) => x.startArc - y.startArc);
+    const gaps = spans.map((s, i) => {
+      const next = spans[(i + 1) % spans.length]!;
+      let g = next.startArc - s.endArc;
+      if (g < 0) g += perimeter;
+      return Number(g.toFixed(6));
+    });
+    for (const left of stretch.leavesSpansMm) expect(gaps).toContain(Number(left.toFixed(6)));
+    expect(gaps.filter((g) => g > 80 + 1e-9)).toEqual([]);
   });
 
   it('longerStretch places no step-2 tab and still reports the stretches', () => {
@@ -103,11 +132,13 @@ describe('#1258 placement: the stretches are reported, and placed only when the 
     expect(none.stretches).toEqual([]);
   });
 
-  it('a stretch no tab fits in has candidate null, and is not an error under an answer', () => {
+  it('a stretch no tab fits in has no candidates, and is not an error under an answer', () => {
     const r = round()[0]!;
     const asked = placeTabs(r, 1, 6, 3, { maxSpanMm: 40, tabChoice: 'ask' });
     expect(asked.stretches).toHaveLength(1);
-    expect(asked.stretches![0]!.candidate).toBeNull();
+    expect(asked.stretches![0]!.candidates).toEqual([]);
+    expect(asked.stretches![0]!.leavesSpansMm).toEqual([asked.stretches![0]!.spanMm]);
+    expect(asked.stretches![0]!.stillOverLimit).toBe(true);
   });
 });
 

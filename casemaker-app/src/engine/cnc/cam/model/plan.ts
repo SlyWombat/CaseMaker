@@ -599,14 +599,13 @@ export interface ModelPlanOutput {
 
 /**
  * #1258 — THE QUESTION, as plain data. `stretches` carries one entry per stretch (re-indexed across
- * the job, with the setup it belongs to); `candidate: null` — no tab fits in it. `marginMm` is the
- * corner margin of the first candidate's own edge — each candidate also states its OWN edge's
- * margin, which is what a table should print. `fingerprint` is what the answer must echo as
- * `answeredFor`.
+ * the job, with the setup it belongs to); `candidates: []` — no tab fits in it. The margin is per
+ * edge, so there is no single margin here: each candidate states the margin of ITS edge, which is
+ * what a table prints. `fingerprint` (the outline, the limit, the corner angle, the tab count and
+ * width) is what the answer must echo as `answeredFor`.
  */
 export interface TabChoiceNeeded {
   limitMm: number;
-  marginMm: number;
   stretches: (TabStretch & { setupIndex: number; cut: TabCut })[];
   fingerprint: string;
   /**
@@ -1145,10 +1144,10 @@ function fnv1a(text: string): string {
  * `tabs.maxSpanMm`, the tab count and width (the corner margin's two numbers are still written in
  * the placement code, #1262; when they become settings they join this).
  */
-function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | null {
+function collectTabQuestion(perSetup: readonly SetupPlan[], cornerDeg: number): TabChoiceNeeded | null {
   const stretches: (TabStretch & { setupIndex: number; cut: TabCut })[] = [];
   const drawn: TabChoiceNeeded['setups'] = [];
-  const parts: unknown[] = [];
+  const parts: unknown[] = [cornerDeg];
   let limitMm = 0;
   for (const setup of perSetup) {
     for (const op of setup.ops) {
@@ -1177,8 +1176,7 @@ function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | n
     }
   }
   if (stretches.length === 0) return null;
-  const marginMm = stretches.find((s) => s.candidate !== null)?.candidate?.marginMm ?? 0;
-  return { limitMm, marginMm, stretches, fingerprint: fnv1a(JSON.stringify(parts)), setups: drawn };
+  return { limitMm, stretches, fingerprint: fnv1a(JSON.stringify(parts)), setups: drawn };
 }
 
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
@@ -3084,7 +3082,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
   // too long. With no valid answer the plan hands back the question and NO programs; with a valid
   // one it goes on (the contour already tabbed or left each stretch as the answer said).
   {
-    const asked = collectTabQuestion(perSetup);
+    const asked = collectTabQuestion(perSetup, readDefault(input.defaults ?? null, 'tabs.cornerDeg').value);
     if (asked !== null) {
       const answer = input.tabChoice;
       if (answer === undefined) return { perSetup: [], tabChoiceNeeded: asked };
