@@ -257,6 +257,27 @@ describe('#478 the human output is rendered from the receipt', () => {
     expect(text).toContain('  sheet      badge-run-sheet.md  hash=deadbeef  time=1 min 35 s');
   });
 
+  it('counts only warnings as warnings: a receipt with infos alone says "0 warning" (#1275)', () => {
+    const base = engraveReceipt();
+    const receipt = {
+      ...base,
+      diagnostics: [
+        diagnostic('location-no-settings', 'info', 'planned on the recommendations', 'findings', 'Badge'),
+        diagnostic('feeds-no-catalogue', 'info', 'no catalogue', 'findings', 'Badge'),
+        diagnostic('rest-default', 'info', 'a default', 'findings', 'Badge'),
+      ],
+    } as typeof base;
+    const text = renderReceipt(receipt).join('\n');
+    expect(text).toContain('  findings   0 error, 0 warning');
+    expect(text).not.toContain('     warn  ');
+    // One real warning among the infos is counted once.
+    const mixed = {
+      ...base,
+      diagnostics: [...receipt.diagnostics, ...base.diagnostics],
+    } as typeof base;
+    expect(renderReceipt(mixed).join('\n')).toContain('  findings   0 error, 1 warning');
+  });
+
   it('prints a frame’s findings beside the program’s, under the frame’s own name (#747)', () => {
     // #747 review — the frame's report is its OWN list. Its rows carry `source: 'frame'`, so the
     // renderer can label them and an operator can never read one as a finding about the program.
