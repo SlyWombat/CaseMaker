@@ -103,6 +103,10 @@ The checker's own rule is pinned by `test_goal_check.py`: a plunge (305 cells at
 1.000 mm), a clean pocket (0 cut-into, 0 leftover, 4,941 cells) and a boundary-tangent contour
 (0 cut-into — the old `distance <= radius` line charged exactly 1.00 % there). Run it with the venv
 python; a change to the stamp or the allowances fails a pinned number before it reaches a card.
+The suite runs it too (`casemaker-app/tests/unit/pageChecker1267.spec.ts`, #1267). It needs numpy and Pillow,
+which a bare `python3` lacks: set `CM_PYTHON` to an interpreter that has both (the interpreter path, not the
+venv directory — dave-1 `~/casemaker-manager/venv/bin/python`, k3 `~/v02-stage/venv/bin/python`). Without them the
+spec FAILS and says how to fix it; `CM_SKIP_PAGE_CHECKER=1` is the only way out, it prints why, and a gate run never sets it.
 
 `--only-tools` scores a subset (the calibration's "without the chamfer" line). The sweep is single-setup
 (side 1; work Z 0 = stock top) — a whole-surface comparison needs the maker's NC per side.
