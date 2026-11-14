@@ -45,7 +45,7 @@ import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
 import { recogniseFeatures, regionRefs } from './features';
 import type { EdgeBreakSpec, GoalCellField, ModelPlanProgress, ModelTolerances, PlanFindingStatement, PlanSheetStatement, PlanStatement, StockProbes } from './types';
-import { eligibleByReach, postedDepthMm, postedReachShortfall, usableLengthMm } from './reach';
+import { eligibleByReach, postedDepthMm, postedReachShortfall } from './reach';
 import { pickAmongEquals, pickDecisionSentence, pickKeysFor, pickKeysOf, pickNote as pickNoteSentence, REACH_MARGIN_FALLBACK_MM, type PickKeys } from './pickAmongEquals';
 import { BIT_CHANGE_KEYS, bitChangePriceSeconds, bitChangeShapeSentence, bitChangeStanding, flatBitChangeRule, type BitChangeRule } from './bitChange';
 import { finishTipField, discRowCountFor, stencilCellsFor, tipFieldOpsFor, maxTipOpsFor } from '../dropTip';
@@ -1957,7 +1957,6 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
             : { flat: input.curvedRoughTool }),
       ...(b === undefined ? {} : { ball: b }),
       ...(restBallFor(b) === undefined ? {} : { restBalls: restBallsFor(b) }),
-      catalogueBalls: input.cutters.catalogue.filter((t) => t.shape === 'ball'),
       // #982 — NO BALL IN THE SET: the flat finishes the curved remainder (a flat-raster over
       // the whole region, the flat's cusp rule), the creases via the rest with the smallest flat.
       ...(b === undefined ? { finishFlat: finishFlat ?? primary } : {}),
@@ -5334,8 +5333,6 @@ export interface PlanCurvedOptions {
    */
   /** #1288 — every rest ball eligible for the remainder, in the order they are tried; a ball whose posted depth is past its length yields to the next. */
   restBalls?: readonly Tool[];
-  /** #1288 — the catalogue's ball cutters (not on the shelf), so a refusal can say whether one would reach (the buy-this path) or none does. */
-  catalogueBalls?: readonly Tool[];
   /** The V. Absent is allowed when the job states no edge break — the rim stage is then not planned at
    * all (the property specs' house holds no V and asks for none). */
   vbit?: Tool;
@@ -5544,19 +5541,13 @@ export function planCurvedForTree(tree: FeatureTree, opts: PlanCurvedOptions): P
     const usable = postedReachShortfall(cutter, postedMm);
     if (usable === null) return true;
     const cutterName = cutter.name || cutter.shape;
-    // What would finish it (9b's ruling): a catalogue ball of this cutting diameter that reaches (the
-    // buy-this path), else the plain statement that nothing reaches and what it would take.
+    // What would finish it (9b's ruling): the REACH it would take, never a product. A reach-only check
+    // names no cutter to buy: the app names a product only when a plan with it was evaluated and came
+    // out better, and this is not that.
     const diameter = cuttingDiameter(cutter);
-    const reaching = (opts.catalogueBalls ?? []).filter(
-      (t) => diameter !== null && Math.abs((cuttingDiameter(t) ?? -1) - diameter) < 0.05 && (usableLengthMm(t) ?? 0) + 1e-9 >= postedMm,
-    );
     const needMm = Math.ceil(postedMm * 10 - 1e-6) / 10;
-    const remedy =
-      reaching.length > 0
-        ? `the catalogue's ${reaching[0]!.name || reaching[0]!.id} reaches it (${usableLengthMm(reaching[0]!)} mm) — add it to the shop's list to finish this region`
-        : `no cutter on the shelf or in the catalogue reaches it — it needs a ⌀${diameter === null ? '?' : Number(diameter.toFixed(2))} mm ball with at least ${needMm} mm of reach`;
     const text =
-      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm; ${remedy}`;
+      `"${ref.id}": not ${kind === 'pencil' ? 'pencilled' : 'finished'} by the ${cutterName} — its ${kind} cuts ${postedMm} mm below the stock top, past its usable length ${usable} mm; no cutter on the shelf reaches it — it needs a ⌀${diameter === null ? '?' : Number(diameter.toFixed(2))} mm ball with at least ${needMm} mm of reach`;
     notes.push(text);
     statements.push({ severity: 'warning', code: 'goal-finish-unreachable', count: 1, ids: [ref.id], text, floorMm: postedMm, usableMm: usable });
     return false;
