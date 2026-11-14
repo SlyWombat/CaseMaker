@@ -57,7 +57,7 @@ import { sheetRegistrationPlan } from '@/engine/cnc/registration/footprintJob';
 import { probeInstrumentOf } from '@/engine/cnc/registration/plan';
 import { findingFix, fixActionLabel, fixIsOffered, type PanelFix } from './findingFix';
 import { operatorRunError } from './runErrorWords';
-import { SETTINGS_UNREAD_SENTENCE } from '@/engine/cnc/engrave/settingsWords';
+import { SETTINGS_CHANGED_SENTENCE, SETTINGS_UNREAD_SENTENCE } from '@/engine/cnc/engrave/settingsWords';
 import { useToolRegistry } from '@/hooks/useToolRegistry';
 import { useRendererVerdict } from '@/hooks/useRendererVerdict';
 // #1124 — the press's own re-probe (the landing ruling): only a failure at Generate refuses.
@@ -5642,7 +5642,9 @@ export function EngravePanel(): JSX.Element {
                   ? 'The machine’s saved frame changed while generating.'
                   : run.staleReason === 'margins'
                     ? 'The depth margins changed while generating.'
-                    : 'The job changed while generating.'}{' '}
+                    : run.staleReason === 'shop'
+                      ? SETTINGS_CHANGED_SENTENCE
+                      : 'The job changed while generating.'}{' '}
                 <button type="button" data-testid="engrave-run-stale-regenerate" onClick={() => void generate()}>
                   Generate again
                 </button>

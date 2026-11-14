@@ -76,6 +76,7 @@ import {
   runInputs,
   RUN_INPUT_ORDER,
   shopSettingsKey,
+  stampMoved,
   surfaceKey,
   type EngraveInputKey,
   type EngraveRunInputs,
@@ -1998,7 +1999,7 @@ export function movedRunInputs(current?: EngraveRunInputs): EngraveInputKey[] {
   const run = useEngraveRunStore.getState();
   if (run.inputs === null) return [];
   const stamps = current ?? currentRunInputStamps();
-  return RUN_INPUT_ORDER.filter((key) => stamps[key] !== run.inputs![key]);
+  return RUN_INPUT_ORDER.filter((key) => stampMoved(key, run.inputs![key], stamps[key]));
 }
 
 export function recheckRunInputs(current?: EngraveRunInputs): void {
@@ -2020,7 +2021,7 @@ export function recheckRunInputs(current?: EngraveRunInputs): void {
 function staleIfMoved(key: EngraveInputKey, current: string): void {
   const run = useEngraveRunStore.getState();
   if (run.inputs === null) return;
-  if (current === run.inputs[key]) return;
+  if (!stampMoved(key, run.inputs[key], current)) return;
   markStale(key);
 }
 

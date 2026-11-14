@@ -168,6 +168,22 @@ export function shopSettingsKey(status: 'unknown' | 'present' | 'absent' | 'erro
   return `${status}:${shopKey(defaults)}`;
 }
 
+const SHOP_STAMP_STATUS = /^(unknown|present|absent|error):/;
+
+/**
+ * #1276 — has one stamped input moved? Every input compares by equality except `shop`: a `shop` stamp
+ * stored before the settings' state was recorded has no state part. It is compared on the part it
+ * HAS (the values), so an update does not make every stored run stale over a bookkeeping change; it
+ * is stale only if those values moved. A stamp with a state part compares whole.
+ */
+export function stampMoved(key: string, stored: string, current: string): boolean {
+  if (key === 'shop' && !SHOP_STAMP_STATUS.test(stored)) {
+    const m = SHOP_STAMP_STATUS.exec(current);
+    return (m === null ? current : current.slice(m[0].length)) !== stored;
+  }
+  return stored !== current;
+}
+
 export function shopKey(defaults: ShopDefaults | null): string {
   if (defaults === null) return 'none';
   const values = Object.entries(defaults)

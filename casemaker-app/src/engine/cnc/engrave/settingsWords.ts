@@ -23,3 +23,6 @@ export interface ShopSettingsRead {
   defaults: import('@/platform/defaultsClient').ShopDefaults | null;
   etag: string | null;
 }
+
+/** #1276 — the stale line for a result made stale by the shop's settings. */
+export const SETTINGS_CHANGED_SENTENCE = "The shop's settings changed since this was generated.";
