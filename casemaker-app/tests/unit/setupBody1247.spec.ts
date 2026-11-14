@@ -121,6 +121,7 @@ function recheckFindings(job: EngraveJob, machine: Mill, move: string): readonly
     machine,
     mount: null,
     setup: toSetup(job, machine, undefined, null),
+    defaults: null,
   });
   return out.generated.programs[0]!.verify!.findings;
 }

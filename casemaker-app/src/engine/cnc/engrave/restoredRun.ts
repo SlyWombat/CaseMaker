@@ -32,6 +32,8 @@ import { jobTool, toSetup } from '@/engine/cnc/engrave/jobSetup';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import type { EngraveJob } from '@/types/engraveJob';
 import { benchCutterFor } from '@/engine/cnc/toolRegistry';
+import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
+import type { ShopDefaults } from '@/platform/defaultsClient';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
 
 export interface StoredProgramRecheckInput {
@@ -42,6 +44,12 @@ export interface StoredProgramRecheckInput {
   mount: MountObstacles | null;
   /** The verifier context's setup — `toSetup(job, machine, mount?.fixture, bed)`. */
   setup: Setup;
+  /**
+   * #1277 — the shop's settings map, REQUIRED: the caller's own (the store's `shopDefaults`); `null` =
+   * a caller with no location (the recommendations). It reaches the rotary frame the verifier is
+   * told (`rotaryMapOf`), and the per-setup Setups this module builds (`toSetup`).
+   */
+  defaults: ShopDefaults | null;
 }
 
 export interface StoredProgramRecheck {
@@ -63,13 +71,13 @@ function planIrs(generated: EngraveGenerated): readonly ToolpathIR[] {
  * no store, no wasm.
  */
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
-  const { job, generated, machine, mount, setup } = input;
+  const { job, generated, machine, mount, setup, defaults } = input;
   const irs = planIrs(generated);
   // #1247 — THE VERIFIER'S BODY IS THE SETUP'S OWN (#1082). A job that states per-setup stocks
   // gets a body per setup; a job with none keeps the caller's job-wide setup exactly. The bed is
   // not re-read here: the verifier reads the body's part and work origin, not its sacrificial.
   const setupFor = (setupIndex: number): Setup =>
-    job.setups === undefined ? setup : toSetup(job, machine, mount?.fixture ?? undefined, null, stockForSetup(job, setupIndex));
+    job.setups === undefined ? setup : toSetup(job, machine, mount?.fixture ?? undefined, null, stockForSetup(job, setupIndex), defaults);
 
   // #1246 slice 2 pair (c) — A RESTORED RUN WITH NO STORED PLAN SAYS WHAT IT WAS CHECKED
   // AGAINST. The fallback to the job's limit stays; the run's sheet statements gain one line.
@@ -118,6 +126,10 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       outsideAllowancesMm,
       mount,
       clearanceMm: job.jawClearance,
+      // #1277 — A ROTARY JOB IS RE-CHECKED IN ITS OWN FRAME. Without this the verifier read every
+      // program as flat and refused the A words as foreign (`not-our-dialect`); a flat job's map is
+      // null and states none, exactly as before. The limits it carries are the shop's.
+      rotary: rotaryMapOf(job, defaults),
     };
     const ctx = verifyContextFrom(setupRecordFor(job, setupIndex, facts), facts);
     const verify = verifyProgram(program.nc, ctx);

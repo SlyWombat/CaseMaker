@@ -464,7 +464,7 @@ describe('#1246 slice 2 pair (c) — a restored run without a stored plan says s
     job.toolKey = 'flat-1.0';
     const one = program();
     const recheck = (generated: EngraveGenerated) =>
-      recheckStoredPrograms({ job, generated, machine: Z1, mount: null, setup: toSetup(job, Z1) });
+      recheckStoredPrograms({ job, generated, machine: Z1, mount: null, setup: toSetup(job, Z1), defaults: null });
 
     const withoutPlan = recheck(generatedWith(one));
     expect((withoutPlan.generated.planStatements ?? []).map((s) => s.text)).toContain(SENTENCE);

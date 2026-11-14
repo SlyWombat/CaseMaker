@@ -1643,6 +1643,7 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         machine,
         mount,
         setup: toSetup(job, machine, mount?.fixture, bed, undefined, shopDefaults),
+        defaults: shopDefaults,
       });
       set({ generated: check.generated });
       if (check.errors.length > 0) {
