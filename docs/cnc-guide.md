@@ -683,9 +683,12 @@ of a corner — an edge too short keeps none, and a round outline keeps equal sp
 the outline is left longer than the shop's `tabs.maxSpanMm` (80 mm on stock 6 mm or thicker, 40 mm
 under 3 mm, linear between): the planner adds centred tabs beyond the count asked, so the count is
 a minimum, not a cap. When the stretch cannot take a corner-clear tab — a curve drawn in short
-segments — one TIGHT tab is placed inside the corner margin, and the run sheet names it with its
-distance from the nearest corner and the number of joins it spans; only when nothing can be placed
-is the part refused (`tab-unplaceable` below). The sheet states the placed count when it is fewer
+segments, or edges too short for the margin — Generate stops and asks (#1258): a tab closer to a
+corner than the edge's margin, or a longer unsupported stretch. The answer is stored on the job
+(the CLI takes `--tab-choice inside-margin|longer-stretch`; without it the run stops with the same
+question and never picks), and the run sheet states it with the numbers — which tab, how far from a
+corner, the edge's own margin, the longest stretch left. A stretch no tab fits in stays long and is
+stated; only when no tab can be placed at all is the part refused (`tab-unplaceable` below). The sheet states the placed count when it is fewer
 than asked and why, and the tabs it added when it is more. A tab's HEIGHT is unchanged in this
 rule — the apex-height placement is a later stage.
 

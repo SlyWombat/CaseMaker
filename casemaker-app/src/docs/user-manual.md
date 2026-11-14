@@ -468,9 +468,10 @@ edge)` of a corner — an edge too short keeps none, and a round outline keeps e
 stretch of the outline is left longer than the shop's `tabs.maxSpanMm` (80 mm on 6 mm stock or
 thicker, 40 mm under 3 mm), so the planner may add centred tabs beyond the number asked: your
 count is a minimum, not a cap. When a stretch still cannot take a corner-clear tab — a curve
-drawn in short pieces — the planner places a tight tab inside the corner margin and the run sheet
-names it, its distance from the nearest corner and how many joins of the outline it spans:
-holding the part comes first, and the sheet says what was given up. A job that places fewer tabs
+drawn in short pieces — Generate stops and asks you: a tab closer to a corner than the edge's
+margin, or a longer stretch without a tab. Your answer is kept with the job, and the run sheet
+states it with the numbers — which tab, how far from a corner, the edge's own margin, and the
+longest stretch left. A job that places fewer tabs
 than asked says so on the sheet ("N asked, M placed — the remaining edges are too short for
 another tab clear of the corners"), and one that gets more says why. The tab's height is
 unchanged; when nothing can be placed the cut is refused (`tab-unplaceable` in the CNC guide).

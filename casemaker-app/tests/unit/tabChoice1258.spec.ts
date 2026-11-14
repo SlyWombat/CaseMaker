@@ -121,13 +121,13 @@ describe('#1258 the contour op: byte-identical on insideMargin, the question oth
     expect(asked.tabChoice!.mode).toBe('ask');
     expect(asked.tabChoice!.stretches.length).toBeGreaterThan(0);
     const left = runContour(teeth(), { tabChoice: 'longerStretch' });
-    expect((left.notes ?? []).join('\n')).toMatch(/stays without a tab, past the shop's 80 mm span limit — the operator chose a longer stretch/);
-    expect((left.notes ?? []).join('\n')).not.toMatch(/tight tab/);
+    expect((left.notes ?? []).join('\n')).toMatch(/[\d.]+ mm of the outline has no tab; the shop's limit is 80 mm — the operator's choice\./);
+    expect((left.notes ?? []).join('\n')).not.toMatch(/Tab \d+ sits/);
   });
 
   it('a no-fit stretch under insideMargin stays long and is stated, not refused', () => {
     const out = runContour(round(), { count: 1, maxSpanMm: 40, tabChoice: 'insideMargin' });
-    expect((out.notes ?? []).join('\n')).toMatch(/no tab fits in it/);
+    expect((out.notes ?? []).join('\n')).toMatch(/of the outline has no tab and no tab fits there; the shop's limit is 40 mm\./);
   });
 
   it('without a mode the old refusal stands', () => {
@@ -190,6 +190,11 @@ describe('#1258 the plan asks, and an answer is for the job it was given for', (
     expect(drawn[0]!.outline[0]!.length).toBeGreaterThanOrEqual(4);
     expect(drawn[0]!.path[0]!.length).toBeGreaterThanOrEqual(4);
     expect(drawn[0]!.tabsAt).toHaveLength(4);
+    // …per cut-out: one ring here, named, with its own tab centres; every stretch says which cut-out it is on.
+    expect(drawn[0]!.cuts).toHaveLength(1);
+    expect(drawn[0]!.cuts[0]!.cut).toEqual({ id: 'setup-1-cut-1', name: 'Cut-out 1' });
+    expect(drawn[0]!.cuts[0]!.tabsAt).toEqual(drawn[0]!.tabsAt);
+    for (const s of asked.tabChoiceNeeded!.stretches) expect(s.cut).toEqual({ id: 'setup-1-cut-1', name: 'Cut-out 1' });
     const answer = { choice: 'longerStretch' as const, answeredFor: asked.tabChoiceNeeded!.fingerprint };
     expect(structuredClone(planInput({ tabChoice: answer })).tabChoice).toEqual(answer);
     expect(tabChoiceSentence(asked.tabChoiceNeeded!)).toMatch(/--tab-choice inside-margin/);
@@ -204,7 +209,7 @@ describe('#1258 the plan asks, and an answer is for the job it was given for', (
       expect(out.tabChoiceNeeded).toBeUndefined();
       expect(out.perSetup[0]!.programs.length).toBeGreaterThan(0);
       const said = out.perSetup.flatMap((s) => s.statements.map((st) => st.text)).join('\n');
-      expect(said).toMatch(/stays without a tab/);
+      expect(said).toMatch(/of the outline has no tab/);
     }
   }, 240_000);
 
