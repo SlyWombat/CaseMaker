@@ -36,16 +36,17 @@ afterEach(() => {
 });
 
 describe('#1293 houseGenerationStatus', () => {
-  it('names the service reason when runs is false', async () => {
-    probe.mockResolvedValue({ kind: 'present', health: { runs: false, runsReason: `${REASON}.` } as never, base: '' });
+  it('a service that sent a code: the operator line is fixed, the service sentence is the detail', async () => {
+    probe.mockResolvedValue({ kind: 'present', health: { runs: false, runsReason: REASON, runsReasonCode: 'node-missing' } as never, base: '' });
     expect(await houseGenerationStatus()).toEqual({
       available: false,
-      sentence: `Planning in this page — the house can't run jobs yet: ${REASON}.`,
+      sentence: "Planning in this page — this house's install cannot plan jobs.",
+      detail: REASON,
     });
   });
-  it('says so without a reason from an older service, and when no house answers', async () => {
+  it('an older service (no code), and no house at all, keep their plain sentences', async () => {
     probe.mockResolvedValue({ kind: 'present', health: { runs: false } as never, base: '' });
-    expect((await houseGenerationStatus()).sentence).toBe("Planning in this page — the house can't run jobs yet.");
+    expect(await houseGenerationStatus()).toEqual({ available: false, sentence: "Planning in this page — the house can't run jobs yet." });
     probe.mockResolvedValue({ kind: 'absent', reason: 'none' });
     expect((await houseGenerationStatus()).sentence).toBe('Planning in this page — no house answered.');
   });
@@ -56,10 +57,13 @@ describe('#1293 houseGenerationStatus', () => {
 });
 
 describe('#1293 the run says which side plans, once', () => {
-  it('a Generate against a house that cannot run logs the reason', async () => {
-    probe.mockResolvedValue({ kind: 'present', health: { runs: false, runsReason: REASON } as never, base: '' });
+  it('the progress line gets the operator sentence; the Log gets it and then the service sentence verbatim', async () => {
+    probe.mockResolvedValue({ kind: 'present', health: { runs: false, runsReason: REASON, runsReasonCode: 'node-missing' } as never, base: '' });
     await useEngraveRunStore.getState().generate();
-    const said = useEngraveRunStore.getState().log.filter((l) => l.label.startsWith('Planning'));
-    expect(said.map((l) => l.label)).toEqual([`Planning in this page — the house can't run jobs yet: ${REASON}.`]);
+    const labels = useEngraveRunStore.getState().log.map((l) => l.label);
+    const at = labels.indexOf("Planning in this page — this house's install cannot plan jobs.");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(labels[at + 1]).toBe(REASON);
+    expect(labels.filter((l) => l.startsWith('Planning'))).toHaveLength(1);
   });
 });

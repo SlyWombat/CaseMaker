@@ -200,6 +200,11 @@ const HouseHealthSchema = z.object({
    */
   runsReason: z.string().optional(),
   /**
+   * #1293 — the stable kebab-case code for `runsReason` (`node-missing`, `cli-missing`,
+   * `setting-not-a-number`). Present exactly when the reason is; an older service sends none.
+   */
+  runsReasonCode: z.string().optional(),
+  /**
    * One sentence per document the service could not read. Non-empty means it will refuse writes —
    * worth showing to the user rather than swallowing, and worth not treating as "no tools".
    */
