@@ -11,6 +11,7 @@
  * must compile against the present API and fail at RUNTIME — which it does, on both counts.
  */
 
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 import { describe, expect, it } from 'vitest';
 
 import { planCurvedForTree, planPocketsForTree, type PlanPocketsOptions } from '../../src/engine/cnc/cam/model/plan';
@@ -50,6 +51,7 @@ function skinTree(skinMm: number): FeatureTree {
 
 function plan(tree: FeatureTree, extra: Record<string, unknown> = {}) {
   const opts = {
+    tabs: DEFAULT_RELEASE_TABS,
     offset: makeClipperOffset(tl),
     houseFlats: [flat],
     stepDownMm: 1.0,

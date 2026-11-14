@@ -27,7 +27,7 @@ import { GOAL_MAX_CELLS } from '@/engine/cnc/goalLimits';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
-import { TAB_MAX_SPAN_FALLBACK_MM, TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
+import { TAB_FREEING_WIDTH_FALLBACK_MM, TAB_MAX_SPAN_FALLBACK_MM, TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
 import {
   houseRequest,
   setHouseRequestTimeoutMs,
@@ -105,6 +105,21 @@ export interface KnownDefault {
   rule: z.ZodType<number>;
   /** Used only with no service. Labelled `fallback` wherever it is shown. */
   fallback: number;
+}
+
+/**
+ * The numeric bounds a registered key's rule states, for a control that must not offer more than the
+ * rule allows (#1207: the bound is stated once, here). Read from the rule's JSON Schema (Zod 4);
+ * a bound the rule does not state is absent. An exclusive bound is reported as is (`exclusive*`).
+ */
+export function ruleBounds(key: string): { min?: number; max?: number } {
+  const rule = KNOWN_DEFAULTS[key]?.rule;
+  if (rule === undefined) return {};
+  const schema = z.toJSONSchema(rule) as { minimum?: number; maximum?: number };
+  return {
+    ...(schema.minimum === undefined ? {} : { min: schema.minimum }),
+    ...(schema.maximum === undefined ? {} : { max: schema.maximum }),
+  };
 }
 
 export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
@@ -676,6 +691,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     unit: 'mm',
     rule: z.number().min(0.1).max(50),
     fallback: TAB_SETTINGS_FALLBACK.widthMm,
+  },
+  // #1271 — the width of the tabs that hold a 3D part while its outline is cut free. CHOSEN, not
+  // measured: it is the 6 mm the freeing contour has always used (`TAB_FREEING_WIDTH_FALLBACK_MM`),
+  // distinct from a cut-out's 4 mm; count and height are `tabs.count` / `tabs.heightMm`.
+  'tabs.freeingWidthMm': {
+    label: 'width of the tabs that hold a 3D part while its outline is cut free (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0.1).max(50),
+    fallback: TAB_FREEING_WIDTH_FALLBACK_MM,
   },
   'tabs.heightMm': {
     label: 'holding tab height left below the tab top (chosen)',

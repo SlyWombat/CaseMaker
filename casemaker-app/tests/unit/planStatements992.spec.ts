@@ -23,6 +23,7 @@ import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { stlBase64 } from './helpers/meshes';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const tl = await import('@/workers/geometry/ManifoldRuntime').then((m) => m.getToplevel());
 
@@ -107,7 +108,7 @@ describe('#992 — the plan states one thing per cause, typed', () => {
     tree.levels = [-0.81];
     tree.contour = { ...tree.contour, zTo: -0.81 };
     const result = planPocketsForTree(tree, {
-      offset: makeClipperOffset(tl),
+      tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
       houseFlats: [FLAT],
       stepDownMm: 1.5,
       feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },
@@ -126,7 +127,7 @@ describe('#992 — the plan states one thing per cause, typed', () => {
     // The relief note lives in the POCKET planner (the synthetic outline is why no contour op is
     // demanded), not the curved pipeline.
     const result = planPocketsForTree(tree, {
-      offset: makeClipperOffset(tl),
+      tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
       houseFlats: [FLAT],
       stepDownMm: 1.5,
       feeds: { feedMmPerMin: 900, plungeFeedMmPerMin: 250 },

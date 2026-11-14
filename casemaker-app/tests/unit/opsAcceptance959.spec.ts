@@ -63,6 +63,7 @@ import type { Polygons } from '@/engine/cnc/cam/pocket';
 import {
   CHAMFER3175, EDGE_BREAK_LEG_MM, FLAT3175, FLAT6, RAPID, VENDOR_SET,
   edgeBreakAllowance, placedTree, postedTextFor, runsOf, writeAcceptance } from './helpers/trayAcceptance';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 /** Even-odd point membership over every ring (outers and holes alike) — the same rule
  * `pocketRedFirst959.spec.ts`'s own helper uses. */
@@ -137,7 +138,7 @@ function totalFeedLength(ir: ToolpathIR): number {
 // cases go through `planModelCam` with no option, so they plan no facing stage.
 function planTray(tree: FeatureTree): PlanPocketsResult {
   return planPocketsForTree(tree, {
-    facing: 'on',
+    tabs: DEFAULT_RELEASE_TABS, facing: 'on',
     offset: makeClipperOffset(tl),
     houseFlats: VENDOR_SET,
     stepDownMm: 1.5,
@@ -418,7 +419,7 @@ describe('#959 opsAcceptance plumbing (no STEP needed)', () => {
   it('a region that fails to plan does not crash the whole plan — it is a named finding, the rest still posts', () => {
     const tree = syntheticTreeTwoPockets();
     const result = planPocketsForTree(tree, {
-      offset: offsetThrowingFor(7, makeClipperOffset(tl)),
+      tabs: DEFAULT_RELEASE_TABS, offset: offsetThrowingFor(7, makeClipperOffset(tl)),
       houseFlats: VENDOR_SET,
       stepDownMm: 1.5,
       feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
@@ -696,6 +697,7 @@ describe.skipIf(TRAY === undefined || (!CATALOGUE.installed && !CATALOGUE.optedO
     const result = planTreePrograms(tree, {
       offset: makeClipperOffset(tl),
       pockets: {
+        tabs: DEFAULT_RELEASE_TABS,
         houseFlats: [flat, flatEndMill(3.175, { number: 4, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 })],
         // #975 — the V bits are the chain's last resort for pockets no flat enters (the digits).
         houseVs: [vbit],

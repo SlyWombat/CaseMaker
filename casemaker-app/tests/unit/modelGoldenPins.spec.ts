@@ -64,6 +64,7 @@ import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import { parseGcode } from '@/engine/cnc';
 import { measurePostedProgram, combinePostedFacts } from '../tools/postedFacts';
 import { scoreSevenLines } from '../tools/sevenLines';
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = join(HERE, 'fixtures', 'golden', 'model');
@@ -95,7 +96,7 @@ describe('#964 golden pins for the rebuilt engine’s synthetic programs (#965)'
     it(`${c.id}: the posted program is the pinned program`, () => {
       const part = buildRandomPart(c.seed, c.kind, tl);
       const result = planPocketsForTree(part.tree, {
-        offset: makeClipperOffset(tl),
+        tabs: DEFAULT_RELEASE_TABS, offset: makeClipperOffset(tl),
         houseFlats: HOUSE,
         stepDownMm: 1.5,
         feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },
