@@ -29,6 +29,7 @@
 
 import type { CutParams } from '../feeds';
 import { readDefault } from '@/platform/defaultsClient';
+import { dialectOf, Z1 } from '../machine';
 import type { Tool } from '../tool';
 import { cuttingForTrace } from '../tool';
 import {
@@ -57,7 +58,7 @@ export interface ProfileCut {
   /** The blank's thickness, mm. The tab top is `-(thickness - tabs.height)`. */
   thickness: number;
   /** The cut-out's tab spec. `count: 0` cuts the part free. */
-  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number; /** #1258 — what the operator chose for a stretch the margin leaves too long; absent = the pre-#1258 placement (a tight tab). */ tabChoice?: TabChoiceMode };
+  tabs: { count: number; width: number; height: number; /** #1206 — the shop's `tabs.maxSpanMm`, mm. */ maxSpanMm?: number; /** #1207 — the shop's `tabs.cornerDeg`. */ cornerDeg?: number; /** #1258 — what the operator chose for a stretch the margin leaves too long; absent = the pre-#1258 placement (a tight tab). */ tabChoice?: TabChoiceMode; /** #1269 — the machine's posted step, mm (see {@link TabPlacementOptions.axisStepMm}). */ axisStepMm?: number };
 }
 
 /** A tab span on one contour, by work XY and by arc length along the contour. */
@@ -205,6 +206,13 @@ export interface TabPlacementOptions {
   cornerDeg?: number;
   /** #1258 — what to do with a stretch the margin leaves too long (see {@link TabChoiceMode}). */
   tabChoice?: TabChoiceMode;
+  /**
+   * #1269 — THE MACHINE'S POSTED STEP, mm (`10 ** -dialect.axisPrecision`; 0.001 on the Z1): a segment
+   * shorter than this has no direction — what the post writes cannot tell its end from its start, so its
+   * "direction" is coordinate rounding. The corner test skips such segments (they stay in the path and
+   * in every arc length). Absent: the registered default machine's step — no new number.
+   */
+  axisStepMm?: number;
 }
 
 /** One cut's tab facts, for the run sheet and the `tab-unplaceable` finding. */
@@ -451,7 +459,8 @@ interface Segment {
 }
 
 /** The contour's segments, closing back on the first vertex, with cumulative lengths. */
-function segmentsOf(contour: readonly (readonly [number, number])[]): { segments: Segment[]; perimeter: number } {
+/** Exported for tests (#1269). */
+export function segmentsOf(contour: readonly (readonly [number, number])[]): { segments: Segment[]; perimeter: number } {
   const segments: Segment[] = [];
   let at = 0;
   for (let i = 0; i < contour.length; i++) {
@@ -495,6 +504,39 @@ interface Edge {
 const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
 
 /**
+ * #1269 — THE TWO DIRECTIONS AT JOINT `i` (where segment `i − 1` meets segment `i`): the nearest
+ * segment on each side that is at least `minDirectionLengthMm` long (a posted step). Shorter ones have
+ * no direction. With 0 the old rule stands exactly: the adjacent segments, `null` where one is
+ * zero-length. ONE helper for the corner test and the sheet's "sharp joins" count.
+ */
+function jointDirections(
+  segments: readonly Segment[],
+  dirs: readonly ([number, number] | null)[],
+  i: number,
+  minDirectionLengthMm: number,
+): { before: [number, number] | null; after: [number, number] | null } {
+  const n = segments.length;
+  if (!(minDirectionLengthMm > 0)) return { before: dirs[(i - 1 + n) % n]!, after: dirs[i]! };
+  let before: [number, number] | null = null;
+  for (let k = 1; k <= n; k++) {
+    const j = (((i - k) % n) + n) % n;
+    if (segments[j]!.length >= minDirectionLengthMm - 1e-12) {
+      before = dirs[j]!;
+      break;
+    }
+  }
+  let after: [number, number] | null = null;
+  for (let k = 0; k < n; k++) {
+    const j = (i + k) % n;
+    if (segments[j]!.length >= minDirectionLengthMm - 1e-12) {
+      after = dirs[j]!;
+      break;
+    }
+  }
+  return { before, after };
+}
+
+/**
  * The edges a tab may sit on (#736): maximal straight runs (a 70 mm side traced as many short
  * collinear segments is ONE edge) and maximal runs of smoothly jointed segments (a polygonised
  * circle or a rounded corner is one arc edge). Sharp turns end an edge, so no span crosses a
@@ -509,22 +551,43 @@ const TAB_COLLINEAR_RAD = (0.5 * Math.PI) / 180;
  * `minStraightLengthMm` (the tab's centre-path span — shorter than that cannot hold a tab, and a
  * polygonised circle's chords are far below it).
  */
-function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLengthMm = 0, cornerRad = readDefault(null, 'tabs.cornerDeg').value * (Math.PI / 180)): Edge[] {
+/** Exported for tests (#1269): the edges the placement sees. */
+export function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLengthMm = 0, cornerRad = readDefault(null, 'tabs.cornerDeg').value * (Math.PI / 180), minDirectionLengthMm = 0): Edge[] {
   const n = segments.length;
   if (n === 0 || !(perimeter > 0)) return [];
   const dirs = segments.map((segment) => unitDirection(segment.a, segment.b));
+  // #1269 — THE DIRECTION AT A JOINT IS MEASURED BETWEEN THE NEAREST SEGMENT ON EACH SIDE THAT IS AT
+  // LEAST ONE POSTED STEP LONG. A shorter segment has no direction (coordinate rounding, not
+  // geometry) and is skipped for direction ONLY — it stays in the path and in every arc length, so no
+  // position moves. `minDirectionLengthMm` 0 (the release pass's explicit targets) keeps the old rule:
+  // every segment above the divide-by-zero guard has a direction.
+  const around = segments.map((_, i) => jointDirections(segments, dirs, i, minDirectionLengthMm));
+  const before = around.map((d) => d.before);
+  const after = around.map((d) => d.after);
   // Joint i is the vertex where segment i - 1 meets segment i.
   const sharp = segments.map((_, i) => {
-    const u = dirs[(i - 1 + n) % n]!;
-    const v = dirs[i]!;
+    // A corner beside a skipped short segment is ONE corner, not two: only the joint that follows a
+    // segment with a direction of its own is judged (the next joint starts at the short one).
+    if (minDirectionLengthMm > 0 && segments[(i - 1 + n) % n]!.length < minDirectionLengthMm - 1e-12) return false;
+    const u = before[i]!;
+    const v = after[i]!;
     if (u === null || v === null) return false;
     return Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) > cornerRad;
   });
   // `straight[i]`: segment i continues segment i - 1 in the same direction, within a tight
   // tolerance, so the two belong to one straight edge.
   const straight = segments.map((_, i) => {
-    const u = dirs[(i - 1 + n) % n]!;
-    const v = dirs[i]!;
+    // #1269 — short segments right AFTER a corner belong to the direction that starts there: the
+    // corner is judged once (at the joint after the last long segment), so the joint beside the noise
+    // must not read as a bend against the side the corner turned away from.
+    if (minDirectionLengthMm > 0 && segments[(i - 1 + n) % n]!.length < minDirectionLengthMm - 1e-12) {
+      let j = (i - 1 + n) % n;
+      let guard = 0;
+      while (segments[j]!.length < minDirectionLengthMm - 1e-12 && guard++ < n) j = (j - 1 + n) % n;
+      if (sharp[(j + 1) % n]) return true;
+    }
+    const u = before[i]!;
+    const v = after[i]!;
     return u !== null && v !== null && u[0] * v[0] + u[1] * v[1] > Math.cos(TAB_COLLINEAR_RAD);
   });
   // Start the walk at a corner when there is one, so no piece wraps; otherwise at a direction
@@ -555,7 +618,13 @@ function edgesOf(segments: readonly Segment[], perimeter: number, minStraightLen
     for (let p = pieceFrom; p <= k; ) {
       let q = p;
       while (q + 1 <= k && straight[seq[q + 1]!]!) q++;
-      if (q > p || segments[seq[p]!]!.length >= minStraightLengthMm - 1e-9) {
+      // #1269 — A RUN OF COLLINEAR SEGMENTS IS A STRAIGHT EDGE ONLY WHEN IT IS AT LEAST
+      // `minStraightLengthMm` LONG (the rule this comment always stated). Two chords of one
+      // polygonised arc are collinear to a fraction of a degree but are not a straight edge: they
+      // belong to the smooth run around them and do not end it.
+      let runLength = 0;
+      for (let r = p; r <= q; r++) runLength += segments[seq[r]!]!.length;
+      if (runLength >= minStraightLengthMm - 1e-9) {
         for (let r = p; r <= q; r++) runOf[r] = runId;
         runId++;
       }
@@ -648,26 +717,42 @@ export function placeTabs(
   const cornerRad = (options?.cornerDeg ?? readDefault(null, 'tabs.cornerDeg').value) * (Math.PI / 180);
   // #1206's single-segment straight edge is for the DEFAULT placement: the release pass (#1073)
   // hands explicit targets and keeps the edge structure it was tuned against.
-  const edges = edgesOf(segments, perimeter, targets === undefined ? spanLength : 0, cornerRad);
+  // #1269 — the machine's posted step; the release pass's explicit targets keep the old direction rule.
+  const axisStep = options?.axisStepMm ?? 10 ** -dialectOf(Z1).axisPrecision;
+  const edges = edgesOf(segments, perimeter, targets === undefined ? spanLength : 0, cornerRad, targets === undefined ? axisStep : 0);
   if (targets !== undefined) {
     return placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => targets[k] ?? ((k + 0.5) / count) * perimeter);
   }
   // A ROUND outline is one smooth edge around the whole contour: equal spacing is its own
   // symmetry, and there is no side midpoint to prefer.
   if (edges.length === 1 && edges[0]!.end - edges[0]!.start >= perimeter - 1e-6) {
-    const placed = placeOnEdges(segments, perimeter, edges, count, spanLength, (k) => ((k + 0.5) / count) * perimeter);
+    // #1269 — A CORNERLESS CLOSED OUTLINE GETS AS MANY EVENLY SPACED TABS AS THE SPAN LIMIT NEEDS:
+    // the count asked, or the smallest n for which `perimeter / n − spanLength` is within the limit,
+    // whichever is more — placed evenly, the extra ones reported in `added`. When even that cannot be
+    // met (n tabs would touch), the count asked is placed and the stretch is reported/refused as before.
+    const limit = options?.maxSpanMm;
+    let n = count;
+    if (limit !== undefined && Number.isFinite(limit) && limit > 0) {
+      const need = Math.ceil(perimeter / (limit + spanLength) - 1e-9);
+      if (need > count && need * spanLength < perimeter) n = need;
+    }
+    const evenly = placeOnEdges(segments, perimeter, edges, n, spanLength, (k) => ((k + 0.5) / n) * perimeter);
+    const placed: TabPlacement = {
+      ...evenly,
+      unplaceable: Math.max(0, count - evenly.spans.length),
+      added: Math.max(0, evenly.spans.length - count),
+    };
     // #1258 — a round outline has no edge inside a stretch to tab, so a stretch past the limit is
     // reported with no candidate (the step-2 tab never applied to it; the contour used to refuse).
-    const limit = options?.maxSpanMm;
     if (options?.tabChoice === undefined) return placed;
     const sorted = placed.spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc })).sort((a, b) => a.startArc - b.startArc);
     const stretches =
       limit !== undefined && Number.isFinite(limit) && limit > 0
-        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit, cornerRad)
+        ? stretchesOf(sorted, edges, segments, perimeter, widthMm, spanLength, limit, cornerRad, axisStep)
         : [];
     return { ...placed, stretches };
   }
-  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad, options?.tabChoice);
+  return placeMidSide(segments, perimeter, edges, count, widthMm, spanLength, options?.maxSpanMm, cornerRad, options?.tabChoice, axisStep);
 }
 
 /**
@@ -870,6 +955,7 @@ function placeMidSide(
   maxSpanMm: number | undefined,
   cornerRad: number,
   tabChoice: TabChoiceMode | undefined,
+  minDirectionLengthMm: number,
 ): TabPlacement {
   const sides = sideEdges(edges, widthMm, spanLength);
   const counts = new Map<SideEdge, number>(sides.map((side) => [side, 0] as const));
@@ -915,12 +1001,12 @@ function placeMidSide(
     // of the spans, so what the question lists is what `insideMargin` then places — by
     // construction, not by a second implementation.
     spans.sort((x, y) => x.startArc - y.startArc);
-    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad);
+    stretches = stretchesOf(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad, minDirectionLengthMm);
   }
   if (limited && (tabChoice === undefined || tabChoice === 'insideMargin')) {
     // A mode stated: a gap no tab fits in is left (and reported) and the others are still
     // tabbed. Absent: the pre-#1258 loop, which stops at the first gap it cannot fix.
-    tight = placeStepTwo(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad, tabChoice !== undefined).map((t) => t.tab);
+    tight = placeStepTwo(spans, edges, segments, perimeter, widthMm, spanLength, maxSpanMm!, cornerRad, tabChoice !== undefined, minDirectionLengthMm).map((t) => t.tab);
   }
   spans.sort((a, b) => a.startArc - b.startArc);
   return {
@@ -1029,8 +1115,10 @@ function placeStepTwo(
   maxSpanMm: number,
   cornerRad: number,
   skipUnfixable: boolean,
+  minDirectionLengthMm: number,
 ): PlacedTight[] {
   const placedTabs: PlacedTight[] = [];
+  const stepDirs = segments.map((segment) => unitDirection(segment.a, segment.b));
   const unfixable = new Set<number>();
   for (let guard = 0; guard < 512; guard++) {
     spans.sort((a, b) => a.startArc - b.startArc);
@@ -1069,10 +1157,7 @@ function placeStepTwo(
       if (d < 0) d += perimeter;
       if (d <= 1e-9 || d >= spanLength - 1e-9) continue;
       joins += 1;
-      const u = segments[(k - 1 + segments.length) % segments.length]!;
-      const v = segments[k]!;
-      const ud = unitDirection(u.a, u.b);
-      const vd = unitDirection(v.a, v.b);
+      const { before: ud, after: vd } = jointDirections(segments, stepDirs, k, minDirectionLengthMm);
       if (ud !== null && vd !== null && Math.acos(Math.max(-1, Math.min(1, ud[0] * vd[0] + ud[1] * vd[1]))) > cornerRad) {
         sharpJoins += 1;
       }
@@ -1108,6 +1193,7 @@ function stretchesOf(
   spanLength: number,
   maxSpanMm: number,
   cornerRad: number,
+  minDirectionLengthMm: number,
 ): TabStretch[] {
   const out: TabStretch[] = [];
   if (spans.length === 0) return out;
@@ -1132,7 +1218,7 @@ function stretchesOf(
   if (intervals.length === 0) return out;
   // The placement, on a copy, then each placed tab filed under the stretch it falls in.
   const copy = spans.map((span) => ({ startArc: span.startArc, endArc: span.endArc }));
-  const placed = placeStepTwo(copy, edges, segments, perimeter, widthMm, spanLength, maxSpanMm, cornerRad, true);
+  const placed = placeStepTwo(copy, edges, segments, perimeter, widthMm, spanLength, maxSpanMm, cornerRad, true, minDirectionLengthMm);
   const lift = (arc: number, from: number): number => from + ((((arc - from) % perimeter) + perimeter) % perimeter);
   for (const iv of intervals) {
     const mine = placed
@@ -1303,6 +1389,7 @@ export function generateProfile(
           ...(cut.tabs.maxSpanMm === undefined ? {} : { maxSpanMm: cut.tabs.maxSpanMm }),
           ...(cut.tabs.cornerDeg === undefined ? {} : { cornerDeg: cut.tabs.cornerDeg }),
           ...(cut.tabs.tabChoice === undefined ? {} : { tabChoice: cut.tabs.tabChoice }),
+          ...(cut.tabs.axisStepMm === undefined ? {} : { axisStepMm: cut.tabs.axisStepMm }),
         });
         // Count once per cut, not once per pass: the report is about the tabs, not the Z levels.
         if (z === passes[0]) {

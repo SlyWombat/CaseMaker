@@ -134,7 +134,8 @@ describe('#1258 placement: the stretches are reported, and placed only when the 
 
   it('a stretch no tab fits in has no candidates, and is not an error under an answer', () => {
     const r = round()[0]!;
-    const asked = placeTabs(r, 1, 6, 3, { maxSpanMm: 40, tabChoice: 'ask' });
+    // #1269: a limit of 40 mm is met by adding tabs to a smooth circle; 0.5 mm cannot be (the tabs would touch).
+    const asked = placeTabs(r, 1, 6, 3, { maxSpanMm: 0.5, tabChoice: 'ask' });
     expect(asked.stretches).toHaveLength(1);
     expect(asked.stretches![0]!.candidates).toEqual([]);
     expect(asked.stretches![0]!.leavesSpansMm).toEqual([asked.stretches![0]!.spanMm]);
@@ -164,12 +165,12 @@ describe('#1258 the contour op: byte-identical on insideMargin, the question oth
   });
 
   it('a no-fit stretch under insideMargin stays long and is stated, not refused', () => {
-    const out = runContour(round(), { count: 1, maxSpanMm: 40, tabChoice: 'insideMargin' });
-    expect((out.notes ?? []).join('\n')).toMatch(/of the outline has no tab and no tab fits there; the shop's limit is 40 mm\./);
+    const out = runContour(round(), { count: 1, maxSpanMm: 0.5, tabChoice: 'insideMargin' });
+    expect((out.notes ?? []).join('\n')).toMatch(/of the outline has no tab and no tab fits there; the shop's limit is 0\.5 mm\./);
   });
 
   it('without a mode the old refusal stands', () => {
-    expect(() => runContour(round(), { count: 1, maxSpanMm: 40 })).toThrow(/stretch|span limit/i);
+    expect(() => runContour(round(), { count: 1, maxSpanMm: 0.5 })).toThrow(/stretch|span limit/i);
   });
 });
 
