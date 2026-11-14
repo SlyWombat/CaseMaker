@@ -725,6 +725,16 @@ export const GOAL_CUT_INTO_FLOOR_MM = 0.01;
 /** The leftover-material reporting bands `goal_check.py` prints (0.1 / 0.3 / 1 mm), kept here so the app's sentence matches the bench tool's. */
 
 /**
+ * #1248 — THE WALL-LINE STEP'S FLOAT-EQUALITY SLACK, mm. The step itself is not a number of its own:
+ * a cell standing more than the TALL BAND above the goal is on a wall line when the goal steps by
+ * at least that same band beside it, so the step is `tallMm − LEFTOVER_TALL_WALL_STEP_TOL`, where
+ * `tallMm` is the last of the leftover bands the check was called with (the shop's own band since
+ * #1207). The slack only lets an exact step count once float32 has rounded it (a 1.0 mm step is
+ * not >= 1.0 after the round trip). Numerical, not a shop setting.
+ */
+export const LEFTOVER_TALL_WALL_STEP_TOL = 1e-6;
+
+/**
  * #948 — THE PASS LINE's LABELLED FALLBACK: the share of the goal's top surface that must stand
  * within the 0.1 mm band (the first leftover band) for the run to pass. It is the demo page's own
  * rule — "zero cut-into AND top-surface coverage ≥ 95 %" — and the shop owns it as
@@ -808,6 +818,12 @@ export interface GoalCutIntoOptions {
    * ADJUDICATED, the conservative side (an uncounted excusal is a false pass).
    */
   clAt?: (x: number, y: number) => { x: number; y: number } | null;
+  /**
+   * #1248 — HALF THE SMALLEST CUTTING DIAMETER among the programs this check judges; the wall-foot
+   * band is every tall cell whose CENTRE is within this radius of a wall-line cell's centre. Absent
+   * = no cutter is known and the foot cells count as open.
+   */
+  smallestCutterRadiusMm?: number;
 }
 
 export interface GoalCutIntoReport {
@@ -854,6 +870,30 @@ export interface GoalCutIntoReport {
   columnCutInto?: { fraction: number; maxMm: number; at: { x: number; y: number } | null };
   /** Share of covered cells left standing more than each leftover band above the goal, 0-1, same order. */
   leftoverFractions: number[];
+  /**
+   * #1248 — THE TALL CELLS, SPLIT AND REPORTED ONLY: every covered cell standing more than the
+   * tall band (the LAST of the leftover bands the check was called with) above the goal is a
+   * wall-line sample, at a wall's foot, or in the open; the three counts partition them. Present
+   * only when the caller states its bands.
+   * No rule reads it.
+   */
+  leftoverTall?: {
+    /** Cells whose goal height differs by more than the tall limit from a 4-neighbour's: a sample on a near-vertical face. */
+    wallLineCells: number;
+    /**
+     * Not on a wall line, and within the smallest cutter radius the job used of a wall-line cell: the
+     * fillet that cutter leaves. ABSENT when no cutter radius was given (`classified` is false): a
+     * cell is never called "in the open" for want of a cutter.
+     */
+    wallFootCells?: number;
+    /** Everything else: material standing proud away from any wall. ABSENT when `classified` is false. */
+    openCells?: number;
+    /** Tall cells that are not wall-line cells and were NOT classified, because no cutter radius was given. 0 when `classified`. */
+    unclassifiedCells: number;
+    /** True when a cutter radius was given, so every tall cell is wall line, wall foot or open. */
+    classified: boolean;
+    cellAreaMm2: number;
+  };
   leftoverVolumeMm3: number;
   maxLeftoverMm: number;
   /** Share of covered cells within the cut-into floor on both sides — the coverage % the acceptance asks for. */
@@ -1257,6 +1297,74 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       }
       if (Math.abs(d) <= cutIntoFloorMm) withinBoth++;
     }
+  }
+
+  // #1248 — THE TALL CELLS, SPLIT AND REPORTED ONLY. Tall is the caller's shop limit; the wall
+  // line is the goal's own 4-neighbour step (≥ 1 mm − 1e-6, the equality counting: a 1.0 mm step
+  // is not > 1.0 in float32); the foot is a tall cell whose CENTRE lies within the smallest cutter
+  // radius used of a wall-line cell's centre; the rest is open. The wall SEEDS are the goal's raw
+  // step cells, covered or not, exactly as #1245's classifier seeded its disc; the three counts
+  // partition the tall cells (the set is what `leftoverFractions`' 1 mm band counts).
+  let leftoverTall: GoalCutIntoReport['leftoverTall'];
+  // The tall band is the LAST band the check was called with; the split is reported when the caller
+  // states its bands (the app and the CLI both do, #1207), never against a fallback nobody stated.
+  const tallMm = leftoverBandsMm[leftoverBandsMm.length - 1];
+  if (opts.leftoverBandsMm !== undefined && tallMm !== undefined && Number.isFinite(tallMm) && tallMm >= 0) {
+    const tallLimit = tallMm;
+    const wallStepMm = tallMm - LEFTOVER_TALL_WALL_STEP_TOL;
+    const wallLine = new Uint8Array(cells);
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        const g = goal.z[k] as number;
+        if (
+          (i > 0 && Math.abs(g - (goal.z[k - 1] as number)) >= wallStepMm) ||
+          (i + 1 < nx && Math.abs(g - (goal.z[k + 1] as number)) >= wallStepMm) ||
+          (j > 0 && Math.abs(g - (goal.z[k - nx] as number)) >= wallStepMm) ||
+          (j + 1 < ny && Math.abs(g - (goal.z[k + nx] as number)) >= wallStepMm)
+        ) {
+          wallLine[k] = 1;
+        }
+      }
+    }
+    // The foot's disc, from every wall-line seed (cell centres, di² + dj² ≤ (R/pitch)²). No
+    // cutter known: no disc, and the cells it would have claimed count as open.
+    const radiusOf = opts.smallestCutterRadiusMm;
+    const radius = radiusOf !== undefined && Number.isFinite(radiusOf) && radiusOf > 0 ? radiusOf : null;
+    const nearWall = radius === null ? null : new Uint8Array(cells);
+    if (nearWall !== null && radius !== null) {
+      const span = Math.ceil(radius / goal.pitch);
+      for (let j = 0; j < ny; j++) {
+        for (let i = 0; i < nx; i++) {
+          if (wallLine[j * nx + i] !== 1) continue;
+          for (let dj = -span; dj <= span; dj++) {
+            for (let di = -span; di <= span; di++) {
+              if ((di * goal.pitch) ** 2 + (dj * goal.pitch) ** 2 > radius * radius + 1e-12) continue;
+              const jj = j + dj;
+              const ii = i + di;
+              if (jj >= 0 && jj < ny && ii >= 0 && ii < nx) nearWall[jj * nx + ii] = 1;
+            }
+          }
+        }
+      }
+    }
+    let wallLineCells = 0;
+    let wallFootCells = 0;
+    let openCells = 0;
+    let unclassifiedCells = 0;
+    for (let k = 0; k < cells; k++) {
+      const dk = dOf[k];
+      if (sampled[k] !== 1 || dk === undefined || !(dk > tallLimit)) continue;
+      if (wallLine[k] === 1) wallLineCells++;
+      // No cutter radius: the rest is NOT classified — "in the open" is never said for want of a cutter.
+      else if (nearWall === null) unclassifiedCells++;
+      else if (nearWall[k] === 1) wallFootCells++;
+      else openCells++;
+    }
+    leftoverTall =
+      nearWall === null
+        ? { wallLineCells, unclassifiedCells, classified: false, cellAreaMm2: cellArea }
+        : { wallLineCells, wallFootCells, openCells, unclassifiedCells: 0, classified: true, cellAreaMm2: cellArea };
   }
 
   const n = Math.max(covered, 1);
@@ -1781,12 +1889,25 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
     opts.predictedCutIntoMm === undefined
       ? ''
       : ` The plan predicted ${opts.predictedCutIntoMm.toFixed(2)} mm, measured ${adjudicatedMaxMm.toFixed(2)} mm.`;
+  // #1248 — THE TALL CELLS, NAMED. One clause when any cell stands over the shop's tall limit:
+  // how much of that material is on wall lines, at a wall's foot, and in the open. Reported only.
+  const tallArea = (count: number): string => (count * cellArea).toFixed(2);
+  const tallClause = ((): string => {
+    if (leftoverTall === undefined) return '';
+    const total = leftoverTall.wallLineCells + (leftoverTall.wallFootCells ?? 0) + (leftoverTall.openCells ?? 0) + leftoverTall.unclassifiedCells;
+    if (total === 0) return '';
+    const head = `Of the ${tallArea(total)} mm² standing over ${tallMm} mm, ${tallArea(leftoverTall.wallLineCells)} mm² is on wall lines`;
+    // Its own sentence (#1248 review): the clause is never joined with a semicolon.
+    return leftoverTall.classified
+      ? ` ${head}, ${tallArea(leftoverTall.wallFootCells ?? 0)} mm² at the foot of walls and ${tallArea(leftoverTall.openCells ?? 0)} mm² in the open.`
+      : ` ${head}; the rest is not classified (no cutter radius was given).`;
+  })();
   const sentence =
-    judgedCells > 0
+    (judgedCells > 0
       ? `goal check: ${(adjudicatedFraction * 100).toFixed(2)} % of the goal (${cutIntoAreaMm2(adjudicatedCells, cellArea).toFixed(1)} mm²) cut into by up to ${adjudicatedMaxMm.toFixed(3)} mm — ${adjudicatedVolumeMm3.toFixed(1)} mm³ over-cut${excludedNote}.${predictedNote}`
       : coverageOk
         ? `goal check: no cell cut more than 0.1 mm into the goal${excludedNote} (${(coverageFraction * 100).toFixed(1)} % of the goal within ${cutIntoFloorMm} mm).`
-        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${leftoverBandsMm[0]} mm above the goal).`;
+        : `goal check: coverage ${surfacePct} % of the goal's top surface — the pass line asks ${passPct} % (${((1 - surfaceCoverage) * 100).toFixed(2)} % stands more than ${leftoverBandsMm[0]} mm above the goal).`) + tallClause;
 
   return {
     ok,
@@ -1804,6 +1925,7 @@ export function checkGoalCutInto(goal: GoalHeightfield, sweptTop: ResultTop | nu
       ? {}
       : { columnCutInto: { fraction: columnCells / n, maxMm: columnMax, at: columnAt } }),
     leftoverFractions,
+    ...(leftoverTall === undefined ? {} : { leftoverTall }),
     leftoverVolumeMm3,
     maxLeftoverMm: maxLeftover,
     coverageFraction,

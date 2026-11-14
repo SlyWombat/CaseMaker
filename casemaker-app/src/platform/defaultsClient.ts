@@ -1058,6 +1058,25 @@ export function goalPassCoverage(map: ShopDefaults | null): number {
   return readDefault(map, 'goal.passCoverage').value;
 }
 
+/**
+ * #1207/#1248 — THE SHOP'S SETTINGS THE GOAL CHECK READS, in ONE place: the pass line and the three
+ * leftover bands (`acceptance.leftoverBand1Mm` … `3Mm`; the LAST is also the tall band the reported
+ * wall-line / wall-foot / open split is cut at). Every caller of the check — the run store, the
+ * plan evaluator and the CLI — takes them from here, so they cannot drift apart again: the CLI once
+ * left the bands to the registry's recommendations, so a shop that changed a band got one verdict in
+ * the app and another from `casemaker cut` (the class #1237 closed for the planner's settings).
+ */
+export function goalCheckShopOptions(map: ShopDefaults | null): { passCoverage: number; leftoverBandsMm: [number, number, number] } {
+  return {
+    passCoverage: goalPassCoverage(map),
+    leftoverBandsMm: [
+      readDefault(map, 'acceptance.leftoverBand1Mm').value,
+      readDefault(map, 'acceptance.leftoverBand2Mm').value,
+      readDefault(map, 'acceptance.leftoverBand3Mm').value,
+    ],
+  };
+}
+
 function firstIssue(error: z.ZodError): string {
   const issue = error.issues[0];
   if (!issue) return 'unrecognised shape';

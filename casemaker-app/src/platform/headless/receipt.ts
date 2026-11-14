@@ -244,6 +244,17 @@ export const engraveGoalSchema = z
     leftoverFractions: z
       .array(z.number())
       .describe('Share of the covered cells standing more than each leftover band (0.1 / 0.3 / 1 mm) above the goal.'),
+    leftoverTall: z
+      .object({
+        wallLineCells: z.number().int().nonnegative().describe('Tall cells whose goal height differs by ≥ 1 mm from a 4-neighbour’s: samples on near-vertical faces.'),
+        wallFootCells: z.number().int().nonnegative().optional().describe('Tall cells within the smallest cutter radius used of a wall-line cell’s centre: the fillet that cutter leaves. Absent when no cutter radius was given (`classified` false).'),
+        openCells: z.number().int().nonnegative().optional().describe('Every other tall cell: material standing proud away from any wall. Absent when no cutter radius was given (`classified` false): a cell is never called open for want of a cutter.'),
+        unclassifiedCells: z.number().int().nonnegative().describe('Tall cells that are not wall-line cells and were not classified because no cutter radius was given; 0 when `classified`.'),
+        classified: z.boolean().describe('True when a cutter radius was given, so every tall cell is wall line, wall foot or open.'),
+        cellAreaMm2: z.number().describe('The goal grid’s cell area, mm².'),
+      })
+      .optional()
+      .describe('#1248 — the cells standing more than the tall band (the shop’s last leftover band, `acceptance.leftoverBand3Mm`) above the goal, split wall line / wall foot / open. Reported only; no rule reads it. Absent on a check that was not told its bands.'),
     passCoverage: z.number().describe('The coverage the pass line asks for, 0–1 — the shop’s own `goal.passCoverage`.'),
     causeClass: z
       .enum(['setup-infeasible', 'shop-infeasible', 'plan-shortfall'])
@@ -812,6 +823,7 @@ export function goalBlockFromReport(report: GoalCutIntoReport, cause?: GoalCause
     silhouetteUnavailableCells: report.silhouetteUnavailableCells,
     silhouetteByWitnessCells: report.silhouetteByWitnessCells,
     leftoverFractions: [...report.leftoverFractions],
+    ...(report.leftoverTall === undefined ? {} : { leftoverTall: report.leftoverTall }),
     passCoverage: report.passCoverage,
     wholeSurface: extended.wholeSurface ?? null,
     columnCutInto: extended.columnCutInto ?? null,

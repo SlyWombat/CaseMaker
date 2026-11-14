@@ -169,7 +169,7 @@ import { jobMachine } from '../../../src/engine/cnc/calibration';
 import { executeProfile } from '../../../src/workers/geometry/evaluateOp';
 import { engravePreviewSvg } from '../engravePreviewSvg';
 import { svgToPng } from '../svgToPng';
-import { efficiencyThresholds, goalPassCoverage, installShopDefaults, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
+import { efficiencyThresholds, goalCheckShopOptions, installShopDefaults, KNOWN_DEFAULTS, readDefault } from '../../../src/platform/defaultsClient';
 import { plannerDefaultsProvenance } from '../../../src/platform/plannerDefaults';
 import { goalCheckForProgram, type SimGoalCheck } from '../../../src/engine/cnc/engrave/goalCheckInput';
 import { goalCauseFacts, goalCauseOf } from '../../../src/engine/cnc/engrave/goalCause';
@@ -1452,7 +1452,10 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // `benchCutterFor` (`toolRegistry.ts`) is the one rule; the app's run store calls it too, so
     // the CLI and the Cut card cannot disagree about which cutter a posted program names.
     const goalCheck = goalCheckForProgram(job, pureGoalObject(job) !== null, {
-      passCoverage: goalPassCoverage(shopDefaults),
+      // #1207 — the pass line and the shop's own three goal bands, from the one place every caller of
+      // the check reads them (the run store and the plan evaluator too); the CLI used to leave the
+      // bands to the registry's recommendations. The LAST band is also #1248's tall band.
+      ...goalCheckShopOptions(shopDefaults),
       // #1064 (d) — the plan's own bevel prediction, stated beside the measurement.
       ...(generated.plan?.outcome?.predictedCutIntoMm == null
         ? {}
