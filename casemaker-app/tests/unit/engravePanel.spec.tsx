@@ -5652,6 +5652,10 @@ describe('EngravePanel (#893) — the run row names its stop and offers the next
     expect(screen.getByTestId('engrave-run-stale').textContent).toContain('The machine’s saved frame changed while generating.');
     act(() => useEngraveRunStore.setState({ staleReason: 'margins' }));
     expect(screen.getByTestId('engrave-run-stale').textContent).toContain('The depth margins changed while generating.');
+    // #1276 — the shop's settings word themselves too; the job's sentence stays the job's.
+    act(() => useEngraveRunStore.setState({ staleReason: 'shop' }));
+    expect(screen.getByTestId('engrave-run-stale').textContent).toContain("The shop's settings changed since this was generated.");
+    expect(screen.getByTestId('engrave-run-stale').textContent).not.toContain('The job changed');
   });
 
   it('a generated program with no simulation offers Simulate, and the press runs it', () => {

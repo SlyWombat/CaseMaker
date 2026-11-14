@@ -78,6 +78,7 @@ function sources(): RunInputSources {
     margins: effectiveMargins(job, MARGIN_DEFAULTS),
     calibration: CAL,
     shopDefaults: DEFAULTS,
+    shopStatus: 'present',
     feeds: FEEDS_TABLE,
     catalogue: CATALOGUE,
     tools: TOOL_LIBRARY,

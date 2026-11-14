@@ -21,6 +21,7 @@ import { setEngraveRunClientLoader, useEngraveRunStore } from '@/store/engraveRu
 import { setEngravePreviewClientLoader, useEngravePreviewStore } from '@/store/engravePreviewStore';
 import { resetEngraveRows } from '@/store/engraveRowStore';
 import { resetShopDefaultsStore } from '@/store/shopDefaultsStore';
+import { settleShopSettings } from '../tools/settledShop';
 import { useSettingsStore } from '@/store/settingsStore';
 import { resetMachineStore } from '@/store/machineStore';
 import { resetLocationStore, useLocationStore } from '@/store/locationStore';
@@ -130,6 +131,8 @@ beforeEach(() => {
   useSettingsStore.getState().resetSettings();
   resetEngraveRows();
   resetShopDefaultsStore();
+  // #1276 — Generate waits for / refuses without the shop's settings: this spec runs with them settled.
+  settleShopSettings();
   resetLocationStore();
   resetMachineStore();
   resetRegistry();

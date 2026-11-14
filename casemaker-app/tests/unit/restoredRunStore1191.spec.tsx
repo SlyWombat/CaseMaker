@@ -14,6 +14,7 @@ import { resetLocationStore } from '@/store/locationStore';
 import type { EngraveRunInputs } from '@/engine/cnc/engrave/runInputs';
 import type { VerifyReport } from '@/engine/cnc/verify';
 import type { EngraveGenerated, EngraveProgram } from '@/workers/sim/engraveGenerate';
+import { settleShopSettings } from '../tools/settledShop';
 
 const CLEAN: VerifyReport = {
   ok: true,
@@ -75,6 +76,8 @@ beforeEach(() => {
   useEngraveJobStore.setState({ job });
   useEngraveRunStore.getState().reset();
   resetShopDefaultsStore();
+  // #1276 — the re-check waits for / refuses without the shop's settings: this spec runs with them settled.
+  settleShopSettings();
   resetLocationStore();
 });
 
