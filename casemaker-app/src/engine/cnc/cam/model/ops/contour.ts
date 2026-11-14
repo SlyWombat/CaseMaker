@@ -196,6 +196,13 @@ export function contour(opts: ContourOpOptions): OpOutcome {
   // and did not get is never silent.
   const asked = cut.tabs.count * path.length;
   const placed = placements.reduce((sum, placement) => sum + placement.spans.length, 0);
+  // #1271 — the same counts as plain data, with the two the prose leaves out.
+  const tabCounts = {
+    asked,
+    placed,
+    added: placements.reduce((sum, placement) => sum + placement.added, 0),
+    unplaceable: placements.reduce((sum, placement) => sum + placement.unplaceable, 0),
+  };
   const tabNotes =
     cut.tabs.count > 0 && placed < asked
       ? [
@@ -287,6 +294,7 @@ export function contour(opts: ContourOpOptions): OpOutcome {
     cleared,
     ...(throughKerf === undefined ? {} : { throughKerf }),
     ...(clampedTabHeightMm === undefined ? {} : { clampedTabHeightMm }),
+    tabCounts,
     ...(cut.tabs.tabChoice === undefined || stretches.length === 0 ? {} : { tabChoice: { mode: cut.tabs.tabChoice, stretches, count: cut.tabs.count, widthMm: cut.tabs.width, maxSpanMm: cut.tabs.maxSpanMm ?? 0, path, tabsAt, tabsByRing } }),
     ...(tabNotes.length === 0 ? {} : { notes: tabNotes }),
   };

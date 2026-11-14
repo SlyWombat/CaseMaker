@@ -27,7 +27,7 @@ import { GOAL_MAX_CELLS } from '@/engine/cnc/goalLimits';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
-import { TAB_MAX_SPAN_FALLBACK_MM, TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
+import { TAB_FREEING_WIDTH_FALLBACK_MM, TAB_MAX_SPAN_FALLBACK_MM, TAB_SETTINGS_FALLBACK } from '@/engine/cnc/cam/tabSettings';
 import {
   houseRequest,
   setHouseRequestTimeoutMs,
@@ -676,6 +676,15 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
     unit: 'mm',
     rule: z.number().min(0.1).max(50),
     fallback: TAB_SETTINGS_FALLBACK.widthMm,
+  },
+  // #1271 — the width of the tabs that hold a 3D part while its outline is cut free. CHOSEN, not
+  // measured: it is the 6 mm the freeing contour has always used (`TAB_FREEING_WIDTH_FALLBACK_MM`),
+  // distinct from a cut-out's 4 mm; count and height are `tabs.count` / `tabs.heightMm`.
+  'tabs.freeingWidthMm': {
+    label: 'width of the tabs that hold a 3D part while its outline is cut free (chosen)',
+    unit: 'mm',
+    rule: z.number().min(0.1).max(50),
+    fallback: TAB_FREEING_WIDTH_FALLBACK_MM,
   },
   'tabs.heightMm': {
     label: 'holding tab height left below the tab top (chosen)',

@@ -244,7 +244,6 @@ import type { SurfaceProgramCheck } from '@/engine/cnc/uploadGate';
 // #966 — `generateGoalProgram` plans every goal job through `planModelCam`, the model-driven CAM
 // engine's one entry point.
 import {
-  DEFAULT_RELEASE_TABS,
   MODEL_STOCK_TO_LEAVE_MM,
   resolvedCutParams,
   type PlanModelCamOptions,
@@ -258,6 +257,7 @@ import {
   type SetupSpec,
 } from '@/engine/cnc/cam/model/plan';
 // #1073 — the flip's tab release: the band cut's plan and the program it posts as.
+import { freeingTabsFrom } from '@/engine/cnc/cam/tabSettings';
 import { bandHalfThicknessMm, planTabRelease, tabReleaseIr, type TabReleaseProgramFacts } from '@/engine/cnc/engrave/tabRelease';
 import { tabSettings } from '@/engine/cnc/cam/tabSettings';
 // #961 — the two-plan run: the OWNED plan posts, the ideal rides beside it for the card's tradeoff.
@@ -5593,7 +5593,7 @@ export async function buildModelPlanInputForGoal(
       : {
           freeingTabs:
             goal.underside.tabs === undefined
-              ? { count: 0, widthMm: DEFAULT_RELEASE_TABS.width, heightMm: DEFAULT_RELEASE_TABS.height }
+              ? { count: 0, widthMm: freeingTabsFrom(shop.defaults ?? null).widthMm, heightMm: freeingTabsFrom(shop.defaults ?? null).heightMm }
               : { count: goal.underside.tabs.count, widthMm: goal.underside.tabs.widthMm, heightMm: goal.underside.tabs.thicknessMm },
         }),
     // #1246 slice 2 — the record's stock kind and a rod's diameter, stated rather than dropped

@@ -28,6 +28,7 @@
  * tray and the difference count reads 0, so (c) fails — the pin can tell the exact bound from the
  * old gate. The block case stays green either way.
  */
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 import { describe, expect, it } from 'vitest';
 import { placedTree } from './helpers/trayAcceptance';
 
@@ -54,6 +55,7 @@ const FLAT3175 = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3
 
 function pocketOptions(shadowMesh: PlanPocketsOptions['shadowMesh']): Omit<PlanPocketsOptions, 'offset'> {
   return {
+    tabs: DEFAULT_RELEASE_TABS,
     houseFlats: [FLAT6, FLAT3175],
     stepDownMm: 1.5,
     feeds: { feedMmPerMin: 1000, plungeFeedMmPerMin: 300 },

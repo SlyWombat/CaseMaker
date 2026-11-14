@@ -39,6 +39,7 @@ import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
 import type { ProfileSpan, TabChoiceMode, TabStretch } from '@/engine/cnc/cam/profile';
+import { TAB_FREEING_WIDTH_FALLBACK_MM, TAB_SETTINGS_FALLBACK, freeingTabsFrom } from '@/engine/cnc/cam/tabSettings';
 import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
@@ -190,6 +191,13 @@ export interface OpOutcome {
    * tab is taller than the part`) — a changed number is never silent. Absent when the tab fits.
    */
   clampedTabHeightMm?: { wanted: number; cut: number };
+  /**
+   * #1271 — THE TAB COUNTS, as plain data: `asked` (the requested count × the contour's rings),
+   * `placed` (the tabs the plan placed), `added` (placed BEYOND the requested count to meet
+   * `tabs.maxSpanMm`, #1206) and `unplaceable` (requested with no edge to hold them). The notes say
+   * the same in prose; a caller that draws a number reads these.
+   */
+  tabCounts?: { asked: number; placed: number; added: number; unplaceable: number };
   /**
    * #1258 — THE STRETCHES THE CORNER MARGIN LEFT TOO LONG on this contour, with the tab step 2
    * would place in each, and the mode the contour ran under. Absent when nothing is too long.
@@ -2231,11 +2239,16 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     // release instruction must not be given: the contour keeps its tabs exactly as a non-last
     // setup's does. (The band is measured from this setup's stock top.)
     const bandReachesBottom = depthBandMm === undefined || depthBandMm + 1e-9 >= -tree.contour.zTo;
+    // #1271 — THE SHOP'S FREEING TABS, not a constant: `tabs.count`, `tabs.freeingWidthMm`,
+    // `tabs.heightMm` from the input's defaults map (each recommendation equals the old constant,
+    // 4 × 6 × 1, so nothing moves for a shop that changed nothing).
+    const freeing = freeingTabsFrom(input.defaults ?? null);
+    const releaseTabs = { count: freeing.count, width: freeing.widthMm, height: freeing.heightMm };
     const tabs =
       input.setups.length > 1 && bandReachesBottom
         ? setupIndex === input.setups.length - 1
-          ? { count: 0, width: DEFAULT_RELEASE_TABS.width, height: DEFAULT_RELEASE_TABS.height }
-          : DEFAULT_RELEASE_TABS
+          ? { count: 0, width: releaseTabs.width, height: releaseTabs.height }
+          : releaseTabs
         : input.freeingTabs === undefined
           ? undefined
           : { count: input.freeingTabs.count, width: input.freeingTabs.widthMm, height: input.freeingTabs.heightMm };
@@ -2252,7 +2265,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const tabChoiceMode: TabChoiceMode = input.tabChoice?.choice ?? 'ask';
     const tabSpec =
       tabs === undefined
-        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode }
+        ? { ...releaseTabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode }
         : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
@@ -2654,7 +2667,7 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
         // over-clip" / `pocketShadowNestedFloor966.spec.ts` cases. `curvedOpsProperty959` is back
         // at its own 95% line, unchanged.
         shadowMesh: curvedGeometry.triangles,
-        ...(tabSpec === undefined ? {} : { tabs: tabSpec }),
+        tabs: tabSpec,
         ...(oppositeSafeDepthMm === undefined ? {} : { oppositeSafeDepthMm }),
         facing: input.facing ?? 'off',
         ...(goalCoverage === undefined ? {} : { goalCoverage }),
@@ -3675,8 +3688,12 @@ export interface PlanPocketsOptions {
   /** #1038 — the caller's stop, checked once per step boundary (and forwarded to
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
-  /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode };
+  /**
+   * REQUIRED (#1271): the freeing contour's tabs, from the shop's `tabs.count` / `tabs.freeingWidthMm` /
+   * `tabs.heightMm` ({@link freeingTabsFrom}); a caller with no shop passes {@link DEFAULT_RELEASE_TABS}
+   * (the labelled fallback) explicitly. The part must stay held until the last cut touches it.
+   */
+  tabs: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
@@ -3760,7 +3777,11 @@ export interface PlanPocketsOptions {
  * through every cut that follows. `{count: 0}` is no longer the default; it still frees the part
  * outright when the caller states it explicitly.
  */
-export const DEFAULT_RELEASE_TABS = { count: 4, width: 6, height: 1 };
+export const DEFAULT_RELEASE_TABS = {
+  count: TAB_SETTINGS_FALLBACK.count,
+  width: TAB_FREEING_WIDTH_FALLBACK_MM,
+  height: TAB_SETTINGS_FALLBACK.heightMm,
+};
 
 export interface PlanPocketsResult {
   ops: PlannedOp[];
@@ -4229,7 +4250,7 @@ export function planPocketsForTree(tree: FeatureTree, opts: PlanPocketsOptions):
         ...(contourThrough && opts.stockThicknessMm !== undefined
           ? { thicknessMm: opts.stockThicknessMm, through: true }
           : {}),
-        tabs: opts.tabs ?? DEFAULT_RELEASE_TABS,
+        tabs: opts.tabs,
         offset: opts.offset,
         params: cutParamsFor(cutter),
         rapid: opts.rapid,

@@ -24,6 +24,7 @@
  * union (no floor patch there, the leg being inset means this is also an OPEN shoulder at its own
  * outer edge, same as any other root pocket whose footprint reaches the part's own outline).
  */
+import { DEFAULT_RELEASE_TABS } from '@/engine/cnc/cam/model/plan';
 import { describe, expect, it } from 'vitest';
 
 import { tl, type ManifoldInstance } from './helpers/manifoldExec';
@@ -104,6 +105,7 @@ function treeOf(mesh: ParsedMesh, stockTop: number): FeatureTree {
 
 function basePlanOptions(houseFlats: Tool[]): Omit<PlanPocketsOptions, 'shadowMesh'> {
   return {
+    tabs: DEFAULT_RELEASE_TABS,
     offset,
     houseFlats,
     stepDownMm: 2,
