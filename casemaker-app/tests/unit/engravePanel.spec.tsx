@@ -24,7 +24,7 @@ import {
   useEngraveRegistrationStore,
 } from '@/store/engraveRegistrationStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { recheckRendererForGenerate, resetRendererCheck } from '@/engine/cnc/rendererBits';
+import { BROWSER_MEMORY_SHORT_WARNING, recheckRendererForGenerate, resetRendererCheck } from '@/engine/cnc/rendererBits';
 
 import {
   setEngravePreviewClientLoader,
@@ -6042,7 +6042,8 @@ describe('#1123-52 the memory warning', () => {
     await recheckRendererForGenerate(undefined, () => ({ ok: false, reservedMb: 0, failedAtMb: 0 }));
     useEngraveRunStore.setState({ phase: 'generating' });
     render(<EngravePanel />);
-    expect(screen.getByTestId('engrave-generate-memory-warning').textContent).toContain('450 MiB');
+    expect(screen.getByTestId('engrave-generate-memory-warning').textContent).toBe(BROWSER_MEMORY_SHORT_WARNING);
+    expect(screen.getByTestId('engrave-generate-memory-warning').textContent).toContain('Memory is tight in this page');
     act(() => useEngraveRunStore.setState({ phase: 'ready' }));
     expect(screen.queryByTestId('engrave-generate-memory-warning')).toBeNull();
   });
