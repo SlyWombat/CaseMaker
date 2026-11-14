@@ -129,7 +129,7 @@ import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
-import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, refuseFractionOf, type CutParams } from '@/engine/cnc/feeds';
 import {
   importOutlineFromDisk,
   importRasterFromDisk,
@@ -1275,6 +1275,9 @@ export function EngravePanel(): JSX.Element {
         goalOnly ? feedsToolForSurface(tool) : tool,
         jobMachine(job),
         job.cutOverride,
+        undefined,
+        undefined,
+        refuseFractionOf(shopDefaults ?? null),
       )
     : null;
   const params: CutParams | null = feeds && feeds.ok ? feeds.params : null;

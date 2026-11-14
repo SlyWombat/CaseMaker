@@ -35,6 +35,7 @@
 import {
   feedsFor,
   resolvedFeedsTable,
+  refuseFractionOf,
   setLocatedFeedTable,
   type CutParams,
   type FeedCatalogue,
@@ -59,6 +60,8 @@ import { inventoryConditions } from '@/engine/cnc/toolCondition';
  */
 export interface EngraveFeedsShop {
   feeds?: readonly FeedsEntry[] | null;
+  /** #1256 — the shop's settings map; `clamp.refuseFraction` is read from it when no band is passed. */
+  defaults?: ShopDefaults | null;
 }
 
 /**
@@ -77,9 +80,7 @@ export function engraveFeedsFor(
   context?: { slotting?: boolean },
   refuseFraction?: number,
 ): FeedsResult {
-  return refuseFraction === undefined
-    ? feedsFor(catalogue, material, tool, machine, override, shop.feeds ?? undefined, context)
-    : feedsFor(catalogue, material, tool, machine, override, shop.feeds ?? undefined, context, refuseFraction);
+  return feedsFor(catalogue, material, tool, machine, override, shop.feeds ?? undefined, context, refuseFraction ?? refuseFractionOf(shop.defaults));
 }
 
 /**

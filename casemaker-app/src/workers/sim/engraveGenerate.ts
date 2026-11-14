@@ -43,7 +43,7 @@ import { segmentsForRadius } from '@/engine/compiler/arcResolution';
 import { version as CAM_VERSION } from '../../../package.json';
 import { dialectOf, type Mill } from '@/engine/cnc/machine';
 import { jobMachine, type MachineCalibration } from '@/engine/cnc/calibration';
-import { catalogueCoverageFor, feedsFor, feedsToolForSurface, type CutParams, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, feedsFor, feedsToolForSurface, refuseFractionOf, type CutParams, type FeedsEntry, type FeedsResult, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 // #922 — the one call shape every `shop.feeds ?? undefined` resolution below now uses: one options
 // object (`shop`, already built by whichever caller — the worker or the CLI) instead of that
 // fragment copied at each site. See the module doc in `engrave/feeds.ts`.
@@ -3615,6 +3615,8 @@ function facingProgram(
    * frame the facing passes are written in.
    */
   topLiftMm = 0,
+  /** #1256 — the shop's `clamp.refuseFraction`; absent, the labelled fallback. */
+  refuseFraction?: number,
 ): {
   nc: string | null;
   verify: VerifyReport | null;
@@ -3646,7 +3648,7 @@ function facingProgram(
   // job's ENGRAVING cutter (#205): a person who typed 12 000 rpm for a 1 mm flat has said nothing
   // about the 6 mm mill that skims the top, and handing those numbers over would run the big cutter
   // at a small cutter's feed rate. The facing file's S/F are the row's own for the facing cutter.
-  const feeds = feedsFor(catalogue, job.stock.material, tool, machine, undefined, table);
+  const feeds = feedsFor(catalogue, job.stock.material, tool, machine, undefined, table, undefined, refuseFraction);
   if (!feeds.ok) {
     return {
       nc: null,
@@ -9174,6 +9176,7 @@ async function generateOneProgram(
           shop.feeds ?? undefined,
           span === 'none' ? 'none' : 'first',
           liftOverStock,
+          refuseFractionOf(shop.defaults ?? null),
         )
       : { nc: null, verify: null, toolKey: null, error: facingYieldsToPlan ? NO_FACING_TOP_REASON : null, cam: null };
 

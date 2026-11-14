@@ -49,7 +49,7 @@ import { readDefault } from '@/platform/defaultsClient';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
-import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, refuseFractionOf, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
@@ -542,7 +542,7 @@ export function materialRefusal(
    * would refuse by material is still a candidate — the simulatio decides — while a CATALOGUE
    * cutter keeps the catalogue's own rule, and a broken or metal-line cutter is still refused.
    */
-  opts?: { ownedVouches?: boolean },
+  opts?: { ownedVouches?: boolean; /** #1256 — the shop's `clamp.refuseFraction`, from the caller's settings map. */ refuseFraction?: number },
 ): string | null {
   const tool = entry.tool;
   const condition = conditions?.get(entry.key) ?? null;
@@ -567,7 +567,7 @@ export function materialRefusal(
   if (tool.shape === 'thread') return null;
   // #910 — the generator's own proxy (`feedsToolForSurface`), which keeps the ball's Makera id, so
   // the gate reads the same row the goal program will: a ⌀6 ball's own hardwood row, not nothing.
-  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), undefined, table);
+  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), undefined, table, undefined, opts?.refuseFraction);
   if (!feeds.ok) {
     return `no cutting parameters for ${entry.key} in ${MATERIAL_LABELS[job.stock.material]}: ${feeds.reason}`;
   }
@@ -658,7 +658,7 @@ export function planCutters(
   const candidates: Candidate[] = [];
   const refusals = new Map<string, string>();
   for (const entry of candidateTools) {
-    const refusal = materialRefusal(job, entry, catalogue, conditions, table);
+    const refusal = materialRefusal(job, entry, catalogue, conditions, table, { refuseFraction: refuseFractionOf(defaults) });
     if (refusal !== null) {
       refusals.set(entry.key, refusal);
       continue;

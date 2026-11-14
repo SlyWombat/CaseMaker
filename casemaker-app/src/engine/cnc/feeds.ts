@@ -93,23 +93,25 @@
 import { z } from 'zod';
 import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambiguousCuttingDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
-import { clampToMachine } from './machine';
-import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
-/**
- * #1256 — THE SHOP'S `clamp.refuseFraction`, AT THE MOMENT OF THE CALL: the band above a machine
- * ceiling where a feed or rpm is refused instead of clamped. Every resolution below defaults to it,
- * so the panel, the pick and the generator all judge one number; each realm's defaults source is
- * installed by `installShopDefaults` (the app's store; the worker from the request's `shop`), and
- * with none the labelled fallback answers (`CLAMP_REFUSE_FRACTION_FALLBACK`).
- */
-export function shopRefuseFraction(): number {
-  return readDefault(liveShopDefaults(), 'clamp.refuseFraction').value;
-}
 import type { ClampDiagnostic, Mill } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
 import { V_CARVE_STEPOVER_FALLBACK } from './vCarveGeometry';
 import type { FieldSource, StockMaterial } from '@/types/engraveJob';
+
+/**
+ * #1256 — THE SHOP'S `clamp.refuseFraction` from a settings map the caller holds: the band above a
+ * machine ceiling where a feed or rpm is refused instead of clamped. Settings enter at a realm's
+ * edge and travel inward as data (#1244), so the callers that hold the map (the generator through
+ * `engraveFeedsFor`, the model plan, the cutter pick, the panel) read it here and pass it down;
+ * with no map the labelled fallback answers.
+ */
+export function refuseFractionOf(defaults: ShopDefaults | null | undefined): number {
+  return readDefault(defaults ?? null, 'clamp.refuseFraction').value;
+}
+
 
 export interface CutParams {
   rpm: number;
@@ -1132,7 +1134,7 @@ export function catalogueRefusal(
   field: CatalogueField,
   value: number,
   machine: Mill,
-  refuseFraction: number = shopRefuseFraction(),
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): string | null {
   if (!Number.isFinite(value) || value <= 0) return 'it is not a positive number';
   if (field === 'stepDown') return null;
@@ -1321,7 +1323,7 @@ function entryFor(
   machine: Mill,
   table: readonly FeedsEntry[],
   edge: 'flat' | 'v',
-  refuseFraction: number = shopRefuseFraction(),
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): EntryChoice {
   const entry = table.find(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
@@ -1609,7 +1611,7 @@ export function feedsFor(
    * is refused rather than clamped. Threaded in so this resolver and the catalogue screening share
    * one number with `clampToMachine`; defaults to the labelled fallback.
    */
-  refuseFraction: number = shopRefuseFraction(),
+  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting

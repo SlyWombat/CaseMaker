@@ -30,7 +30,7 @@ import { vCarvePassPitch } from '@/engine/cnc/vCarveGeometry';
 import { memTrace, memTraceEnabled } from '@/engine/cnc/memTrace';
 import { PlanFinishTooManyMoves } from './ops/finish';
 import { concatToolpathIR, estimateCycleTerms, HOP_Z, SAFE_Z, type CycleTerms, type RapidEstimate, type ToolpathIR } from '@/engine/cnc/cam/ir';
-import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, refuseFractionOf, resolvedFeedsTable, type CutParams, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { dialectOf, Z1 } from '@/engine/cnc/machine';
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { REST_MACHINING_FALLBACK, type RestSettingSource } from '@/engine/cnc/engrave/restSettings';
@@ -964,7 +964,7 @@ export function resolvedCutParams(
   // #1047 — the caller's rows, never this realm's snapshot: the worker and the CLI both hold an
   // empty module state however carefully the main thread filled its own (#324, `feeds.ts`).
   const catalogue = input.feedCatalogue ?? feedCatalogueSnapshot();
-  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1);
+  const resolved = feedsFor(catalogue, input.stock.material, feedsToolForSurface(tool), Z1, undefined, undefined, undefined, refuseFractionOf(input.defaults));
   if (resolved.ok) return { params: resolved.params, substitution: null };
   const rows = resolvedFeedsTable()
     .table.filter((row) => row.material === input.stock.material && (row.edge ?? 'flat') === 'flat')
@@ -985,7 +985,7 @@ export function resolvedCutParams(
     // row). `feedsToolForSurface`'s flat proxy keeps the id because its diameter IS the cutter's
     // own cutting diameter, so the catalogue's check agrees with the record there.
     const proxy = flatEndMill(largest.maxDiameter, { number: tool.number, name: tool.name });
-    const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1);
+    const viaProxy = feedsFor(catalogue, input.stock.material, proxy, Z1, undefined, undefined, undefined, refuseFractionOf(input.defaults));
     if (viaProxy.ok) {
       return {
         params: viaProxy.params,
