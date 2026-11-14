@@ -156,6 +156,25 @@ describe('#1281 the pick ranks Listed ahead of Unlisted, inside the fidelity tie
     expect(keys(pick.chosen)).toBe(CORN.key);
   });
 
+  it('the last tie-break is the LIBRARY order, not the key’s spelling', async () => {
+    // Two listed owned cutters with the same everything: whichever the shop lists first wins, in
+    // either order (the keys sort `…-a` before `…-b` in both runs).
+    const twin = (key: string, id: string) => entry(key, 'flat', { id, tipDiameter: 3.175, diameter: 3.175, fluteLength: 12 });
+    const a = twin('inv:twin-a', '122111013890');
+    const b = twin('inv:twin-b', '122111013890');
+    const first = picked(await smartPick(job(), [a, b], CATALOGUE, null, uniform));
+    const second = picked(await smartPick(job(), [b, a], CATALOGUE, null, uniform));
+    expect(keys(first.chosen)).toBe('inv:twin-a');
+    expect(keys(second.chosen)).toBe('inv:twin-b');
+  });
+
+  it('owned before catalogue-only at equal standing: a cat: key spelled first no longer takes the slot', async () => {
+    const cat = entry('cat:aaa-flat', 'flat', { id: '122111013890', tipDiameter: 3.175, diameter: 3.175, fluteLength: 12 });
+    const own = entry('inv:zzz-flat', 'flat', { id: '122111013890', tipDiameter: 3.175, diameter: 3.175, fluteLength: 12 });
+    const pick = picked(await smartPick(job(), [cat, own], CATALOGUE, null, uniform));
+    expect(keys(pick.chosen)).toBe('inv:zzz-flat');
+  });
+
   it('no catalogue: nothing is rated, and the pick is the one it was (the key order decides the tie)', async () => {
     const withCat = picked(await smartPick(job(), [CORN, LISTED_A], [], null, uniform));
     expect(withCat.chosen.unlisted ?? []).toHaveLength(0);

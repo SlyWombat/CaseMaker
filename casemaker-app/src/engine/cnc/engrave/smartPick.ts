@@ -144,6 +144,13 @@ export interface ScoredPlan {
    * Listed (or no catalogue is synced, so nothing is rated). A plan with any entry is UNLISTED.
    */
   unlisted?: readonly CutterStanding[];
+  /**
+   * #1281 — THE LAST TIE-BREAK, stated: the position of each of the plan's cutters in the library
+   * the pick was given (the shop's own tool list order), compared cutter by cutter. Absent for a
+   * hand-built verdict. It exists so a tie is decided by the shop's order, never by how a key is
+   * spelled (`cat:` sorting before `inv:` was an accident of the alphabet).
+   */
+  libraryRank?: readonly number[];
   /** The item the worst fidelity belongs to, for the sentence. */
   worstItem: EvaluatedItem | null;
 }
@@ -793,6 +800,11 @@ function byObjective(a: ScoredPlan, b: ScoredPlan, toolChangeSeconds: number = T
   const ca = round6(cost(a));
   const cb = round6(cost(b));
   if (ca !== cb) return ca - cb;
+  // #1281 — the library's own order decides a tie before the key's spelling does.
+  const ra = a.libraryRank ?? [];
+  const rb = b.libraryRank ?? [];
+  for (let i = 0; i < Math.min(ra.length, rb.length); i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!;
+  if (ra.length !== rb.length) return ra.length - rb.length;
   return planKey(a.plan) < planKey(b.plan) ? -1 : planKey(a.plan) > planKey(b.plan) ? 1 : 0;
 }
 
@@ -835,7 +847,11 @@ export async function smartPick(
   };
   const scored = (plan: CandidatePlan, evaluation: PlanEvaluation): ScoredPlan => {
     const unlisted = plan.cutters.map((c) => standingOf(c.key)).filter((x): x is CutterStanding => x !== null && isUnlisted(x));
-    return { ...toScored(plan, evaluation, exactWhenEmpty), unlisted };
+    const libraryRank = plan.cutters.map((c) => {
+      const at = tools.findIndex((t) => t.key === c.key);
+      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    });
+    return { ...toScored(plan, evaluation, exactWhenEmpty), unlisted, libraryRank };
   };
   const plans = candidatePlans(job, tools, catalogue, defaults, conditions, table, opts.floors).slice(0, maxCandidates);
   // #1052 — THE MEASURED SEARCH IS ITS OWN SUSPECT (j27 names no cutter, so this runs before any
