@@ -16,6 +16,28 @@ import type { TabChoiceNeeded } from '@/engine/cnc/cam/model/plan';
  */
 export type TabStretchOf = TabChoiceNeeded['stretches'][number] & { cut?: { id: string; name: string } };
 
+/**
+ * The cut-out's 0-based position among the job's cut-out rows, from the id the planner mints
+ * (`setup-S-cut-K`): the K-th ring of the centre path is the K-th cut-out. Null for an id not in
+ * that form.
+ */
+export function cutPosition(s: { cut?: { id: string } }): number | null {
+  const m = /cut-(\d+)$/.exec(s.cut?.id ?? '');
+  return m === null ? null : Number(m[1]) - 1;
+}
+
+/** The question with each stretch's cut-out named as the operation list names it, when the job's row exists. */
+export function withCutNames(needed: TabChoiceNeeded, cutNames: readonly string[]): TabChoiceNeeded {
+  return {
+    ...needed,
+    stretches: needed.stretches.map((s) => {
+      const k = cutPosition(s);
+      const name = k === null ? undefined : cutNames[k];
+      return name === undefined ? s : { ...s, cut: { ...s.cut, name } };
+    }),
+  };
+}
+
 /** "Lid outline — " before a row when the stretch's cut-out is known and there is more than one. */
 function cutPrefix(s: TabStretchOf, several: boolean): string {
   return several && s.cut !== undefined ? `${s.cut.name} — ` : '';

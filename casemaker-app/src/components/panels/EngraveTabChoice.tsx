@@ -19,16 +19,28 @@ import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useEngraveRunStore } from '@/store/engraveRunStore';
 import { useTabChoiceStore } from '@/store/tabChoiceStore';
 import { TabChoiceCard } from './TabChoiceCard';
+import { cutPosition, withCutNames } from './tabChoiceWords';
 
-/** The tab settings are the cut-out row's count and width; bring the first into view and focus it. */
-function showTabSettings(): void {
-  const el = document.querySelector<HTMLElement>('[data-testid^="engrave-cutout-tabs-count-"]');
+/** The tab settings are the cut-out row's count and width; bring the first such row's into view and focus it. */
+function showTabSettings(row: number | null): void {
+  const el = document.querySelector<HTMLElement>(
+    row === null ? '[data-testid^="engrave-cutout-tabs-count-"]' : `[data-testid="engrave-cutout-tabs-count-${row}"]`,
+  );
   if (el === null) return;
   el.scrollIntoView({ block: 'center' });
   el.focus();
 }
 
-export function EngraveTabChoice({ onGenerate, tabWidthMm }: { onGenerate: () => void; tabWidthMm?: number }): JSX.Element | null {
+export function EngraveTabChoice({
+  onGenerate,
+  tabWidthMm,
+  cutNames = [],
+}: {
+  onGenerate: () => void;
+  tabWidthMm?: number;
+  /** The job's cut-out rows as the operation list names them, in row order. */
+  cutNames?: readonly string[];
+}): JSX.Element | null {
   const generated = useEngraveRunStore((s) => s.generated);
   const answer = useEngraveJobStore((s) => s.job.tabChoice);
   const ui = useTabChoiceStore();
@@ -57,18 +69,19 @@ export function EngraveTabChoice({ onGenerate, tabWidthMm }: { onGenerate: () =>
     // operator goes to the cut-out's own tab count.
     onChangeTabs: () => {
       ui.collapse();
-      showTabSettings();
+      const first = (needed ?? ui.asked)?.stretches[0];
+      showTabSettings(first === undefined ? null : cutPosition(first));
     },
   };
   if (needed !== undefined) {
-    return <TabChoiceCard {...common} needed={needed} stale={stale} mode={ui.collapsed ? 'collapsed' : 'ask'} />;
+    return <TabChoiceCard {...common} needed={withCutNames(needed, cutNames)} stale={stale} mode={ui.collapsed ? 'collapsed' : 'ask'} />;
   }
   const asked = ui.asked;
   if (asked !== null && answer !== undefined && answer.answeredFor === asked.fingerprint) {
     return ui.reopened ? (
-      <TabChoiceCard {...common} needed={asked} mode="ask" />
+      <TabChoiceCard {...common} needed={withCutNames(asked, cutNames)} mode="ask" />
     ) : (
-      <TabChoiceCard {...common} needed={asked} mode="answered" answer={answer.choice} />
+      <TabChoiceCard {...common} needed={withCutNames(asked, cutNames)} mode="answered" answer={answer.choice} />
     );
   }
   return null;

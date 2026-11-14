@@ -87,10 +87,31 @@ describe('#1258 — the question where Generate stopped', () => {
     fireEvent.click(screen.getByLabelText(/Leave the longer stretches/));
     fireEvent.click(screen.getByTestId('tab-choice-use'));
     function Row(): JSX.Element {
-      return <span data-testid="row">{useTabChoiceSuffix('cut-1', 0)}</span>;
+      return <span data-testid="row">{useTabChoiceSuffix(0)}</span>;
     }
     render(<Row />);
     expect(screen.getByTestId('row').textContent).toBe('3 stretches by your choice');
+  });
+
+  it('several cut-outs: each row names its cut-out as the operation list does, and option 3 goes to the first such row', () => {
+    const second = FIXTURE_NEEDED.stretches.map((s, i) => ({ ...s, cut: { id: `setup-1-cut-${i === 0 ? 1 : 2}`, name: `Cut-out ${i === 0 ? 1 : 2}` } }));
+    useEngraveRunStore.setState({ generated: { ok: false, stage: 'cam', tabChoiceNeeded: { ...FIXTURE_NEEDED, stretches: second } } as unknown as EngraveGenerated });
+    const mk = (n: number): HTMLInputElement => {
+      const el = document.createElement('input');
+      el.setAttribute('data-testid', `engrave-cutout-tabs-count-${n}`);
+      el.scrollIntoView = vi.fn();
+      document.body.appendChild(el);
+      return el;
+    };
+    const row0 = mk(0);
+    const row1 = mk(1);
+    render(<EngraveTabChoice onGenerate={vi.fn()} cutNames={['Cut out "Lid" top outline', 'Cut out "Base" top outline']} />);
+    expect(screen.getByTestId('tab-choice-option-insideMargin').textContent).toContain('Cut out "Lid" top outline — Stretch 1: a tab 5 mm');
+    expect(screen.getByTestId('tab-choice-option-insideMargin').textContent).toContain('Cut out "Base" top outline — Stretch 2: a tab 6 mm');
+    fireEvent.click(screen.getByTestId('tab-choice-change-tabs'));
+    expect(document.activeElement).toBe(row0);
+    row0.remove();
+    row1.remove();
   });
 
   it('a stale answer asks again with the one-line reason', () => {

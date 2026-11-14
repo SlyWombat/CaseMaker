@@ -99,6 +99,7 @@ import {
 } from '@/engine/cnc/vCarveGeometry';
 import { jobVise, validateVise } from '@/engine/cnc/fixture';
 import {
+  cutoutOperationName,
   keepOutLimitParts,
   keepOutMembrane,
   labelGlyphMeasure,
@@ -5400,7 +5401,10 @@ export function EngravePanel(): JSX.Element {
             the action. */}
       <div data-testid="engrave-generate-slot">
         {/* #1258 — the tab question, at the point Generate stopped (its own card, never a findings row). */}
-        <EngraveTabChoice onGenerate={() => void generate()} />
+        <EngraveTabChoice
+          onGenerate={() => void generate()}
+          cutNames={(job.cutouts ?? []).map((c) => cutoutOperationName(c, c.of === 'stock-inset' ? null : (cutoutTargets.find((t) => t.id === c.of)?.label ?? null)))}
+        />
         {/* #688 — the blocker is the button's OWN sentence with its Fix (design §1 principle 4).
             It used to be one tooltip for two causes, "Fix the errors above first.", which could
             be — and was — shown beside "0 errors" (audit B9). */}

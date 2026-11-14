@@ -7,15 +7,16 @@
  */
 import { useEngraveJobStore } from '@/store/engraveJobStore';
 import { useTabChoiceStore } from '@/store/tabChoiceStore';
-import { holdingChoiceSuffix, type TabStretchOf } from './tabChoiceWords';
+import { cutPosition, holdingChoiceSuffix, type TabStretchOf } from './tabChoiceWords';
 
-export function useTabChoiceSuffix(cutId: string, index: number): string | null {
+export function useTabChoiceSuffix(index: number): string | null {
   const answer = useEngraveJobStore((s) => s.job.tabChoice);
   const asked = useTabChoiceStore((s) => s.asked);
   if (answer === undefined || asked === null || answer.answeredFor !== asked.fingerprint) return null;
   const stretches = asked.stretches as readonly TabStretchOf[];
   const named = stretches.some((s) => s.cut !== undefined);
-  const mine = named ? stretches.filter((s) => s.cut?.id === cutId) : index === 0 ? stretches : [];
+  // The planner mints `setup-S-cut-K`; the K-th ring is the K-th cut-out row.
+  const mine = named ? stretches.filter((s) => cutPosition(s) === index) : index === 0 ? stretches : [];
   if (mine.length === 0) return null;
   return holdingChoiceSuffix(answer.choice, { ...asked, stretches: [...mine] });
 }

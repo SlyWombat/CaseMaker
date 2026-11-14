@@ -54,6 +54,7 @@ export const FIXTURE_NEEDED: TabChoiceNeeded = (() => {
     return {
       index,
       setupIndex: 0,
+      cut: { id: 'setup-1-cut-1', name: 'Cut-out 1' },
       spanMm: b - a - TAB_WIDTH_MM,
       startXY: at(a + TAB_WIDTH_MM / 2),
       endXY: at(b - TAB_WIDTH_MM / 2),
@@ -71,7 +72,15 @@ export const FIXTURE_NEEDED: TabChoiceNeeded = (() => {
     limitMm: 80,
     marginMm: 8,
     fingerprint: 'fixture-1258',
-    setups: [{ setupIndex: 0, outline: [FIXTURE_OUTLINE.map((p) => [...p] as [number, number])], path: [FIXTURE_OUTLINE.map((p) => [...p] as [number, number])], tabsAt: PLACED_TABS_S.map((s) => at(s)) }],
+    setups: [
+      {
+        setupIndex: 0,
+        outline: [FIXTURE_OUTLINE.map((p) => [...p] as [number, number])],
+        path: [FIXTURE_OUTLINE.map((p) => [...p] as [number, number])],
+        tabsAt: PLACED_TABS_S.map((s) => at(s)),
+        cuts: [{ cut: { id: 'setup-1-cut-1', name: 'Cut-out 1' }, path: [FIXTURE_OUTLINE.map((p) => [...p] as [number, number])], tabsAt: PLACED_TABS_S.map((s) => at(s)) }],
+      },
+    ],
     stretches: [
       mk(0, bottomRightCorner - 60, bottomRightCorner + 36, bottomRightCorner, 5, 8),
       mk(1, bottomRightCorner + 70, bottomRightCorner + 160, bottomRightCorner + 90 + ARC_LEN, 6, 12.6),

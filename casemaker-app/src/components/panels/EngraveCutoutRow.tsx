@@ -58,7 +58,7 @@ export function EngraveCutoutRow({
 }: EngraveCutoutRowProps): JSX.Element {
   const tabCount = cutout.tabs.count;
   // #1258 — the operator's answer to the tab question stays visible on the row.
-  const choiceSuffix = useTabChoiceSuffix(cutout.id, index);
+  const choiceSuffix = useTabChoiceSuffix(index);
   return (
     <EngraveItemRow
       id={cutout.id}
