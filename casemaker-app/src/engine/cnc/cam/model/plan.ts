@@ -304,7 +304,8 @@ export interface ModelPlanInput {
    * #1237 — WHERE THOSE DEFAULTS CAME FROM, or null for a caller that planned with no location.
    * A caller that states one must also set {@link defaults}: `planModelCam` throws — naming this —
    * when a location is stated and the input carries none, rather than planning on the fallbacks.
-   * A location WITH NO defaults section passes `defaults: null` (the recommendations, stated).
+   * A location that states no overrides passes `defaults: {}` (the recommendations, stated); `null`
+   * with a location stated is refused too, like absent (#1237's guard, made reachable).
    */
   defaultsFrom?: string | null;
   /**
@@ -1188,13 +1189,16 @@ function collectTabQuestion(perSetup: readonly SetupPlan[], cornerDeg: number): 
 
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
   // #1237 — A LOCATION GIVEN IS DEFAULTS GIVEN. The planner's settings travel in the input; a
-  // caller that planned from a location and did not pass them (undefined — null is a location
-  // with no defaults section, the recommendations) is refused by name rather than planned on the
-  // fallbacks. This is the one guard: no realm can silently regress to the recommendations.
-  if (input.defaultsFrom !== undefined && input.defaultsFrom !== null && input.defaults === undefined) {
+  // caller that planned from a location and did not pass them is refused by name rather than
+  // planned on the fallbacks. This is the one guard: no realm can silently regress to the
+  // recommendations. ABSENT OR NULL both count as "not passed" (the builder turns an absent map
+  // into null, so testing `undefined` alone made the guard unreachable): a location that states
+  // no overrides passes an EMPTY map `{}`, which is the recommendations stated; `defaultsFrom`
+  // absent or null is a caller with no location at all, and plans on them as always.
+  if (input.defaultsFrom !== undefined && input.defaultsFrom !== null && (input.defaults === undefined || input.defaults === null)) {
     throw new Error(
       `planModelCam was given the location ${input.defaultsFrom} but no shop defaults: ` +
-        'pass the location\'s defaults map as ModelPlanInput.defaults (null when the location states none)',
+        'pass the location\'s defaults map as ModelPlanInput.defaults ({} when the location states no overrides)',
     );
   }
   // #1052 — the flag-gated memory trace (a null check when off): one row at the plan's start.
