@@ -20,6 +20,7 @@ import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 // All three reach the part's deepest remainder (flute 30 mm), so all three are CANDIDATES;
@@ -53,7 +54,7 @@ describe('#986 the prune’s order and early exit', () => {
       cutters: { house: [flat6, ball2, ball4, ball6], catalogue: [] },
       tolerances: { finishMm: 0.01 },
       edgeBreak: { legMm: 0 },
-      goal: sampleGoalHeightfield(target, { pitchMm: 0.1, stockTopZ: 0 }),
+      goal: sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 }),
     };
     const output = await planModelCam(input);
     const notes = output.perSetup.flatMap((s) => s.notes).join('\n');

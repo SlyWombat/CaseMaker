@@ -59,6 +59,7 @@ import { clearMakeraCatalogue, installMakeraCatalogue } from '../tools/makeraCat
 import { feedRowsFor } from '../tools/feedRows';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', '..');
@@ -203,7 +204,7 @@ function allowance(job: EngraveJob): Pick<GoalCutIntoOptions, 'edgeBreak' | 'wal
 
 /** The goal heightfield of the placed figure, sampled through the app's own door. */
 function goalField(job: EngraveJob, bytes: Buffer, filePath: string): GoalHeightfield {
-  return sampleGoalHeightfield(targetOf(job, bytes, filePath), { pitchMm: 0.1, stockTopZ: 0 });
+  return sampleGoalHeightfield(targetOf(job, bytes, filePath), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
 }
 
 /** The figure job's stated finish tolerance, mm (#965): the scallop the job asks for. */

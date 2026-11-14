@@ -20,7 +20,7 @@
  * The provisional "by key, pending #1114" rows of #1111 are gone: every same-diameter pick states
  * the decider it used ({@link pickNote}).
  */
-import { feedsFor, feedsToolForSurface, type FeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { feedsFor, feedsToolForSurface, refuseFractionOf, type FeedCatalogue, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { Z1 } from '@/engine/cnc/machine';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { StockMaterial } from '@/types/engraveJob';
@@ -67,7 +67,7 @@ export function pickKeysOf(tool: Tool, deepestMm: number, priceSeconds = Number.
 export function pickKeysFor(tool: Tool, ctx: PickContext): PickKeys {
   // The feeds resolution is not read by this rule (the gate, the flute and the key only); it is
   // kept so a caller holding a row set can prove the plan's world is the shop's.
-  void (ctx.catalogue === undefined ? null : feedsFor(ctx.catalogue, ctx.material, feedsToolForSurface(tool), Z1));
+  void (ctx.catalogue === undefined ? null : feedsFor(ctx.catalogue, ctx.material, feedsToolForSurface(tool), Z1, refuseFractionOf(null)));
   return pickKeysOf(tool, ctx.deepestMm, ctx.priceSeconds);
 }
 

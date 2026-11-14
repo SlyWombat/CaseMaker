@@ -21,7 +21,7 @@ import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { placedSize } from './targetScale';
 import { jobSetups, jobTargetObjects, jobTool } from './jobSetup';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
-import type { ShopDefaults } from '@/platform/defaultsClient';
+import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 
 /**
  * The grid the question is asked on, mm. Coarser than any cut grid the planner settles on
@@ -65,7 +65,7 @@ export const NO_FACING_TOP_REASON = 'every part of the top is cut away, so there
 export function goalTopFace(
   job: EngraveJob,
   goal: EngraveTargetObject,
-  opts: { tool?: Tool | null } = {},
+  opts: { tool?: Tool | null; maxCells: number },
 ): TopFaceFacts | null {
   if ((goal.role ?? 'reference') !== 'goal' || !goal.enabled) return null;
   if (goal.format === 'png') return null; // a picture is cut INTO the top; the top is kept
@@ -80,6 +80,7 @@ export function goalTopFace(
   try {
     hf = sampleGoalHeightfield(goal, {
       pitchMm: FACE_PITCH_MM,
+      maxCells: opts.maxCells,
       ...(clear === null
         ? {}
         : { clear, stockRect: rect, baseZ: goal.position.z - placedSize(goal).z }),
@@ -130,7 +131,7 @@ export function jobTopFace(
   let best: TopFaceFacts | null = null;
   for (const goal of jobTargetObjects(job)) {
     if (goal.setupId !== undefined && goal.setupId !== first) continue;
-    const facts = goalTopFace(job, goal, opts);
+    const facts = goalTopFace(job, goal, { ...opts, maxCells: readDefault(defaults, 'goal.maxCells').value });
     if (facts === null) continue;
     if (facts.keeps) return facts;
     if (best === null || facts.keptFraction > best.keptFraction) best = facts;

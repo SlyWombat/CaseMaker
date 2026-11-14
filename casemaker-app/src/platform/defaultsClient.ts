@@ -23,6 +23,7 @@ import {
   VISE_UNCERTAINTY_FALLBACK,
 } from '@/engine/cnc/fixture';
 import { CLAMP_REFUSE_FRACTION_FALLBACK } from '@/engine/cnc/machine';
+import { GOAL_MAX_CELLS } from '@/engine/cnc/goalLimits';
 import { DRILL_POINT_FALLBACK_DEG } from '@/engine/cnc/tool';
 import { REST_MACHINING_FALLBACK } from '@/engine/cnc/engrave/restSettings';
 import { FINISH_STOCK_TO_LEAVE_FALLBACK } from '@/engine/cnc/engrave/finishPass';
@@ -421,6 +422,13 @@ export const KNOWN_DEFAULTS: Readonly<Record<string, KnownDefault>> = {
   // down a cleared column stops at; the rest bound the grid it may build and the material it may leave.
   // Fallbacks = adaptive.ts's shipped defaults.
   'adaptive.entryClearanceMm': { label: 'adaptive entry clearance above the cut floor (chosen)', unit: 'mm', rule: z.number().min(0.05).max(5), fallback: 0.5 },
+  // ── #1256 goal.maxCells — the cell cap the goal samplers (the part's heightfield, the rotary
+  // radial field) coarsen their pitch to stay under, so a big goal costs memory and time in a bound
+  // the shop sets. CHOSEN, not measured. Read at the realm edge and passed to each sampler; the
+  // goal CHECK keeps its own, higher cap (`GOAL_CHECK_MAX_CELLS`: a gate rule, frozen for M2).
+  // Fallback = `goalLimits.ts`'s GOAL_MAX_CELLS.
+  'goal.maxCells': { label: 'goal sampler cell cap (chosen)', unit: 'cells', rule: z.number().int().min(40_000).max(20_000_000), fallback: GOAL_MAX_CELLS },
+  // ── #1256 goal.maxCells (end)
   'adaptive.maxCells': { label: 'adaptive material grid cap (chosen)', unit: 'cells', rule: z.number().int().min(1000).max(100_000_000), fallback: 12_000_000 },
   'adaptive.residualShare': { label: 'adaptive residual tolerance, as a share of the area to clear (chosen)', unit: 'x', rule: z.number().min(0).max(0.5), fallback: 0.005 },
   'adaptive.neckAreaMm2': { label: 'adaptive sub-grid neck area (chosen)', unit: 'mm²', rule: z.number().min(0).max(100), fallback: 0.05 },

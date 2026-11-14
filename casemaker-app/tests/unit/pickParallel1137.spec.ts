@@ -157,9 +157,9 @@ function reversedBatch(evaluateOne: Evaluate = evaluate): { many: EvaluateMany; 
 
 describe('#1137 the finalists run as one batch', () => {
   it('the winner, the ranking and the notes are IDENTICAL to the serial run despite reverse completion', async () => {
-    const serial = picked(await smartPick(coinJob(), TOOLS, [], evaluate));
+    const serial = picked(await smartPick(coinJob(), TOOLS, [], null, evaluate));
     const { many, calls } = reversedBatch();
-    const parallel = picked(await smartPick(coinJob(), TOOLS, [], evaluate, { evaluateMany: many }));
+    const parallel = picked(await smartPick(coinJob(), TOOLS, [], null, evaluate, { evaluateMany: many }));
     expect(calls).toHaveLength(1);
     expect(observable(parallel)).toEqual(observable(serial));
     // The coin's own answer is the point of the comparison, not an artifact of two empty picks.
@@ -172,7 +172,7 @@ describe('#1137 the finalists run as one batch', () => {
       seen.push({ level, plans: plans.length });
       return plans.map(() => verdict(1));
     };
-    await smartPick(coinJob(), TOOLS, [], evaluate, { evaluateMany: many });
+    await smartPick(coinJob(), TOOLS, [], null, evaluate, { evaluateMany: many });
     expect(seen).toHaveLength(1);
     expect(seen[0]!.level).toBe('full');
     expect(seen[0]!.plans).toBeGreaterThan(1);
@@ -185,14 +185,14 @@ describe('#1137 the finalists run as one batch', () => {
       called++;
       return plans.map(() => verdict(1));
     };
-    const pick = picked(await smartPick(coinJob(), TOOLS, [], evaluate, { fullFinalists: 1, evaluateMany: many }));
+    const pick = picked(await smartPick(coinJob(), TOOLS, [], null, evaluate, { fullFinalists: 1, evaluateMany: many }));
     expect(called).toBe(0);
     expect(pick.notes.join(' ')).toMatch(/\d+ tied, 1 fully planned/);
   });
 
   it('a short batch answer throws rather than silently dropping a finalist', async () => {
     const many: EvaluateMany = async () => [];
-    await expect(smartPick(coinJob(), TOOLS, [], evaluate, { evaluateMany: many })).rejects.toThrow(
+    await expect(smartPick(coinJob(), TOOLS, [], null, evaluate, { evaluateMany: many })).rejects.toThrow(
       /the batch evaluator answered 0 of \d+ finalists/,
     );
   });
@@ -201,11 +201,11 @@ describe('#1137 the finalists run as one batch', () => {
     // Every plan gets a DISTINCT fidelity; reverse completion must not shuffle them.
     const distinct: Evaluate = (plan) => verdict(SCORES[keyOf(plan)] ?? 0.05);
     const { many } = reversedBatch(distinct);
-    const serial = picked(await smartPick(coinJob(), TOOLS, [], distinct));
-    const parallel = picked(await smartPick(coinJob(), TOOLS, [], distinct, { evaluateMany: many }));
+    const serial = picked(await smartPick(coinJob(), TOOLS, [], null, distinct));
+    const parallel = picked(await smartPick(coinJob(), TOOLS, [], null, distinct, { evaluateMany: many }));
     const fidelityOf = (pick: SmartPick, plan: CandidatePlan): number | undefined =>
       pick.considered.find((s) => planKey(s.plan) === planKey(plan))?.worstFidelity;
-    for (const candidate of candidatePlans(coinJob(), TOOLS, [])) {
+    for (const candidate of candidatePlans(coinJob(), TOOLS, [], null)) {
       expect(fidelityOf(parallel, candidate)).toBe(fidelityOf(serial, candidate));
     }
   });

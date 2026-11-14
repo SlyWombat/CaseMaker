@@ -1030,6 +1030,7 @@ export function createEngravePreviewer(tl: ManifoldToplevel): EngravePreviewer {
       // catalogue states must qualify for a V job the run would cut with that same tip.
       catalogueEntries,
       catalogue,
+      shop.defaults ?? null,
       (key) => {
         const entry = catalogueEntries.find((e) => e.key === key);
         if (!entry) return [];

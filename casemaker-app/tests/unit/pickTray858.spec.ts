@@ -51,7 +51,7 @@ describe('#858 a tool change has a cost, and time decides at equal fidelity', ()
     const evaluate = (p: CandidatePlan): PlanEvaluation =>
       p.cutters.length === 1 ? verdict(1000, 0, 1 - FIDELITY_TIE / 2) : verdict(950, 1, 1);
     const pickWith = async (change: number) =>
-      keys(picked(await smartPick(job, [...TOOLS, OWNED_1MM], [], evaluate, { toolChangeSeconds: change })).chosen);
+      keys(picked(await smartPick(job, [...TOOLS, OWNED_1MM], [], null, evaluate, { toolChangeSeconds: change })).chosen);
     // 950 + 40 < 1000: the change is worth it. 950 + 91.4 > 1000: it is not — and the 0.05 %
     // fidelity difference is inside the tie, so it does not decide either way.
     expect(await pickWith(40)).toContain('+');

@@ -131,7 +131,7 @@ describe('#760 recommendTool reads the raised gaps', () => {
       raisedJob(),
       [FLAT_3, FLAT_1],
       [],
-      measureAll,
+      null, measureAll,
       null,
       null,
       undefined,
@@ -147,7 +147,7 @@ describe('#760 recommendTool reads the raised gaps', () => {
       raisedJob(),
       [FLAT_3, FLAT_1],
       [],
-      measureAll,
+      null, measureAll,
       null,
       null,
       undefined,
@@ -167,7 +167,7 @@ describe('#760 recommendTool reads the raised gaps', () => {
       raisedJob(),
       [FLAT_3, FLAT_1],
       [],
-      losing,
+      null, losing,
       null,
       null,
       undefined,
@@ -188,7 +188,7 @@ describe('#760 planCutters gives raised text a cutter that fits, or a rest cutte
       ],
       { 'flat-3': 0.98, 'flat-1': 1 },
     );
-    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1], []);
+    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1], [], null);
     expect(plan.unassigned).toEqual([]);
     expect(plan.cutters.map((c) => c.key)).toEqual(['flat-3', 'flat-1']);
     // The clearance cutter owns the cut-away; the rest pass owns no items and re-cuts its leftovers.
@@ -205,7 +205,7 @@ describe('#760 planCutters gives raised text a cutter that fits, or a rest cutte
       ],
       { 'flat-3': 0.96, 'flat-1': 0.98 },
     );
-    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1], []);
+    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1], [], null);
     expect(plan.notes.join('\n')).toContain(
       'no cutter fits the 0.278 mm gaps; make the text larger or V-carve it',
     );
@@ -223,7 +223,7 @@ describe('#760 planCutters gives raised text a cutter that fits, or a rest cutte
       ],
       { 'flat-3': 0.96, 'flat-1': 0.98 },
     );
-    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1, ENGRAVER], []);
+    const plan = planCutters(raisedJob(), reach, [FLAT_3, FLAT_1, ENGRAVER], [], null);
     expect(plan.unassigned).toEqual([]);
     expect(plan.cutters.map((c) => c.key)).toEqual(['engraver']);
     expect(plan.cutters[0]!.items).toEqual(['clear']);

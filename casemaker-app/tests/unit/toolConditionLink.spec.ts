@@ -79,7 +79,7 @@ describe('#454 the condition follows the physical cutter', () => {
     );
 
     const tools = [BUILTIN_1MM, ownedEntry('inv:only', ownedOne)];
-    const rec = recommendTool(jobWithLabel(), tools, [], allRows, inventoryConditions());
+    const rec = recommendTool(jobWithLabel(), tools, [], null, allRows, inventoryConditions());
 
     // The built-in is the same physical cutter, so it is out by the same operator statement — there
     // is no silent fresh fallback, and the no-pick sentence says a cutter is marked broken.
@@ -91,7 +91,7 @@ describe('#454 the condition follows the physical cutter', () => {
     // The engine-side wording of the "Why?" list, as `reachTable` prints it. The panel's own
     // "every copy is marked broken or lost (the shop's copies)" / "· worn (the shop's copies)" text is
     // pinned by `engraveRecommendationNotes.spec.tsx` (#458).
-    const table = reachTable(reachabilityFor(jobWithLabel(), tools, [], allRows, inventoryConditions()));
+    const table = reachTable(reachabilityFor(jobWithLabel(), tools, [], null, allRows, inventoryConditions()));
     expect(table.find((r) => r.key === 'flat-1.0')!.excluded).toBe('every copy of it is marked broken or lost');
   });
 
@@ -110,7 +110,7 @@ describe('#454 the condition follows the physical cutter', () => {
     // (#572) keeps the pair runnable.
     const job = jobWithLabel();
     job.metalLineOverride = true;
-    const rec = recommendTool(job, tools, [], allRows, inventoryConditions());
+    const rec = recommendTool(job, tools, [], null, allRows, inventoryConditions());
 
     // Both entries rank as worn, so the pick goes to the key order; what must not happen is the
     // built-in standing in as an untested cutter. Its summary names the shop's own copies, and

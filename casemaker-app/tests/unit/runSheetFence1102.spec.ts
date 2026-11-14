@@ -7,12 +7,13 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { defaultTapeHold } from '@/engine/cnc/engrave/jobSetup';
 import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import type { BedFence, EngraveJob } from '@/types/engraveJob';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 
 const GENERATED = { findings: [], feeds: null, cam: null, nc: '', verify: null, frameNc: null } as const;
 
 function fenced(anchor: 1 | 2): EngraveJob {
   const fence: BedFence = { kind: 'bracket', anchor, variant: 'thin', edges: 'corner' };
-  return { ...defaultEngraveJob(), workholding: { kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence } } };
+  return { ...defaultEngraveJob(), workholding: { kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence } } };
 }
 const stepsOf = (job: EngraveJob, options = {}): string =>
   buildRunSheet(job, GENERATED, null, new Date(), undefined, options)
@@ -62,7 +63,7 @@ describe('#1102 the run sheet of a taped blank located against the bracket', () 
   });
 
   it('an unfenced taped job keeps its own steps', () => {
-    const job = { ...defaultEngraveJob(), workholding: { kind: 'tape' as const, tape: defaultTapeHold() } };
+    const job = { ...defaultEngraveJob(), workholding: { kind: 'tape' as const, tape: defaultTapeHold(TAPE_DEFAULTS) } };
     const text = stepsOf(job, { tapeStripCount: 5 });
     expect(text).not.toContain('Taped to the bed —');
     expect(text).toContain('Lay strips of 20 mm double-sided tape across the bed');

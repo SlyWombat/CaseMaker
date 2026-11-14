@@ -24,6 +24,7 @@ import type { ToolLibraryEntry } from '@/engine/cnc/toolLibrary';
 import type { Tool } from '@/engine/cnc/tool';
 import type { InventoryItem } from '@/platform/houseClient';
 import type { StockMaterial } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const JOBS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs', 'bench', '2026-10-27-z1-typical-jobs', 'jobs');
 
@@ -188,7 +189,7 @@ describe('#732 an owned cutter carries no Makera id until it is confirmed', () =
     ['j17-faceplate-alu', METAL_FLAT_3_175_12],
   ])('%s is refused on aluminium, exactly as the bench manifest records', (jobId, item) => {
     const material = jobMaterial(jobId);
-    const refused = feedsFor(CATALOGUE, material, item.tool, Z1);
+    const refused = feedsFor(CATALOGUE, material, item.tool, Z1, NO_SHOP.refuse);
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error('an owned cutter with no Makera id must not reach a catalogue row');
     expect(refused.reason).toContain("matched by Makera's own cutter id");
@@ -198,7 +199,7 @@ describe('#732 an owned cutter carries no Makera id until it is confirmed', () =
   it('j05 (two-colour laminate, plastic) is refused for the same reason', () => {
     const material = jobMaterial('j05-two-colour-sign');
     expect(material).toBe('plastic');
-    const refused = feedsFor(CATALOGUE, material, PLAIN_FLAT_3_175_25.tool, Z1);
+    const refused = feedsFor(CATALOGUE, material, PLAIN_FLAT_3_175_25.tool, Z1, NO_SHOP.refuse);
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error('an owned cutter with no Makera id must not reach a catalogue row');
     expect(refused.reason).toContain('which this cutter does not carry');
@@ -207,7 +208,7 @@ describe('#732 an owned cutter carries no Makera id until it is confirmed', () =
   it('j15 (acrylic) is refused for the same reason until the id is confirmed', () => {
     const material = jobMaterial('j15-acrylic-keychain');
     expect(material).toBe('acrylic');
-    const refused = feedsFor(CATALOGUE, material, PLAIN_FLAT_3_175_25.tool, Z1);
+    const refused = feedsFor(CATALOGUE, material, PLAIN_FLAT_3_175_25.tool, Z1, NO_SHOP.refuse);
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error('an owned cutter with no Makera id must not reach a catalogue row');
     expect(refused.reason).toContain('which this cutter does not carry');
@@ -217,7 +218,7 @@ describe('#732 an owned cutter carries no Makera id until it is confirmed', () =
 describe('#732 a confirmed Makera id resolves the owned cutter from the catalogue', () => {
   it('j01 (Top Clamp, 6061): Makera’s aluminium row answers once the match is saved', () => {
     const material = jobMaterial('j01-topclamp-alu');
-    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_3_175_12, G_METAL_FLAT_3_175_12).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_3_175_12, G_METAL_FLAT_3_175_12).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(12000);
     expect(res.params.feed).toBe(500);
@@ -232,7 +233,7 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
 
   it('j04 (metal disc, 1 mm): the 1 mm cutter’s own row answers', () => {
     const material = jobMaterial('j04-metal-disc-text');
-    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_1_3, G_METAL_FLAT_1_3).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_1_3, G_METAL_FLAT_1_3).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.stepDown).toBe(0.2);
     expect(res.catalogue?.cutterId).toBe(G_METAL_FLAT_1_3);
@@ -240,7 +241,7 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
 
   it('j17 (faceplate, 6061): the same bit as j01 answers on its aluminium row', () => {
     const material = jobMaterial('j17-faceplate-alu');
-    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_3_175_12, G_METAL_FLAT_3_175_12).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(METAL_FLAT_3_175_12, G_METAL_FLAT_3_175_12).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.feed).toBe(500);
     expect(res.catalogue?.cutterId).toBe(G_METAL_FLAT_3_175_12);
@@ -248,7 +249,7 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
 
   it('j05 (two-colour laminate): the plain O-flute takes Makera’s plastic row — an app mapping, labelled', () => {
     const material = jobMaterial('j05-two-colour-sign');
-    const res = feedsFor(CATALOGUE, material, confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(10000);
     expect(res.params.feed).toBe(1000);
@@ -261,7 +262,7 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
   it('j15 (acrylic): the same bit takes Makera’s acrylic row directly — no mapping', () => {
     const material = jobMaterial('j15-acrylic-keychain');
     expect(material).toBe('acrylic');
-    const res = feedsFor(CATALOGUE, material, confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.feed).toBe(1000);
     expect(res.provenance).not.toContain('standing in');
@@ -271,7 +272,7 @@ describe('#732 a confirmed Makera id resolves the owned cutter from the catalogu
 describe('#732 a V-bit with a confirmed Makera id uses Makera’s engraving rows (j14)', () => {
   it('j14 (dog tag, 6061): the refusal names the missing id, not a false claim about cones', () => {
     const material = jobMaterial('j14-dog-tag');
-    const refused = feedsFor(CATALOGUE, material, METAL_ENGRAVER_60_01.tool, Z1);
+    const refused = feedsFor(CATALOGUE, material, METAL_ENGRAVER_60_01.tool, Z1, NO_SHOP.refuse);
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error('an owned V-bit with no Makera id must not reach a catalogue row');
     expect(refused.reason).toContain('V-bit');
@@ -285,7 +286,7 @@ describe('#732 a V-bit with a confirmed Makera id uses Makera’s engraving rows
 
   it('j14: the engraver’s confirmed id resolves Makera’s 6061 engraving row', () => {
     const material = jobMaterial('j14-dog-tag');
-    const res = feedsFor(CATALOGUE, material, confirmed(METAL_ENGRAVER_60_01, G_METAL_ENGRAVER_60_01).tool, Z1);
+    const res = feedsFor(CATALOGUE, material, confirmed(METAL_ENGRAVER_60_01, G_METAL_ENGRAVER_60_01).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(12000);
     expect(res.params.feed).toBe(500);
@@ -339,7 +340,7 @@ describe('#732 a confirmed id whose catalogue cutter has changed geometry is ref
     // Hardwood has a starting-table row, so the answer would exist without the catalogue. That is
     // what makes this the sharp case: the refusal must stop the row's numbers being merged in.
     const rows = [row(G_PLAIN_FLAT_3_175_25, 'Hardwood', 10000, 1000, 300, 1)];
-    const before = feedsFor(rows, 'hardwood', proven, Z1);
+    const before = feedsFor(rows, 'hardwood', proven, Z1, NO_SHOP.refuse);
     if (!before.ok) throw new Error(before.reason);
     expect(before.params.rpm).toBe(10000);
 
@@ -356,7 +357,7 @@ describe('#732 a confirmed id whose catalogue cutter has changed geometry is ref
       catalogue: 6,
     });
 
-    const after = feedsFor(moved, 'hardwood', proven, Z1);
+    const after = feedsFor(moved, 'hardwood', proven, Z1, NO_SHOP.refuse);
     expect(after.ok).toBe(false);
     if (after.ok) throw new Error('a row whose cutter no longer matches the confirmed id must not run');
     expect(after.reason).toContain(G_PLAIN_FLAT_3_175_25);
@@ -374,7 +375,7 @@ describe('#732 a confirmed id whose catalogue cutter has changed geometry is ref
         tool.id === G_METAL_ENGRAVER_60_01 ? { ...tool, tipDiameter: 0.2 } : tool,
       ),
     );
-    const after = feedsFor(moved, 'aluminium-6061', proven, Z1);
+    const after = feedsFor(moved, 'aluminium-6061', proven, Z1, NO_SHOP.refuse);
     expect(after.ok).toBe(false);
     if (after.ok) throw new Error('a row whose cutter tip changed must not run');
     expect(after.reason).toContain('tip');
@@ -388,7 +389,7 @@ describe('#732 a confirmed id whose catalogue cutter has changed geometry is ref
       CATALOGUE,
       CATALOGUE_ENTRIES.map((entry) => entry.tool),
     );
-    const res = feedsFor(rows, 'acrylic', confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1);
+    const res = feedsFor(rows, 'acrylic', confirmed(PLAIN_FLAT_3_175_25, G_PLAIN_FLAT_3_175_25).tool, Z1, NO_SHOP.refuse);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.feed).toBe(1000);
     expect(res.catalogue?.cutterId).toBe(G_PLAIN_FLAT_3_175_25);

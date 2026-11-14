@@ -1711,6 +1711,13 @@
       "unit": "mm",
       "note": "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"
     },
+    "goal.maxCells": {
+      "value": 4000000.0,
+      "source": "seeded",
+      "setAt": null,
+      "unit": "cells",
+      "note": "chosen, not measured: the cell cap the goal samplers coarsen their pitch to stay under (the part's heightfield and the rotary radial field); the goal check keeps its own higher cap"
+    },
     "adaptive.maxCells": {
       "value": 12000000.0,
       "source": "seeded",

@@ -19,6 +19,7 @@ import { boardNameOf, buildPcbJob, jobDocumentProblem, type PcbJobFile } from '.
 import { engraveJobMain } from '../../scripts/lib/casemaker/engrave';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import type { FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { NO_SHOP } from '../tools/noShop';
 
 const FIXTURES = join(process.cwd(), 'tests/unit/fixtures/pcb');
 const bytes = (name: string): Uint8Array<ArrayBuffer> => Uint8Array.from(readFileSync(join(FIXTURES, name)));
@@ -39,7 +40,7 @@ const DRILLS = [tool('user:d08', 'drill', 0.8), tool('user:d10', 'drill', 1.0)];
 describe('the CLI Gerber door (#743 P-4b)', () => {
   it('builds a PCB job from the files, with the board holding and no demo lines', async () => {
     const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools: DRILLS,
     });
@@ -80,7 +81,7 @@ describe('the CLI Gerber door (#743 P-4b)', () => {
 
   it('bores a hole size no owned cutter is, and says which sizes that is', async () => {
     const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools: [tool('user:f05', 'flat', 0.5)],
     });
@@ -97,7 +98,7 @@ describe('the CLI Gerber door (#743 P-4b)', () => {
       'tiny-inside.drl': bytes('tiny-inside.drl'),
       'README.md': strToU8('# tiny\n'),
     });
-    const out = await buildPcbJob(tl, [file('tiny.zip', new Uint8Array(zip))], { blank: BLANK, tabs: TABS, tools: DRILLS });
+    const out = await buildPcbJob(tl, [file('tiny.zip', new Uint8Array(zip))], { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: DRILLS });
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.job.drills).toHaveLength(8);
@@ -170,7 +171,7 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
 
   it('writes the engraver, each drill and the outline cutter into the setup', async () => {
     const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools,
       catalogue: rows,
@@ -193,7 +194,7 @@ describe('the board’s cutters are assigned at import (#743 §3.4)', () => {
 
   it('posts one program per cutter, including both drill sizes', async () => {
     const out = await buildPcbJob(tl, [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')], {
-      blank: BLANK,
+      tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK,
       tabs: TABS,
       tools,
       catalogue: rows,
@@ -248,7 +249,7 @@ describe('a two-layer set at the CLI door (#743 P-8)', () => {
     const out = await buildPcbJob(
       tl,
       [file('tiny-F_Cu.gbr'), file('tiny-B_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')],
-      { blank: BLANK, tabs: TABS, tools },
+      { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools },
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;

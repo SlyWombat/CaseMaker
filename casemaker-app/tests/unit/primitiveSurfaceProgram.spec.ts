@@ -25,6 +25,7 @@ import { setupPrograms } from '@/engine/cnc/engrave/programs';
 import { validateJob } from '@/engine/cnc/engrave/jobSetup';
 import { parseGcode } from '@/engine/cnc/gcode/interpreter';
 import type { EngraveJob } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const FLAT: Tool = flatEndMill(1, { name: '1 mm flat end', fluteLength: 20, centreCutting: true });
 const KEY = 'inv:flat-1x20';
@@ -65,7 +66,7 @@ function job(primitives: SurfacePrimitive[]): EngraveJob {
 
 /** Every feed move inside the field's footprint, with the field's own Z at its XY. */
 function cutsBelowTheSurface(nc: string, primitive: SurfacePrimitive): { count: number; below: number } {
-  const field = primitiveHeightfield(primitive)!;
+  const field = primitiveHeightfield(primitive, { maxCells: NO_SHOP.goalMaxCells })!;
   let count = 0;
   let below = 0;
   for (const e of parseGcode(nc).events) {

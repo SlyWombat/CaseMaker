@@ -33,6 +33,7 @@ import { getTools } from '@/engine/cnc/toolRegistry';
 import { engraveJobSchema } from '@/store/engraveJobSchema';
 import type { EngraveFaceItem, EngraveFaceOp, EngraveJob } from '@/types/engraveJob';
 import { DEFAULT_FONT_ID } from '@/engine/fonts/registry';
+import { NO_SHOP } from '../tools/noShop';
 
 const TOOL = flatEndMill(3.175, { name: '3.175 mm flat end', handleDiameter: 3.175 });
 
@@ -79,7 +80,7 @@ describe('#241 slice 2 — the face model', () => {
   it('a Flat becomes one face pocket, cut by several Y passes when the cutter is narrower than the chord', () => {
     const job = rod([flat('f1', 0, 1)]);
     const map = rotaryMapOf(job, null)!;
-    const feeds = feedsFor([], job.stock.material, TOOL, Z1);
+    const feeds = feedsFor([], job.stock.material, TOOL, Z1, NO_SHOP.refuse);
     expect(feeds.ok).toBe(true);
     if (!feeds.ok) return;
     const plan = planFaceCuts(job, map, TOOL, feeds.params);
@@ -104,7 +105,7 @@ describe('#241 slice 2 — the face model', () => {
     const op: EngraveFaceOp = { id: 'hex', kind: 'faces-all-round', a: 10, count: 6, acrossFlats: 17.321 };
     const job = rod([op]);
     const map = rotaryMapOf(job, null)!;
-    const feeds = feedsFor([], job.stock.material, TOOL, Z1);
+    const feeds = feedsFor([], job.stock.material, TOOL, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
     const plan = planFaceCuts(job, map, TOOL, feeds.params);
     expect(plan.ok).toBe(true);
@@ -121,7 +122,7 @@ describe('#241 slice 2 — the face model', () => {
     const op: EngraveFaceOp = { id: 'h', kind: 'cross-hole', a: 90, diameter: 3.175 };
     const job = rod([op]);
     const map = rotaryMapOf(job, null)!;
-    const feeds = feedsFor([], job.stock.material, TOOL, Z1);
+    const feeds = feedsFor([], job.stock.material, TOOL, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
     const plan = planFaceCuts(job, map, TOOL, feeds.params);
     expect(plan.ok).toBe(true);
@@ -134,7 +135,7 @@ describe('#241 slice 2 — the face model', () => {
   });
 
   it('refuses a depth at the axis, a non-flat cutter, and a job that also carries map items', () => {
-    const feeds = feedsFor([], 'pla', TOOL, Z1);
+    const feeds = feedsFor([], 'pla', TOOL, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
     const tooDeep = rod([flat('f', 0, 10)]);
     const d = planFaceCuts(tooDeep, rotaryMapOf(tooDeep, null)!, TOOL, feeds.params);
@@ -161,7 +162,7 @@ describe('#241 slice 2 — the face model', () => {
   it('a cross-hole whose diameter is not the cutter’s is a warning naming what comes out', () => {
     const op: EngraveFaceOp = { id: 'h', kind: 'cross-hole', a: 0, diameter: 5 };
     const job = rod([op]);
-    const feeds = feedsFor([], job.stock.material, TOOL, Z1);
+    const feeds = feedsFor([], job.stock.material, TOOL, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
     const plan = planFaceCuts(job, rotaryMapOf(job, null)!, TOOL, feeds.params);
     expect(plan.ok).toBe(true);
@@ -282,7 +283,7 @@ describe('#833 — cuts ON a face', () => {
   });
 
   it('refuses a cut off the face, and one that reaches the axis', () => {
-    const feeds = feedsFor([], 'softwood', TOOL, Z1);
+    const feeds = feedsFor([], 'softwood', TOOL, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
     const off = faceWith([{ ...text, x: 1 }]);
     const a = planFaceCuts(off, rotaryMapOf(off, null)!, TOOL, feeds.params);

@@ -13,6 +13,7 @@ import { bracketSettings, mountInPath, type PathSegment } from '@/engine/cnc/mou
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { defaultBracketHold, defaultTapeHold, fixtureMountOf, jobMountObstacles } from '@/engine/cnc/engrave/jobSetup';
 import type { BedFence, EngraveJob } from '@/types/engraveJob';
+import { TAPE_DEFAULTS } from '@/engine/cnc/engrave/jobSetup';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS: ShopDefaults = ShopDefaultsSchema.parse(
@@ -28,9 +29,9 @@ function plate(): EngraveJob {
 }
 const fenced = (over: Partial<BedFence> = {}): EngraveJob => ({
   ...plate(),
-  workholding: { kind: 'tape', tape: { ...defaultTapeHold(), where: null, squareTo: 'fence', fence: { ...FENCE, ...over } } },
+  workholding: { kind: 'tape', tape: { ...defaultTapeHold(TAPE_DEFAULTS), where: null, squareTo: 'fence', fence: { ...FENCE, ...over } } },
 });
-const unfenced = (): EngraveJob => ({ ...plate(), workholding: { kind: 'tape', tape: defaultTapeHold() } });
+const unfenced = (): EngraveJob => ({ ...plate(), workholding: { kind: 'tape', tape: defaultTapeHold(TAPE_DEFAULTS) } });
 const clamped = (): EngraveJob => ({
   ...plate(),
   workholding: { kind: 'bracket', bracket: defaultBracketHold({ x: 100, y: 60, z: 6 }, DEFAULTS) },

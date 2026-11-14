@@ -33,6 +33,7 @@ import { V_CARVE_STEPOVER_FALLBACK, vCarvePlane, vCarveStepover } from '@/engine
 import { colourBoundaryDepthFor } from '@/engine/cnc/layerStack';
 import type { EngraveJob } from '@/types/engraveJob';
 import type { JobFinding } from '@/engine/cnc/engrave/jobSetup';
+import { NO_SHOP } from '../tools/noShop';
 
 const NOW = new Date('2026-10-04T00:00:00Z');
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -95,7 +96,7 @@ function stubGenerated(job: EngraveJob, extraFindings: JobFinding[] = []): RunSh
       ]),
       ...extraFindings,
     ],
-    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, job.cutOverride) : null,
+    feeds: tool ? feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride) : null,
     cam: { operations: 6, cuttingMoves: 100, estimatedSeconds: 60, passes: 1 },
     nc: NC,
     verify: {

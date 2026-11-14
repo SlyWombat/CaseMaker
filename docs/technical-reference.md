@@ -248,6 +248,7 @@ The keys added since v0.2, with their recommendations:
 | `tape.stripWidthMm` | 20 mm | 1–200 | The tape strip width the sheet states (the house roll). |
 | `clamps.maxCount` | 4 clamps | whole, 1–8 | The most clamps one bracket job may state (`too-many-clamps` when exceeded). |
 | `report.statusPollsKept` | 30 polls | whole, 5–500 | How much of the run's `?` status tail its stop report keeps — about a minute at the 2 s poll; every command is kept whole. |
+| `goal.maxCells` | 4 000 000 cells | whole, 40 000–20 000 000 | The cap the goal samplers (the part's heightfield and a rotary's radial field) coarsen their pitch to stay under; the goal check keeps its own higher cap, which is a gate rule and not this setting. |
 | `relief.planningPitchMm` | 1 mm | 0.1–2 | The map a rotary relief's drop-tip fields are planned on when the goal states no grid pitch; the 0.1 mm simulation grid is a measurement pitch, not a planning one. |
 | `rotary.jawKeepOutMm` | 3 mm | 0–20 | The chuck keep-out past the jaw tips: nothing moves at X inside it, at any Z, in a rotary session. |
 | `rotary.tailstockBandMm` | 10 mm | 0–50 | The tailstock's keep-out band at the rod's free end. |

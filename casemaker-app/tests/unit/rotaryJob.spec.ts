@@ -22,6 +22,7 @@ import { buildTimeline, parseGcode, stubSetup, type Setup } from '@/engine/cnc';
 import { unliftTimeline } from '@/workers/geometry/sweep';
 import { MachineRecordSchema, type FixtureRecord, type MachineRecord } from '@/platform/locationClient';
 import type { EngraveJob, EngraveShape, RotaryChuck, Sacrificial, ViseParams } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LOCATION = join(HERE, 'fixtures', 'location-doc.json');
@@ -392,7 +393,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
 
   it('is disabled for a box that never said it is a block, with the step-2 sentence', () => {
     const options = mountOptions({
-      machine: rotaryMachine(),
+      stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: rotaryMachine(),
       accessories: [...LOCATION_DOC.accessories, ROTARY],
       stock: { length: 80, width: 60, thickness: 8 },
     });
@@ -408,7 +409,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
     // #777 made a squared block a rotary job: its section turns on the envelope that
     // circumscribes it. The panther's 44.5 mm square bar is ⌀62.93 across the corners.
     const options = mountOptions({
-      machine: rotaryMachine(),
+      stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: rotaryMachine(),
       accessories: [...LOCATION_DOC.accessories, ROTARY],
       stock: { length: 100, width: 44.5, thickness: 44.5 },
       block: true,
@@ -422,7 +423,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
   it('#877 — a stated machine has no fourth axis, and its rod is not judged against the Z1’s envelope', () => {
     const options = mountOptions({
       // The fixture location's machine, re-stated as a shipped GRBL preset.
-      machine: { ...rotaryMachine(), profileId: 'grbl:shapeoko-4' },
+      stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: { ...rotaryMachine(), profileId: 'grbl:shapeoko-4' },
       accessories: [...LOCATION_DOC.accessories, ROTARY],
       // A rod that WOULD fit the Z1's ⌀80 × 150 envelope: the refusal must not be the stock's.
       stock: { length: 60, width: 60, thickness: 60 },
@@ -436,7 +437,7 @@ describe('the Holding step’s rotary option (#240 §2)', () => {
 
   it('is available when the stock is round and fits the module', () => {
     const options = mountOptions({
-      machine: rotaryMachine(),
+      stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: rotaryMachine(),
       accessories: [...LOCATION_DOC.accessories, ROTARY],
       stock: { length: 30, width: 10, thickness: 10 },
       round: true,

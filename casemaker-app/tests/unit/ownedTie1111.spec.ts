@@ -23,6 +23,7 @@ import { sampleGoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { planModelCam, type ModelPlanInput } from '@/engine/cnc/cam/model/plan';
 import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever way the house arrives', () => {
   const flat6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
@@ -56,7 +57,7 @@ describe('#1111 R2 — the tray’s ⌀3.175 finish is the same ball whichever w
       cutters: { house, catalogue: [] },
       tolerances: { finishMm: 0.01 },
       edgeBreak: { legMm: 0 },
-      goal: sampleGoalHeightfield(target, { pitchMm: 0.1, stockTopZ: 0 }),
+      goal: sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 }),
     };
     const output = await planModelCam(input);
     const ops = output.perSetup.flatMap((s) => s.ops);

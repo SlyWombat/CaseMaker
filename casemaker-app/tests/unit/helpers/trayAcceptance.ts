@@ -48,6 +48,7 @@ import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseStl } from '@/engine/import/stlParser';
 import { buildModelPlanInputForGoal, type EngraveShopOpts } from '@/workers/sim/engraveGenerate';
+import { NO_SHOP } from '../../tools/noShop';
 
 export const TRAY_STEP = process.env.CM_959_TRAY_STEP ?? process.env.CM_958_TRAY_STEP;
 export const ORGANIZER_STEP = process.env.CM_959_ORGANIZER_STEP ?? process.env.CM_958_ORGANIZER_STEP;
@@ -701,7 +702,7 @@ export function writeAcceptance(
     | { coverage: number; cutInto: CutIntoScore; report: GoalCutIntoReport; ours: ProgramScore; scored: SevenLineCard }
     | null = null;
   if (goal !== undefined) {
-    const field = sampleGoalHeightfield(goal.target, { pitchMm: 0.1, stockTopZ: 0 });
+    const field = sampleGoalHeightfield(goal.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
     const stamped = stampedTop(factsByRun, field);
     const report = checkGoalCutInto(field, stamped.top, {
       passCoverage: 0.95,
