@@ -55,7 +55,9 @@ async function toDefaultJob(page: Page): Promise<void> {
   await openSignCard(page);
   await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
   await page.getByTestId('start-wizard-operation-next').click();
-  await stockNext(page);
+  // This house's shelf holds the line in several materials and none is the default job's piece, so the
+  // walk types the default job's blank explicitly: the 36 × 100 × 36 mm stick (the material it chooses).
+  await stockNext(page, { typeSize: [36, 100, 36] });
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }

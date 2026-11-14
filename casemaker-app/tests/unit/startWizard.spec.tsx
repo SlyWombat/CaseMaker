@@ -775,6 +775,50 @@ describe('#681 — the wizard with nothing to lean on', () => {
     );
   });
 
+  it('#1263 — the shelf arrives AFTER the step opens: the card and the job are the shelf piece, not the first recommendation', async () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    skipToStockStep();
+    // At first the shop's stock is not loaded: the proposal is the size the line needs, no material.
+    expect(screen.getByTestId('engrave-setup-stock-provenance').textContent).toContain('No stock is recorded');
+    // Then the shelf lands (one piece holds the line): the step follows it.
+    act(() => {
+      seedTestShopShelf();
+    });
+    expect(screen.getByTestId('start-wizard-stock-summary').textContent).toContain('36 × 100 × 36 mm');
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
+    });
+    const yes = screen.queryByTestId('start-wizard-replace-yes');
+    if (yes !== null) {
+      await act(async () => {
+        fireEvent.click(yes);
+      });
+    }
+    // The job is made from what the card said — the piece's size and material — not from the first recommendation.
+    const stock = useEngraveJobStore.getState().job.stock;
+    expect([stock.length, stock.width, stock.thickness, stock.material]).toEqual([36, 100, 36, 'hardwood']);
+  });
+
+  it('#1263 — a size typed before a material is chosen survives Back and forward', () => {
+    act(() => {
+      useStartWizardStore.getState().openWizard();
+    });
+    render(<WizardHost />);
+    fireEvent.click(screen.getByTestId('start-wizard-next'));
+    fireEvent.click(screen.getByTestId('start-wizard-preset-something-else'));
+    fireEvent.click(screen.getByTestId('engrave-setup-what-pocket'));
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '77' } });
+    // No material yet: back to the question and forward again.
+    fireEvent.click(screen.getByTestId('start-wizard-back'));
+    fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
+    expect((screen.getByTestId('start-wizard-make-length') as HTMLInputElement).value).toBe('77');
+    expect((screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement).value).toBe('');
+  });
+
   it('#1264 — a step opens at its top: the scroll the last step was left at does not carry over', () => {
     act(() => {
       useStartWizardStore.getState().openWizard();

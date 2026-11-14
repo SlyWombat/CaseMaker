@@ -54,7 +54,7 @@ import { accessoryFor, activeProfileOf } from '@/platform/machineChange';
 import { rotaryMapOf } from '@/engine/cnc/rotary/wrap';
 import { OperationStep, type OperationChoice } from './OperationStep';
 import { operationCreateBlocked } from './operationCreate';
-import type { PendingStock, StartStockSeed } from './StartStockStep';
+import type { PendingStock, StartStockSeed, StockDraft } from './StartStockStep';
 import { proposeBlank, type StockProposal } from '@/engine/cnc/stockProposal';
 import { partFootprintFor, proposalContextFor, proposedMaterialFor, workShapeFor } from './workShape';
 import { workFactsOf } from './workFacts';
@@ -267,6 +267,8 @@ export function StartWizard(): JSX.Element {
   const starterRan = useRef(false);
   // #1264 — ONE SCROLL CONTAINER FOR EVERY STEP: a step opens at its top, not where the last one was left.
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  // #1263 — what the operator typed or chose on the Stock step, kept across Back.
+  const [stockDraft, setStockDraft] = useState<StockDraft | null>(null);
   const machine = useMachineStore((s) => s.machine);
   const outcome = useMachineStore((s) => s.outcome);
   const reason = useMachineStore((s) => s.reason);
@@ -1145,6 +1147,8 @@ export function StartWizard(): JSX.Element {
           <StockStep
             seed={stockSeed}
             several={severalHold}
+            draft={stockDraft}
+            onDraft={setStockDraft}
             onPending={onStockPending}
             part={partFootprintFor(work)}
             // #1098 item 6 — a PrusaSlicer project dropped on the question step arrives here already

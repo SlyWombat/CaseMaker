@@ -233,6 +233,19 @@ const SIZE_LABELS: Readonly<Record<StockSizeKey, string>> = {
 
 const SIZE_KEYS: readonly StockSizeKey[] = ['length', 'width', 'thickness', 'diameter', 'wall'];
 type DimState = Record<StockSizeKey, string>;
+
+/**
+ * #1263 — WHAT THE OPERATOR HAS TYPED OR CHOSEN ON THIS STEP, kept by the wizard beside the answer:
+ * going Back to the question and returning would otherwise lose a size typed before a material was
+ * chosen (an answer needs both). Only what the operator did is kept; a proposal is not a draft.
+ */
+export interface StockDraft {
+  material: StockMaterial | null;
+  form: JobStockForm;
+  dims: Record<StockSizeKey, string>;
+  materialTouched: boolean;
+  dimsTouched: boolean;
+}
 const EMPTY_DIMS: DimState = { length: '', width: '', thickness: '', diameter: '', wall: '' };
 
 function text(v: number | null | undefined): string {
@@ -415,6 +428,8 @@ export function StartStockStep({
   part = null,
   presetFile,
   several = null,
+  draft = null,
+  onDraft,
 }: {
   /** #1098 item 6 — a file the question step recognised; read once on arrival, as if picked here. */
   presetFile?: File;
@@ -426,6 +441,9 @@ export function StartStockStep({
   part?: PartFootprint | null;
   /** #1263 — the holding pieces (least waste first) when they span more than one material and the job states none. */
   several?: readonly string[] | null;
+  /** #1263 — the operator's own typing from an earlier visit to this step (see {@link StockDraft}). */
+  draft?: StockDraft | null;
+  onDraft?: (draft: StockDraft) => void;
 }): JSX.Element {
   // #875 — the step's phone layout: four form columns and the thickness on its own size row.
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -441,10 +459,12 @@ export function StartStockStep({
   const materials = useMemo(() => materialOptionsFor(machine), [machine]);
   const groups = useMemo(() => groupMaterials(materials), [materials]);
   const [material, setMaterial] = useState<StockMaterial | null>(() =>
-    openingMaterial(materials, { material: jobMaterial, labels: jobLabels }, seed),
+    draft?.materialTouched === true
+      ? draft.material
+      : openingMaterial(materials, { material: jobMaterial, labels: jobLabels }, seed),
   );
-  const [form, setForm] = useState<JobStockForm>(seed?.form ?? 'plate');
-  const [dims, setDims] = useState<DimState>(() => dimsFromSeed(seed));
+  const [form, setForm] = useState<JobStockForm>(draft?.dimsTouched === true ? draft.form : (seed?.form ?? 'plate'));
+  const [dims, setDims] = useState<DimState>(() => (draft?.dimsTouched === true ? draft.dims : dimsFromSeed(seed)));
   const [seedDims] = useState<DimState>(() => dimsFromSeed(seed));
   const [finish, setFinish] = useState<JobStockFinish>(seed?.finish ?? 'rough');
   // #743 P-1 — a PCB blank states its copper. 0.035 mm is 1 oz, Case Maker's default; the field is
@@ -466,8 +486,8 @@ export function StartStockStep({
   const shopDefaults = useShopDefaultsStore((s) => s.defaults);
   const arrivalMatched = useRef(false);
   // The operator chose the material themselves (never overwritten by a late proposal).
-  const materialTouched = useRef(false);
-  const dimsTouched = useRef(false);
+  const materialTouched = useRef(draft?.materialTouched === true);
+  const dimsTouched = useRef(draft?.dimsTouched === true);
   // #1109 — the provenance sentence survives typing; it goes only when a DIFFERENT valid number is
   // committed on blur (or another source — a shelf entry, a file, a form — takes the numbers over).
   const [seedDropped, setSeedDropped] = useState(false);
@@ -495,11 +515,19 @@ export function StartStockStep({
     }
     if (seed?.computed !== true || seedDropped || shelfId !== null || fileRead !== null) return;
     if (!materialTouched.current) setMaterial(seed.material);
+    // What the operator typed (this visit or an earlier one) is theirs: a proposal never overwrites it.
+    if (dimsTouched.current) return;
     setForm(seed.form);
     setDims(dimsFromSeed(seed));
     setFinish(seed.finish);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- follows the proposal's values only
   }, [seed?.computed, seed?.material, seed?.form, seed?.length, seed?.width, seed?.thickness, seed?.finish, several]);
+  // Keep what the operator typed or chose, so Back and forward do not lose it (#1263).
+  useEffect(() => {
+    if (!materialTouched.current && !dimsTouched.current) return;
+    onDraft?.({ material, form, dims, materialTouched: materialTouched.current, dimsTouched: dimsTouched.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reports on the values; onDraft is the wizard's setter
+  }, [material, form, dims]);
   const [save, setSave] = useState(false);
   const [fileRead, setFileRead] = useState<{ read: StockFileRead; file: File } | null>(null);
   const [reading, setReading] = useState(false);
