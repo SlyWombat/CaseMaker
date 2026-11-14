@@ -126,7 +126,7 @@ describe('#848 the plan cuts the boss first, then the thread', () => {
     ['the thread mill', M8],
     ['the flat', FLAT],
   ])('named %s: every candidate plan puts the boss cutter before the thread mill', (_, named) => {
-    const plans = candidatePlans(bossJob(named), TOOLS, []);
+    const plans = candidatePlans(bossJob(named), TOOLS, [], null);
     expect(plans.length).toBeGreaterThan(0);
     for (const plan of plans) {
       const keys = plan.cutters.map((c) => c.key);
@@ -145,7 +145,7 @@ describe('#848 the plan cuts the boss first, then the thread', () => {
   it('the applied split: no one-tool refusal, two programs in cut order, and one line says so', () => {
     const job = bossJob(M8);
     expect(validateJob(job).some((f) => f.code === 'thread-mixed-tools')).toBe(true);
-    const applied = applyCutterPlanToJob(job, candidatePlans(job, TOOLS, [])[0]!);
+    const applied = applyCutterPlanToJob(job, candidatePlans(job, TOOLS, [], null)[0]!);
     const findings = validateJob(applied);
     expect(findings.filter((f) => f.severity === 'error')).toEqual([]);
     expect(findings.some((f) => f.code === 'thread-boss-order')).toBe(false);
@@ -183,7 +183,7 @@ describe('#848 the plan cuts the boss first, then the thread', () => {
 
   it('an ⌀8 mm boss threaded M8×1.25 posts two programs, and both verify and pass their own oracle', async () => {
     const job = bossJob(M8);
-    const applied = applyCutterPlanToJob(job, candidatePlans(job, TOOLS, [])[0]!);
+    const applied = applyCutterPlanToJob(job, candidatePlans(job, TOOLS, [], null)[0]!);
     const g = await generate(tl, applied, null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
     expect(g.errors).toEqual([]);
     expect(g.ok, JSON.stringify(g.findings.filter((f) => f.severity === 'error'))).toBe(true);
@@ -265,7 +265,7 @@ describe('#848 existing thread outputs are byte-identical', () => {
       tool: M8.tool,
       sources: { tool: 'user' },
     };
-    const plan = candidatePlans(pocketJob, TOOLS, [])[0]!;
+    const plan = candidatePlans(pocketJob, TOOLS, [], null)[0]!;
     expect(plan.cutters.map((c) => c.key)).toEqual([M8.key, FLAT.key]);
     const g2 = await generate(tl, applyCutterPlanToJob(pocketJob, plan), null, [], undefined, { tools: TOOLS, defaults: DEFAULTS });
     expect(g2.programs.map((p) => sha(p.nc))).toEqual([

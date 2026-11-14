@@ -31,6 +31,7 @@ import {
 import { bracketSettings } from '@/engine/cnc/mounts/bracket';
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import type { BedProfile } from '@/platform/locationClient';
+import { NO_SHOP } from '../tools/noShop';
 
 /** The house's bed: a sized wasteboard, the vise on the pins, 20 mm tape and four 2 mm boards. */
 const WASTEBOARD: BedProfile = {
@@ -96,16 +97,16 @@ describe('#715 the tape’s lines (§3.4)', () => {
     expect(tapeStrips(tape, { width: 38.1 })).toBe(2);
     expect(tapeStrips(tape, { width: 80 })).toBe(4);
     expect(tapeStrips(tape, { width: 20 })).toBe(1);
-    expect(tapeStripsLine(bedTapeHold(WASTEBOARD, null), { width: 38.1 })).toBe(
+    expect(tapeStripsLine(bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm), { width: 38.1 })).toBe(
       'two strips of the 20 mm tape, 2 mm in from every edge',
     );
-    expect(tapeStripsLine(bedTapeHold(WASTEBOARD, null), { width: 80 })).toBe(
+    expect(tapeStripsLine(bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm), { width: 80 })).toBe(
       'four strips of the 20 mm tape, 2 mm in from every edge',
     );
   });
 
   it('the tape starts from the house roll, and a taped job keeps its own hold', () => {
-    expect(bedTapeHold(WASTEBOARD, null)).toEqual({
+    expect(bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm)).toEqual({
       width: 20,
       thickness: 0.2,
       inset: 2,
@@ -113,17 +114,17 @@ describe('#715 the tape’s lines (§3.4)', () => {
       squareTo: 'front',
       source: 'default',
     });
-    const own = { ...bedTapeHold(WASTEBOARD, null), where: { x: 40, y: 30 }, source: 'saved' as const };
-    expect(bedTapeHold(WASTEBOARD, own)).toEqual(own);
+    const own = { ...bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm), where: { x: 40, y: 30 }, source: 'saved' as const };
+    expect(bedTapeHold(WASTEBOARD, own, undefined, NO_SHOP.tapeStripWidthMm)).toEqual(own);
     // A copy, not the same object: a write through one can never mutate the job's.
-    expect(bedTapeHold(WASTEBOARD, own)).not.toBe(own);
+    expect(bedTapeHold(WASTEBOARD, own, undefined, NO_SHOP.tapeStripWidthMm)).not.toBe(own);
     // No record at all: Makera's roll and the typed thickness.
-    expect(bedTapeHold(null, null).width).toBe(20);
+    expect(bedTapeHold(null, null, undefined, NO_SHOP.tapeStripWidthMm).width).toBe(20);
   });
 
   it('the position reads the middle of the bed, or the corner it was dragged to', () => {
-    expect(tapeWhereWords(bedTapeHold(WASTEBOARD, null))).toBe('the middle of the bed');
-    expect(tapeWhereWords({ ...bedTapeHold(WASTEBOARD, null), where: { x: 40, y: 30.5 } })).toBe(
+    expect(tapeWhereWords(bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm))).toBe('the middle of the bed');
+    expect(tapeWhereWords({ ...bedTapeHold(WASTEBOARD, null, undefined, NO_SHOP.tapeStripWidthMm), where: { x: 40, y: 30.5 } })).toBe(
       'X 40 · Y 30.5 mm on the bed',
     );
   });

@@ -27,6 +27,7 @@ import { executeProfile } from '@/workers/geometry/evaluateOp';
 import { setRegistry } from '@/engine/cnc/toolRegistry';
 import { useSimSetupStore } from '@/store/simSetupStore';
 import { tl } from './helpers/manifoldExec';
+import { NO_SHOP } from '../tools/noShop';
 
 const rapid = (x: number, y: number, z: number): CamMove => ({ kind: 'rapid', x, y, z });
 const cut = (x: number, y: number, z: number, f: number): CamMove => ({ kind: 'feed', x, y, z, f });
@@ -390,7 +391,7 @@ describe('postZ1 round trip (#173)', () => {
     if (!tool) return;
     const radius = cuttingRadiusForSweep(tool);
     if (!radius.ok) throw new Error(radius.reason);
-    const feeds = feedsFor([], job.stock.material, tool, Z1);
+    const feeds = feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse);
     if (!feeds.ok) throw new Error(feeds.reason);
 
     const opened = (label: EngraveLabel): Polygons => {

@@ -996,6 +996,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       job,
       getTools(),
       catalogueRows,
+      shopDefaults,
       (key) => {
         const entry = entryFor(key);
         return entry === null ? [] : measureEngraving(tl, job, entry.tool, shopDefaults);
@@ -2436,7 +2437,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const namedKey = args.tool ?? null;
     const named = namedKey === null ? null : entryFor(namedKey);
     const namedFeeds =
-      named === null ? null : engraveFeedsFor(shop, catalogueRows, job.stock.material, named.tool, jobMachine(job), undefined);
+      named === null ? null : engraveFeedsFor(shop, catalogueRows, shopDefaults, job.stock.material, named.tool, jobMachine(job), undefined);
     for (const { row, cutters } of unreachable) {
       const item = (job.vectors ?? []).find((v) => v.id === row.itemId);
       if (item) item.enabled = false;
@@ -2686,13 +2687,13 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
       // `restChosen` is non-null in this branch, so `restTool` resolved — this is the type's own guard,
       // and it fails rather than falling through, because a rest program without its cutter is not one.
       if (restTool === null) fail(`--rest "${restChosen.key}" did not resolve to a cutter`);
-      const restFeeds = engraveFeedsFor(shop, catalogueRows, job.stock.material, restTool, jobMachine(job), undefined);
+      const restFeeds = engraveFeedsFor(shop, catalogueRows, shopDefaults, job.stock.material, restTool, jobMachine(job), undefined);
       const stepOver2 = restFeeds.ok ? restFeeds.params.stepOver : null;
       // The FIRST cutter's step-over shapes the residue the band has to make cuttable, so it comes
       // from the same feeds table through the same resolver as the second one — never from a number
       // typed into this file.
       const tool1 = jobTool(job);
-      const roughFeeds = tool1 === null ? null : engraveFeedsFor(shop, catalogueRows, job.stock.material, tool1, jobMachine(job), undefined);
+      const roughFeeds = tool1 === null ? null : engraveFeedsFor(shop, catalogueRows, shopDefaults, job.stock.material, tool1, jobMachine(job), undefined);
       const stepOver1 = roughFeeds !== null && roughFeeds.ok ? roughFeeds.params.stepOver : null;
       // The stored number and where it came from, together — never the number alone (#436).
       const overlapRead = readDefault(shopDefaults, REST_OVERLAP_KEY);
@@ -3010,6 +3011,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     const built = await buildPcbJob(tl, files, {
       blank,
       tabs: { count: tabs.count, width: tabs.widthMm, height: tabs.heightMm },
+      tapeStripWidthMm: readDefault(shopDefaults, 'tape.stripWidthMm').value, // #1256
       // §3.4 — the engraver and the outline cutter come from the rows that answer PCB first.
       catalogue: catalogueRows,
     });

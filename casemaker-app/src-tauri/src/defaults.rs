@@ -380,6 +380,7 @@ pub const UNMEASURED_SEEDS: &[(&str, f64, &str, &str)] = &[
     // ── #451 adaptive settings (begin) — the entry clearance and the planner's three refusal limits:
     // chosen, not measured, and `defaultsClient.ts` states the same bounds and fallbacks.
     ("adaptive.entryClearanceMm", 0.5, "mm", "chosen, not measured: how far above the floor just cut a rapid down a cleared column stops, and the clearance every entry starts from"),
+    ("goal.maxCells", 4000000.0, "cells", "chosen, not measured: the cell cap the goal samplers coarsen their pitch to stay under (the part's heightfield and the rotary radial field); the goal check keeps its own higher cap"),
     ("adaptive.maxCells", 12000000.0, "cells", "chosen, not measured: the largest material grid adaptive clearing will build; a pocket needing more cells at the planned engagement is refused rather than ground through"),
     ("plan.leftoverEquivalencePct", 0.5, "%", "chosen, not measured. Sets of cutters that leave within this share of the surface of each other count as equal, and the faster one is chosen."),
     ("plan.leftoverTallMm", 1.0, "mm", "chosen, not measured. Material left standing taller than this is never traded for a faster set of cutters."),
@@ -1487,6 +1488,10 @@ fn known_rule(key: &str, n: Option<f64>) -> Option<Result<(), String>> {
         "adaptive.entryClearanceMm" => Some(need(
             n.is_some_and(|v| (0.05..=5.0).contains(&v)),
             "0.05 to 5 mm",
+        )),
+        "goal.maxCells" => Some(need(
+            n.is_some_and(|v| v.fract() == 0.0 && (40_000.0..=20_000_000.0).contains(&v)),
+            "a whole number of cells, 40000 to 20000000",
         )),
         "adaptive.maxCells" => Some(need(
             n.is_some_and(|v| v.fract() == 0.0 && (1000.0..=100_000_000.0).contains(&v)),

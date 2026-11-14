@@ -49,7 +49,7 @@ import { readDefault } from '@/platform/defaultsClient';
 import { MATERIAL_LABELS } from '@/engine/cnc/materials';
 import { jobMachine } from '@/engine/cnc/calibration';
 import { cuttingDiameter, statedCuttingSize, type Tool } from '@/engine/cnc/tool';
-import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, catalogueStandingFor, feedsFor, feedsToolForSurface, refuseFractionOf, type FeedCatalogueRow, type FeedsEntry } from '@/engine/cnc/feeds';
 import { vCone, vFluteLength } from '@/engine/cnc/vProfile';
 import { inlayPairConeTan } from './inlay';
 import { threadGeometry } from '@/engine/cnc/cam/threadMill';
@@ -152,11 +152,17 @@ export function goalRoughOptions(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ballDiameter = 0,
 ): GoalRoughOptions | null {
-  const ballWork = kindedWork(job).filter((w) => w.kind === 'ball');
+  const ballWork = kindedWork(job, defaults).filter((w) => w.kind === 'ball');
   if (ballWork.length === 0) return null;
   const needed = ballWork.reduce((m, w) => Math.max(m, w.reachMm), 0);
   const sizeOf = (entry: ToolLibraryEntry): number => statedCuttingSize(entry.tool) ?? cuttingDiameter(entry.tool) ?? 0;
@@ -165,7 +171,7 @@ export function goalRoughOptions(
     if (!(sizeOf(entry) > 0)) return false;
     const reach = reachOf(entry);
     if (reach !== null && needed > reach + 1e-9) return false;
-    return materialRefusal(job, entry, catalogue, conditions, table) === null;
+    return materialRefusal(job, entry, catalogue, defaults, conditions, table) === null;
   });
   if (flats.length === 0) return null;
   const nearBall = (a: ToolLibraryEntry, b: ToolLibraryEntry): number => {
@@ -230,7 +236,7 @@ export interface FaceWorkFacts {
 }
 
 /** The face work the job states, or null when it has none (or is not round stock in the chuck). */
-export function faceWorkOf(job: EngraveJob, defaults: ShopDefaults | null = null): FaceWorkFacts | null {
+export function faceWorkOf(job: EngraveJob, defaults: ShopDefaults | null): FaceWorkFacts | null {
   const ops = job.faces ?? [];
   if (ops.length === 0) return null;
   // #1244 — the map is the caller's; the read is a PREDICATE (is this a chuck job?), which the
@@ -305,6 +311,12 @@ export function faceCutterOptions(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /** Owned cutters vouch for themselves (#766's rule), as the search does. */
@@ -316,11 +328,11 @@ export function faceCutterOptions(
    */
   allowMixed = false,
 ): FaceCutterOptions | null {
-  const facts = faceWorkOf(job);
+  const facts = faceWorkOf(job, defaults);
   if (facts === null) return null;
   if (jobHasItems(job) && !allowMixed) return null;
   const eligible = tools.filter(
-    (entry) => materialRefusal(job, entry, catalogue, conditions, table, { ownedVouches }) === null,
+    (entry) => materialRefusal(job, entry, catalogue, defaults, conditions, table, { ownedVouches }) === null,
   );
   const matched = eligible.filter((e) => faceCutterFits(e, facts, true)).sort(widestFirst);
   if (matched.length > 0) return { facts, candidates: matched, matchedHoles: true };
@@ -332,12 +344,18 @@ export function faceCutterPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   ownedVouches = true,
   allowMixed = false,
 ): FaceCutterPick | null {
-  const options = faceCutterOptions(job, tools, catalogue, conditions, table, ownedVouches, allowMixed);
+  const options = faceCutterOptions(job, tools, catalogue, defaults, conditions, table, ownedVouches, allowMixed);
   if (options === null) return null;
   const { facts, matchedHoles } = options;
   const pick = options.candidates[0];
@@ -395,9 +413,10 @@ function sideGoalObject(job: EngraveJob): EngraveTargetObject | null {
  */
 export function kindedWork(
   job: EngraveJob,
+  // #1244/#1256 — the map from the caller's edge, REQUIRED: `null` = a caller with no location (the
+  // recommendations, stated). Nothing here defaults it, so a site that forgets it does not compile.
+  defaults: ShopDefaults | null,
   floors?: ReadonlyMap<string, number> | null,
-  // #1244 — the map from the caller's edge; the read is a job-decided predicate (see faceWorkOf).
-  defaults: ShopDefaults | null = null,
 ): KindedItem[] {
   const through = r3(job.stock.thickness + job.breakthrough);
   const out: KindedItem[] = [];
@@ -514,8 +533,8 @@ export function kindedWork(
  * serves), `'cone'` when its regions need a cone's flank, else `'flat'`. Null when there is no
  * work at all.
  */
-export function kindForJob(job: EngraveJob): WorkKind | null {
-  const work = kindedWork(job);
+export function kindForJob(job: EngraveJob, defaults: ShopDefaults | null): WorkKind | null {
+  const work = kindedWork(job, defaults);
   if (work.length === 0) return null;
   if (work.some((w) => w.kind === 'ball')) return 'ball';
   if (work.some((w) => w.kind === 'thread')) return 'thread';
@@ -533,6 +552,12 @@ export function materialRefusal(
   job: EngraveJob,
   entry: ToolLibraryEntry,
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /**
@@ -567,7 +592,7 @@ export function materialRefusal(
   if (tool.shape === 'thread') return null;
   // #910 — the generator's own proxy (`feedsToolForSurface`), which keeps the ball's Makera id, so
   // the gate reads the same row the goal program will: a ⌀6 ball's own hardwood row, not nothing.
-  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), undefined, table);
+  const feeds = feedsFor(catalogue, job.stock.material, feedsToolForSurface(tool), jobMachine(job), refuseFractionOf(defaults), undefined, table);
   if (!feeds.ok) {
     return `no cutting parameters for ${entry.key} in ${MATERIAL_LABELS[job.stock.material]}: ${feeds.reason}`;
   }
@@ -591,6 +616,12 @@ export function planCutters(
   reach: Reachability | null,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
   /** The shop's `sim.columnFlatPitchYMm` (the goal finish's grid), for the ball's budget check. */
@@ -600,13 +631,11 @@ export function planCutters(
    * cut it makes below its item's floor rather than the stock-top depth. Absent: the old reading.
    */
   floors?: ReadonlyMap<string, number> | null,
-  // #1244 — the map from the caller's edge (a job-decided predicate; see faceWorkOf).
-  defaults: ShopDefaults | null = null,
 ): CutterPlan {
   // #834 — A JOB WHOSE WORK IS ON ITS FACES. The face pick is one flat end, and the plan's one
   // cutter owns no ITEMS (there are none): the indexed program cuts the face list the job states.
   // It is answered here so the rule plan, the CLI and the search's baseline are the same cutter.
-  const face = faceCutterPick(job, tools, catalogue, conditions, table);
+  const face = faceCutterPick(job, tools, catalogue, defaults, conditions, table);
   if (face !== null) {
     return {
       cutters: [
@@ -625,7 +654,7 @@ export function planCutters(
     };
   }
   // #842 — a MIXED job's face program has its own cutter, chosen by the same face rule.
-  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, conditions, table, true, true) : null;
+  const mixedFace = jobHasItems(job) ? faceCutterPick(job, tools, catalogue, defaults, conditions, table, true, true) : null;
   const faceToolKey = mixedFace === null ? undefined : mixedFace.entry.key;
 
   // #1051 — THE PANEL'S ADVISORY FOLLOWS THE ENGINE'S TWO RULES.
@@ -650,7 +679,7 @@ export function planCutters(
       : tools;
   const registryStandsIn = meshGoal && ownedRecords.length === 0;
 
-  const work = kindedWork(job, floors, defaults);
+  const work = kindedWork(job, defaults, floors);
   const unassigned: CutterPlan['unassigned'] = [];
   const notes: string[] = [];
   const reachByKey = new Map(reach === null ? [] : reach.cutters.map((c) => [c.key, c]));
@@ -658,7 +687,7 @@ export function planCutters(
   const candidates: Candidate[] = [];
   const refusals = new Map<string, string>();
   for (const entry of candidateTools) {
-    const refusal = materialRefusal(job, entry, catalogue, conditions, table);
+    const refusal = materialRefusal(job, entry, catalogue, defaults, conditions, table);
     if (refusal !== null) {
       refusals.set(entry.key, refusal);
       continue;
@@ -719,7 +748,7 @@ export function planCutters(
     let coveredCount: number | null = null;
     if (goal !== null) {
       try {
-        coveredCount = sampleGoalHeightfield(goal, { pitchMm: pitch }).coveredCount;
+        coveredCount = sampleGoalHeightfield(goal, { pitchMm: pitch, maxCells: readDefault(defaults, 'goal.maxCells').value }).coveredCount;
       } catch {
         coveredCount = null;
       }
@@ -763,7 +792,7 @@ export function planCutters(
       // #869 — THE ROUGH IS A FLAT, AND ITS OWN PROGRAM. The rule names the flat nearest the
       // ball's size: the finish must lift whatever the rough leaves, and the flat closest to the
       // ball leaves the least extra stock for it. The search measures the alternatives.
-      const rough = goalRoughOptions(job, candidateTools, catalogue, conditions, table, pick.diameter);
+      const rough = goalRoughOptions(job, candidateTools, catalogue, defaults, conditions, table, pick.diameter);
       const roughPick = rough?.candidates[0];
       if (roughPick !== undefined) {
         goalRoughKey = roughPick.key;
@@ -1094,14 +1123,20 @@ export function kindOnlyPick(
   job: EngraveJob,
   tools: readonly ToolLibraryEntry[],
   catalogue: readonly FeedCatalogueRow[],
+  /**
+   * #1256 — the shop's settings map, REQUIRED: the refusal band (`clamp.refuseFraction`) and the goal
+   * cell cap (`goal.maxCells`) are read from it. A caller with no shop passes `null` explicitly (the
+   * recommendations); nothing below defaults it.
+   */
+  defaults: ShopDefaults | null,
   conditions?: ReadonlyMap<string, ConditionSummary> | null,
   table?: readonly FeedsEntry[],
 ): { key: string; reason: string; kind: WorkKind } | null {
-  const work = kindedWork(job);
+  const work = kindedWork(job, defaults);
   const kind = work[0]?.kind;
   if (kind !== 'ball' && kind !== 'thread') return null;
   if (!work.every((w) => w.kind === kind)) return null;
-  const plan = planCutters(job, null, tools, catalogue, conditions, table);
+  const plan = planCutters(job, null, tools, catalogue, defaults, conditions, table);
   const pick = plan.cutters[0];
   return pick === undefined ? null : { key: pick.key, reason: pick.reason, kind };
 }

@@ -42,6 +42,7 @@ import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
 import { Z1 } from '@/engine/cnc/machine';
 import { postZ1, type PostContext } from '@/engine/cnc/post/z1';
 import type { EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from './noShop';
 
 // ---------------------------------------------------------------------------------------------
 // Input document
@@ -104,7 +105,7 @@ function parseArgs(argv: readonly string[]): Args {
 // ---------------------------------------------------------------------------------------------
 
 function goalOf(doc: PicsDoc): GoalHeightfield {
-  return sampleGoalHeightfield(doc.target, { pitchMm: 0.1, stockTopZ: 0 });
+  return sampleGoalHeightfield(doc.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
 }
 
 interface PostedRun {

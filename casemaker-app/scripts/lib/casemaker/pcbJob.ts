@@ -20,7 +20,7 @@ import { basename, extname } from 'node:path';
 import type { ManifoldToplevel } from '../../../src/workers/geometry/evaluateOp';
 import { PCB_COPPER_MM } from '../../../src/engine/cnc/stockStart';
 import { defaultEngraveJob, newEngraveCutoutId, newEngraveDrillId, newEngraveShapeId } from '../../../src/engine/cnc/engrave/defaults';
-import { defaultTapeHold } from '../../../src/engine/cnc/engrave/jobSetup';
+import { TAPE_DEFAULTS, defaultTapeHold } from '../../../src/engine/cnc/engrave/jobSetup';
 import { embedSource } from '../../../src/engine/cnc/engrave/jobSources';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { getTools } from '../../../src/engine/cnc/toolRegistry';
@@ -45,6 +45,8 @@ export interface PcbJobBuildOpts {
   blank: { length: number; width: number; thickness: number };
   /** The shop's holding tabs for the cut-out. */
   tabs: { count: number; width: number; height: number };
+  /** #1256 — the shop's `tape.stripWidthMm`, REQUIRED: a board is held taped, and the tape is the shop's. */
+  tapeStripWidthMm: number;
   /** The owned cutters §3.4 chooses between (default: the registry's own list). */
   tools?: readonly ToolLibraryEntry[];
   /**
@@ -177,7 +179,7 @@ export async function buildPcbJob(
     },
     // Q8 — a board is held on the bed, taped, over a board under it: the drills and the outline
     // go through, and the vise's jaws bow a thin board a 0.1 mm cut cannot follow.
-    workholding: { kind: 'tape', tape: defaultTapeHold() },
+    workholding: { kind: 'tape', tape: defaultTapeHold({ ...TAPE_DEFAULTS, widthMm: opts.tapeStripWidthMm }) },
     sacrificial: {
       under: defaultSacrificialUnder(),
       sides: noneSacrificial().sides,

@@ -89,7 +89,7 @@ describe('reachabilityFor (#410)', () => {
   it('measures each candidate ONCE and answers the picker from the same rows', () => {
     const measure = vi.fn(measuring(table));
     const job = jobWith('big', 'small');
-    const reach = reachabilityFor(job, tools, [], measure);
+    const reach = reachabilityFor(job, tools, [], null, measure);
     // Three eligible cutters, one pass each — the table costs no more wasm than the picker did.
     expect(measure).toHaveBeenCalledTimes(3);
     expect(reach.recommendation.key).toBe('fine');
@@ -99,7 +99,7 @@ describe('reachabilityFor (#410)', () => {
   });
 
   it('reports each cutter per item, and the total as an AREA share rather than the mean of ratios', () => {
-    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], measuring(table));
+    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], null, measuring(table));
     const fine = reach.cutters.find((c) => c.key === 'fine')!;
     expect(fine.rows.map((r) => r.ratio)).toEqual([880 / 900, 0.8]);
     expect(fine.bestRatio).toBe(880 / 900);
@@ -112,7 +112,7 @@ describe('reachabilityFor (#410)', () => {
   });
 
   it('marks the items a cutter reaches NONE of as empty, and nothing is empty at ratio 0 of area 0', () => {
-    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], measuring(table));
+    const reach = reachabilityFor(jobWith('big', 'small'), tools, [], null, measuring(table));
     expect(untouchedBy(reach, 'wide').map((r) => r.itemId)).toEqual(['big', 'small']);
     expect(untouchedBy(reach, 'mid').map((r) => r.itemId)).toEqual(['small']);
     expect(untouchedBy(reach, 'fine')).toEqual([]);
@@ -127,7 +127,7 @@ describe('reachabilityFor (#410)', () => {
       outsideArea: 0,
       polygons: [],
     };
-    const empty = reachabilityFor(jobWith('zero'), tools, [], () => [zeroArea]);
+    const empty = reachabilityFor(jobWith('zero'), tools, [], null, () => [zeroArea]);
     expect(empty.cutters.find((c) => c.key === 'fine')!.rows[0]!.empty).toBe(false);
     expect(empty.cutters.find((c) => c.key === 'fine')!.rows[0]!.ratio).toBe(1);
   });
@@ -136,7 +136,7 @@ describe('reachabilityFor (#410)', () => {
     const job = jobWith('big', 'small');
     const tools = [tool('wide', 3.175, { shoulderLength: 12 }), tool('fine', 1.0, { shoulderLength: 12 })];
     const nothing = { wide: { big: 0, small: 0 }, fine: { big: 800, small: 0 } };
-    const reach = reachabilityFor(job, tools, [], measuring(nothing));
+    const reach = reachabilityFor(job, tools, [], null, measuring(nothing));
     // `small` is reached by nothing; `big` is missed by `wide` alone, which is a cutter choice and
     // a different sentence. Both facts come out of one table and must not be confused.
     const all = untouchedByAll(reach);
@@ -147,7 +147,7 @@ describe('reachabilityFor (#410)', () => {
     // An excluded cutter is NOT evidence: a ball nose may well reach `small`, and nobody measured
     // it, so "nothing reaches this" cannot be said on the strength of its absence.
     const withBall = [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' }), ...tools];
-    const reach2 = reachabilityFor(job, withBall, [], measuring(nothing));
+    const reach2 = reachabilityFor(job, withBall, [], null, measuring(nothing));
     expect(reach2.cutters.find((c) => c.key === 'ball')!.excluded).toBe('not-flat');
     expect(untouchedByAll(reach2)[0]!.cutters).toBe(2);
   });
@@ -159,7 +159,7 @@ describe('reachabilityFor (#410)', () => {
     // share of the design as 0 %, so the position of the ball in the list must not matter.
     const ball = tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' });
     const flat = tool('flat', 1.0, { shoulderLength: 12 });
-    const reach = reachabilityFor(job, [ball, flat], [], measuring({ flat: { big: 900, small: 50 } }));
+    const reach = reachabilityFor(job, [ball, flat], [], null, measuring({ flat: { big: 900, small: 50 } }));
     expect(reach.cutters[0]!.key).toBe('ball');
     expect(reach.cutters[0]!.rows.every((r) => r.openedArea === 0)).toBe(true);
     expect(shareOf(reach, 'flat')).toBeCloseTo(950 / 1000, 10);
@@ -167,7 +167,7 @@ describe('reachabilityFor (#410)', () => {
 
   it('offers the SMALLEST cutter that reaches strictly more, and nothing when none does', () => {
     const job = jobWith('big', 'small');
-    const reach = reachabilityFor(job, tools, [], measuring(table));
+    const reach = reachabilityFor(job, tools, [], null, measuring(table));
     // `wide` reaches nothing, and BOTH finer bits reach more — the rule takes the smallest of them,
     // because a second program wants the most reach a bit can buy, not the nearest improvement.
     expect(finerThan(reach, 'wide')!.key).toBe('fine');
@@ -181,7 +181,7 @@ describe('reachabilityFor (#410)', () => {
   it('says why a cutter was not measured instead of leaving it out of the table', () => {
     const job = jobWith('big');
     const tools = [tool('ball', 1.0, { shape: 'ball', typeText: 'Ball End' }), tool('wide', 3.175, { shoulderLength: 12 })];
-    const reach = reachabilityFor(job, tools, [], measuring({ wide: { big: 0 } }));
+    const reach = reachabilityFor(job, tools, [], null, measuring({ wide: { big: 0 } }));
     const rows = reachTable(reach);
     expect(rows.map((r) => r.key)).toEqual(['ball', 'wide']);
     expect(rows[0]!.excluded).toBe(
@@ -207,7 +207,7 @@ describe('reachabilityFor (#410)', () => {
       angle: 30,
     });
     const wide = tool('wide', 3.175, { shoulderLength: 12 });
-    const reach = reachabilityFor(job, [vbit, wide], [], measuring({ wide: { big: 900 } }));
+    const reach = reachabilityFor(job, [vbit, wide], [], null, measuring({ wide: { big: 900 } }));
     const cutter = reach.cutters.find((r) => r.key === 'vbit')!;
     // The cone is OFFERED by the colour-plane model, but it is not measured as a flat disc: no
     // rows, no share, and it cannot become the second cutter of a rest pair.
@@ -243,7 +243,7 @@ describe('reachabilityFor (#410)', () => {
       job,
       [wide, fine, corn],
       catalogue,
-      measuring({ wide: { big: 300, small: 0 }, fine: { big: 880, small: 80 } }),
+      null, measuring({ wide: { big: 300, small: 0 }, fine: { big: 880, small: 80 } }),
     );
 
     const cornReach = reach.cutters.find((c) => c.key === 'inv:corn')!;
@@ -267,7 +267,7 @@ describe('reachabilityFor (#410)', () => {
       provenance: 'reachability test',
       tool: { ...flatEndMill(1.0, { shoulderLength: 12 }), name: 'TiN Coating Corn Bit 1.0mm' },
     };
-    const reach = reachabilityFor(job, [named], [], measuring({ 'inv:owned': { big: 900 } }));
+    const reach = reachabilityFor(job, [named], [], null, measuring({ 'inv:owned': { big: 900 } }));
     expect(reach.cutters[0]!.name).toBe('TiN Coating Corn Bit 1.0mm');
     expect(reach.cutters[0]!.diameter).toBe(1.0);
     expect(reach.cutters[0]!.shape).toBe('flat');

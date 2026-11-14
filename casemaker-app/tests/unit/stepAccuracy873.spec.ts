@@ -48,6 +48,7 @@ import { readTargetObjectFile, targetObjectMesh } from '@/engine/import/targetOb
 import { createSimSession } from '@/workers/sim/session';
 import type { FlatField } from '@/workers/geometry/carriedField';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const STEP = 'step-accuracy.step';
 const FINE = 'step-accuracy-fine.3mf';
@@ -755,7 +756,7 @@ describe('#873 STEP accuracy: one solid, two files, the same cut', () => {
     // The oracle's own measure, both sweeps judged against the SAME fine 3MF goal at the same
     // 0.05 mm band. The 3MF's finer tessellation reaches 13.25 mm² more of the 4,490 mm² of
     // judged surface (the bottom faces away and is excluded); the fraction gap is 0.001926.
-    const goal = sampleGoalHeightfield(run.b.target, { stockTopZ: 0, pitchMm: 0.1 });
+    const goal = sampleGoalHeightfield(run.b.target, { maxCells: NO_SHOP.goalMaxCells, stockTopZ: 0, pitchMm: 0.1 });
     const goalMesh = workMesh(run.b.target);
     const coverage = (field: FlatField): ReturnType<typeof goalCoverage> =>
       goalCoverage(goalMesh, goal, resultTopOf(field), { reachedMm: bar });

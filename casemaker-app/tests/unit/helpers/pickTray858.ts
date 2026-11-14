@@ -54,7 +54,7 @@ export async function pickFor(job: EngraveJob) {
   clearPlanEvaluations();
   const ctx = { tl, tools: TOOLS, catalogue: [], shop: { tools: TOOLS }, calibration: null };
   return picked(
-    await smartPick(job, TOOLS, [], async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
+    await smartPick(job, TOOLS, [], null, async (p: CandidatePlan, level) => await evaluatePlan(job, p, ctx, { level }), {
       toolChangeSeconds: SEED.value,
     }),
   );

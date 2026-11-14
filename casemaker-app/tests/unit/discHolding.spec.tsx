@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultBedMount, mountOptions } from '@/components/welcome/holdingMounts';
 import { HoldingPicture } from '@/components/welcome/HoldingStep';
 import { MachineRecordSchema, type BedProfile, type FixtureRecord } from '@/platform/locationClient';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOC = JSON.parse(readFileSync(join(HERE, 'fixtures', 'location-doc.json'), 'utf8')) as {
@@ -36,7 +37,7 @@ const ROTARY: FixtureRecord = {
 describe('#743 holding a disc', () => {
   it('shows the bracket and the chuck, and offers neither, each with its reason', () => {
     const options = mountOptions({
-      machine: MACHINE,
+      stripWidthMm: NO_SHOP.tapeStripWidthMm, machine: MACHINE,
       accessories: [...DOC.accessories, ROTARY],
       stock: DISC_BOX,
       disc: true,

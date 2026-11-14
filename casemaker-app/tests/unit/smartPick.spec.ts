@@ -121,7 +121,7 @@ const tools = (entries: readonly ToolLibraryEntry[]) => entries;
 
 describe('#766 B the search generates the plans worth trying', () => {
   it('the kind plan, single clearances, rough+rest pairs, and a V rest for raised text', () => {
-    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), []);
+    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], null);
     const keys = plans.map((p) => p.cutters.map((c) => c.key).join('+'));
     expect(keys).toContain('inv:flat-2');
     expect(keys).toContain('inv:flat-2+inv:corn-0-6');
@@ -133,7 +133,7 @@ describe('#766 B the search generates the plans worth trying', () => {
   });
 
   it('records each cutter’s source — owned before catalogue is the objective’s tie-break', () => {
-    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_06_CAT]), []);
+    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_06_CAT]), [], null);
     const withCat = plans.find(
       (p) => p.cutters.some((c) => c.key === 'cat:corn-0-6') && p.cutters.some((c) => c.key === 'inv:flat-2'),
     )!;
@@ -144,7 +144,7 @@ describe('#766 B the search generates the plans worth trying', () => {
 
   it('never offers a rest that cannot reach the cut or fails the material gate', () => {
     const short = entry('inv:short-0-4', 'flat', { tipDiameter: 0.4, diameter: 0.4, fluteLength: 0.2 });
-    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_1, short]), []);
+    const plans = candidatePlans(coinJob(), tools([FLAT_2, FLAT_1, short]), [], null);
     expect(plans.map((p) => p.cutters.map((c) => c.key).join('+'))).not.toContain('inv:flat-2+inv:short-0-4');
   });
 });
@@ -162,7 +162,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6+inv:flat-1': 0.2,
       'inv:flat-2+inv:flat-1+inv:corn-0-6': 0.8,
     };
-    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], fakeEvaluator(scores)));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06, V_01]), [], null, fakeEvaluator(scores)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:engraver-0-3']);
     expect(pick.chosen.worstFidelity).toBe(1);
     expect(pick.runnable).toBe(pick.chosen);
@@ -177,7 +177,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:flat-2+inv:flat-1': { toolChanges: 1, seconds: 90 } as Partial<PlanEvaluation>,
       'inv:flat-2+inv:corn-0-6': { toolChanges: 1, seconds: 120 } as Partial<PlanEvaluation>,
     };
-    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over)));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], null, fakeEvaluator(scores, over)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2']);
   });
 
@@ -187,7 +187,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       coinJob(),
       tools([FLAT_2, FLAT_06, FLAT_06_CAT]),
       [],
-      fakeEvaluator({ 'inv:flat-2': 0.86, 'inv:flat-2+inv:corn-0-6': 0.86, 'inv:flat-2+cat:corn-0-6': 0.87, 'cat:corn-0-6': 0.5, 'inv:corn-0-6': 0.5, 'inv:flat-2+inv:corn-0-6+inv:flat-2': 0.5 }),
+      null, fakeEvaluator({ 'inv:flat-2': 0.86, 'inv:flat-2+inv:corn-0-6': 0.86, 'inv:flat-2+cat:corn-0-6': 0.87, 'cat:corn-0-6': 0.5, 'inv:corn-0-6': 0.5, 'inv:flat-2+inv:corn-0-6+inv:flat-2': 0.5 }),
       { buyThisMargin: 0.02 },
     ));
     expect(near.chosen.owned).toBe(true);
@@ -198,7 +198,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06_CAT]),
       [],
-      fakeEvaluator({ 'inv:flat-2': 0.6, 'inv:flat-2+inv:flat-1': 0.6, 'inv:flat-2+cat:corn-0-6': 0.86, 'cat:corn-0-6': 0.5, 'inv:flat-1': 0.5, 'inv:flat-1+cat:corn-0-6': 0.5 }),
+      null, fakeEvaluator({ 'inv:flat-2': 0.6, 'inv:flat-2+inv:flat-1': 0.6, 'inv:flat-2+cat:corn-0-6': 0.86, 'cat:corn-0-6': 0.5, 'inv:flat-1': 0.5, 'inv:flat-1+cat:corn-0-6': 0.5 }),
       { buyThisMargin: 0.02 },
     ));
     expect(clear.chosen.owned).toBe(false);
@@ -210,7 +210,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       coinJob(),
       tools([FLAT_2, FLAT_1, FLAT_06, V_01]),
       [],
-      fakeEvaluator(
+      null, fakeEvaluator(
         { 'inv:flat-2': 0.19, 'inv:flat-2+inv:flat-1': 0.6, 'inv:flat-2+inv:corn-0-6': 0.86, 'inv:flat-2+inv:engraver-0-3': 1, 'inv:flat-1': 0.3, 'inv:corn-0-6': 0.5, 'inv:flat-1+inv:corn-0-6': 0.7, 'inv:corn-0-6+inv:flat-1': 0.2, 'inv:flat-2+inv:flat-1+inv:corn-0-6': 0.8 },
         { 'inv:flat-2+inv:engraver-0-3': { ok: false, refusal: 'a V-bit is not a rest cutter here' } },
       ),
@@ -231,14 +231,14 @@ describe('#766 B the chosen plan is the best measured one', () => {
       'inv:corn-0-6': { seconds: 16790, toolChanges: 0 },
       'inv:flat-2+inv:corn-0-6': { seconds: 167, toolChanges: 1 },
     };
-    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], fakeEvaluator(scores, over)));
+    const pick = picked(await smartPick(coinJob(), tools([FLAT_2, FLAT_1, FLAT_06]), [], null, fakeEvaluator(scores, over)));
     expect(pick.chosen.plan.cutters.map((c) => c.key)).toEqual(['inv:flat-2', 'inv:corn-0-6']);
   });
 
   it('the rule’s kind plan is always a candidate, and is used with a sentence when it is the only one that posts', async () => {
     // The structural guard (#766 fix): the measured search can never do WORSE than #762's rule.
     const entries = tools([FLAT_2, FLAT_1, FLAT_06, V_01]);
-    const rule = rulePlanOf(coinJob(), entries, [])!;
+    const rule = rulePlanOf(coinJob(), entries, [], null)!;
     const base = fakeEvaluator({});
     // Every other plan is refused at its full evaluation; the rule's plan posts.
     const evaluate: Evaluate = (plan, level) => {
@@ -246,7 +246,7 @@ describe('#766 B the chosen plan is the best measured one', () => {
       if (planKey(plan) === planKey(rule)) return verdictForPlan;
       return { ...verdictForPlan, ok: false, refusal: 'refused for the test' };
     };
-    const pick = picked(await smartPick(coinJob(), entries, [], evaluate));
+    const pick = picked(await smartPick(coinJob(), entries, [], null, evaluate));
     expect(pick.rule).not.toBeNull();
     expect(pick.runnable).not.toBeNull();
     expect(planKey(pick.chosen.plan)).toBe(planKey(rule));
@@ -266,7 +266,7 @@ describe('#829 a goal’s chamfer enters the measured plans', () => {
   it('adds the V-bit as the SECOND cutter of every candidate, and the plan writes it into the goal', () => {
     const job = goalJobWithChamfer();
     const BALL_2 = entry('inv:ball-2', 'ball', { diameter: 2 });
-    const plans = candidatePlans(job, [BALL_2, V_01], []);
+    const plans = candidatePlans(job, [BALL_2, V_01], [], null);
     expect(plans.length).toBeGreaterThan(0);
     const withV = plans.filter((p) => p.cutters.some((c) => c.key === V_01.key));
     expect(withV.length, plans.map((p) => p.cutters.map((c) => c.key).join('+')).join(' / ')).toBeGreaterThan(0);
@@ -291,7 +291,7 @@ describe('#1134 the pick caps its full evaluations', () => {
       return verdict(1);
     };
     const job = coinJob();
-    const pick = picked(await smartPick(job, entries(), [], evaluate));
+    const pick = picked(await smartPick(job, entries(), [], null, evaluate));
     const fulls = levels.filter((l) => l === 'full').length;
     expect(fulls).toBeGreaterThan(0);
     expect(fulls).toBeLessThanOrEqual(3);
@@ -300,7 +300,7 @@ describe('#1134 the pick caps its full evaluations', () => {
     expect(pick.notes.join(' ')).toMatch(/\d+ tied, \d+ fully planned/);
     expect(pick.notes.join(' ')).toContain(`, ${fulls} fully planned`);
     // #766's structural floor: the rule's plan is one of the plans that gets a full evaluation.
-    const rule = rulePlanOf(job, entries(), [])!;
+    const rule = rulePlanOf(job, entries(), [], null)!;
     const fullyEvaluated = pick.considered.filter((s) => s.evaluation.seconds !== null).map((s) => planKey(s.plan));
     expect(fullyEvaluated).toContain(planKey(rule));
   });
@@ -313,7 +313,7 @@ describe('#1134 the pick caps its full evaluations', () => {
       if (level === 'coarse' || cutterKey(plan) === promised) return base;
       return { ...base, ok: false, refusal: 'refused for the test' };
     };
-    const pick = picked(await smartPick(coinJob(), entries(), [], evaluate));
+    const pick = picked(await smartPick(coinJob(), entries(), [], null, evaluate));
     expect(pick.runnable, pick.notes.join(' ')).not.toBeNull();
     expect(cutterKey(pick.chosen.plan)).toBe(promised);
     expect(pick.notes.join(' ')).toMatch(/none of the first \d+ fully planned candidate/);
@@ -325,7 +325,7 @@ describe('#1134 the pick caps its full evaluations', () => {
       levels.push(level);
       return verdict(1);
     };
-    const pick = picked(await smartPick(coinJob(), entries(), [], evaluate, { fullFinalists: 1 }));
+    const pick = picked(await smartPick(coinJob(), entries(), [], null, evaluate, { fullFinalists: 1 }));
     expect(levels.filter((l) => l === 'full').length).toBe(1);
     expect(pick.notes.join(' ')).toMatch(/\d+ tied, 1 fully planned/);
   });

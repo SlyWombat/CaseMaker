@@ -18,6 +18,7 @@ import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { SurfaceFeeds } from '@/engine/cnc/cam/surfaceFinishTipField';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -81,7 +82,7 @@ const HOLD = { kind: 'rotary-chuck' as const, jawDiameter: 40, stickout: 60 };
 const setup = (): Setup => stubSetup(STOCK, HOLD, { startingTool: 1 }, Z1);
 
 function build() {
-  const field = sampleGoalRadialField(goal(), R, { pitchMm: 0.5 });
+  const field = sampleGoalRadialField(goal(), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
   const ir = generateRotaryReliefIR({
     field,
     tool: BALL2,
@@ -109,7 +110,7 @@ describe('#723 R-2 — the relief program posts, parses and sweeps to the cone',
 
   it('#1061 — a goal reaching into the chuck/jaws band is CLIPPED, stated, and no word goes left of X 3', () => {
     // The same cone placed at X 10 (its span −5 … 25): its left end lies inside the keep-out band.
-    const field = sampleGoalRadialField({ ...goal(), position: { x: 10, y: 0, z: 0 } }, R, { pitchMm: 0.5 });
+    const field = sampleGoalRadialField({ ...goal(), position: { x: 10, y: 0, z: 0 } }, R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(field.x0).toBeLessThan(3);
     const ir = generateRotaryReliefIR({
       field,

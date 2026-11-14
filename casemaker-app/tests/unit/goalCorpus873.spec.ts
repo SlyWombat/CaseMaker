@@ -29,6 +29,7 @@ import { createSimSession } from '@/workers/sim/session';
 import type { FlatField } from '@/workers/geometry/carriedField';
 import { flatEndMill, type Tool } from '@/engine/cnc/tool';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -169,7 +170,7 @@ async function runFixture(
       if (load.ok) {
         // The measure samples the goal FINELY (0.1 mm): a coarse raster's own cell-max bias would
         // read as a miss on every slope. The result side is the column grid's own pitch.
-        const goal = sampleGoalHeightfield(target, { stockTopZ: 0, pitchMm: 0.1 });
+        const goal = sampleGoalHeightfield(target, { maxCells: NO_SHOP.goalMaxCells, stockTopZ: 0, pitchMm: 0.1 });
         const field = load.flatField ?? null;
         // 0.1 mm is the column grid's own pitch — the oracle's spatial band (floored at 0.05):
         // a face cut to the CAM's resolution is reached; stock left standing on a steep flank is

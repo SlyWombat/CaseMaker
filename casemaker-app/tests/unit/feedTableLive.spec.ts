@@ -23,6 +23,7 @@ import { feedProblem } from '@/platform/feedClient';
 import { flatEndMill } from '@/engine/cnc/tool';
 import { Z1 } from '@/engine/cnc/machine';
 import { TOOL_LIBRARY } from '@/engine/cnc/toolLibrary';
+import { NO_SHOP } from '../tools/noShop';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SPECIMEN = JSON.parse(readFileSync(join(HERE, 'fixtures', 'feed-table.json'), 'utf8')) as {
@@ -87,8 +88,8 @@ describe('the seeded table is the compiled table (#450 slice 3)', () => {
     expect(resolvedFeedsTable().from).toBe('location');
     for (const row of UNMEASURED_FEEDS_TABLE) {
       const cutter = cutterFor(row);
-      const installed = feedsFor([], row.material, cutter, Z1);
-      const compiled = feedsFor([], row.material, cutter, Z1, undefined, UNMEASURED_FEEDS_TABLE);
+      const installed = feedsFor([], row.material, cutter, Z1, NO_SHOP.refuse);
+      const compiled = feedsFor([], row.material, cutter, Z1, NO_SHOP.refuse, undefined, UNMEASURED_FEEDS_TABLE);
       expect(installed, `${row.material} ${row.edge ?? 'flat'} ${row.minDiameter}-${row.maxDiameter}`).toEqual(compiled);
     }
   });
@@ -105,7 +106,7 @@ describe('a stored row reaches feedsFor', () => {
     });
     setLocatedFeedTable([mine]);
 
-    const res = feedsFor([], 'pla', flatEndMill(1.0), Z1);
+    const res = feedsFor([], 'pla', flatEndMill(1.0), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     expect(res.params.rpm).toBe(9000);
@@ -122,7 +123,7 @@ describe('a stored row reaches feedsFor', () => {
     // The table REPLACES the compiled one; it is not merged over it. A shop that keeps only PLA
     // rows gets no softwood answer rather than the compiled softwood row behind its back.
     setLocatedFeedTable([storedRow({ material: 'pla', minDiameter: 0.8, maxDiameter: 1.6 })]);
-    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(false);
   });
 
@@ -138,7 +139,7 @@ describe('a stored row reaches feedsFor', () => {
     // no rows" cannot mean "refuse every job" (an import of an older export would do exactly that).
     setLocatedFeedTable([]);
     expect(resolvedFeedsTable().from).toBe('fallback');
-    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1);
+    const res = feedsFor([], 'softwood', flatEndMill(1.0), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.entry).toEqual(UNMEASURED_FEEDS_TABLE[0]);
   });
@@ -165,7 +166,7 @@ describe('the catalogue-only fractions come from the table (#450 slice 3)', () =
 
   it('reads the flat row that would answer this diameter, not a compiled 0.45 / 1.0', () => {
     setLocatedFeedTable([storedRow({ params: { stepOverFraction: 0.5, peckFraction: 0.75 } })]);
-    const res = feedsFor([ALUMINIUM_ROW], 'aluminium-6061', makeraCutter(), Z1);
+    const res = feedsFor([ALUMINIUM_ROW], 'aluminium-6061', makeraCutter(), Z1, NO_SHOP.refuse);
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error(res.reason);
     // 3.175 mm falls inside the stored 0.8-3.2 band.

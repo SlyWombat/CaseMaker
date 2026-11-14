@@ -10,14 +10,6 @@
  * a named key gains a reader but stays listed.
  */
 export const UNREAD_DEFAULT_KEYS: readonly string[] = [
-  // The raster-trace dialog still starts from `rasterOutline.ts`'s compiled fallbacks (#451's
-  // consumer rewire was deferred).
-  'import.traceThreshold',
-  'import.traceDespecklePx',
-  'import.traceSimplifyPx',
-  // The tape strip width the run sheet would state; no path reads it.
-  'tape.stripWidthMm',
-  // The band above a machine ceiling where a feed/rpm is refused; the clamp takes it as an
-  // argument nobody supplies from the shop yet.
-  'clamp.refuseFraction',
+  // #1256 wired the last five (the trace dialog's three, `tape.stripWidthMm`, `clamp.refuseFraction`);
+  // the list is empty and stays the guard's place for a key that must land before its reader.
 ];

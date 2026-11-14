@@ -129,9 +129,8 @@ import { allRuns, lastTimedRun } from '@/engine/cnc/engrave/runHistory';
 import { useRunRecordStore } from '@/store/runRecordStore';
 import { surfaceSpreadFor, firstRegistrationFor } from '@/store/engraveRegistrationStore';
 import { openTextFile } from '@/utils/openTextFile';
-import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, type CutParams } from '@/engine/cnc/feeds';
+import { feedCatalogueSnapshot, feedsFor, feedsToolForSurface, refuseFractionOf, type CutParams } from '@/engine/cnc/feeds';
 import {
-  TRACE_DEFAULTS,
   importOutlineFromDisk,
   importRasterFromDisk,
   toLineTraces,
@@ -161,6 +160,7 @@ import { defaultFaceOperation, faceSpanMm } from '@/engine/cnc/rotary/faceOps';
 import { FaceOperationRow } from './FaceOperationRow';
 import { groupRejections, isActionableRejection, shouldGroupCatalogueRows } from './recommendationRejections';
 import { useShopDefaultsStore, shopDefault } from '@/store/shopDefaultsStore';
+import { traceStartFrom } from '@/components/panels/traceStart';
 import { readDesignFile } from '@/engine/import/designImport';
 import { readTargetObjectFile } from '@/engine/import/targetObject';
 import {
@@ -1274,6 +1274,7 @@ export function EngravePanel(): JSX.Element {
         job.stock.material,
         goalOnly ? feedsToolForSurface(tool) : tool,
         jobMachine(job),
+        refuseFractionOf(shopDefaults ?? null),
         job.cutOverride,
       )
     : null;
@@ -3170,7 +3171,12 @@ export function EngravePanel(): JSX.Element {
   // re-traces from them. The options are held here rather than in the dialog so they survive a
   // re-render of it, and they stay as the user last set them for the next picture.
   const [pendingImage, setPendingImage] = useState<RasterImage | null>(null);
-  const [traceOptions, setTraceOptions] = useState<Required<TraceOptions>>(() => ({ ...TRACE_DEFAULTS }));
+  // #1256 — a trace STARTS from the shop's three numbers (Manage › Advanced › All values) and
+  // stays as the operator last set it; only what they moved is kept, so a shop value that arrives
+  // late (the location loads after the panel) still reaches a picture not yet touched.
+  const traceStart = useMemo(() => traceStartFrom(shopDefaults), [shopDefaults]);
+  const [tracePatch, setTracePatch] = useState<Partial<TraceOptions>>({});
+  const traceOptions: Required<TraceOptions> = { ...traceStart, ...tracePatch };
   const [traceError, setTraceError] = useState<string | null>(null);
 
   function closeImport(): void {
@@ -3220,7 +3226,7 @@ export function EngravePanel(): JSX.Element {
   /** A trace control moved: re-trace the pixels the user already picked and redraw the dialog. */
   function retrace(patch: Partial<TraceOptions>): void {
     const next = { ...traceOptions, ...patch };
-    setTraceOptions(next);
+    setTracePatch((prev) => ({ ...prev, ...patch }));
     if (!pendingImage) return;
     const result = traceRaster(pendingImage, next, pendingOutline?.sourceName ?? 'image');
     if (result.ok) {
@@ -5755,6 +5761,7 @@ export function EngravePanel(): JSX.Element {
           trace={
             pendingImage && {
               options: traceOptions,
+              startThreshold: traceStart.threshold,
               onChange: retrace,
               imageWidth: pendingImage.width,
               imageHeight: pendingImage.height,

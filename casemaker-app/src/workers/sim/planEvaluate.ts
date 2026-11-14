@@ -488,7 +488,7 @@ function measureItems(
   swept: SweptRaised | null = null,
 ): EvaluatedItem[] {
   const { part, raisedOf } = partOf(job, ctx.shop.defaults ?? null);
-  const work = kindedWork(job, floorsOf(ctx, part));
+  const work = kindedWork(job, ctx.shop.defaults ?? null, floorsOf(ctx, part));
   const hasRest = plan.cutters.some((c) => c.items.length === 0);
   // #860 — A MALE INLAY HALF'S fidelity is not its cutaway's cut (which reproduces its own design
   // exactly, however thin the plug). It is the plug's BASE FACE — what planing reveals — as a
@@ -572,9 +572,10 @@ function measureReach(
   job: EngraveJob,
   plan: CandidatePlan,
   tools: readonly ToolLibraryEntry[],
+  defaults: ShopDefaults | null,
   floors?: ReadonlyMap<string, number> | null,
 ): number | null {
-  const work = kindedWork(job, floors);
+  const work = kindedWork(job, defaults, floors);
   let margin: number | null = null;
   for (const cutter of plan.cutters) {
     const tool = toolFor(tools, cutter.key);
@@ -608,7 +609,7 @@ function evaluateCoarse(job: EngraveJob, plan: CandidatePlan, ctx: EvalContext):
     return { ...base, ok: false, refusal: 'a multi-setup job is not evaluated by one plan yet', items: [], seconds: null };
   }
   // #940 — the floors are the plan's own: a cone's reach is the cut below its item's floor.
-  const reach = measureReach(job, plan, ctx.tools, floorsOf(ctx, partOf(job, ctx.shop.defaults ?? null).part));
+  const reach = measureReach(job, plan, ctx.tools, ctx.shop.defaults ?? null, floorsOf(ctx, partOf(job, ctx.shop.defaults ?? null).part));
   return {
     ...base,
     ok: true,
@@ -876,7 +877,7 @@ function sweptRaisedDetails(
 ): SweptRaised {
   const out: SweptRaised = new Map();
   // The pinch half of the detail stays the model's, at the effective cutter of each item.
-  for (const w of kindedWork(job, floorsOf(ctx, part))) {
+  for (const w of kindedWork(job, ctx.shop.defaults ?? null, floorsOf(ctx, part))) {
     const key = effectiveCutter(plan, w.id);
     const tool = key === null ? null : toolFor(ctx.tools, key);
     if (tool === null) continue;

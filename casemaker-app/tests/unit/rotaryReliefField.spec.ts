@@ -10,6 +10,7 @@ import { sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { clearTargetObjectMeshCache } from '@/engine/import/targetObject';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -110,8 +111,8 @@ describe('#1096 — the seam rows are cast at their own angle', () => {
     const placed = goal(tris, size); // seam 0: the ridge straddles φ = ±180°
     const turned = { ...placed, position: { ...placed.position, y: Math.PI * R } }; // seam half a turn
 
-    const f0 = sampleGoalRadialField(placed, R, { pitchMm: PITCH });
-    const f1 = sampleGoalRadialField(turned, R, { pitchMm: PITCH });
+    const f0 = sampleGoalRadialField(placed, R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: PITCH });
+    const f1 = sampleGoalRadialField(turned, R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: PITCH });
     // The half-turn placement's rows are POSITIVE at the same physical ridge, so the base build
     // samples it correctly — the control that isolates the bug to the negative-φ rows.
     const peakRow1 = cell(f1, 50, 0);
@@ -132,7 +133,7 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
   const R = 10; // ⌀20 stock
 
   it('a ⌀16 cylinder over 30 mm is radius 8 everywhere covered', () => {
-    const f = sampleGoalRadialField(goal(sideTris(() => 8, 30), { x: 30, y: 16, z: 16 }), R, { pitchMm: 0.5 });
+    const f = sampleGoalRadialField(goal(sideTris(() => 8, 30), { x: 30, y: 16, z: 16 }), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(f.coveredCount).toBeGreaterThan(0);
     expect(f.minRadius).toBeCloseTo(8, 1);
     expect(f.maxRadius).toBeCloseTo(8, 1);
@@ -149,7 +150,7 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
   it('a cone follows its own radius along the rod', () => {
     // r = 4 at x = −15, 9 at x = +15.
     const f = sampleGoalRadialField(goal(sideTris((x) => 4 + ((x + 15) / 30) * 5, 30), { x: 30, y: 18, z: 18 }), R, {
-      pitchMm: 0.5,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5,
     });
     const left = f.z[cell(f, 37, 0)]! + R;
     const right = f.z[cell(f, 63, 0)]! + R;
@@ -161,7 +162,7 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
 
   it('a cell no triangle covers keeps the stock’s surface (the sentinel)', () => {
     // A half shell: angles 0…π. The other half has no surface, so those rays hit nothing.
-    const f = sampleGoalRadialField(goal(sideTris(() => 8, 30, Math.PI), { x: 30, y: 16, z: 16 }), R, { pitchMm: 0.5 });
+    const f = sampleGoalRadialField(goal(sideTris(() => 8, 30, Math.PI), { x: 30, y: 16, z: 16 }), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     const covered = f.z[cell(f, 50, Math.PI / 2)]!;
     expect(covered).toBeCloseTo(8 - R, 1);
     const k = cell(f, 50, (3 * Math.PI) / 2 * R);
@@ -174,7 +175,7 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
     const f = sampleGoalRadialField(
       goal(sideTris(() => 8, 30, Math.PI), { x: 30, y: 16, z: 16 }, { position: { x: 50, y: seamShift, z: 0 } }),
       R,
-      { pitchMm: 0.5 },
+      { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 },
     );
     // The shell now covers the second half of the circumference.
     expect(f.z[cell(f, 50, (3 * Math.PI) / 2 * R)]!).toBeCloseTo(8 - R, 1);
@@ -183,7 +184,7 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
   });
 
   it('a mesh larger than the stock still samples: maxRadius says it does not fit', () => {
-    const f = sampleGoalRadialField(goal(sideTris(() => 12, 20), { x: 20, y: 24, z: 24 }), R, { pitchMm: 0.5 });
+    const f = sampleGoalRadialField(goal(sideTris(() => 12, 20), { x: 20, y: 24, z: 24 }), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(f.maxRadius).toBeCloseTo(12, 1);
     expect(f.minRadius).toBeCloseTo(12, 1);
   });
@@ -204,13 +205,13 @@ describe('#723 R-1 — a solid of revolution reads back as its own radius', () =
     expect(() =>
       sampleGoalRadialField(
         { sha256: 'x', format: 'png', data: undefined, position: { x: 0, y: 0, z: 0 }, scale: undefined },
-        R,
+        R, { maxCells: NO_SHOP.goalMaxCells },
       ),
     ).toThrow(/picture relief is a flat heightfield/);
   });
 
   it('a non-positive stock radius is refused before any geometry', () => {
-    expect(() => sampleGoalRadialField(goal(sideTris(() => 8, 30), { x: 30, y: 16, z: 16 }), 0)).toThrow(
+    expect(() => sampleGoalRadialField(goal(sideTris(() => 8, 30), { x: 30, y: 16, z: 16 }), 0, { maxCells: NO_SHOP.goalMaxCells })).toThrow(
       /positive stock radius/,
     );
   });

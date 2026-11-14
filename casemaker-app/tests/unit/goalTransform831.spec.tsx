@@ -33,6 +33,7 @@ import {
 } from '@/store/goalTransformUndo';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { binaryStlBase64 } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 beforeEach(() => {
   resetEngraveRows();
@@ -143,9 +144,9 @@ describe('#831 — the sampler reads the turn', () => {
   });
 
   it('a 90° turn about X swaps the height and the length in the sampled bounds', () => {
-    const flat = sampleGoalHeightfield(lgoal(), { pitchMm: 0.5 });
+    const flat = sampleGoalHeightfield(lgoal(), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     const turned = sampleGoalHeightfield(lgoal({ ...turnsPatch(turnAboutAxis({ x: 0, y: 0, z: 0 }, 'x', 90)) }), {
-      pitchMm: 0.5,
+      maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5,
     });
     const spanY = (hf: typeof flat) => (hf.ny - 1) * hf.pitch;
     expect(spanY(flat)).toBeGreaterThanOrEqual(30 - 0.5 - 1e-9);
@@ -161,8 +162,8 @@ describe('#831 — the sampler reads the turn', () => {
   });
 
   it('a goal without the turn fields samples exactly as one with them at 0', () => {
-    const plain = sampleGoalHeightfield(lgoal(), { pitchMm: 1 });
-    const zero = sampleGoalHeightfield(lgoal({ rotation: 0, rotationX: 0, rotationY: 0 }), { pitchMm: 1 });
+    const plain = sampleGoalHeightfield(lgoal(), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 1 });
+    const zero = sampleGoalHeightfield(lgoal({ rotation: 0, rotationX: 0, rotationY: 0 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 1 });
     expect(zero.nx).toBe(plain.nx);
     expect(zero.ny).toBe(plain.ny);
     expect(Array.from(zero.z)).toEqual(Array.from(plain.z));

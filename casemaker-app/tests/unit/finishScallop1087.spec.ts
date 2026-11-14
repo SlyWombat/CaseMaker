@@ -21,6 +21,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import type { RapidEstimate } from '@/engine/cnc/cam/ir';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -71,7 +72,7 @@ function sphereGoal(): EngraveTargetObject {
 
 const build = (pitchMm: number, finishScallopMm?: number) =>
   generateRotaryReliefIR({
-    field: sampleGoalRadialField(sphereGoal(), R, { pitchMm }),
+    field: sampleGoalRadialField(sphereGoal(), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm }),
     tool: BALL,
     toolNumber: 1,
     spindleRpm: 12000,

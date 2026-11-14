@@ -14,6 +14,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { goalTopFace, jobTopFace } from '@/engine/cnc/engrave/goalTopFace';
 import { clearTargetObjectMeshCache, readTargetObjectFile } from '@/engine/import/targetObject';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -66,7 +67,7 @@ describe('#888 — the top-face measure', () => {
     // sits 2 mm below the blank's top, so every covered cell is cut lower than the top.
     const goal = targetOf(relief, { x: 20, y: 15, z: -2 });
     const job = jobWith(goal, { length: 38, width: 28, thickness: 10 });
-    const facts = goalTopFace(job, goal);
+    const facts = goalTopFace(job, goal, { maxCells: NO_SHOP.goalMaxCells });
     expect(facts).not.toBeNull();
     expect(facts!.keeps).toBe(false);
     expect(facts!.keptFraction).toBe(0);
@@ -76,7 +77,7 @@ describe('#888 — the top-face measure', () => {
     const relief = await read('relief-plate.stl');
     const goal = targetOf(relief, { x: 20, y: 15, z: 0 });
     const job = jobWith(goal, { length: 38, width: 28, thickness: 10 });
-    const facts = goalTopFace(job, goal);
+    const facts = goalTopFace(job, goal, { maxCells: NO_SHOP.goalMaxCells });
     expect(facts!.keeps).toBe(true);
   });
 
@@ -84,16 +85,16 @@ describe('#888 — the top-face measure', () => {
     const relief = await read('relief-plate.stl');
     const goal = targetOf(relief, { x: 40, y: 25, z: -2 }, { surface: { clearAround: 'none' } });
     const job = jobWith(goal, { length: 80, width: 50, thickness: 10 });
-    const facts = goalTopFace(job, goal);
+    const facts = goalTopFace(job, goal, { maxCells: NO_SHOP.goalMaxCells });
     expect(facts!.keeps).toBe(true);
   });
 
   it('a reference, a picture or a disabled mesh is not judged', async () => {
     const figure = await read('figure.stl');
     const job = jobWith(undefined, { length: 80, width: 50, thickness: 40 });
-    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { role: 'reference' }))).toBeNull();
-    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { enabled: false }))).toBeNull();
-    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { format: 'png' }))).toBeNull();
+    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { role: 'reference' }), { maxCells: NO_SHOP.goalMaxCells })).toBeNull();
+    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { enabled: false }), { maxCells: NO_SHOP.goalMaxCells })).toBeNull();
+    expect(goalTopFace(job, targetOf(figure, { x: 40, y: 25, z: 0 }, { format: 'png' }), { maxCells: NO_SHOP.goalMaxCells })).toBeNull();
   });
 
   it('the job reads its FIRST setup’s goals only: a flip side’s frame is not the top', async () => {

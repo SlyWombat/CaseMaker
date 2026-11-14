@@ -24,6 +24,7 @@ import { HOP_Z, SAFE_Z } from '@/engine/cnc/cam/ir';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveDrill, EngraveJob } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { NO_SHOP } from '../tools/noShop';
 
 /**
  * The tool the drill specs use: a 3.175 mm flat end mill, the shank every sample tool uses.
@@ -70,7 +71,7 @@ function singleHole(): EngraveJob {
 function drillIr(job: EngraveJob, peckClearanceMm: number | null = null) {
   const { regions, tool } = cutRegions(tl, job);
   if (tool === null) throw new Error(`${TOOL_KEY} is not in the tool library`);
-  const feeds = feedsFor([], job.stock.material, tool, Z1, job.cutOverride);
+  const feeds = feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride);
   if (!feeds.ok) throw new Error(feeds.reason);
   return generateEngrave(tl, regions, tool, feeds.params, Z1.rapidEstimate, 'nearest', peckClearanceMm);
 }
@@ -208,7 +209,7 @@ describe('drill CAM (#220)', () => {
   it('refuses to drill with a tool that is not a flat end mill, naming the shape', () => {
     const { regions } = cutRegions(tl, singleHole());
     const ball = flatEndMill(3.175, { shape: 'ball', typeText: 'Ball End' });
-    const feeds = feedsFor([], 'softwood', ball, Z1);
+    const feeds = feedsFor([], 'softwood', ball, Z1, NO_SHOP.refuse);
     // The feeds table refuses a ball cutter before CAM even runs; the CAM refusal is the belt
     // to that braces and is what the issue's test names.
     expect(feeds.ok).toBe(false);

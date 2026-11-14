@@ -25,7 +25,6 @@
  * mesh's uncovered cells are.
  */
 
-import { GOAL_MAX_CELLS } from '@/engine/cnc/goalLimits';
 import { DEFAULT_GRID_PITCH_MM, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import type { EngraveConePrimitive, EngraveJob, EngravePrimitive, EngraveSpherePrimitive } from '@/types/engraveJob';
 
@@ -85,14 +84,14 @@ export function surfacePrimitiveUsable(p: SurfacePrimitive): boolean {
  */
 export function primitiveHeightfield(
   primitive: SurfacePrimitive,
-  opts: { pitchMm?: number | null; maxCells?: number | null; stockTopZ?: number } = {},
+  opts: { pitchMm?: number | null; maxCells: number; stockTopZ?: number },
 ): GoalHeightfield | null {
   if (!surfacePrimitiveUsable(primitive)) return null;
   const R = primitive.diameter / 2;
   const d = primitive.depth;
   const topZ = opts.stockTopZ ?? 0;
   const requested = opts.pitchMm !== null && opts.pitchMm !== undefined && opts.pitchMm > 0 ? opts.pitchMm : DEFAULT_GRID_PITCH_MM;
-  const maxCells = opts.maxCells !== null && opts.maxCells !== undefined && opts.maxCells > 0 ? opts.maxCells : GOAL_MAX_CELLS;
+  const maxCells = opts.maxCells;
 
   // The footprint, plus one cell of margin so the rim's zero-cells are inside the grid.
   const rim =

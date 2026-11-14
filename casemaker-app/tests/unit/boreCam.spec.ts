@@ -36,6 +36,7 @@ import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { sweptCuts } from '@/engine/cnc/engrave/partPlan';
 import type { EngraveDrill, EngraveJob } from '@/types/engraveJob';
 import type { NodeMeshOutput } from '@/workers/geometry/meshOutput';
+import { NO_SHOP } from '../tools/noShop';
 
 const TOOL_KEY = 'flat-3.175x12-metal';
 const DRILL_TOOL = flatEndMill(3.175, {
@@ -226,7 +227,7 @@ describe('bore CAM (#668)', () => {
     expect(region?.name).toBe('Bore "hole" ⌀10');
 
     const tool = jobTool(job)!;
-    const feeds = feedsFor([], job.stock.material, tool, Z1, job.cutOverride);
+    const feeds = feedsFor([], job.stock.material, tool, Z1, NO_SHOP.refuse, job.cutOverride);
     if (!feeds.ok) throw new Error(feeds.reason);
     const ir = generateEngrave(tl, regions, tool, feeds.params, Z1.rapidEstimate, 'nearest', null, null, 2);
     expect(ir.operations).toHaveLength(1);

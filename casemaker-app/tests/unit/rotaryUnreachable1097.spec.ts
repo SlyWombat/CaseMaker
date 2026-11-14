@@ -20,6 +20,7 @@ import { flatEndMill } from '@/engine/cnc/tool';
 import { sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -86,7 +87,7 @@ describe('#1097 the rotary placement states what a one-radius relief cannot cut'
     expect(finding).toBeDefined();
     expect(finding!.severity).toBe('warning');
     // The numbers ARE the field's: recompute them from the same sampler the generator used.
-    const field = sampleGoalRadialField(job.targetObject!, ROD_RADIUS);
+    const field = sampleGoalRadialField(job.targetObject!, ROD_RADIUS, { maxCells: NO_SHOP.goalMaxCells });
     const cells = field.nx * field.ny;
     let near = 0;
     let under = 0;

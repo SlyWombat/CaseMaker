@@ -36,6 +36,7 @@ import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
 import { parseEngraveJob } from '@/store/engraveJobSchema';
 import type { EngraveTargetObject } from '@/types/engraveJob';
 import { binaryStlBase64 } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -148,13 +149,13 @@ describe('#723 P2-1 — the turned extents and the fitted size', () => {
 
 describe('#723 P2-1 — the sampled surface follows the turn', () => {
   it('unturned, the boss top is at the stock top and the base 6 mm below', () => {
-    const hf = sampleGoalHeightfield(goal(), { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(goal(), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(at(hf, 50, 30)).toBeCloseTo(0, 3); // on the boss
     expect(at(hf, 32, 30)).toBeCloseTo(-6, 3); // on the base
   });
 
   it('turned 90 about X, the block’s former +Y face is the top — its side, not its crown', () => {
-    const hf = sampleGoalHeightfield(goal({ rotationX: 90 }), { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(goal({ rotationX: 90 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     // Turned bbox: X 30…70, Y 22…38 (40 × 16), top at Z 0.
     expect((hf.nx - 1) * hf.pitch).toBeGreaterThanOrEqual(40 - hf.pitch - 1e-9);
     expect((hf.ny - 1) * hf.pitch).toBeGreaterThanOrEqual(16 - hf.pitch - 1e-9);
@@ -166,7 +167,7 @@ describe('#723 P2-1 — the sampled surface follows the turn', () => {
   });
 
   it('turned 90 about Y, the block’s former −X face is up, and the boss stands 10 mm proud of it', () => {
-    const hf = sampleGoalHeightfield(goal({ rotationY: 90 }), { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(goal({ rotationY: 90 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     // The top is the former x = 0 face (world z 0); past the base's former z = 10 band only the
     // boss remains, whose former x = 10 face sits 10 mm lower.
     expect(at(hf, 47, 30)).toBeCloseTo(0, 3);
@@ -177,13 +178,13 @@ describe('#723 P2-1 — the sampled surface follows the turn', () => {
   it('a 180 turn about X puts the block’s flat BOTTOM up: the top-Z field is flat, and the boss is hidden under it', () => {
     // The top-only field cannot see the boss after the flip — exactly why the carried-stock slice
     // needs the remaining SOLID (meshes), not a heightfield, to hand to the second setup.
-    const hf = sampleGoalHeightfield(goal({ rotationX: 180 }), { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(goal({ rotationX: 180 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     expect(hf.minZ).toBeCloseTo(0, 6);
     expect(at(hf, 50, 30)).toBeCloseTo(0, 6);
   });
 
   it('a Z turn keeps the old footprint and top contract', () => {
-    const hf = sampleGoalHeightfield(goal({ rotation: 90 }), { pitchMm: 0.5 });
+    const hf = sampleGoalHeightfield(goal({ rotation: 90 }), { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.5 });
     // 40 × 20 turned about Z occupies 20 × 40, centred on (50, 30).
     expect((hf.nx - 1) * hf.pitch).toBeGreaterThanOrEqual(20 - hf.pitch - 1e-9);
     expect((hf.ny - 1) * hf.pitch).toBeGreaterThanOrEqual(40 - hf.pitch - 1e-9);

@@ -141,7 +141,7 @@ function mixedThreadJob(): EngraveJob {
 
 describe('#786 4c — a named drill bit with other work is ONE split plan', () => {
   it('offers the drill for the hole and a flat for the pocket, and nothing that replaces the drill', () => {
-    const plans = candidatePlans(mixedDrillJob(), [DRILL_ENTRY, FLAT_ENTRY], []);
+    const plans = candidatePlans(mixedDrillJob(), [DRILL_ENTRY, FLAT_ENTRY], [], null);
     expect(plans.length).toBeGreaterThan(0);
     for (const plan of plans) {
       // Every plan keeps the named drill FIRST and gives it the holes only.
@@ -156,7 +156,7 @@ describe('#786 4c — a named drill bit with other work is ONE split plan', () =
   });
 
   it('a named thread mill with other work splits the same way, and the thread item is cut once', () => {
-    const plans = candidatePlans(mixedThreadJob(), [THREAD_ENTRY, FLAT_ENTRY], []);
+    const plans = candidatePlans(mixedThreadJob(), [THREAD_ENTRY, FLAT_ENTRY], [], null);
     expect(plans.length).toBeGreaterThan(0);
     for (const plan of plans) {
       expect(plan.cutters[0]?.key).toBe(THREAD_KEY);
@@ -180,7 +180,7 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
     // Before the plan, the legacy document is refused: the bit cannot cut the pocket.
     expect(validateJob(job).some((f) => f.code === 'drill-mixed-tools')).toBe(true);
 
-    const plan = candidatePlans(job, [DRILL_ENTRY, FLAT_ENTRY], [])[0]!;
+    const plan = candidatePlans(job, [DRILL_ENTRY, FLAT_ENTRY], [], null)[0]!;
     const applied = applyCutterPlanToJob(job, plan);
 
     // The refusal is gone, and the setup is the split.
@@ -200,7 +200,7 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
 
   it('the drill job generates and verifies BOTH programs, each with its own cutter', async () => {
     const job = mixedDrillJob();
-    const plan = candidatePlans(job, [DRILL_ENTRY, FLAT_ENTRY], [])[0]!;
+    const plan = candidatePlans(job, [DRILL_ENTRY, FLAT_ENTRY], [], null)[0]!;
     const applied = applyCutterPlanToJob(job, plan);
 
     const g = await generate(tl, applied, null, [], undefined, SHOP);
@@ -222,7 +222,7 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
 
   it('the thread job generates and verifies BOTH programs, each with its own cutter', async () => {
     const job = mixedThreadJob();
-    const plan = candidatePlans(job, [THREAD_ENTRY, FLAT_ENTRY], [])[0]!;
+    const plan = candidatePlans(job, [THREAD_ENTRY, FLAT_ENTRY], [], null)[0]!;
     const applied = applyCutterPlanToJob(job, plan);
     const g = await generate(tl, applied, null, [], undefined, { ...SHOP, defaults: THREAD_DEFAULTS });
     expect(g.errors).toEqual([]);
@@ -238,7 +238,7 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
     const job = mixedThreadJob();
     expect(validateJob(job).some((f) => f.code === 'thread-mixed-tools')).toBe(true);
 
-    const plan = candidatePlans(job, [THREAD_ENTRY, FLAT_ENTRY], [])[0]!;
+    const plan = candidatePlans(job, [THREAD_ENTRY, FLAT_ENTRY], [], null)[0]!;
     const applied = applyCutterPlanToJob(job, plan);
     expect(validateJob(applied).some((f) => f.code === 'thread-mixed-tools')).toBe(false);
     expect(setupPrograms(applied).map((r) => [r.toolKey, r.itemIds])).toEqual([
@@ -261,7 +261,7 @@ describe('#786 4b — the applied split posts two programs, and the sentence say
       tool: FLAT,
       sources: { tool: 'user' },
     };
-    const plans = candidatePlans(job, [FLAT_ENTRY], []);
+    const plans = candidatePlans(job, [FLAT_ENTRY], [], null);
     expect(plans[0]?.cutters.map((c) => c.key)).toEqual([FLAT_KEY]);
     expect(setupProgramFindings(job).some((f) => f.code === 'setup-programs-split')).toBe(false);
   });

@@ -21,6 +21,7 @@ import { finishTipField } from '@/engine/cnc/cam/dropTip';
 import { rotaryFinishTipField, type RotaryTipTool } from '@/engine/cnc/rotary/tipDrop';
 import { sweepRotaryPenetration, type RotaryMove } from './helpers/rotaryPenetration';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 afterEach(() => clearTargetObjectMeshCache());
 
@@ -223,7 +224,7 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
 
   function setup(): { field: GoalRadialField; flat: number[]; k: number; x: number; arc: number } {
     const { tris, flat } = vGrooveTriangles(halfWidth);
-    const field = sampleGoalRadialField(goal(tris), R, { pitchMm: PITCH });
+    const field = sampleGoalRadialField(goal(tris), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: PITCH });
     // The ball sits at the groove's BOTTOM: its walls are halfWidth (= 10°) away, the acceptance's
     // pose, and the map's own disc (7.7° at the envelope) does not reach them while the true
     // distance at ρ = 8 does.
@@ -254,7 +255,7 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
     // (rule 5). A cell that contains the wall then carries the wall's radius, so the plan stands
     // off it; planning on the unpooled 1 mm samples leaves the wall's face unresolved between
     // cells and the ball shaves it (0.36 mm, measured).
-    const fine = sampleGoalRadialField(goal(tris), R, { pitchMm: 0.1 });
+    const fine = sampleGoalRadialField(goal(tris), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1 });
     const field = poolRadialField(fine, PITCH);
     const xWorld = field.x0 + Math.floor(field.nx / 2) * field.pitch;
     const arc = 0;
@@ -290,7 +291,7 @@ describe('#1164 the rotary tip drop on the true ray geometry', () => {
 
   it('a plain rod with no groove asks for no lift', () => {
     const { tris } = vGrooveTriangles(0);
-    const field = sampleGoalRadialField(goal(tris), R, { pitchMm: PITCH });
+    const field = sampleGoalRadialField(goal(tris), R, { maxCells: NO_SHOP.goalMaxCells, pitchMm: PITCH });
     const tips = rotaryFinishTipField(field, TOOL, { maxOps: Number.MAX_SAFE_INTEGER });
     // The sampled rod is a 180-gon: its chords sag below the envelope by ~0.0017 mm, and the tip
     // follows the sampled surface, not the ideal circle.

@@ -18,6 +18,7 @@ import { buildRunSheet } from '@/engine/cnc/engrave/runSheet';
 import { engraveGenerate } from '@/workers/sim/engraveGenerate';
 import { buildPcbJob, type PcbJobFile } from '../../scripts/lib/casemaker/pcbJob';
 import type { EngraveJob } from '@/types/engraveJob';
+import { NO_SHOP } from '../tools/noShop';
 
 const FIXTURES = join(process.cwd(), 'tests/unit/fixtures/pcb');
 const bytes = (name: string): Uint8Array<ArrayBuffer> => Uint8Array.from(readFileSync(join(FIXTURES, name)));
@@ -101,7 +102,7 @@ describe('the board’s run sheet (§3.7)', () => {
     const built = await buildPcbJob(
       tl,
       [file('tiny-F_Cu.gbr'), file('tiny-Edge_Cuts.gbr'), file('tiny-inside.drl')],
-      { blank: BLANK, tabs: TABS, tools: TOOLS, catalogue: ROWS },
+      { tapeStripWidthMm: NO_SHOP.tapeStripWidthMm, blank: BLANK, tabs: TABS, tools: TOOLS, catalogue: ROWS },
     );
     expect(built.ok).toBe(true);
     if (!built.ok) return;

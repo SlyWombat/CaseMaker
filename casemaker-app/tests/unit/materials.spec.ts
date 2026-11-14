@@ -51,7 +51,7 @@ describe('#1105 the material vocabulary', () => {
   it("Epoxy Tooling Board resolves feeds for the house's ⌀3.175 flat and has family board", () => {
     expect(materialFamilyOf('epoxy-tooling')).toBe('board');
     expect(catalogueMaterialFor('Epoxy Tooling')).toBe('epoxy-tooling');
-    const feeds = engraveFeedsFor({}, CATALOGUE.feeds, 'epoxy-tooling', OWNED_FLAT, Z1);
+    const feeds = engraveFeedsFor({}, CATALOGUE.feeds, null, 'epoxy-tooling', OWNED_FLAT, Z1);
     expect(feeds.ok, feeds.ok ? '' : feeds.reason).toBe(true);
     if (!feeds.ok) return;
     expect(feeds.params.rpm).toBe(10_000);

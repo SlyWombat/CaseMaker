@@ -57,7 +57,7 @@ const CTX: EvalContext = { tl, tools: [O, C, F], catalogue: [], shop: {}, calibr
 
 /** The flat work as the kind plan sees it, so the plan owns every item exactly once. */
 function planWith(rest: ToolLibraryEntry): CandidatePlan {
-  const ids = kindedWork(j20()).map((w) => w.id);
+  const ids = kindedWork(j20(), null).map((w) => w.id);
   const cutters = [
     { key: O.key, items: ids },
     { key: rest.key, items: [] as string[] },
@@ -103,7 +103,7 @@ describe('#864 the floor a V rest leaves', () => {
   it('the measured pick no longer rests j20 with the V — whatever wins reaches the floor', async () => {
     clearPlanEvaluations();
     const job = j20();
-    const pick = picked(await smartPick(job, [O, C, F], [], async (plan) => await evaluatePlan(job, plan, CTX)));
+    const pick = picked(await smartPick(job, [O, C, F], [], null, async (plan) => await evaluatePlan(job, plan, CTX)));
     // The chamfer as a rest leaves 74 % of the floor's depth standing; the plan with it scores
     // 0.256 on the raised cutaway and cannot win once the floor is in the score.
     expect(pick.chosen.plan.cutters.every((c) => c.key !== C.key)).toBe(true);

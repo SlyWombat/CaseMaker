@@ -33,6 +33,7 @@ import { exactSweptFieldTooled } from '@/workers/sim/sweptPoint';
 import { sampleGoalHeightfield, type GoalHeightfield } from '@/engine/cnc/engrave/goalHeightfield';
 import { checkGoalCutInto } from '@/engine/cnc/engrave/designCheck';
 import type { ResultTop } from '@/engine/cnc/engrave/goalCoverage';
+import { NO_SHOP } from '../tools/noShop';
 
 const FLAT6: Tool = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const FLAT3175: Tool = flatEndMill(3.175, { number: 2, id: 'flat-3.175', name: 'flat-3.175', fluteLength: 30 });
@@ -147,7 +148,7 @@ describe('#964 the curved ops cut the design and leave the walls (#959/#960)', (
         }
         expect(programs.length, `${kind} seed ${seed}: the plan posted no program`).toBeGreaterThan(0);
 
-        const field = sampleGoalHeightfield(part.target, { pitchMm: 0.1, stockTopZ: 0 });
+        const field = sampleGoalHeightfield(part.target, { maxCells: NO_SHOP.goalMaxCells, pitchMm: 0.1, stockTopZ: 0 });
         const { top, clAt } = wholeSurfaceTop(programs, field);
         // #1092 (gate v8) — the silhouette proof's floor beside the part is the BLANK's:
         // −(stock thickness + breakthrough), from the job this part planned as.

@@ -33,6 +33,7 @@ import { sampleGoalRadialField } from '@/engine/cnc/cam/rotaryRelief';
 import { columnSweep } from '@/workers/geometry/columnEngine';
 import type { EngraveJob, EngraveTargetObject } from '@/types/engraveJob';
 import { stl } from './helpers/meshes';
+import { NO_SHOP } from '../tools/noShop';
 
 type V = [number, number, number];
 type Tri = [V, V, V];
@@ -290,7 +291,7 @@ describe('#723 R-4 acceptance — the relief is cut to its closed form', () => {
     expect(highest, 'no cutting move above the rod').toBeLessThanOrEqual(R + 1e-6);
 
     // THE FIELD ITSELF: height at or below the surface everywhere, true reach still reported.
-    const field = sampleGoalRadialField(target, R, {});
+    const field = sampleGoalRadialField(target, R, { maxCells: NO_SHOP.goalMaxCells });
     expect(field.maxRadius).toBeGreaterThan(R);
     for (let k = 0; k < field.z.length; k++) expect(field.z[k]).toBeLessThanOrEqual(1e-9);
   });
