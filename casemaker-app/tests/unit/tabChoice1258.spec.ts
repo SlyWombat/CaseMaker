@@ -26,7 +26,7 @@ import { flatEndMill, type Tool } from '../../src/engine/cnc/tool';
 
 const flat6 = flatEndMill(6, { number: 1, id: 'flat-6', name: 'flat-6', fluteLength: 30 });
 const rapid: RapidEstimate = { xyMmPerMin: 1200, zMmPerMin: 600, accelMmPerS2: 150, source: 'test fixture' };
-const params: CutParams = { feedMmPerMin: 600, plungeMmPerMin: 200, spindleRpm: 12000, stepDown: 3, stepOver: 0.4 } as CutParams;
+const params: CutParams = { rpm: 12000, feed: 1000, plungeFeed: 300, stepDown: 2.5, stepOver: 3, peck: 0, air: true };
 const identityOffset: OffsetFn = (region) => region.map((c) => [...c]);
 
 /** 7 mm teeth: too short for the corner margin, wide enough for a 6 mm tab (contourOp959's fixture). */
@@ -183,6 +183,13 @@ describe('#1258 the plan asks, and an answer is for the job it was given for', (
     expect(asked.tabChoiceNeeded!.stretches.length).toBeGreaterThan(0);
     expect(asked.tabChoiceNeeded!.stretches[0]!.setupIndex).toBe(0);
     expect(asked.tabChoiceNeeded!.fingerprint).toMatch(/^[0-9a-f]{8}$/);
+    // What a card needs to draw the question to scale: the outline, the cutter's centre path and the placed tabs.
+    const drawn = asked.tabChoiceNeeded!.setups;
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]!.setupIndex).toBe(0);
+    expect(drawn[0]!.outline[0]!.length).toBeGreaterThanOrEqual(4);
+    expect(drawn[0]!.path[0]!.length).toBeGreaterThanOrEqual(4);
+    expect(drawn[0]!.tabsAt).toHaveLength(4);
     const answer = { choice: 'longerStretch' as const, answeredFor: asked.tabChoiceNeeded!.fingerprint };
     expect(structuredClone(planInput({ tabChoice: answer })).tabChoice).toEqual(answer);
     expect(tabChoiceSentence(asked.tabChoiceNeeded!)).toMatch(/--tab-choice inside-margin/);

@@ -196,7 +196,7 @@ export interface OpOutcome {
    * Under `ask` the plan stops on it (`ModelPlanOutput.tabChoiceNeeded`); under an answer it is the
    * record of what the answer applied to.
    */
-  tabChoice?: { mode: TabChoiceMode; stretches: TabStretch[]; count: number; widthMm: number; maxSpanMm: number };
+  tabChoice?: { mode: TabChoiceMode; stretches: TabStretch[]; count: number; widthMm: number; maxSpanMm: number; path: Polygons; tabsAt: [number, number][] };
   /**
    * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the lip bevel a floor-correct V pocket cuts
    * into the design's top face at its walls, mm: `depth × tan(half)` per side, the V's own
@@ -609,6 +609,13 @@ export interface TabChoiceNeeded {
   marginMm: number;
   stretches: (TabStretch & { setupIndex: number })[];
   fingerprint: string;
+  /**
+   * What a card needs to draw the question to scale, per setup that raised it, all in that setup's
+   * work XY: the part's `outline`, the cutter's centre `path` (the stretches and the candidates lie
+   * on it, one tool radius outside the outline) and `tabsAt`, the centre of every tab already
+   * placed at full margins.
+   */
+  setups: { setupIndex: number; outline: Polygons; path: Polygons; tabsAt: [number, number][] }[];
 }
 
 /**
@@ -1123,6 +1130,7 @@ function fnv1a(text: string): string {
  */
 function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | null {
   const stretches: (TabStretch & { setupIndex: number })[] = [];
+  const drawn: TabChoiceNeeded['setups'] = [];
   const parts: unknown[] = [];
   let limitMm = 0;
   for (const setup of perSetup) {
@@ -1130,6 +1138,7 @@ function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | n
       const tc = op.outcome.tabChoice;
       if (op.kind !== 'contour' || tc === undefined) continue;
       limitMm = tc.maxSpanMm;
+      drawn.push({ setupIndex: setup.setupIndex, outline: setup.features.contour.outline, path: tc.path, tabsAt: tc.tabsAt });
       for (const s of tc.stretches) stretches.push({ ...s, index: stretches.length, setupIndex: setup.setupIndex });
       const r = (v: number): number => Math.round(v * 1e4) / 1e4;
       parts.push([
@@ -1143,7 +1152,7 @@ function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | n
   }
   if (stretches.length === 0) return null;
   const marginMm = stretches.find((s) => s.candidate !== null)?.candidate?.marginMm ?? 0;
-  return { limitMm, marginMm, stretches, fingerprint: fnv1a(JSON.stringify(parts)) };
+  return { limitMm, marginMm, stretches, fingerprint: fnv1a(JSON.stringify(parts)), setups: drawn };
 }
 
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
