@@ -1298,7 +1298,7 @@ describe('#491 the release step names the cutter’s case', () => {
       new Map([[surfaceProgram.programHash, check]]),
     );
 
-    registerForTest(job, TARGET, setupId); // #1286
+    registerForTest(job, TARGET, null); // #1286 — an implicit setup is filed with no id, as the Register card files it
     await act(async () => {
       useEngraveReleaseStore.getState().plan(TARGET, job, sources);
       await useEngraveReleaseStore.getState().uploadAll(TARGET);

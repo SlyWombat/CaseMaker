@@ -137,7 +137,7 @@ export async function registerCurrentJob(page: Page): Promise<void> {
     const stamp = { blankId: null, holdKey: reg.holdKeyOf(job) };
     // Later setups first, then setup 1 and the job-keyed entry LAST: only the latest origin written on a
     // machine counts, and the run these specs press is setup 1's.
-    for (const setup of [...(job.setups ?? [])].reverse()) reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setup.id, stamp);
-    reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, null, stamp);
+    for (const setup of [...(job.setups ?? [])].slice(1).reverse()) reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setup.id, stamp);
+    reg.useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, job.setups?.[0]?.id ?? null, stamp);
   });
 }

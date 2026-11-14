@@ -1359,6 +1359,13 @@ export function EngraveRegistrationStep({ job, target, setupIndex = 1 }: Engrave
     if (refusal !== null && !(force && marginRefusal(result.outcome))) return;
     setPhase('writing');
     setError(null);
+    // #1286 — from the first line of the origin write the machine's G54 is no longer the previous job's,
+    // whether or not this write finishes: mark the machine now.
+    useEngraveRegistrationStore.getState().markWriting(
+      target,
+      job.id,
+      flipRun ? (selectedSetup?.id ?? null) : (job.setups?.[0]?.id ?? null),
+    );
     const handle = handleRef.current ?? attachConsole(target);
     handleRef.current = handle;
     // #1123 items 31/34 — THE CUTTER THE PROGRAM RUNS, named and numbered. The write's M491

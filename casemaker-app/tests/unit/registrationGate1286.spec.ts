@@ -64,11 +64,16 @@ describe('#1286 setupRunGate', () => {
       { blankId: null, holdKey: holdKeyOf(jobA) },
     );
     expect(gate(jobA, 2, 'setup-2')).toBeNull();
-    // The job-keyed entry names setup-1: asking for a first setup under another id is refused.
+    // C — a record that NAMES a setup does not satisfy the job's first setup unless it is `job.setups[0]`
+    // (the program's own setup id is not what decides): filed for another setup id, it is refused.
     resetEngraveRegistrationStore();
-    registerForTest(jobA, TARGET, 'setup-1');
-    expect(gate(jobA, 1, 'setup-1')).toBeNull();
-    expect(gate(jobA, 1, 'setup-9')?.code).toBe('registration-missing');
+    const withSetups = { ...jobA, setups: [{ id: 'real-1' }] } as unknown as EngraveJob;
+    registerForTest(withSetups, TARGET, 'other-setup');
+    expect(gate(withSetups, 1, null)?.code).toBe('registration-missing');
+    expect(gate(withSetups, 1, 'whatever-the-program-says')?.code).toBe('registration-missing');
+    registerForTest(withSetups, TARGET, null); // filed under real-1
+    expect(gate(withSetups, 1, null)).toBeNull();
+    expect(gate(withSetups, 1, 'whatever-the-program-says')).toBeNull();
   });
 
   it('a registration that was not usable is not a registration', () => {
@@ -111,6 +116,28 @@ describe('#1286 setupRunGate', () => {
     s.recordSetup('job-A', 'setup-2', TARGET, s.records['job-A']!.plan, s.records['job-A']!.outcome, null, { blankId: null, holdKey: holdKeyOf(jobA) });
     expect(gate(jobA, 2, 'setup-2')).toBeNull();
     expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+  });
+
+  it('A — a clear must not erase "the origin is no longer A\u2019s": A, then B, then B cleared → A stays refused; and no mark at all refuses', () => {
+    registerForTest(jobA, TARGET, null);
+    registerForTest(jobB, TARGET, null);
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+    useEngraveRegistrationStore.getState().clear('job-B');
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+    expect(gate(jobB, 1, null)?.code).toBe('registration-missing');
+    // A record with NO machine mark behind it (state restored some other way) is refused, not waved through.
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null)).toBeNull();
+    useEngraveRegistrationStore.setState({ latest: {} });
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+  });
+
+  it('B — the machine is marked when the origin write STARTS: A registered, B begins writing and is stopped → A is refused', () => {
+    registerForTest(jobA, TARGET, null);
+    expect(gate(jobA, 1, null)).toBeNull();
+    useEngraveRegistrationStore.getState().markWriting(TARGET, 'job-B', null); // B's G10 is going out; no record ever follows
+    expect(gate(jobA, 1, null)?.code).toBe('registration-superseded');
+    expect(gate(jobB, 1, null)?.code).toBe('registration-missing');
   });
 
   it('a record restored from the house’s note carries no blank stamp and never satisfies the gate', () => {

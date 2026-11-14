@@ -256,6 +256,9 @@ test('#1286 — NOT registered: ticking the cutter does not make Start live, it 
   const start = page.getByTestId('engrave-cut-card-start');
   await expect(start).toBeDisabled();
   await expect(page.getByTestId('engrave-cut-card-start-reason')).toContainText('Register this job first');
+  // #1123-112 — never "Ready" above a refusal.
+  await expect(page.getByTestId('engrave-cut-card-ready')).toContainText('Not ready');
+  await expect(page.getByTestId('engrave-cut-card-ready')).not.toContainText(/^Ready/);
   // Even a forced press changes nothing: the gate is not only on the button.
   await start.click({ force: true, timeout: 3000 }).catch(() => undefined);
   await page.waitForTimeout(1500);
@@ -305,4 +308,110 @@ test('#1286 — REGISTERED (real presses): Start is live and sends the program a
   }
   await locateCutter(page);
   await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 60_000 });
+});
+
+/** One real registration on the open job: tick/approve/continue, wait for the measurement, write the origin. */
+async function registerForReal(page: Page, fake: FakeConsole, z = '-60.788'): Promise<void> {
+  await ensureStep2(page);
+  const tick = page.getByTestId('engrave-registration-first-run-tick');
+  if ((await tick.count()) > 0 && !(await tick.isChecked())) await tick.check();
+  const go = page.getByTestId('engrave-registration-approve-start').or(page.getByTestId('engrave-registration-start')).first();
+  await go.click();
+  await page.getByTestId('engrave-registration-continue').click();
+  await expect(page.getByTestId('engrave-registration-write')).toBeVisible({ timeout: 120_000 });
+  await ensureStep2(page);
+  await page.getByTestId('engrave-registration-write').click();
+  await page.getByTestId('engrave-registration-continue').click();
+  await expect.poll(() => fake.lines().filter((l) => l.startsWith('G10 L2 P1')).length, { timeout: 60_000 }).toBeGreaterThan(0);
+  void z;
+}
+
+/** Regenerate when approving the plan made the program older than the design, then tick the cutters. */
+async function readyToStart(page: Page): Promise<void> {
+  const regen = page.getByTestId('engrave-package-generate');
+  if ((await regen.count()) > 0 && (await regen.isVisible())) {
+    await regen.click();
+    await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  }
+  await locateCutter(page);
+}
+
+test('#1286 D — two jobs, one machine (real presses): A registers → B registers → A is refused; a new blank refuses a registered job', async ({ cm, page }) => {
+  test.setTimeout(900_000);
+  page.setDefaultTimeout(45_000);
+  await fakeHouse(page);
+  const fake = await installFakeConsole(page);
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
+  await cm.ready();
+  await prepare(page);
+
+  // ── A registers for real: Start is live.
+  await registerForReal(page, fake);
+  await readyToStart(page);
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 60_000 });
+  const jobA = await page.evaluate(async () => {
+    const m = (await import('/src/store/engraveJobStore.ts' as string)) as { useEngraveJobStore: { getState: () => { job: unknown } } };
+    return JSON.parse(JSON.stringify(m.useEngraveJobStore.getState().job)) as Record<string, unknown>;
+  });
+
+  // ── B: another job on the same machine, generated and registered with real presses.
+  await page.evaluate(async (a) => {
+    const m = (await import('/src/store/engraveJobStore.ts' as string)) as { useEngraveJobStore: { setState: (p: unknown) => void } };
+    m.useEngraveJobStore.setState({ job: { ...a, id: 'job-B-1286', name: 'Job B', package: undefined, runLog: undefined } });
+  }, jobA);
+  await page.getByTestId('cnc-mode-design').click();
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  await page.getByTestId('cnc-mode-cut').click();
+  const ack = page.getByTestId('engrave-ack');
+  if (!(await ack.isVisible())) await page.getByTestId('engrave-cut-step-1-summary').click();
+  if (!(await ack.isChecked())) await ack.check();
+  await registerForReal(page, fake);
+
+  // ── Back to A (the open document changes; no registration is touched): its origin is gone.
+  const linesBefore = fake.lines().filter((l) => l.startsWith('upload') || l.startsWith('play')).length;
+  await page.evaluate(async (a) => {
+    const m = (await import('/src/store/engraveJobStore.ts' as string)) as { useEngraveJobStore: { setState: (p: unknown) => void } };
+    m.useEngraveJobStore.setState({ job: a });
+  }, jobA);
+  await page.waitForTimeout(1500);
+  // The run on screen is B's: A is generated again (a real press) before its card can be read.
+  if ((await page.getByTestId('engrave-generate').count()) === 0) await page.getByTestId('cnc-mode-design').click();
+  await page.getByTestId('engrave-generate').click();
+  await expect(page.getByTestId('engrave-run-oracle')).toHaveAttribute('data-state', 'tick', { timeout: 300_000 });
+  await page.getByTestId('cnc-mode-cut').click();
+  const ackA = page.getByTestId('engrave-ack');
+  if (!(await ackA.isVisible())) await page.getByTestId('engrave-cut-step-1-summary').click();
+  if (!(await ackA.isChecked())) await ackA.check();
+  if ((await page.getByTestId('engrave-cut-surface').count()) === 0) await page.getByTestId('cnc-mode-cut').click();
+  await expect(page.getByTestId('engrave-cut-surface')).toBeVisible();
+  await locateCutter(page);
+  const start = page.getByTestId('engrave-cut-card-start');
+  await expect(start).toBeDisabled();
+  await expect(page.getByTestId('engrave-cut-card-start-reason')).toContainText('Another registration has been written on this machine since');
+  expect(fake.lines().filter((l) => l.startsWith('upload') || l.startsWith('play')).length, 'nothing went on the wire').toBe(linesBefore);
+});
+
+test('#1286 D2 — "This is a new blank" on a registered job refuses its Start until it is registered again (real presses)', async ({ cm, page }) => {
+  test.setTimeout(600_000);
+  page.setDefaultTimeout(45_000);
+  const house = await fakeHouse(page);
+  const fake = await installFakeConsole(page);
+  fake.setFeature({ kind: 'boss', radiusMm: 400, centre: { x: -140, y: -163 }, topZ: TOP_READING });
+  await cm.ready();
+  await prepare(page);
+  await registerForReal(page, fake);
+  await readyToStart(page);
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeEnabled({ timeout: 60_000 });
+  // The operator says the stick on the bed is a new one.
+  await ensureStep2(page);
+  const mint = page.getByTestId('engrave-registration-new-blank');
+  await expect(mint, 'the card offers "This is a new blank" on a registered job').toBeVisible();
+  await mint.click();
+  await expect.poll(() => Object.keys((house.writtenMachine()?.currentBlank as Record<string, string>) ?? {}).length, { timeout: 60_000 }).toBe(1);
+  await page.waitForTimeout(2000);
+  await locateCutter(page);
+  await expect(page.getByTestId('engrave-cut-card-start')).toBeDisabled();
+  await expect(page.getByTestId('engrave-cut-card-start-reason')).toContainText('This blank has not been registered');
+  expect(fake.lines().filter((l) => l.startsWith('upload') || l.startsWith('play'))).toEqual([]);
 });

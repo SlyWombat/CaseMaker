@@ -468,7 +468,8 @@ export function CutRunCard({
       {readyUp && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #222c38' }}>
           <p data-testid="engrave-cut-card-ready" style={{ fontSize: 13, color: '#c9d4e2', margin: '0 0 6px' }}>
-            <b>Ready</b> · program {nextIndex ?? 1} of {total} · next: {inSpindle ? 'the bit in the spindle' : (nextBit ?? '—')}
+            {/* #1123-112 — never "Ready" above a refusal: the line says Not ready while Start's reason is showing. */}
+            <b>{startReason === null ? 'Ready' : 'Not ready'}</b> · program {nextIndex ?? 1} of {total} · next: {inSpindle ? 'the bit in the spindle' : (nextBit ?? '—')}
           </p>
           <button
             type="button"

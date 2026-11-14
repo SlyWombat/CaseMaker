@@ -38,5 +38,9 @@ export function registerForTest(
     settings,
   );
   if (!planned.ok) throw new Error(planned.reason);
-  useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, setupId, { blankId: null, holdKey: holdKeyOf(job) });
+  // The job's FIRST setup is filed under `job.setups[0].id` (or none when the job states none); null and
+  // 'setup-1' both mean "the first". A later setup is filed under its own id by the same call.
+  const firstId = job.setups?.[0]?.id ?? null;
+  const sid = setupId === null || setupId === 'setup-1' || setupId === firstId ? firstId : setupId;
+  useEngraveRegistrationStore.getState().record(job.id, target, planned.plan, outcome, null, sid, { blankId: null, holdKey: holdKeyOf(job) });
 }
