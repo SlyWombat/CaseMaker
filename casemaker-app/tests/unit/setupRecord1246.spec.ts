@@ -14,6 +14,7 @@
  * its pin. The record's `verifierSetup` field is `null` here for the same reason.
  */
 
+import { planlessVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateOpenEdge } from '@/engine/cnc/cam/model/openEdges';
@@ -434,6 +435,7 @@ describe('#1246 slice 2 pair (c) — a restored run without a stored plan says s
       frameNc: null,
       frameVerify: null,
       programHash: 'h-1246c',
+      verifyContext: planlessVerifyContext(),
       cam: null,
     }) as unknown as EngraveProgram;
   const generatedWith = (p: EngraveProgram): EngraveGenerated =>

@@ -83,13 +83,25 @@ describe('#1126 — the v2 result document', () => {
     expect(doc.facingProgram).toBe(0);
   });
 
-  it('builds each plan from an ALLOWLIST — outcome and perSetup notes, nothing else', () => {
+  it('builds each plan from an ALLOWLIST — named fields only, nothing else', () => {
     const withPlans = {
       ...generatedFixture(),
       plan: {
         perSetup: [
-          { setupIndex: 0, notes: ['kept note'], features: { regions: 1 }, programs: [{ operations: [{ big: true }] }], clGrid: [{ huge: true }] },
+          {
+            setupIndex: 0,
+            notes: ['kept note'],
+            features: { regions: 1 },
+            programs: [{ operations: [{ big: true }] }],
+            clGrid: [{ huge: true }],
+            ops: [
+              { kind: 'contour', region: { big: true }, outcome: { tabCounts: { asked: 4, placed: 4, added: 0, unplaceable: 0 }, throughKerf: { path: [] }, ir: { huge: true } } },
+              { kind: 'rough', region: { big: true }, outcome: { ir: { huge: true } } },
+            ],
+          },
         ],
+        tabChoiceStale: true,
+        tabChoiceApplied: { choice: 'insideMargin', limitMm: 40, fingerprint: 'f', stretches: [], setups: [] },
         outcome: { predictedCutIntoMm: 0.4 },
         totalCostSeconds: 1234,
       },
@@ -99,14 +111,26 @@ describe('#1126 — the v2 result document', () => {
       },
     } as unknown as EngraveGenerated;
     const doc = resultDocument('tray', withPlans);
-    // By construction: exactly the two fields the browser reads, and the setup they belong to.
+    // By construction: exactly the named fields the browser reads (planSummary.ts lists each reader);
+    // an op's `throughKerf` and `ir` are not among them.
     expect(doc.plan).toEqual({
       outcome: { predictedCutIntoMm: 0.4 },
-      perSetup: [{ setupIndex: 0, notes: ['kept note'] }],
+      tabChoiceApplied: { choice: 'insideMargin', limitMm: 40, fingerprint: 'f', stretches: [], setups: [] },
+      tabChoiceStale: true,
+      perSetup: [
+        {
+          setupIndex: 0,
+          notes: ['kept note'],
+          ops: [
+            { kind: 'contour', outcome: { tabCounts: { asked: 4, placed: 4, added: 0, unplaceable: 0 } } },
+            { kind: 'rough', outcome: {} },
+          ],
+        },
+      ],
     });
     expect(doc.planIdeal).toEqual({
       outcome: { predictedCutIntoMm: 0.2 },
-      perSetup: [{ setupIndex: 0, notes: ['ideal note'] }],
+      perSetup: [{ setupIndex: 0, notes: ['ideal note'], ops: [] }],
     });
   });
 

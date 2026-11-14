@@ -10,6 +10,7 @@
  * Fixture: `perSetupStock1082.spec.ts:34-48` — blank 120 × 160 × 28, setup 2 states 106 × 136 × 25.
  */
 
+import { planlessVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -86,6 +87,7 @@ const storedProgram = (move: string, setupIndex = 2): EngraveProgram =>
     frameNc: null,
     frameVerify: null,
     programHash: 'h-1247',
+    verifyContext: planlessVerifyContext(),
     cam: null,
   }) as unknown as EngraveProgram;
 

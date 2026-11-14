@@ -14,6 +14,9 @@ export const SETTINGS_UNREAD_SENTENCE = "The shop's settings could not be read, 
 /** The same fact for a restored run's re-check, which plans nothing but checks against the shop's limits. */
 export const SETTINGS_UNREAD_RECHECK = "The shop's settings could not be read, so this stored run was not re-checked.";
 
+/** A stored run written without its verify context (#1126) is planned again, not checked from guesswork. */
+export const RESTORED_RUN_REGENERATE = 'This stored run has no record to re-check it against, so generate it again.';
+
 /** The info line on a run planned with no house connected (the hosted build): the recommendations are the truth there. */
 export const SETTINGS_ABSENT_SENTENCE = 'Planned on the recommended settings — no shop is connected.';
 

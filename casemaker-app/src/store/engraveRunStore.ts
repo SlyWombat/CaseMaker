@@ -86,6 +86,7 @@ import {
   SETTINGS_ABSENT_SENTENCE,
   SETTINGS_READING_LABEL,
   SETTINGS_UNREAD_RECHECK,
+  RESTORED_RUN_REGENERATE,
   SETTINGS_UNREAD_SENTENCE,
   type ShopSettingsRead,
 } from '@/engine/cnc/engrave/settingsWords';
@@ -1708,6 +1709,13 @@ export const useEngraveRunStore = create<EngraveRunState>()((set, get) => {
         setup: toSetup(job, machine, mount?.fixture, bed, undefined, shopDefaults),
         defaults: shopDefaults,
       });
+      if (check.regenerate) {
+        // #1126 — a stored run with no verify context is not re-checked from guesswork: it is stale,
+        // and Generate plans the job again.
+        markStale('job');
+        set({ restoreNote: RESTORED_RUN_REGENERATE, restoreChecking: false });
+        return;
+      }
       set({ generated: check.generated });
       if (check.errors.length > 0) {
         // THE BYTES FAIL THIS BUILD: say which program and what it found; Load is off because the

@@ -143,6 +143,7 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
+import { planlessVerifyContext, planSummary, verifyContextOf, type ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { setupRecordFor, verifyContextFrom, type OpenEdgeFacts, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
@@ -541,6 +542,13 @@ export interface EngraveProgram {
   frameError?: string | null;
   /** FNV-1a over `nc` — `programHash` in `engine/cnc/programHash.ts`. */
   programHash: string;
+  /**
+   * #1126/#1191 — THE RE-CHECK'S CONTEXT beside the program, as plain data: its hop height, its ops'
+   * outside allowances and its setup's through kerfs, computed at posting where the IR exists. A
+   * stored run is re-verified from this, never from a plan's IR (which no result carries). Absent
+   * on the facing program and on a program with no plan (an item-pipeline run).
+   */
+  verifyContext?: ProgramVerifyContext;
   cam: EngraveCamSummary | null;
   /**
    * #844 — THIS PROGRAM'S OWN PREDICTIONS, the ones its generation produced (`OneProgram.predicted`).
@@ -5055,6 +5063,7 @@ export function generateRotaryGoalProgram(
     frameNc: null,
     frameVerify: null,
     programHash: programHash(nc),
+    verifyContext: planlessVerifyContext(),
     cam,
   };
   return {
@@ -6046,6 +6055,7 @@ export async function postModelPlan(
         frameNc: null,
         frameVerify: null,
         programHash: programHash(posted.text),
+        verifyContext: verifyContextOf(ir, throughKerf),
         cam: summarize(ir, mill.rapidEstimate),
         // #1073 — the release is the LAST program of the LAST setup; its bridges ride with it so
         // the sheet's last step prints the positions the file was cut with.
@@ -8258,6 +8268,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameZ: one.frameZ ?? null,
     frameError: one.frameError ?? null,
     programHash: programHash(nc),
+    verifyContext: planlessVerifyContext(),
     cam: one.cam,
     // #865 — this file's own findings, for the run's tagged list and the receipt.
     findings: one.findings,
@@ -8304,6 +8315,7 @@ function facingProgramOf(
     frameNc: null,
     frameVerify: null,
     programHash: programHash(one.facingNc),
+    verifyContext: planlessVerifyContext(),
     cam: null,
   };
 }
@@ -9433,4 +9445,20 @@ async function generateOneProgram(
   } finally {
     stack?.dispose();
   }
+}
+
+/**
+ * #1126 — THE RESULT THE PAGE RECEIVES: both plans reduced to their `planSummary` (a copy; the input
+ * is untouched). `EngraveGenerated` types a plan as the engine's whole `ModelPlanOutput` because the
+ * engine's own callers (the pick's `reusedOwnedPlan`, the CLI, the tests) hold it whole; what crosses
+ * to the page is the summary, from this worker and from the house's `resultDocument` alike. The
+ * summary's fields are a subset of the plan's, so the narrowing is the one cast below, and
+ * `houseResultTrim1126.spec.ts` pins that nothing in `src/` outside the engine reads past it.
+ */
+export function trimmedResult(full: EngraveGenerated): EngraveGenerated {
+  return {
+    ...full,
+    plan: planSummary(full.plan) as EngraveGenerated['plan'],
+    planIdeal: planSummary(full.planIdeal) as EngraveGenerated['planIdeal'],
+  };
 }

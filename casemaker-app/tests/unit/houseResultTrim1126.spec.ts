@@ -68,6 +68,13 @@ describe('#1126 — camIr is not a browser input', () => {
       // The cycle sentence reads the plan's outcome too (its `cycleSeconds`).
       'src/engine/cnc/engrave/runCycle.ts': /generated\?\.plan\?\.outcome/,
       'src/testing/windowApi.ts': /perSetup\.flatMap\(\(setup\) => setup\.notes\)/,
+      // The allowlist's other named fields, each with its reader (see `planSummary.ts`'s header):
+      'src/components/panels/EngraveTabChoice.tsx': /generated\?\.plan\?\.tabChoiceApplied/,
+      'src/components/panels/useTabChoiceSuffix.ts': /generated\?\.plan\?\.tabChoiceApplied/,
+      'src/components/panels/GoalFreeingTabs.tsx': /generated\?\.plan\?\.perSetup/,
+      // Existence tests only — no plan field is read.
+      'src/components/panels/EngravePanel.tsx': /run\.generated\?\.plan === undefined \|\| run\.generated\?\.plan === null/,
+      'src/engine/cnc/engrave/restoredRun.ts': /generated\.plan !== undefined && generated\.plan !== null/,
     };
     const isEngine = (path: string): boolean =>
       path.startsWith('src/workers/sim/') || path.startsWith('src/engine/cnc/cam/model/');
@@ -89,11 +96,15 @@ describe('#1126 — camIr is not a browser input', () => {
   });
 
   it('nothing in the browser reads a plan’s toolpath IR (perSetup[].programs)', () => {
-    // Allowed to name `perSetup` in code: the engine that produces the plan, and the QA window,
-    // which reads NOTES from it (`windowApi` below — pinned so a change to `.programs` fails here).
+    // Allowed to name `perSetup` in code: the engine that produces the plan, the QA window, which
+    // reads NOTES from it, and the freeing-tabs counts, which read ops[].kind / outcome.tabCounts —
+    // both pinned below so a change to `.programs` fails here. The summary builder names it to
+    // build the allowlist. `restoredRun.ts` is NOT here: it reads each program's `verifyContext`.
     const allowed = (path: string): boolean =>
       path.startsWith('src/workers/sim/') ||
       path.startsWith('src/engine/cnc/cam/model/') ||
+      path === 'src/engine/cnc/engrave/planSummary.ts' ||
+      path === 'src/components/panels/GoalFreeingTabs.tsx' ||
       path === 'src/testing/windowApi.ts';
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {
@@ -107,6 +118,10 @@ describe('#1126 — camIr is not a browser input', () => {
     expect(offenders).toEqual([]);
     const windowApi = readFileSync(join(SRC, 'testing', 'windowApi.ts'), 'utf8');
     expect(windowApi).toContain('perSetup.flatMap((setup) => setup.notes)');
+    const freeing = readFileSync(join(SRC, 'components', 'panels', 'GoalFreeingTabs.tsx'), 'utf8');
+    expect(freeing).toContain("last?.ops.find((op) => op.kind === 'contour')");
+    expect(freeing).toContain('contour?.outcome.tabCounts');
+    expect(freeing).not.toMatch(/\.programs\b/);
   });
 
   it('a result without camIr still freezes (#1132): the package takes nc, frames and hashes', () => {

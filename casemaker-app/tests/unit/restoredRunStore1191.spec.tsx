@@ -4,6 +4,7 @@
 // The pure report replacement is `restoredRun1191.spec.ts`; here the store action is exercised:
 // a stored program this build's verifier refuses leaves the run blocked with the finding (no Load,
 // Generate is the way forward), and the programs are still build A's bytes.
+import { planlessVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -37,6 +38,7 @@ function programFor(nc: string, hash = 'h-flat-1.0'): EngraveProgram {
     frameNc: null,
     frameVerify: null,
     programHash: hash,
+    verifyContext: planlessVerifyContext(),
     cam: null,
   } as EngraveProgram;
 }

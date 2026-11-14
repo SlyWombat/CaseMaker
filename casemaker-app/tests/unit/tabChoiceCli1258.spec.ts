@@ -100,6 +100,8 @@ describe('#1258 casemaker cut, flag to planner', () => {
       const gen = run.generated as { ok: boolean; programs: unknown[]; plan: { tabChoiceApplied?: { choice: string; stretches: unknown[] } } };
       expect(gen.ok).toBe(true);
       expect(gen.programs.length).toBeGreaterThan(0);
+      // #1126 — every posted program carries the re-check's context beside it, computed where the IR exists.
+      expect((gen.programs as { verifyContext?: unknown }[]).every((p) => p.verifyContext !== undefined)).toBe(true);
       expect(gen.plan.tabChoiceApplied?.choice).toBe(flag === 'inside-margin' ? 'insideMargin' : 'longerStretch');
       expect(gen.plan.tabChoiceApplied?.stretches.length).toBeGreaterThan(0);
     }, 300_000);

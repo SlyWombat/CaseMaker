@@ -5,6 +5,7 @@
 // wrote is replaced by what THIS build reads from the same `.nc`; the programs themselves are
 // untouched. A program whose cutter this build cannot resolve keeps its stored report and is
 // reported as unresolved (the sweep refuses it by name).
+import { planlessVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { describe, expect, it } from 'vitest';
 
 import { defaultEngraveJob } from '@/engine/cnc/engrave/defaults';
@@ -48,6 +49,7 @@ function programFor(nc: string, verify: VerifyReport, toolKey: string): EngraveP
     frameNc: null,
     frameVerify: null,
     programHash: `h-${toolKey}`,
+    verifyContext: planlessVerifyContext(),
     cam: null,
   } as EngraveProgram;
 }
