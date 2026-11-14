@@ -719,7 +719,7 @@ export function planCutters(
     let coveredCount: number | null = null;
     if (goal !== null) {
       try {
-        coveredCount = sampleGoalHeightfield(goal, { pitchMm: pitch }).coveredCount;
+        coveredCount = sampleGoalHeightfield(goal, { pitchMm: pitch, maxCells: readDefault(defaults, 'goal.maxCells').value }).coveredCount;
       } catch {
         coveredCount = null;
       }

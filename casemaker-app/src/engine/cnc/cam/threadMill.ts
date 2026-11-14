@@ -45,7 +45,7 @@
 
 import { readDefault, type ShopDefaults } from '@/platform/defaultsClient';
 import { threadDims, threadLabel, type ThreadSize } from '@/engine/cnc/threadTable';
-import { catalogueCoverageFor, type FeedCatalogueRow } from '@/engine/cnc/feeds';
+import { catalogueCoverageFor, shopRefuseFraction, type FeedCatalogueRow } from '@/engine/cnc/feeds';
 import { clampToMachine, type ClampDiagnostic, type Mill } from '@/engine/cnc/machine';
 import { cuttingDiameter, type Tool } from '@/engine/cnc/tool';
 import type { StockMaterial } from '@/types/engraveJob';
@@ -133,8 +133,8 @@ export function threadSettings(
   const coverage = catalogueCoverageFor(catalogue, material, tool);
   if (coverage.kind === 'covered') {
     const row = coverage.row;
-    const running = clampToMachine(row.feed, row.rpm, machine);
-    const plunging = clampToMachine(row.plungeFeed, null, machine);
+    const running = clampToMachine(row.feed, row.rpm, machine, shopRefuseFraction());
+    const plunging = clampToMachine(row.plungeFeed, null, machine, shopRefuseFraction());
     diagnostics.push(...running.diagnostics, ...plunging.diagnostics);
     if (running.feed !== null && running.rpm !== null && plunging.feed !== null && !diagnostics.some((d) => d.severity === 'error')) {
       settings.feed = running.feed;

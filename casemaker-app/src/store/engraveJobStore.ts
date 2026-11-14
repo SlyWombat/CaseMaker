@@ -36,6 +36,7 @@ import { scaleJobAboutCentre } from '@/engine/cnc/engrave/scaleJob';
 import { getMeshBlob, putMeshBlob } from '@/platform/meshBlobs';
 import {
   defaultTapeHold,
+  tapeDefaultsFor,
   itemKindWord,
   itemRowName,
   jobSetups,
@@ -2976,7 +2977,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
       const reheld = reHoldPcbJob(before, newMount, alignment);
       apply(() => ({
         ...reheld.job,
-        workholding: { kind: 'tape', tape: defaultTapeHold() },
+        workholding: { kind: 'tape', tape: defaultTapeHold(tapeDefaultsFor(liveShopDefaults())) },
         sacrificial: { ...reheld.job.sacrificial, under: defaultSacrificialUnder(), source: 'default' },
       }));
       return {
@@ -3084,7 +3085,7 @@ export const useEngraveJobStore = create<EngraveJobState>()((set, get) => {
             cutouts: [...(current.cutouts ?? []), ...plan.items.cutouts, ...(plan.second?.items.cutouts ?? [])],
             ...(fresh
               ? {
-                  workholding: { kind: 'tape' as const, tape: defaultTapeHold() },
+                  workholding: { kind: 'tape' as const, tape: defaultTapeHold(tapeDefaultsFor(liveShopDefaults())) },
                   sacrificial: { ...current.sacrificial, under: defaultSacrificialUnder(), source: 'default' as const },
                 }
               : {}),

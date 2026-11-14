@@ -4848,7 +4848,7 @@ export function generateRotaryGoalProgram(
     settings.gridPitchMm ?? readDefault(shop.defaults ?? null, 'relief.planningPitchMm').value;
   let field: ReturnType<typeof sampleGoalRadialField>;
   try {
-    field = sampleGoalRadialField(goal, rotary.radius, {});
+    field = sampleGoalRadialField(goal, rotary.radius, { maxCells: readDefault(shop.defaults ?? null, 'goal.maxCells').value });
   } catch (e) {
     return fail('cam', e instanceof Error ? e.message : String(e));
   }
@@ -5639,7 +5639,7 @@ export async function buildModelPlanInputForGoal(
     // measurement has run with since #961 — so production plans the way the cards were measured.
     goal: (() => {
       // #1052 — the goal field fixes a plan's cell count; one row with its size.
-      const field = sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0 });
+      const field = sampleGoalHeightfield(goal, { pitchMm: 0.1, stockTopZ: 0, maxCells: readDefault(shop.defaults ?? null, 'goal.maxCells').value });
       memTrace('goal-field', { nx: field.nx, ny: field.ny, cells: field.nx * field.ny, bytes: field.nx * field.ny * 5 });
       return field;
     })(),

@@ -1695,6 +1695,7 @@ export function HoldingStep({
   // a house that tapes differently says so once, and every new taped job starts from it. Declared
   // here, above the arrival effects that write a taped job.
   const tapeInsetMm = readDefault(shopDefaults ?? null, 'tape.insetMm').value;
+  const tapeStripWidthMm = readDefault(shopDefaults ?? null, 'tape.stripWidthMm').value; // #1256
   // #1102 (#1207) — the most clamps a bracket job states is the SHOP's setting, not a number here.
   const maxClamps = maxClampsOf(shopDefaults ?? null);
   // #714 — the grip's default is the shop's own number (Makera publishes no jaw depth).
@@ -1743,10 +1744,10 @@ export function HoldingStep({
   const jobHold = job.workholding.kind === 'tape' || job.workholding.kind === 'bracket' ? job.workholding : null;
   /** The tape the step draws and writes: the job's own when it is taped, else the house roll's. */
   const tape = useMemo(
-    () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm),
+    () => bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm, tapeStripWidthMm),
     // #725 review — the shop defaults load ASYNC: without `tapeInsetMm` here the picture keeps the
     // 2 mm fallback until something else re-renders it.
-    [profile, job.workholding, tapeInsetMm],
+    [profile, job.workholding, tapeInsetMm, tapeStripWidthMm],
   );
   const bracketRead = useMemo(() => bracketSettings(shopDefaults ?? null), [shopDefaults]);
   /** The bracket the step draws and writes: the job's own when it is bracketed, else the default. */
@@ -1911,7 +1912,7 @@ export function HoldingStep({
     if (wanted !== null) {
       if (wanted.fromProfile === now.profile.id) return;
       // The operator asked for this bed mount: their answer stands over any default.
-      if (wanted.mount === 'bed-tape') onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm), bedAnswers(answers));
+      if (wanted.mount === 'bed-tape') onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm, tapeStripWidthMm), bedAnswers(answers));
       else
         onBedHold(
           bedBracketHold(
@@ -1934,7 +1935,7 @@ export function HoldingStep({
       answers.stock,
       job.stock.shape === 'disc' ? 'disc' : (job.stockEntry?.form ?? null),
     );
-    if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null, tapeInsetMm), answers);
+    if (mount === 'bed-tape') onBedHold(bedTapeHold(profile, null, tapeInsetMm, tapeStripWidthMm), answers);
     else onBedHold(bedBracketHold(answers.stock, shopDefaults ?? null, null, bedAnchor(profile) ?? 1), answers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now, job.workholding.kind, answers.stock, answers.vise.source, profile]);
@@ -1978,7 +1979,7 @@ export function HoldingStep({
     }
     // #715 — the two bed mounts are the job's own writes, with the board under them.
     if (mount === 'bed-tape') {
-      onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm), bedAnswers(answers));
+      onBedHold(bedTapeHold(profile, job.workholding.kind === 'tape' ? job.workholding.tape : null, tapeInsetMm, tapeStripWidthMm), bedAnswers(answers));
       return;
     }
     if (mount === 'bed-bracket') {

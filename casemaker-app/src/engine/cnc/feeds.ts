@@ -93,7 +93,19 @@
 import { z } from 'zod';
 import { cuttingDiameter, cuttingForTrace, feedRowDiameter, flatEndMill, unambiguousCuttingDiameter, vendorId } from './tool';
 import type { Tool, ToolShape } from './tool';
-import { CLAMP_REFUSE_FRACTION_FALLBACK, clampToMachine } from './machine';
+import { clampToMachine } from './machine';
+import { liveShopDefaults, readDefault } from '@/platform/defaultsClient';
+
+/**
+ * #1256 — THE SHOP'S `clamp.refuseFraction`, AT THE MOMENT OF THE CALL: the band above a machine
+ * ceiling where a feed or rpm is refused instead of clamped. Every resolution below defaults to it,
+ * so the panel, the pick and the generator all judge one number; each realm's defaults source is
+ * installed by `installShopDefaults` (the app's store; the worker from the request's `shop`), and
+ * with none the labelled fallback answers (`CLAMP_REFUSE_FRACTION_FALLBACK`).
+ */
+export function shopRefuseFraction(): number {
+  return readDefault(liveShopDefaults(), 'clamp.refuseFraction').value;
+}
 import type { ClampDiagnostic, Mill } from './machine';
 import { MATERIAL_LABELS, STOCK_MATERIALS } from './materials';
 import { V_CARVE_STEPOVER_FALLBACK } from './vCarveGeometry';
@@ -1116,11 +1128,11 @@ export type FeedsDiagnostic = ClampDiagnostic | CatalogueDiagnostic;
  * `stepDown` has no ceiling to be past — nothing in this stack clamps a depth of cut — so it is
  * screened for positivity alone. Step-over is not screened at all: it comes from our row (#310).
  */
-function catalogueRefusal(
+export function catalogueRefusal(
   field: CatalogueField,
   value: number,
   machine: Mill,
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number = shopRefuseFraction(),
 ): string | null {
   if (!Number.isFinite(value) || value <= 0) return 'it is not a positive number';
   if (field === 'stepDown') return null;
@@ -1309,7 +1321,7 @@ function entryFor(
   machine: Mill,
   table: readonly FeedsEntry[],
   edge: 'flat' | 'v',
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number = shopRefuseFraction(),
 ): EntryChoice {
   const entry = table.find(
     (e) => e.material === material && (e.edge ?? 'flat') === edge && diameter >= e.minDiameter && diameter <= e.maxDiameter,
@@ -1597,7 +1609,7 @@ export function feedsFor(
    * is refused rather than clamped. Threaded in so this resolver and the catalogue screening share
    * one number with `clampToMachine`; defaults to the labelled fallback.
    */
-  refuseFraction: number = CLAMP_REFUSE_FRACTION_FALLBACK,
+  refuseFraction: number = shopRefuseFraction(),
 ): FeedsResult {
   const snapshot = catalogueOf(catalogue);
   // The cutter, in the table's terms: a flat end mill of some diameter, or a V-bit whose cutting

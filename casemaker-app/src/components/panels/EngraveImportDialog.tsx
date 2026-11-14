@@ -1,7 +1,6 @@
 import { useMemo, useState, type CSSProperties, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  TRACE_DEFAULTS,
   scaleOutlineToWidth,
   type OutlineImport,
   type TraceOptions,
@@ -132,6 +131,8 @@ function ringToPath(ring: readonly [Mm, Mm][], stride: number): string {
  */
 export interface TracePanel {
   options: Required<TraceOptions>;
+  /** The shop's starting threshold (#1256), named in the control's hint. */
+  startThreshold: number;
   onChange: (patch: Partial<TraceOptions>) => void;
   /** Source pixels, so the scale line the controls are read against can be shown. */
   imageWidth: number;
@@ -287,7 +288,7 @@ export function EngraveImportDialog({
                 value={trace.options.threshold}
                 data-testid="engrave-trace-threshold"
                 aria-label="Trace threshold"
-                title={`Pixels darker than this become the cut region (default ${TRACE_DEFAULTS.threshold}).`}
+                title={`Pixels darker than this become the cut region (the shop starts at ${trace.startThreshold}).`}
                 style={{ flex: 1 }}
                 onChange={(e) => trace.onChange({ threshold: Number(e.target.value) })}
               />

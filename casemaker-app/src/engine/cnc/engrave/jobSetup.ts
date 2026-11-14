@@ -1312,6 +1312,15 @@ export const TAPE_DEFAULTS: TapeDefaults = {
   provenance: "Makera's 20 mm tape; ~0.2 mm (Makera's store), not measured here; 2 mm in from every edge",
 };
 
+/**
+ * #1256 — THE TAPE A SHOP STARTS FROM: the design's numbers with the strip width the shop states
+ * (`tape.stripWidthMm`, seeded at 20 = the constant). A bed profile's own roll still wins where it
+ * states one (`bedTapeHold`); this is the roll nobody described.
+ */
+export function tapeDefaultsFor(defaults: ShopDefaults | null | undefined): TapeDefaults {
+  return { ...TAPE_DEFAULTS, widthMm: readDefault(defaults ?? null, 'tape.stripWidthMm').value };
+}
+
 /** A new taped job's holding: the design's defaults, `source: 'default'`, nothing measured. */
 export function defaultTapeHold(defaults: TapeDefaults = TAPE_DEFAULTS): TapeHold {
   return {
