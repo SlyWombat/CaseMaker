@@ -38,7 +38,7 @@ import { makeClipperOffset, makeClipperSubtract, makeClipperUnion } from '@/engi
 import { pointInPolygons } from '@/engine/cnc/engrave/throughMask';
 import { getToplevel } from '@/workers/geometry/ManifoldRuntime';
 import type { OffsetFn, Polygons } from '@/engine/cnc/cam/pocket';
-import type { ProfileSpan } from '@/engine/cnc/cam/profile';
+import type { ProfileSpan, TabChoiceMode, TabStretch } from '@/engine/cnc/cam/profile';
 import { GOAL_FIT_TOLERANCE_MM } from '@/engine/cnc/engrave/goalPlacement';
 import type { BooleanFn } from '@/engine/cnc/cam/engraveJob';
 import type { FeatureSource, FeatureTree, PocketNode, RemainderRegion, SetupFrame } from './features';
@@ -191,6 +191,13 @@ export interface OpOutcome {
    */
   clampedTabHeightMm?: { wanted: number; cut: number };
   /**
+   * #1258 — THE STRETCHES THE CORNER MARGIN LEFT TOO LONG on this contour, with the tab step 2
+   * would place in each, and the mode the contour ran under. Absent when nothing is too long.
+   * Under `ask` the plan stops on it (`ModelPlanOutput.tabChoiceNeeded`); under an answer it is the
+   * record of what the answer applied to.
+   */
+  tabChoice?: { mode: TabChoiceMode; stretches: TabStretch[]; count: number; widthMm: number; maxSpanMm: number };
+  /**
    * #1062 (defect 1) — THE PLAN'S OWN PREDICTION of the lip bevel a floor-correct V pocket cuts
    * into the design's top face at its walls, mm: `depth × tan(half)` per side, the V's own
    * geometry. A PREDICTION, not the gate's measurement — `PlanOutcome.cutInto` stays null ("the
@@ -317,6 +324,14 @@ export interface ModelPlanInput {
    * DEFAULT_RELEASE_TABS, so every job that states no underside block posts byte-identically.
    */
   freeingTabs?: { count: number; widthMm: number; heightMm: number };
+  /**
+   * #1258 — THE OPERATOR'S ANSWER to "the tab rules cannot both be met" (plain data, cloned to the
+   * rank pool). `insideMargin`: each over-long stretch gets the tab #1206's step 2 places.
+   * `longerStretch`: none is placed and the stretch is stated. `answeredFor` is the fingerprint the
+   * question carried (`ModelPlanOutput.tabChoiceNeeded.fingerprint`); an answer whose fingerprint no
+   * longer matches the job is stale and the plan asks again. `answeredFor` absent: the answer is for the job exactly as it stands (the CLI's flag, given with the job in hand) and is never stale. No answer: the plan asks.
+   */
+  tabChoice?: { choice: 'insideMargin' | 'longerStretch'; answeredFor?: string };
   /**
    * #943 (10) — THE JOB'S OWN SETUP COUNT, when this input is one setup of a larger job re-planned
    * ALONE (the #1017 twin): the single-setup-only rules — the "outline is the stock, no freeing
@@ -571,6 +586,29 @@ export interface ModelPlanOutput {
    * rung whose own leftover is under the shop's visibility thresholds). Never a plan candidate.
    */
   ladderRows?: LadderRow[];
+  /**
+   * #1258 — THE PLAN STOPPED AND ASKS. Tabs at full corner margins cannot bring every stretch under
+   * `tabs.maxSpanMm`, and the operator has not answered (or the answer is stale). `perSetup` is
+   * EMPTY: no programs. This is not a refusal and not an error — the run's status is its own
+   * outcome, "needs the operator's choice".
+   */
+  tabChoiceNeeded?: TabChoiceNeeded;
+  /** #1258 — an answer was on the input but its fingerprint no longer matches (the outline or the tab settings changed). */
+  tabChoiceStale?: true;
+}
+
+/**
+ * #1258 — THE QUESTION, as plain data. `stretches` carries one entry per stretch (re-indexed across
+ * the job, with the setup it belongs to); `candidate: null` — no tab fits in it. `marginMm` is the
+ * corner margin of the first candidate's own edge — each candidate also states its OWN edge's
+ * margin, which is what a table should print. `fingerprint` is what the answer must echo as
+ * `answeredFor`.
+ */
+export interface TabChoiceNeeded {
+  limitMm: number;
+  marginMm: number;
+  stretches: (TabStretch & { setupIndex: number })[];
+  fingerprint: string;
 }
 
 /**
@@ -1065,6 +1103,47 @@ export function collectOpNotes(ops: readonly PlannedOp[], statements: PlanStatem
       }
     }
   }
+}
+
+/** FNV-1a over a string, as 8 hex digits: a deterministic fingerprint, never a security hash. */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * #1258 — the tab question the planned setups raised, or null when no contour left a stretch too
+ * long. The fingerprint is what the question was asked about: each such setup's outline points,
+ * `tabs.maxSpanMm`, the tab count and width (the corner margin's two numbers are still written in
+ * the placement code, #1262; when they become settings they join this).
+ */
+function collectTabQuestion(perSetup: readonly SetupPlan[]): TabChoiceNeeded | null {
+  const stretches: (TabStretch & { setupIndex: number })[] = [];
+  const parts: unknown[] = [];
+  let limitMm = 0;
+  for (const setup of perSetup) {
+    for (const op of setup.ops) {
+      const tc = op.outcome.tabChoice;
+      if (op.kind !== 'contour' || tc === undefined) continue;
+      limitMm = tc.maxSpanMm;
+      for (const s of tc.stretches) stretches.push({ ...s, index: stretches.length, setupIndex: setup.setupIndex });
+      const r = (v: number): number => Math.round(v * 1e4) / 1e4;
+      parts.push([
+        setup.setupIndex,
+        setup.features.contour.outline.map((ring) => ring.map(([x, y]) => [r(x), r(y)])),
+        r(tc.maxSpanMm),
+        tc.count,
+        r(tc.widthMm),
+      ]);
+    }
+  }
+  if (stretches.length === 0) return null;
+  const marginMm = stretches.find((s) => s.candidate !== null)?.candidate?.marginMm ?? 0;
+  return { limitMm, marginMm, stretches, fingerprint: fnv1a(JSON.stringify(parts)) };
 }
 
 export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOptions = {}): Promise<ModelPlanOutput> {
@@ -2128,10 +2207,13 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     const tabMaxSpanMm = readDefault(input.defaults ?? null, 'tabs.maxSpanMm').value;
     // #1207 — the corner angle travels with the same spec, so the plan and the cut agree.
     const tabCornerDeg = readDefault(input.defaults ?? null, 'tabs.cornerDeg').value;
+    // #1258 — THE OPERATOR'S ANSWER for a stretch the corner margin leaves too long rides the same
+    // spec; with none the contour ASKS (no tab placed for it, the stretch reported).
+    const tabChoiceMode: TabChoiceMode = input.tabChoice?.choice ?? 'ask';
     const tabSpec =
       tabs === undefined
-        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg }
-        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg };
+        ? { ...DEFAULT_RELEASE_TABS, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode }
+        : { ...tabs, maxSpanMm: tabMaxSpanMm, cornerDeg: tabCornerDeg, tabChoice: tabChoiceMode };
 
     // #965/#898 part 2: the LAST setup's freeing contour must not cut past the OPPOSITE setup's
     // already-finished surface (this file's own #965 open-item note, below, used to be the whole
@@ -2963,6 +3045,17 @@ export async function planModelCam(input: ModelPlanInput, opts: PlanModelCamOpti
     }
 
   }
+  // #1258 — THE TAB QUESTION. Every contour that ran reports the stretches the corner margin left
+  // too long. With no valid answer the plan hands back the question and NO programs; with a valid
+  // one it goes on (the contour already tabbed or left each stretch as the answer said).
+  {
+    const asked = collectTabQuestion(perSetup);
+    if (asked !== null) {
+      const answer = input.tabChoice;
+      if (answer === undefined) return { perSetup: [], tabChoiceNeeded: asked };
+      if (answer.answeredFor !== undefined && answer.answeredFor !== asked.fingerprint) return { perSetup: [], tabChoiceNeeded: asked, tabChoiceStale: true };
+    }
+  }
   // #961 (the card slice) — THE PLAN'S OWN OUTCOME, from the same stamping the picker already uses.
   // Nothing new is simulated: every program's IR is posted and stamped once (the cache above), the
   // fields are unioned, and the result is the coverage the 0.1 mm band leaves and the deepest
@@ -3540,7 +3633,7 @@ export interface PlanPocketsOptions {
    *  `SequenceOptions.signal` for the candidate boundaries). */
   signal?: AbortSignal;
   /** Absent → {@link DEFAULT_RELEASE_TABS} (the part must stay held until the last cut touches it). */
-  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number };
+  tabs?: { count: number; width: number; height: number; maxSpanMm?: number; cornerDeg?: number; tabChoice?: TabChoiceMode };
   /** A real Clipper2 union/subtract, for an OPEN node's region extension (finding 3). Absent on an open node leaves it unextended, stated by the caller, not assumed silently. */
   boolean?: { union: BooleanFn; subtract: BooleanFn };
   /** `ContourOpOptions.oppositeSafeDepthMm`, carried straight through to the contour op when this
