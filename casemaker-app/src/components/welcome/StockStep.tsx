@@ -8,7 +8,7 @@
  */
 
 import type { JSX } from 'react';
-import { StartStockStep, type PendingStock, type StartStockSeed } from './StartStockStep';
+import { StartStockStep, type PendingStock, type StartStockSeed, type StockDraft } from './StartStockStep';
 import type { PartFootprint } from './workShape';
 
 export interface StockStepProps {
@@ -20,8 +20,13 @@ export interface StockStepProps {
   part?: PartFootprint | null;
   /** #1098 item 6 — a file the question step already recognised: the step opens settled on it. */
   presetFile?: File;
+  /** #1263 — the shelf pieces that hold the work when they are of more than one material and the job states none: the step asks, listing them least waste first, with nothing preselected. */
+  several?: readonly string[] | null;
+  /** #1263 — the operator's own typing, kept by the wizard across Back. */
+  draft?: StockDraft | null;
+  onDraft?: (draft: StockDraft) => void;
 }
 
-export function StockStep({ seed, onPending, part = null, presetFile }: StockStepProps): JSX.Element {
-  return <StartStockStep onChange={onPending} seed={seed} part={part} presetFile={presetFile} />;
+export function StockStep({ seed, onPending, part = null, presetFile, several = null, draft = null, onDraft }: StockStepProps): JSX.Element {
+  return <StartStockStep onChange={onPending} seed={seed} part={part} presetFile={presetFile} several={several} draft={draft} onDraft={onDraft} />;
 }

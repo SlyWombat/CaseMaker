@@ -6,7 +6,7 @@
 // server answers the step-1 check through the fake controller, as in holdingMatrix1104.spec.ts.
 import type { Page } from '@playwright/test';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 import { locationDocument, locationView, serveHouse, type Json } from './fixtures/fakeHouse';
 
@@ -51,7 +51,7 @@ async function reachHolding(page: Page, cm: { ready(): Promise<void> }): Promise
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-make-width').fill('60');
   await page.getByTestId('start-wizard-make-thickness').fill('6');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 }
 

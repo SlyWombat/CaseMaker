@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 import { installFakeConsole, type FakeConsole } from './fixtures/fakeConsole';
 import { houseHealth, locationDocument, serveHouse, type Json } from './fixtures/fakeHouse';
 import type { Page } from '@playwright/test';
@@ -90,7 +90,7 @@ async function openRegistrationProposal(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-make-length').fill('100');
   await page.getByTestId('start-wizard-make-width').fill('60');
   await page.getByTestId('start-wizard-make-thickness').fill('25');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-mount-bed-bracket')).toBeChecked();
   await page.getByTestId('engrave-setup-next').click();

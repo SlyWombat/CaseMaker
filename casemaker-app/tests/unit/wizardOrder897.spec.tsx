@@ -109,6 +109,9 @@ function toQuestion(): void {
 
 /** Leaving the blank: a job with items on it asks before it is replaced. */
 async function leaveStock(): Promise<void> {
+  // #1263 — the app assumes no material; where the step still asks, the walk chooses one.
+  const select = screen.getByTestId('start-wizard-stock-material') as HTMLSelectElement;
+  if (select.value === '') fireEvent.change(select, { target: { value: 'hardwood' } });
   await act(async () => {
     fireEvent.click(screen.getByTestId('start-wizard-stock-next'));
   });
@@ -261,6 +264,8 @@ describe('#897 — the question comes first, and it sizes the blank', () => {
     fireEvent.change(screen.getByTestId('start-wizard-preset-text'), { target: { value: 'Hello' } });
     fireEvent.click(screen.getByTestId('start-wizard-operation-next'));
 
+    // The operator chooses the material (none is assumed) and edits the proposed size: that answer exists.
+    fireEvent.change(screen.getByTestId('start-wizard-stock-material'), { target: { value: 'hardwood' } });
     fireEvent.change(screen.getByTestId('start-wizard-make-length'), { target: { value: '123' } });
     // Back to the question, then forward again: the proposal must not overwrite the answer.
     fireEvent.click(screen.getByTestId('start-wizard-back'));

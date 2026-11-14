@@ -7,7 +7,7 @@
 // °, lengths with mm, no decimal past three places, and the bench said in one sentence.
 import fs from 'node:fs';
 import path from 'node:path';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, stockNext } from './fixtures/caseMaker';
 
 /** #792 — Save .nc… / Run sheet… / Open run record… are File ▾ items now; open the menu first. */
 async function menuItem(page: import('@playwright/test').Page, testid: string) {
@@ -63,7 +63,7 @@ test('Name on a dowel: door to the four ticks, the views, and the run refusal (#
   // The blank (the rod's own, passed through) and the hold — its picture names the chuck — then
   // the last step's create (#897).
   await page.getByTestId('start-wizard-operation-next').click();
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   const picture = page.getByTestId('engrave-setup-holding-picture');
   await expect(picture).toContainText('rod ⌀20');

@@ -7,7 +7,7 @@
 // state words, the found line and the device row run on the real path. Steps 2–4 walk the same
 // answers as `wizardFourSteps1109.spec.ts` (web).
 import { lanServerPort } from '../../scripts/e2ePort';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, stockNext } from './fixtures/caseMaker';
 import { installFakeConsole } from './fixtures/fakeConsole';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
@@ -56,7 +56,7 @@ test('#1109 — the four wizard steps on the desktop bundle, one screenshot each
   await page.getByTestId('start-wizard-make-length').fill('36');
   await page.getByTestId('start-wizard-make-width').fill('100');
   await page.getByTestId('start-wizard-make-thickness').fill('36');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page.getByTestId('engrave-setup-holding-picture').first()).toHaveAttribute('data-mechanism', 'vise');
   await expect(page.getByTestId('engrave-setup-mount-row-ledge')).toBeVisible();

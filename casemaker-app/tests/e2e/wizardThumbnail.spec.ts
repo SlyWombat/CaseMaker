@@ -4,7 +4,7 @@
 // maintainer reviews the wording against.
 import { fileURLToPath } from 'node:url';
 
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(240_000);
 
@@ -33,7 +33,7 @@ test('#1099 — the mesh is drawn on the question, the blank and the hold', asyn
   await expect(page.getByTestId('blank-with-part')).toBeVisible();
   await expect(page.getByTestId('blank-part-footprint')).toBeVisible();
   await expect(page).toHaveScreenshot('1099-step3-mesh.png');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   // Step 4 — the same footprint inside the blank in the hold.
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
@@ -59,7 +59,7 @@ test('#1099 — a drawing walks the same three steps, its rings on the blank and
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 3 of 4 · Stock');
   await expect(page.getByTestId('blank-part-footprint')).toBeVisible();
   await expect(page).toHaveScreenshot('1099-step3-drawing.png');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
 
   await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
   await expect(page.getByTestId('engrave-setup-holding-part-footprint')).toBeVisible();
