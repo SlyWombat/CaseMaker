@@ -423,6 +423,8 @@ export interface RunSheetThroughFacts {
       at: { x: number; y: number };
       stretchMm: number;
       cornerMm: number;
+      /** #1258 — the corner margin of the edge the tab sits on, mm; absent on a pre-#1258 run. */
+      marginMm?: number;
       joins?: number;
       sharpJoins?: number;
     }[];
@@ -3891,9 +3893,9 @@ function throughCutSteps(facts: RunSheetThroughFacts | null | undefined): RunShe
             const joins = tab.joins ?? 0;
             const sharp = tab.sharpJoins ?? 0;
             return (
-              `a tight tab at X ${fmtNum(tab.at.x)} Y ${fmtNum(tab.at.y)} closes a ` +
-              `${fmtNum(tab.stretchMm)} mm stretch, ${fmtNum(tab.cornerMm)} mm from the nearest corner ` +
-              '(inside the usual corner margin — holding the part comes first)' +
+              `a tab at X ${fmtNum(tab.at.x)} Y ${fmtNum(tab.at.y)} closes a ` +
+              `${fmtNum(tab.stretchMm)} mm stretch, ${fmtNum(tab.cornerMm)} mm from the nearest corner` +
+              (tab.marginMm === undefined ? '' : `, closer than the edge's ${fmtNum(tab.marginMm)} mm margin`) +
               (joins > 0 ? `; it spans ${joins} join${joins === 1 ? '' : 's'} of the outline` : '') +
               (sharp > 0 ? `, ${sharp} of them sharper than the smooth-arc limit` : '')
             );

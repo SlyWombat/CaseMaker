@@ -117,7 +117,7 @@ export interface TabPlacement {
    * #1206 (the analyst's step 2) — TIGHT TABS: when a stretch between tabs is still longer than
    * `tabs.maxSpanMm` after every margin-respecting place, ONE centred tab is placed on the longest
    * edge inside that stretch even where the corner margin would have refused it, provided the
-   * tab's width fits centred. Holding the part comes before the margin; each entry names the tab's
+   * tab's width fits centred. Only when the operator chose it (#1258); each entry names the tab's
    * centre and the distances the sheet states.
    */
   tight: readonly TightTab[];
@@ -136,6 +136,8 @@ export interface TightTab {
   stretchMm: number;
   /** The centre's distance to the nearer end of its edge, mm — inside the usual corner margin. */
   cornerMm: number;
+  /** #1258 — the corner margin of the edge this tab sits on, mm (the one it is closer to a corner than). */
+  marginMm: number;
   /** How many joins of the outline the tab's span crosses (the sheet states the count). */
   joins: number;
   /** How many of those joins turn sharper than the placement's smooth-arc limit. */
@@ -156,8 +158,10 @@ export type TabChoiceMode = 'ask' | 'insideMargin' | 'longerStretch';
  * work XY. `candidate: null` — no tab fits in the stretch at all.
  */
 export interface TabStretch {
-  /** The stretch's order along its contour, from 0. */
+  /** The stretch's order along its contour, from 0 (the contour op renumbers across its rings). */
   index: number;
+  /** #1258 — which ring of the cutter's centre path (which cut-out) the stretch is on; set by the contour op. */
+  ring?: number;
   /** Its unsupported length before any step-2 tab. */
   spanMm: number;
   startXY: [number, number];
@@ -889,7 +893,7 @@ function placeMidSide(
     if (spans.some((placed) => arcRangesOverlap(startArc, endArc, placed.startArc, placed.endArc, perimeter))) continue;
     spans.push({ startArc, endArc });
   }
-  // #1206 (the analyst's step 2) — HOLDING COMES BEFORE THE MARGIN. A stretch still longer than
+  // #1206 (the analyst's step 2) — A TAB INSIDE THE MARGIN (#1258: only on the operator's say-so). A stretch still longer than
   // the limit after every margin-respecting place gets ONE centred tab on the longest edge inside
   // it, even where the corner margin would have refused it, provided the tab's WIDTH fits centred.
   //
@@ -946,6 +950,7 @@ function placeMidSide(
         at: pointAt(segments, perimeter, centre),
         stretchMm: worst,
         cornerMm: Math.min(centre - pick.start, pick.end - centre),
+        marginMm: edgeMargin(pick.end - pick.start, widthMm, spanLength),
         joins,
         sharpJoins,
       });
