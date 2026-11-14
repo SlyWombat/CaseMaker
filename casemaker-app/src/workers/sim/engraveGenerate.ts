@@ -6435,7 +6435,9 @@ export async function generateGoalProgram(
   let input: ModelPlanInput;
   try {
     input = await buildModelPlanInputForGoal(job, goal, tool, shop, sideFace, catalogueTools, feedCatalogue);
-    if (tabChoice !== undefined) input = { ...input, tabChoice };
+    // #1258 — the answer on the job is the plan's answer; an explicit option (the CLI's flag) wins.
+    const answer = tabChoice ?? job.tabChoice;
+    if (answer !== undefined) input = { ...input, tabChoice: answer };
   } catch (e) {
     return fail('cam', `cam/model seam (#966): could not build a ModelPlanInput for "${goal.name}" — ${e instanceof Error ? e.message : String(e)}`);
   }
