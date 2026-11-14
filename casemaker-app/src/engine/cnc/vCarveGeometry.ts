@@ -229,9 +229,7 @@ export function vCarvePlane(cone: VCone, depth: number, film: number | null, flo
  * width is measured AT THE COLOUR PLANE — not the tip flat — because that is the width whose
  * adjacent passes must meet for the second colour's area to be the design.
  */
-/** The V-carve step-over at its recommendation: the static feed table's labelled fallback (the
- *  registry owns the value; `vcarve.stepoverRatio`'s recommendation equals this). */
-export const V_CARVE_STEPOVER_FALLBACK = 0.6;
+export { V_CARVE_STEPOVER_FALLBACK } from './vCarveFallback';
 
 export function vCarvePlaneStepover(
   plane: VCarvePlane,
