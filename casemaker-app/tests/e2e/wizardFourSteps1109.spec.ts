@@ -1,7 +1,7 @@
 // #1109 §8 — THE FOUR STEPS, PHOTOGRAPHED. The copy pass's baselines for the maintainer's wording
 // review: one screenshot per step, on the web build, from the shell's own walk (#870). The files land
 // in `test-results/` and are posted on the issue; nothing here asserts pixels, it records the screen.
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -29,7 +29,7 @@ test('#1109 — the four wizard steps, one screenshot each', async ({ cm, page }
   await page.getByTestId('start-wizard-make-length').fill('36');
   await page.getByTestId('start-wizard-make-width').fill('100');
   await page.getByTestId('start-wizard-make-thickness').fill('36');
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
   await expect(page).toHaveScreenshot('1109-step4-holding.png');
 });

@@ -62,14 +62,14 @@ describe('#897 — the proposed blank', () => {
     const p = proposeStock(MESH)!;
     expect(p).toMatchObject({
       form: 'plate',
-      material: 'hardwood',
+      material: null, // #1263: the app assumes none
       length: 40 + 2 * WORK_STOCK_MARGIN_MM,
       width: 30 + 2 * WORK_STOCK_MARGIN_MM,
       thickness: 12 + WORK_STOCK_SKIN_MM,
       finish: 'rough',
     });
     expect(p.sentence).toBe(
-      'No stock is recorded for this shop yet. It needs a blank of at least 50 × 40 × 13 mm, hardwood. ' +
+      'No stock is recorded for this shop yet. It needs a blank of at least 50 × 40 × 13 mm. ' +
         `Sized from the mesh: 40 × 30 × 12 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side and ${WORK_STOCK_SKIN_MM} mm under it.`,
     );
   });
@@ -110,7 +110,7 @@ describe('#897 — the proposed blank', () => {
     const p = proposeStock(OUTLINE)!;
     expect(p).toMatchObject({
       form: 'plate',
-      material: 'hardwood',
+      material: null,
       length: 60 + 2 * WORK_STOCK_MARGIN_MM,
       width: 60 + 2 * WORK_STOCK_MARGIN_MM,
       thickness: HOUSE_PLATE_THICKNESS_MM,
@@ -118,7 +118,7 @@ describe('#897 — the proposed blank', () => {
     });
     // #1259 — the sentence now leads with why: nothing on the shelf held it.
     expect(p.sentence).toBe(
-      'No stock is recorded for this shop yet. It needs a blank of at least 70 × 70 × 12 mm, hardwood. ' +
+      'No stock is recorded for this shop yet. It needs a blank of at least 70 × 70 × 12 mm. ' +
         `Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`,
     );
   });
@@ -282,7 +282,7 @@ describe('#1098 — an outline takes the smallest shelf plate that holds it', ()
     expect(p).toMatchObject({ length: 70, width: 70, thickness: 15 });
     // #1259 — the sentence now leads with why: nothing on the shelf held it.
     expect(p.sentence).toBe(
-      'Nothing on your shelf holds this. It needs a blank of at least 70 × 70 × 15 mm, hardwood. ' +
+      'Nothing on your shelf holds this. It needs a blank of at least 70 × 70 × 15 mm. ' +
         `Sized from the outline: 60 × 60 mm, plus ${WORK_STOCK_MARGIN_MM} mm each side.`,
     );
     expect(proposeStock(OUTLINE)!.thickness).toBe(HOUSE_PLATE_THICKNESS_MM);

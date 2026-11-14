@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Locator, Page } from '@playwright/test';
-import { test, expect, openSomethingElse } from './fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(180_000);
 
@@ -140,7 +140,7 @@ for (const vp of VIEWPORTS) {
       await page.getByTestId('start-wizard-make-length').fill('76.2');
       await page.getByTestId('start-wizard-make-width').fill('38.1');
       await page.getByTestId('start-wizard-make-thickness').fill('3.81');
-      await page.getByTestId('start-wizard-stock-next').click();
+      await stockNext(page);
 
       // Step 4 — the tallest step — its primary is still on the screen without a scroll.
       await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
@@ -244,7 +244,7 @@ for (const vp of VIEWPORTS) {
       await expectSameRow(page.getByTestId('start-wizard-load-name'), page.getByTestId('start-wizard-load-change'), 'step 3 name and Change');
       await expect(dialog).not.toContainText('No file chosen');
       await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
-      await page.getByTestId('start-wizard-stock-next').click();
+      await stockNext(page);
       await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
       await page.screenshot({ path: `test-results/870-file-field-${vp.name}.png` });
 

@@ -56,6 +56,58 @@ export async function openSomethingElse(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-preset-something-else').click();
 }
 
+/**
+ * #1263 — THE STOCK STEP'S ASK, ANSWERED THE WAY AN OPERATOR DOES. The app assumes no material, so a
+ * walk that reaches Next on the Stock step with the ask still showing first answers it:
+ *   - `row`      — the step lists several pieces that hold the work and the shelf has one of the walk's
+ *                  material: the walk picks that row;
+ *   - `material` — the walk chooses the material (an operator now does);
+ *   - `size`     — ONLY when the walk says so (`typeSize`): it types that piece. A walk that did not ask
+ *                  for it and still finds the step asking for a size has lost its proposal, and fails.
+ * Returns which branch it took (`none` when the step was not asking), so the walks' choices are visible.
+ */
+export async function answerStockAsk(
+  page: Page,
+  opts: { material?: string; typeSize?: [number, number, number] } = {},
+): Promise<'none' | 'row' | 'material' | 'size'> {
+  const material = opts.material ?? 'hardwood';
+  const ask = page.getByTestId('start-wizard-stock-ask');
+  if ((await ask.count()) === 0) return 'none';
+  const sentence = (await page.getByTestId('start-wizard-stock-ask-sentence').textContent()) ?? '';
+  // A piece is picked only while NO size is entered: a walk that typed its own size keeps it.
+  const sizeMissing = (await page.getByTestId('start-wizard-ask-chip-size').count()) > 0;
+  if (sentence.startsWith('Several pieces') && sizeMissing) {
+    const rows = page.locator('[data-testid^="start-wizard-shelf-item-"]:not([data-testid$="-reason"]):not([disabled])');
+    const mine = rows.filter({ hasText: new RegExp(material, 'i') });
+    if ((await mine.count()) > 0) {
+      await mine.first().click();
+      return 'row';
+    }
+  }
+  const select = page.getByTestId('start-wizard-stock-material');
+  if ((await select.inputValue()) === '') await select.selectOption(material);
+  if ((await ask.count()) === 0) return 'material';
+  if (opts.typeSize === undefined) {
+    throw new Error('the Stock step still asks for a size: this walk lost its proposal (pass { typeSize } to type one)');
+  }
+  const [l, w, t] = opts.typeSize;
+  await page.getByTestId('start-wizard-make-length').fill(String(l));
+  await page.getByTestId('start-wizard-make-width').fill(String(w));
+  await page.getByTestId('start-wizard-make-thickness').fill(String(t));
+  return 'size';
+}
+
+/** Next on the Stock step, after answering the ask if it is showing; the branch taken is on the test's annotations. */
+export async function stockNext(
+  page: Page,
+  opts: { material?: string; typeSize?: [number, number, number] } = {},
+): Promise<void> {
+  const branch = await answerStockAsk(page, opts);
+  test.info().annotations.push({ type: 'stock-ask', description: branch });
+  console.log(`STOCKASK ${test.info().file.split(/[\\/]/).pop()} :: ${test.info().title.slice(0, 60)} :: ${branch}`);
+  await page.getByTestId('start-wizard-stock-next').click();
+}
+
 /** #1100 — the sign card, for a flow that types a line of text. */
 export async function openSignCard(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-preset-sign').click();

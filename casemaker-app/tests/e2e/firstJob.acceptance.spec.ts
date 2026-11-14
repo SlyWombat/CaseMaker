@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openSignCard, stockNext } from './fixtures/caseMaker';
 
 test.setTimeout(300_000);
 
@@ -515,8 +515,12 @@ test.describe('first job acceptance (§6)', () => {
     await page.getByTestId('start-wizard-form-rod').click();
     await page.getByTestId('start-wizard-make-diameter').fill('10');
     await page.getByTestId('start-wizard-make-length').fill('15');
+    // #1263 — the sign card states no material, so the Stock step asks "What will this be cut from?"
+    // and Next waits for the answer; this walk's rod is hardwood, chosen here.
+    await expect(page.getByTestId('start-wizard-stock-next')).toBeDisabled();
+    await page.getByTestId('start-wizard-stock-material').selectOption('hardwood');
     await expect(page.getByTestId('start-wizard-stock-next')).toBeEnabled();
-    await page.getByTestId('start-wizard-stock-next').click();
+    await stockNext(page);
     await expect(page.getByTestId('start-wizard-progress')).toHaveText('Step 4 of 4 · Holding');
     await expect(page.getByTestId('engrave-setup-next')).toBeEnabled();
     await page.getByTestId('engrave-setup-next').click();

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { test, expect } from './fixtures/caseMaker';
+import { test, expect, stockNext } from './fixtures/caseMaker';
 import { fakeRotaryHouse } from './fixtures/rotaryHouse';
 
 test.setTimeout(600_000);
@@ -49,7 +49,7 @@ async function toStep4(page: Page): Promise<void> {
  */
 async function createOperation(page: Page): Promise<void> {
   await page.getByTestId('start-wizard-operation-next').click();
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('start-wizard')).toHaveCount(0);
 }
@@ -178,7 +178,7 @@ test('a mixed job with a neck cuts the map work, the face, then the neck', async
   await page.getByTestId('start-wizard-op-text').fill('Zoomba');
   await expect(page.getByTestId('start-wizard-operation-next')).toBeEnabled();
   await page.getByTestId('start-wizard-operation-next').click();
-  await page.getByTestId('start-wizard-stock-next').click();
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-mount-rotary')).toBeChecked({ timeout: 30_000 });
   // The Holding step: leave the part on the default neck (chuck side, ⌀7 mm on the ⌀20 mm rod).
   await page.getByTestId('engrave-setup-rotary-neck').check();

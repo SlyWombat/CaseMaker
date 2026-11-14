@@ -11,7 +11,7 @@
 // #870 — on a phone the dialog is a full-height SHEET, edge to edge: no gutter, no band above it;
 // the 16 px edge is the body's (the one scroll region) between its pinned header and footer.
 
-import { test, expect, openSomethingElse } from '../fixtures/caseMaker';
+import { test, expect, openSomethingElse, stockNext } from '../fixtures/caseMaker';
 
 type Box = { left: number; top: number; right: number; bottom: number } | null;
 
@@ -59,7 +59,8 @@ test('#726 W19/P12 — Holding stacks at phone width, and the wizard is a plain 
   await page.getByTestId('start-wizard-make-length').fill('76.2');
   await page.getByTestId('start-wizard-make-width').fill('38.1');
   await page.getByTestId('start-wizard-make-thickness').fill('3.81');
-  await page.getByTestId('start-wizard-stock-next').click();
+  // #1263 — a bare "something else" states no material, so the Stock step asks; the helper answers it.
+  await stockNext(page);
   await expect(page.getByTestId('engrave-setup-step-holding')).toBeVisible();
 
   const layout = await page.evaluate(() => {

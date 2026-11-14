@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { Page } from '@playwright/test';
 
-import { test, expect, openCutterGroup, openSignCard } from './fixtures/caseMaker';
+import { test, expect, openCutterGroup, openSignCard, stockNext } from './fixtures/caseMaker';
 import { locationDocument, locationView, serveHouse } from './fixtures/fakeHouse';
 
 test.setTimeout(300_000);
@@ -55,7 +55,9 @@ async function toDefaultJob(page: Page): Promise<void> {
   await openSignCard(page);
   await page.getByTestId('start-wizard-preset-text').fill('Zoomba');
   await page.getByTestId('start-wizard-operation-next').click();
-  await page.getByTestId('start-wizard-stock-next').click();
+  // This house's shelf holds the line in several materials and none is the default job's piece, so the
+  // walk types the default job's blank explicitly: the 36 × 100 × 36 mm stick (the material it chooses).
+  await stockNext(page, { typeSize: [36, 100, 36] });
   await page.getByTestId('engrave-setup-next').click();
   await expect(page.getByTestId('engrave-panel')).toBeVisible();
 }
