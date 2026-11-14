@@ -4,14 +4,14 @@
 // off the document) and every NC text (also written as files). v2 writes a small result: `camIr`
 // omitted, all NC text nulled, and a `files` list naming what the run wrote under `--out`, with the
 // index each top-level alias (`nc`, `frameNc`, `facingNc`) mirrors so a reader can rebuild the SAME
-// `EngraveGenerated` the in-page worker returns.
+// `EngraveGeneratedFull` the in-page worker returns.
 import { describe, expect, it } from 'vitest';
 
 import { planSummary, programFileNames, resultDocument, type PlanSummary } from '../../scripts/lib/casemaker/engrave';
-import type { EngraveGenerated } from '@/workers/sim/engraveGenerate';
+import type { EngraveGeneratedFull } from '@/workers/sim/engraveGenerate';
 import type { ModelPlanOutput } from '@/engine/cnc/cam/model/plan';
 
-function generatedFixture(): EngraveGenerated {
+function generatedFixture(): EngraveGeneratedFull {
   const programs = [
     { name: 'tray', stage: 'done', ok: true, kind: 'facing', nc: 'FACING', frameNc: null, cam: null },
     { name: 'tray', stage: 'done', ok: true, kind: 'engrave', nc: 'P1', frameNc: 'FRAME1', cam: null },
@@ -42,7 +42,7 @@ function generatedFixture(): EngraveGenerated {
     // The IR that made the document big. The browser never reads it from a result: its only
     // references in the tree are inside engraveGenerate.ts itself.
     camIr: { operations: [{ id: 'big' }] },
-  } as unknown as EngraveGenerated;
+  } as unknown as EngraveGeneratedFull;
 }
 
 describe('#1126 — the v2 result document', () => {
@@ -106,10 +106,10 @@ describe('#1126 — the v2 result document', () => {
         totalCostSeconds: 1234,
       },
       planIdeal: {
-        perSetup: [{ setupIndex: 0, notes: ['ideal note'], programs: [{ operations: [{ big: true }] }] }],
+        perSetup: [{ setupIndex: 0, notes: ['ideal note'], ops: [], programs: [{ operations: [{ big: true }] }] }],
         outcome: { predictedCutIntoMm: 0.2 },
       },
-    } as unknown as EngraveGenerated;
+    } as unknown as EngraveGeneratedFull;
     const doc = resultDocument('tray', withPlans);
     // By construction: exactly the named fields the browser reads (planSummary.ts lists each reader);
     // an op's `throughKerf` and `ir` are not among them.
@@ -149,7 +149,7 @@ describe('#1126 — the v2 result document', () => {
       frameNc: null,
       facingNc: null,
       programs: [{ name: 'tray', stage: 'done', ok: true, kind: 'engrave', nc: 'P1', frameNc: null, cam: null }],
-    } as unknown as EngraveGenerated;
+    } as unknown as EngraveGeneratedFull;
     const doc = resultDocument('tray', plain);
     expect(doc.ncProgram).toBe(0);
     expect(doc.frameProgram).toBeNull();

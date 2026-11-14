@@ -74,7 +74,7 @@ describe('#1126 — camIr is not a browser input', () => {
       'src/components/panels/GoalFreeingTabs.tsx': /generated\?\.plan\?\.perSetup/,
       // Existence tests only — no plan field is read.
       'src/components/panels/EngravePanel.tsx': /run\.generated\?\.plan === undefined \|\| run\.generated\?\.plan === null/,
-      'src/engine/cnc/engrave/restoredRun.ts': /generated\.plan !== undefined && generated\.plan !== null/,
+      'src/engine/cnc/engrave/restoredRun.ts': /const plan = generated\.plan;/,
     };
     const isEngine = (path: string): boolean =>
       path.startsWith('src/workers/sim/') || path.startsWith('src/engine/cnc/cam/model/');
@@ -99,11 +99,13 @@ describe('#1126 — camIr is not a browser input', () => {
     // Allowed to name `perSetup` in code: the engine that produces the plan, the QA window, which
     // reads NOTES from it, and the freeing-tabs counts, which read ops[].kind / outcome.tabCounts —
     // both pinned below so a change to `.programs` fails here. The summary builder names it to
-    // build the allowlist. `restoredRun.ts` is NOT here: it reads each program's `verifyContext`.
+    // build the allowlist. `restoredRun.ts` names it only to ask whether the plan has an entry for
+    // each program's setup (pinned below); everything it checks with comes from `verifyContext`.
     const allowed = (path: string): boolean =>
       path.startsWith('src/workers/sim/') ||
       path.startsWith('src/engine/cnc/cam/model/') ||
       path === 'src/engine/cnc/engrave/planSummary.ts' ||
+      path === 'src/engine/cnc/engrave/restoredRun.ts' ||
       path === 'src/components/panels/GoalFreeingTabs.tsx' ||
       path === 'src/testing/windowApi.ts';
     const offenders: string[] = [];
@@ -122,6 +124,12 @@ describe('#1126 — camIr is not a browser input', () => {
     expect(freeing).toContain("last?.ops.find((op) => op.kind === 'contour')");
     expect(freeing).toContain('contour?.outcome.tabCounts');
     expect(freeing).not.toMatch(/\.programs\b/);
+    const restored = readFileSync(join(SRC, 'engine', 'cnc', 'engrave', 'restoredRun.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+    expect([...restored.matchAll(/\bperSetup\b[^\n]*/g)].map((m) => m[0].trim())).toEqual([
+      'perSetup[program.setupIndex - 1] === undefined))',
+    ]);
   });
 
   it('a result without camIr still freezes (#1132): the package takes nc, frames and hashes', () => {

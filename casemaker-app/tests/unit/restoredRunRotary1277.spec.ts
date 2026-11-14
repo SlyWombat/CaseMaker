@@ -9,7 +9,11 @@
 //
 // Three cases per rod job (the probe that found it): no setups / recommendation, no setups / a
 // tighter shop keep-out, setups / a tighter shop keep-out. The keep-out test is only possible now.
-import { planlessVerifyContext } from '@/engine/cnc/engrave/planSummary';
+import { HOP_Z } from '@/engine/cnc/cam/ir';
+import type { ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
+
+/** The context a standard-hop program with no allowances and no through kerf was verified with. */
+const STORED_CONTEXT: ProgramVerifyContext = { minRapidZ: HOP_Z, outsideAllowancesMm: [], throughKerf: [] };
 import { describe, expect, it } from 'vitest';
 
 import { jobMachine } from '@/engine/cnc/calibration';
@@ -57,7 +61,7 @@ const OLD_REFUSAL: VerifyReport = {
 function generated(nc: string, stored: VerifyReport = CLEAN): EngraveGenerated {
   return {
     ok: true, stage: 'done', findings: [], errors: [], nc, verify: null, predicted: [],
-    programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc, programHash: 'h', verifyContext: planlessVerifyContext(), frameNc: null, frameVerify: null, cam: null, verify: stored }],
+    programs: [{ setupIndex: 1, setupId: 'setup-1', toolKey: 'flat-1.0', nc, programHash: 'h', verifyContext: STORED_CONTEXT, frameNc: null, frameVerify: null, cam: null, verify: stored }],
   } as unknown as EngraveGenerated;
 }
 

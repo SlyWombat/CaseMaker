@@ -26,7 +26,7 @@ import { goalInputFor } from './sim/goalCheckField';
 import type { ConditionSummary } from '@/engine/cnc/toolCondition';
 import { createEngravePreviewer, type EngravePreview, type EngravePreviewer } from './sim/engravePreview';
 import type { ProbeResiduals } from '@/engine/cnc/probePlan';
-import { engraveGenerate as runEngraveGenerate, buildModelPlanInputForGoal, supportingFloors, trimmedResult, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
+import { engraveGenerate as runEngraveGenerate, buildModelPlanInputForGoal, supportingFloors, trimGenerated, type EngraveGenerated, type EngraveProgress, type EngraveShopOpts } from './sim/engraveGenerate';
 // #986 (the ruling) — the background ideal: the second plan's outcome and the tradeoff line,
 // computed AFTER the owned plan has posted, never posting itself.
 import { planIdealAgainst, planTwoOutcomes } from '@/engine/cnc/cam/model/twoPlans';
@@ -340,7 +340,7 @@ const api = {
     // #896 — every stage report names this worker's heap too (see `workerMemoryMb`).
     const withMemory =
       onProgress === undefined ? undefined : (progress: EngraveProgress): void => onProgress({ ...progress, memoryMB: workerMemoryMb() });
-    return trimmedResult(await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools, {
+    return trimGenerated(await runEngraveGenerate(await getToplevel(), job, tool, catalogue, calibration, margins, shop, withMemory, catalogueTools, {
       ...(deferIdeal === undefined ? {} : { deferIdeal }),
       ...(restLadder === undefined ? {} : { restLadder }),
     }));

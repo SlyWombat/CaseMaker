@@ -18,7 +18,7 @@ import type { ManifoldToplevel } from '@/workers/geometry/evaluateOp';
 import {
   engraveGenerate,
   engraveRegions,
-  type EngraveGenerated,
+  type EngraveGeneratedFull,
   type EngraveRegions,
   type EngraveShopOpts,
 } from '@/workers/sim/engraveGenerate';
@@ -41,7 +41,7 @@ export async function generate(
   // #432 — the shop options, for the halves of the pipeline that read the location: the facing
   // pass's tool list (`shop.tools`) and its feeds table. Absent is the no-location build.
   shop: EngraveShopOpts = {},
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   return await engraveGenerate(tl, job, jobTool(job), catalogue, calibration, margins, shop);
 }
 

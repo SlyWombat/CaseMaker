@@ -20,7 +20,6 @@
  */
 
 import { HOP_Z } from '@/engine/cnc/cam/ir';
-import { jobDepthLimit } from '@/engine/cnc/engrave/partPlan';
 import { setupRecordFor, verifyContextFrom, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { setupFootprint } from '@/engine/cnc/footprint';
 import { postKey } from '@/engine/cnc/post';
@@ -74,7 +73,13 @@ export interface StoredProgramRecheck {
  */
 export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredProgramRecheck {
   const { job, generated, machine, mount, setup, defaults } = input;
-  if (generated.programs.some((program) => program.verifyContext === undefined)) {
+  // GREENFIELD: no tolerant reader. A program with no stored context, or a plan that exists but has
+  // no entry for a program's setup, is not re-checked from a guess: the run is planned again.
+  const plan = generated.plan;
+  if (
+    generated.programs.some((program) => program.verifyContext === undefined) ||
+    (plan !== undefined && plan !== null && generated.programs.some((program) => plan.perSetup[program.setupIndex - 1] === undefined))
+  ) {
     return { generated, errors: [], unresolved: [], regenerate: true };
   }
   // #1247 — THE VERIFIER'S BODY IS THE SETUP'S OWN (#1082). A job that states per-setup stocks
@@ -85,8 +90,7 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
 
   // #1246 slice 2 pair (c) — A RESTORED RUN WITH NO STORED PLAN SAYS WHAT IT WAS CHECKED
   // AGAINST. The fallback to the job's limit stays; the run's sheet statements gain one line.
-  const hasStoredPlan = generated.plan !== undefined && generated.plan !== null;
-  const noStoredPlan = !hasStoredPlan;
+  const noStoredPlan = generated.plan === undefined || generated.plan === null;
   const planStatements: PlanStatement[] | null | undefined = noStoredPlan
     ? [
         ...(generated.planStatements ?? []),
@@ -108,11 +112,11 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
     }
     // #1235 (second ruling) / #1126 — the program's own stored context: its hop, its outside
     // allowances (posted toolpath number → mm) and its setup's through kerfs.
-    const stored = program.verifyContext!;
+    const stored = program.verifyContext;
+    if (stored === undefined) return program; // unreachable: a program without one asked to be regenerated above
     const outsideAllowancesMm = stored.outsideAllowancesMm.length === 0 ? undefined : new Map(stored.outsideAllowancesMm);
     // #1246 slice 1 — the context comes from the setup record. The record's limit is the setup's
-    // own (#1082/#943); a stored run with NO plan has no setup to state, so it keeps the plain
-    // job limit the inline builder's fallback used.
+    // own (#1082/#943), composed from the through kerfs and boundary margin the posting path stored.
     const setupIndex = program.setupIndex - 1;
     const body = setupFor(setupIndex);
     const facts: SetupRecordDeps & VerifyPerProgram = {
@@ -121,7 +125,9 @@ export function recheckStoredPrograms(input: StoredProgramRecheckInput): StoredP
       dialect: postKey(machine),
       tool,
       minRapidZ: stored.minRapidZ,
-      ...(!hasStoredPlan ? { depthLimit: jobDepthLimit(job) } : { throughKerf: stored.throughKerf }),
+      throughKerf: stored.throughKerf,
+      ...(stored.boundaryMarginMm === undefined ? {} : { boundaryMarginMm: stored.boundaryMarginMm }),
+      ...(stored.itemProgram === undefined ? {} : { itemProgram: stored.itemProgram }),
       // #1235 stage 2 — the program's own setup footprint, from the same stock the depth limit
       // above describes (#1082): a flipped setup's stated box, else the job's blank.
       footprint: setupFootprint(job, setupIndex),

@@ -36,9 +36,11 @@ import type { MachineCalibration } from '@/engine/cnc/calibration';
 import type { EngraveMargins } from '@/types/engraveJob';
 import type {
   EngraveGenerated,
+  EngraveProgram,
   EngraveProgress,
   EngraveShopOpts,
 } from '@/workers/sim/engraveGenerate';
+import type { EngraveResultFiles } from '@/engine/cnc/engrave/resultShape';
 
 /** The stages the engine's own progress objects use; anything else is relayed as a note. */
 const ENGINE_STAGES: readonly EngraveProgress['stage'][] = [
@@ -129,51 +131,45 @@ function progressReporter(onProgress: ((progress: EngraveProgress) => void) | un
  * receives is the same `EngraveGenerated` an in-page run returns; `camIr` stays absent because
  * nothing in the browser reads it off a result (its only references are inside `engraveGenerate`).
  */
-export async function assembleResult(
-  id: string,
-  doc: Record<string, unknown>,
-): Promise<EngraveGenerated> {
-  const files = Array.isArray(doc.files)
-    ? (doc.files as { name?: unknown; what?: unknown; index?: unknown }[])
-    : [];
+/**
+ * The document is JSON from the wire: it is a v2 result only when it says so and carries the two
+ * lists the rebuild needs. Anything else is refused by name, never read as a guess.
+ */
+export function isResultFiles(doc: Record<string, unknown>): doc is EngraveResultFiles {
+  return doc.resultVersion === 2 && Array.isArray(doc.files) && Array.isArray(doc.programs);
+}
+
+export async function assembleResult(id: string, doc: Record<string, unknown>): Promise<EngraveGenerated> {
+  if (!isResultFiles(doc)) {
+    throw new Error('the house result does not name its programs and files; generate again');
+  }
   const texts = new Map<string, string>();
-  for (const file of files) {
-    if (typeof file.name !== 'string') continue;
+  for (const file of doc.files) {
     const got = await fetchRunProgram(id, file.name);
     if (got.kind !== 'ok') throw new Error(houseFailureSentence(got));
     texts.set(file.name, got.text);
   }
   const programName = new Map<number, string>();
   const frameName = new Map<number, string>();
-  for (const file of files) {
-    if (typeof file.index !== 'number' || typeof file.name !== 'string') continue;
+  for (const file of doc.files) {
     if (file.what === 'program') programName.set(file.index, file.name);
     if (file.what === 'frame') frameName.set(file.index, file.name);
   }
-  const rawPrograms = Array.isArray(doc.programs) ? doc.programs : [];
-  const programs = rawPrograms.map((entry, i) => {
-    const program = { ...(entry as Record<string, unknown>) };
+  const programs: EngraveProgram[] = doc.programs.map((entry, i) => {
     const ncName = programName.get(i);
+    const nc = ncName === undefined ? undefined : texts.get(ncName);
+    if (nc === undefined) throw new Error(`the house result names no file for program ${i + 1}; generate again`);
     const frame = frameName.get(i);
-    program.nc = ncName === undefined ? null : (texts.get(ncName) ?? null);
-    program.frameNc = frame === undefined ? null : (texts.get(frame) ?? null);
-    return program;
+    return { ...entry, nc, frameNc: frame === undefined ? null : (texts.get(frame) ?? null) };
   });
-  const indexOf = (key: string): number | null =>
-    typeof doc[key] === 'number' ? (doc[key] as number) : null;
-  const ncProgram = indexOf('ncProgram');
-  const frameProgram = indexOf('frameProgram');
-  const facingProgram = indexOf('facingProgram');
-  const programNc = (i: number | null): string | null =>
-    i === null ? null : ((programs[i]?.nc as string | null | undefined) ?? null);
-  const programFrame = (i: number | null): string | null =>
-    i === null ? null : ((programs[i]?.frameNc as string | null | undefined) ?? null);
+  const programNc = (i: number | null): string | null => (i === null ? null : (programs[i]?.nc ?? null));
+  const programFrame = (i: number | null): string | null => (i === null ? null : (programs[i]?.frameNc ?? null));
   const {
     resultVersion: _version,
     files: _files,
-    ncProgram: _ncProgram,
-    frameProgram: _frameProgram,
-    facingProgram: _facingProgram,
+    ncProgram,
+    frameProgram,
+    facingProgram,
     ...rest
   } = doc;
   return {
@@ -182,7 +178,7 @@ export async function assembleResult(
     frameNc: programFrame(frameProgram),
     facingNc: programNc(facingProgram),
     programs,
-  } as unknown as EngraveGenerated;
+  };
 }
 
 export interface HouseGenerateArgs {

@@ -71,7 +71,7 @@
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, basename, isAbsolute } from 'node:path';
 
-import { engraveGenerate, type EngraveGenerated, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
+import { engraveGenerate, type EngraveGeneratedFull, type EngraveShopOpts } from '../../../src/workers/sim/engraveGenerate';
 import { tabChoiceSentence, TAB_CHOICE_FLAG_VALUES } from '../../../src/engine/cnc/cam/model/tabChoice';
 // #766 — the measured search: slice A scores a candidate plan, B chooses, C writes the sentences.
 // #922 — THE PICK IS THE APP'S OWN: one builder in smartPickRun.ts (the worker's caller uses it
@@ -185,6 +185,7 @@ import { bootstrap, loadCatalogue, type LoadedCatalogue } from '../../../src/pla
 import { defaultEngraveJob } from '../../../src/engine/cnc/engrave/defaults';
 import { tabSettings } from '../../../src/engine/cnc/cam/tabSettings';
 import { planSummary, type PlanSummary } from '../../../src/engine/cnc/engrave/planSummary';
+import type { EngraveResultFiles, ResultFileRef } from '../../../src/engine/cnc/engrave/resultShape';
 import { buildPcbJob, jobDocumentProblem, type PcbJobFile } from './pcbJob';
 import { viseForNewJob } from '../../../src/engine/cnc/fixture';
 import { designJobFor, type DesignReadingDirection } from '../../../src/engine/cnc/engrave/fromDesign';
@@ -269,7 +270,7 @@ interface Args {
    */
   parallelRank?: boolean;
   /**
-   * #1126 — write the run's whole `EngraveGenerated` document (the plain-data result the browser's
+   * #1126 — write the run's whole `EngraveGeneratedFull` document (the plain-data result the browser's
    * worker returns) to this file as JSON. The house service asks for it beside the receipt and the
    * programs so the panel can settle a house run exactly as it settles an in-page one; the receipt
    * stays the human/machine summary it has always been.
@@ -398,7 +399,7 @@ interface EngraveFailure {
    * `--generated` can hand a house-backed run the structured question (`tabChoiceNeeded`, with its
    * stretches and the drawing data) and not just the receipt's sentence.
    */
-  generated?: EngraveGenerated;
+  generated?: EngraveGeneratedFull;
 }
 
 /**
@@ -577,8 +578,8 @@ export function sheetRegistrationFor(
   return sheetRegistrationPlan({ job, calibration, defaults: where.defaults, probe, bracketSeat, placedSeed });
 }
 
-/** One program as the generator lists it — the CLI's slice of `EngraveGenerated['programs']`. */
-type GeneratedProgram = EngraveGenerated['programs'][number];
+/** One program as the generator lists it — the CLI's slice of `EngraveGeneratedFull['programs']`. */
+type GeneratedProgram = EngraveGeneratedFull['programs'][number];
 
 /**
  * The file names for a job's programs, in cut order (#733, #1093 R1).
@@ -614,7 +615,7 @@ export const NO_SETTINGS_SECTION = 'this location file has no settings section; 
 /**
  * #1126 slice 2 — THE RESULT WITHOUT THE BYTES.
  *
- * `--generated` used to write the whole `EngraveGenerated`: 229 MB for the set B tray bottom. WHAT
+ * `--generated` used to write the whole `EngraveGeneratedFull`: 229 MB for the set B tray bottom. WHAT
  * THE WEIGHT ACTUALLY IS, measured on that job (D, 2026-11-10 — the first guess, from a badge, was
  * wrong): `planIdeal` 141.1 MB and `plan` 82.6 MB, almost all of it each setup's `programs` (the
  * ToolpathIR the post consumed); everything else together — programs' nc/verify/cam, predicted,
@@ -632,30 +633,25 @@ export const NO_SETTINGS_SECTION = 'this location file has no settings section; 
  */
 export const RESULT_VERSION = 2;
 
-export interface ResultFileRef {
-  name: string;
-  what: 'program' | 'frame';
-  index: number;
-}
+export type { ResultFileRef };
 
 // #1126 — `PlanSummary`/`planSummary` (the allowlist, one shape for the house and the in-page worker) live in
 // `src/engine/cnc/engrave/planSummary.ts`, with each field's reader.
 export { planSummary, type PlanSummary };
 
-export function resultDocument(
-  jobName: string,
-  generated: EngraveGenerated,
-): Record<string, unknown> & { resultVersion: number; files: ResultFileRef[] } {
+export function resultDocument(jobName: string, generated: EngraveGeneratedFull): EngraveResultFiles {
   const names = programFileNames(jobName, generated.programs);
   const files: ResultFileRef[] = [];
   const programs = generated.programs.map((program, index) => {
-    const { nc: _nc, camIr: _camIr, ...rest } = program as GeneratedProgram & { camIr?: unknown };
+    const { nc: _nc, ...rest } = program;
     files.push({ name: names[index]!.ncFile, what: 'program', index });
     if (program.frameNc !== null && names[index]!.frameFile !== null) {
       files.push({ name: names[index]!.frameFile!, what: 'frame', index });
     }
     return { ...rest, nc: null, frameNc: null };
   });
+  // A posted program's own text sits in a file; the generator's top-level `camIr` (a face's IR) never
+  // leaves the process — the browser reads no IR.
   const {
     nc,
     frameNc,
@@ -663,7 +659,7 @@ export function resultDocument(
     camIr: _ir,
     programs: _programs,
     ...rest
-  } = generated as EngraveGenerated & { camIr?: unknown };
+  }: EngraveGeneratedFull & { camIr?: unknown } = generated;
   const engraving = (program: GeneratedProgram): boolean => (program.kind ?? 'engrave') !== 'facing';
   const match = (predicate: (program: GeneratedProgram) => boolean): number | null => {
     const found = generated.programs.findIndex(predicate);
@@ -1195,7 +1191,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
   }
 
   /** The frame facts both a generated result and a later program carry (`engraveGenerate`'s type). */
-  type GeneratedFrame = Pick<EngraveGenerated, 'frameNc' | 'frameVerify' | 'frameError'>;
+  type GeneratedFrame = Pick<EngraveGeneratedFull, 'frameNc' | 'frameVerify' | 'frameError'>;
 
   /**
    * #747 — THE FRAME'S OWN REPORT, as the frame's: `source: 'frame'`, so the receipt can render it
@@ -1231,7 +1227,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    */
   function generatedDiagnostics(
     job: EngraveJob,
-    generated: EngraveGenerated,
+    generated: EngraveGeneratedFull,
     load: SimLoadOk | null,
   ): ReceiptDiagnostic[] {
     return [
@@ -1289,7 +1285,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     nc: string;
     /** `cuttingDiameter(tool)`, resolved once here so no caller re-derives it (#410's two programs). */
     diameter: number;
-    generated: EngraveGenerated;
+    generated: EngraveGeneratedFull;
     /** The first ENGRAVING program's sweep — the adapter the run sheet and receipt read. */
     load: SimLoadOk;
     /**
@@ -1369,7 +1365,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
     // `setup-rest-unavailable`.
     // #749 — the generator builds Clipper/Manifold CSG from the job's own geometry; a kernel
     // crash there is caught (never a bare throw) and answered as a stopped run at `cam`.
-    let generated: EngraveGenerated;
+    let generated: EngraveGeneratedFull;
     if (args.restLadder === true && !ladderSentencePrinted) {
       // #1046 — THE EXPECTED COST, BEFORE THE RUN. A first CLI run has no previous plan's timings,
       // so the sentence states #1028's MEASURED bounds instead of inventing a number — the ladder
@@ -1732,7 +1728,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * owned plan first, so the comparison is STATED deferred rather than silently missing; anything
    * else (no goal plan, no catalogue, the catalogue added no cutter) has no comparison at all.
    */
-  function comparisonOf(generated: EngraveGenerated): PlanComparisonStatement | null {
+  function comparisonOf(generated: EngraveGeneratedFull): PlanComparisonStatement | null {
     if (generated.planTradeoff !== undefined && generated.planTradeoff !== null) return planComparisonStatement(generated.planTradeoff);
     return generated.idealDeferred === true ? { kind: 'deferred' } : null;
   }
@@ -2024,7 +2020,7 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
    * value the row sampler stopped at — and whether the job stated it — is on the receipt rather
    * than only in the sheet.
    */
-  function samplingRows(generated: EngraveGenerated): EngraveDetails['sampling'] {
+  function samplingRows(generated: EngraveGeneratedFull): EngraveDetails['sampling'] {
     const rows = (generated.plan?.perSetup ?? []).flatMap((setup) => setup.clGrid);
     const byCutter = new Map<string, NonNullable<EngraveDetails['sampling']>[number]>();
     for (const row of rows) {
@@ -2905,17 +2901,17 @@ async function engraveJobBody(argv: string[], options: CommandOptions, receipt: 
         const stem2 = runSheetFileName(restJob.name).replace(/\.nc$/, '');
         const dia1 = p1.diameter;
         const share1 = shareOf(cut, tool1Key);
-        const seconds = (g: EngraveGenerated): number => Math.round(g.cam?.estimatedSeconds ?? 0);
+        const seconds = (g: EngraveGeneratedFull): number => Math.round(g.cam?.estimatedSeconds ?? 0);
         // #437 item 8 — each program's own cutting numbers, read the SAME way the sheet reads them
         // (`generated.feeds && generated.feeds.ok ? params : null`, `cam?.passes ?? 1`), so the two
         // lines cannot disagree about how a number was arrived at.
-        const cutParams = (g: EngraveGenerated): CutParams | null =>
+        const cutParams = (g: EngraveGeneratedFull): CutParams | null =>
           g.feeds && g.feeds.ok ? g.feeds.params : null;
-        const passCount = (g: EngraveGenerated): number => g.cam?.passes ?? 1;
+        const passCount = (g: EngraveGeneratedFull): number => g.cam?.passes ?? 1;
         // #487 — the program's XY travel, present only when the CAM recorded it. An older stored
         // result can arrive with a `cam` that predates the fields; the sheet then omits the step.
         const travelOf = (
-          g: EngraveGenerated,
+          g: EngraveGeneratedFull,
         ): { travel?: { rapidMm: number; cutMm: number; baselineRapidMm: number } } => {
           const cam = g.cam;
           return cam?.rapidMm !== undefined && cam.cutMm !== undefined && cam.baselineRapidMm !== undefined

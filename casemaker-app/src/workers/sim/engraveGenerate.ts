@@ -143,7 +143,7 @@ import type { NodeMeshOutput } from '../geometry/meshOutput';
 import { programHash } from '@/engine/cnc/programHash';
 import { hasSacrificial } from '@/engine/cnc/sacrificial';
 import { jobFootprint, outsideAllowancesOf, setupFootprint, type FootprintShape } from '@/engine/cnc/footprint';
-import { planlessVerifyContext, planSummary, verifyContextOf, type ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
+import { planSummary, verifyContextOfFacts, type PlanSummary, type ProgramVerifyContext } from '@/engine/cnc/engrave/planSummary';
 import { stockForSetup } from '@/engine/cnc/setups/perSetupStock';
 import { setupRecordFor, verifyContextFrom, type OpenEdgeFacts, type SetupRecordDeps, type VerifyPerProgram } from '@/engine/cnc/setups/setupRecord';
 import { jobVise, validateVise, viseEnvelope } from '@/engine/cnc/fixture';
@@ -411,7 +411,7 @@ export interface EngraveShopOpts {
    *
    * #623 — the SAME pair is what the simulation is loaded with (`SimLoadOpts.surface`), so the
    * program's frame and the oracle's frame are one value (#628 un-lifts the program into it). The
-   * result repeats it as `EngraveGenerated.surface`, so a caller never has to guess the frame from
+   * result repeats it as `EngraveGeneratedFull.surface`, so a caller never has to guess the frame from
    * what it asked for: the package states the frame it was posted against.
    */
   surface?: SurfaceFrame | null;
@@ -499,7 +499,7 @@ export type EngraveProgramKind = 'facing' | 'engrave';
  * `finishedHashes` use, so a program that finished on this machine is recognised across reloads.
  *
  * Only a program that POSTED and PASSED THE VERIFIER appears here: a withheld file is not a program,
- * and `EngraveGenerated.ok` is false whenever one is missing from the list it should have been in.
+ * and `EngraveGeneratedFull.ok` is false whenever one is missing from the list it should have been in.
  */
 export interface EngraveProgram {
   /** #473 — `'facing'` for the blank's skim; absent or `'engrave'` for a setup's program. */
@@ -545,8 +545,8 @@ export interface EngraveProgram {
   /**
    * #1126/#1191 — THE RE-CHECK'S CONTEXT beside the program, as plain data: its hop height, its ops'
    * outside allowances and its setup's through kerfs, computed at posting where the IR exists. A
-   * stored run is re-verified from this, never from a plan's IR (which no result carries). Absent
-   * on the facing program and on a program with no plan (an item-pipeline run).
+   * stored run is re-verified from this, never from a plan's IR (which no result carries). It is
+   * the context its own first verification was built from — the path that posted it records it.
    */
   verifyContext?: ProgramVerifyContext;
   cam: EngraveCamSummary | null;
@@ -768,7 +768,7 @@ export interface ChamferProgramFacts {
   }[];
 }
 
-export interface EngraveGenerated {
+export interface EngraveGeneratedFull {
   /** False as soon as any stage reports an error. */
   ok: boolean;
   /** The stage that stopped it, or `done`. */
@@ -3631,6 +3631,8 @@ function facingProgram(
 ): {
   nc: string | null;
   verify: VerifyReport | null;
+  /** #1126 — the context the skim was verified with (absent when no file was produced). */
+  verifyContext?: ProgramVerifyContext;
   toolKey: string | null;
   error: string | null;
   cam: FacingCamSummary | null;
@@ -3751,7 +3753,7 @@ function facingProgram(
         cam: null,
       };
     }
-    return { nc: posted.text, verify, toolKey, error: null, cam };
+    return { nc: posted.text, verify, verifyContext: verifyContextOfFacts(facts), toolKey, error: null, cam };
   } catch (e) {
     return { nc: null, verify: null, toolKey, error: e instanceof Error ? e.message : String(e), cam: null };
   }
@@ -3786,7 +3788,7 @@ export function depthLimitReason(stack: StackDepthLimit, job: EngraveJob, x: Mm,
  */
 type NeckMode = boolean | { apart: VacuumSpan };
 
-type OneProgram = Omit<EngraveGenerated, 'programs'> & {
+type OneProgram = Omit<EngraveGeneratedFull, 'programs'> & {
   /**
    * #849 — the NECK-ONLY file this program's CAM was split into, when the caller asked for the neck
    * apart (a mixed rotary job: items, then faces, then the neck). This program then holds the items
@@ -3818,6 +3820,10 @@ type OneProgram = Omit<EngraveGenerated, 'programs'> & {
    * indexed one, so its program hands the IR out rather than only its posted text.
    */
   camIr?: ToolpathIR;
+  /** #1126 — the context THIS program's first verification was built from (its posting path states it). */
+  verifyContext?: ProgramVerifyContext;
+  /** #1126 — the same for the facing skim, which is verified on its own. */
+  facingVerifyContext?: ProgramVerifyContext;
 };
 
 /**
@@ -4733,9 +4739,9 @@ function withSimulationTopView(nc: string, mesh: NodeMeshOutput): string {
  */
 
 /**
- * The empty program-fields shell a goal result fills, so its return matches `EngraveGenerated`.
+ * The empty program-fields shell a goal result fills, so its return matches `EngraveGeneratedFull`.
  */
-function emptyGoalResult(): Omit<EngraveGenerated, 'ok' | 'stage' | 'findings' | 'feeds' | 'cam' | 'nc' | 'verify'> {
+function emptyGoalResult(): Omit<EngraveGeneratedFull, 'ok' | 'stage' | 'findings' | 'feeds' | 'cam' | 'nc' | 'verify'> {
   return {
     threads: null,
     threadMachining: null,
@@ -4814,9 +4820,9 @@ export function generateRotaryGoalProgram(
   catalogue: readonly FeedCatalogueRow[],
   calibration: MachineCalibration | null,
   shop: EngraveShopOpts,
-): EngraveGenerated {
+): EngraveGeneratedFull {
   const base = emptyGoalResult();
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGenerated => ({
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null): EngraveGeneratedFull => ({
     ...base,
     ok: false,
     stage,
@@ -5063,7 +5069,9 @@ export function generateRotaryGoalProgram(
     frameNc: null,
     frameVerify: null,
     programHash: programHash(nc),
-    verifyContext: planlessVerifyContext(),
+    // No verifier ran on a surface program (its check is the material sweep): the context states the
+    // hop the IR was posted with and nothing else.
+    verifyContext: verifyContextOfFacts({ minRapidZ: relief.ir.hopZ }),
     cam,
   };
   return {
@@ -5814,7 +5822,7 @@ export async function postModelPlan(
   onProgress?: EngraveProgressFn,
   /** #1046 — the owned plan's wall time, carried beside the plan (never inside its JSON). */
   planTiming?: PlanTiming | null,
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   const { goalFindings, reachFindings, coverageFindings, modelRoughFindings, chamferFindings, tabRelease = null, tabReleaseFindings = [], planIdeal = null, planTradeoff = null } = findings;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
@@ -5823,7 +5831,7 @@ export async function postModelPlan(
   // #992 — `findings` is the fifth seat: a refusal that happens AFTER `planModelCam` returned a
   // plan still carries the plan's own typed statements (the reason the run came up short), the
   // same way the success and verify-fail returns do.
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findingsIn: JobFinding[] = []): EngraveGenerated => ({
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findingsIn: JobFinding[] = []): EngraveGeneratedFull => ({
     ...base,
     ok: false,
     stage,
@@ -6055,7 +6063,7 @@ export async function postModelPlan(
         frameNc: null,
         frameVerify: null,
         programHash: programHash(posted.text),
-        verifyContext: verifyContextOf(ir, throughKerf),
+        verifyContext: verifyContextOfFacts(facts),
         cam: summarize(ir, mill.rapidEstimate),
         // #1073 — the release is the LAST program of the LAST setup; its bridges ride with it so
         // the sheet's last step prints the positions the file was cut with.
@@ -6277,11 +6285,11 @@ export async function generateGoalProgram(
     /**
      * #1258 — the operator's answer to the tab question, as plain data on the plan's input (see
      * `ModelPlanInput.tabChoice`). Absent: a job whose corner margin leaves a stretch too long stops
-     * and asks (`EngraveGenerated.tabChoiceNeeded`).
+     * and asks (`EngraveGeneratedFull.tabChoiceNeeded`).
      */
     tabChoice?: ModelPlanInput['tabChoice'];
   },
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   const { shop, sideFace, catalogueTools, onProgress, signal, feedCatalogue, reusedOwnedPlan, ownedOnly, deferIdeal, measureRankCandidates, restLadder, tabChoice } = opts;
   const base = emptyGoalResult();
   // #966 — `plan` carries `planModelCam`'s own `ModelPlanOutput` on a refusal that happens AFTER
@@ -6290,7 +6298,7 @@ export async function generateGoalProgram(
   // #992 — `findings` is the fifth seat: a refusal that happens AFTER `planModelCam` returned a
   // plan still carries the plan's own typed statements (the reason the run came up short), the
   // same way the success and verify-fail returns do.
-  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGenerated => ({
+  const fail = (stage: EngraveStage, message: string, feeds: FeedsResult | null = null, plan: ModelPlanOutput | null = null, findings: JobFinding[] = []): EngraveGeneratedFull => ({
     ...base,
     ok: false,
     stage,
@@ -6647,10 +6655,10 @@ export async function generateGoalProgram(
  * with the completed list. The result carries the total, or none when no program states a cycle.
  */
 function attachRunCycle(
-  result: EngraveGenerated,
+  result: EngraveGeneratedFull,
   facts: { setupCount: number; flip: boolean },
   defaults: ShopDefaults | null,
-): EngraveGenerated {
+): EngraveGeneratedFull {
   const cycle = runCycleOf(
     result.programs.map((program) => ({
       seconds: program.cam?.estimatedSeconds ?? 0,
@@ -6687,7 +6695,7 @@ async function generateGoalPrograms(
   /** #1134 — the pick's handoffs, passed to each side's plan. #1151 — `deferIdeal` and the rank
    * seam ride the same options object on every side; #1046's ladder choice rides it too. */
   options: EngraveGenerateOptions = {},
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   // #1073 — A FRAME FLIP NEEDS ITS BAND BEFORE ANYTHING POSTS. `flip: { method: 'tabs-in-blank' }`
   // means side 1 stops above the part's silhouette plane and side 2 below it, so a band of stock
   // holds the part on tabs C's release then cuts. A job whose goals carry no band — saved before
@@ -6717,7 +6725,7 @@ async function generateGoalPrograms(
   // side's setup on them, never a field-by-field copy that could drop the check. A side can be
   // more than one program (#847's rest pass, #869's flat rough, the chamfer), so the side's whole
   // list carries over; each keeps its own cutter key.
-  const sidePrograms = (one: EngraveGenerated, side: GoalSide): EngraveProgram[] | null => {
+  const sidePrograms = (one: EngraveGeneratedFull, side: GoalSide): EngraveProgram[] | null => {
     if (!(one.ok && one.nc !== null) || one.programs.length === 0) return null;
     return one.programs.map((program) => ({
       ...program,
@@ -7154,13 +7162,13 @@ async function generateFaceProgram(
   shop: EngraveShopOpts,
   /** #419 decision 4 — this file's share of the RUN's vacuum words (a mixed job's face program). */
   span: VacuumSpan = 'whole',
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   const base = emptyGoalResult();
   const fail = (
     stage: EngraveStage,
     message: string,
-    extra?: Partial<Pick<EngraveGenerated, 'feeds' | 'findings' | 'nc' | 'verify' | 'predicted' | 'cam'>>,
-  ): EngraveGenerated => ({
+    extra?: Partial<Pick<EngraveGeneratedFull, 'feeds' | 'findings' | 'nc' | 'verify' | 'predicted' | 'cam'>>,
+  ): EngraveGeneratedFull => ({
     ...base,
     ok: false,
     stage,
@@ -7367,6 +7375,7 @@ async function generateFaceProgram(
         // A rest pass is cut on the same machine, in the same post's words.
         dialect: postKey(mill),
         depthLimit: jobDepthLimit(job, margins.boundaryMargin),
+        boundaryMarginMm: margins.boundaryMargin,
         minRapidZ: fineIr.hopZ,
         footprint: null,
         rotary: map,
@@ -7376,7 +7385,7 @@ async function generateFaceProgram(
         uncut.push(...[...group.faces.keys()].map((i) => ({ frame: frames[i]!, ids: group.cuts.map((c) => c.id) })));
         continue;
       }
-      const fineOne: Omit<EngraveGenerated, 'programs'> = {
+      const fineOne: OneProgram = {
         ...emptyGoalResult(),
         ok: true,
         stage: 'done',
@@ -7386,6 +7395,7 @@ async function generateFaceProgram(
         nc: postedFine.text,
         frame: 'rotary',
         verify: fineVerify,
+        verifyContext: verifyContextOfFacts(fineFacts),
         predicted: finePredicted,
         errors: [],
       };
@@ -7460,6 +7470,7 @@ async function generateFaceProgram(
     tool,
     dialect: postKey(mill),
     depthLimit: limit,
+    boundaryMarginMm: margins.boundaryMargin,
     minRapidZ: ir.hopZ,
     footprint: null,
     rotary: map,
@@ -7476,7 +7487,7 @@ async function generateFaceProgram(
   }
 
   const cam = summarize(ir, mill.rapidEstimate);
-  const one: Omit<EngraveGenerated, 'programs'> = {
+  const one: OneProgram = {
     ...base,
     ok: true,
     stage: 'done',
@@ -7486,6 +7497,7 @@ async function generateFaceProgram(
     nc,
     frame: 'rotary',
     verify,
+    verifyContext: verifyContextOfFacts(faceFacts),
     predicted,
     errors: [],
   };
@@ -7503,7 +7515,7 @@ async function generateFaceProgram(
  * #1134 — THE CALLER'S HANDOFFS to the two-plan run.
  *
  * `reusedOwnedPlan`: the smart pick fully evaluates its finalists through THIS function; the
- * winning evaluation's `EngraveGenerated.plan` is the cut's owned plan, so the cut hands it back
+ * winning evaluation's `EngraveGeneratedFull.plan` is the cut's owned plan, so the cut hands it back
  * here and `planTwoOutcomes` posts it instead of planning the owned half a second time (the
  * Manager's ruling on #1134: "the pick's winning full plan IS the cut's owned plan"). The ideal
  * still runs, and its enrichment of the owned plan's rest statement still applies.
@@ -7545,7 +7557,7 @@ export async function engraveGenerate(
   /** #1134 — the pick's handoffs (see {@link EngraveGenerateOptions}); #1151 — `deferIdeal` and
    * the rank seam ride the same object; #1046 — the ladder choice does too. */
   options: EngraveGenerateOptions = {},
-): Promise<EngraveGenerated> {
+): Promise<EngraveGeneratedFull> {
   memTrace('pipeline:start', { job: job.name });
   onProgress?.({ stage: 'prepare', label: 'reading the job' });
   // #786 slice 4c-2 — the same catalogue fill as `engraveRegions`, applied HERE as well so the
@@ -8227,7 +8239,7 @@ function faceIntoNeckFinding(job: EngraveJob, faceTool: Tool | null, defaults: S
 }
 
 /** #849 — the run refused before anything is cut, with the one finding that refuses it. */
-function neckRefusal(finding: JobFinding): EngraveGenerated {
+function neckRefusal(finding: JobFinding): EngraveGeneratedFull {
   return {
     ...emptyGoalResult(),
     ok: false,
@@ -8252,6 +8264,11 @@ function withOwnDesignItems(programs: readonly EngraveProgram[], designItems: re
 }
 
 /** One program as the result's list entry, keyed by the FNV of its posted text (decision 3). */
+function requireVerifyContext(context: ProgramVerifyContext | undefined): ProgramVerifyContext {
+  if (context === undefined) throw new Error('a posted program has no verify context: its posting path did not record one');
+  return context;
+}
+
 function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
   const nc = one.nc!;
   return {
@@ -8268,7 +8285,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
     frameZ: one.frameZ ?? null,
     frameError: one.frameError ?? null,
     programHash: programHash(nc),
-    verifyContext: planlessVerifyContext(),
+    verifyContext: requireVerifyContext(one.verifyContext),
     cam: one.cam,
     // #865 — this file's own findings, for the run's tagged list and the receipt.
     findings: one.findings,
@@ -8301,7 +8318,7 @@ function programOf(one: OneProgram, ref: JobProgramRef): EngraveProgram {
  * any other file. It has no frame file: the face program is its own dry-run subject on the sheet.
  */
 function facingProgramOf(
-  one: Omit<EngraveGenerated, 'programs'>,
+  one: OneProgram,
   ref: JobProgramRef,
 ): EngraveProgram | null {
   if (one.facingNc === null || one.facingVerify === null || one.facingToolKey === null) return null;
@@ -8315,7 +8332,7 @@ function facingProgramOf(
     frameNc: null,
     frameVerify: null,
     programHash: programHash(one.facingNc),
-    verifyContext: planlessVerifyContext(),
+    verifyContext: requireVerifyContext(one.facingVerifyContext),
     cam: null,
   };
 }
@@ -8480,7 +8497,7 @@ async function generateOneProgram(
         cam: FacingCamSummary | null;
       };
     },
-  ): Omit<EngraveGenerated, 'programs'> => {
+  ): Omit<EngraveGeneratedFull, 'programs'> => {
     if (extra?.message !== undefined) errors.push({ stage, message: extra.message });
     return {
       ok: false,
@@ -9273,6 +9290,7 @@ async function generateOneProgram(
       tool,
       dialect: postKey(mill),
       depthLimit: limit,
+      boundaryMarginMm: margins.boundaryMargin,
       minRapidZ,
       // #1235 stage 2 — the footprint rule's own facts: this sub-job's blank (its rectangle, or
       // the circle of round stock) plus every sacrificial piece, and whether any of its items was
@@ -9325,6 +9343,7 @@ async function generateOneProgram(
         tool,
         dialect: postKey(mill),
         depthLimit: limit,
+        boundaryMarginMm: margins.boundaryMargin,
         minRapidZ: neckIr.hopZ,
         footprint: rotaryMap === null ? jobFootprint(job) : null,
         outsideAllowancesMm: rotaryMap === null ? neckAllowances : undefined,
@@ -9349,6 +9368,7 @@ async function generateOneProgram(
         nc: postedNeck.text,
         frame: neckIr.frame,
         verify: neckVerify,
+        verifyContext: verifyContextOfFacts(neckFacts),
         predicted: neckPredicted,
         errors: [],
         neck: neckProgram,
@@ -9402,6 +9422,7 @@ async function generateOneProgram(
       // #240 — the frame the post actually wrote, carried to the run and the frozen package.
       frame: postIr.frame,
       verify,
+      verifyContext: verifyContextOfFacts(facts),
       frameNc,
       frameVerify,
       // #747 — the height the frame was actually traced at (work Z), and, when the frame was
@@ -9413,6 +9434,7 @@ async function generateOneProgram(
       facingToolKey: facing.toolKey,
       facingError: facing.error,
       facingCam: facing.cam,
+      ...(facing.verifyContext === undefined ? {} : { facingVerifyContext: facing.verifyContext }),
       predicted: predictedForRun,
       // #924 activation — this program's own design items, split the same way `predictedForRun` is
       // above (rough-only items dropped, the neck item dropped).
@@ -9448,17 +9470,18 @@ async function generateOneProgram(
 }
 
 /**
- * #1126 — THE RESULT THE PAGE RECEIVES: both plans reduced to their `planSummary` (a copy; the input
- * is untouched). `EngraveGenerated` types a plan as the engine's whole `ModelPlanOutput` because the
- * engine's own callers (the pick's `reusedOwnedPlan`, the CLI, the tests) hold it whole; what crosses
- * to the page is the summary, from this worker and from the house's `resultDocument` alike. The
- * summary's fields are a subset of the plan's, so the narrowing is the one cast below, and
- * `houseResultTrim1126.spec.ts` pins that nothing in `src/` outside the engine reads past it.
+ * #1126 — THE RESULT THAT LEAVES THE ENGINE. `EngraveGeneratedFull` is the in-process result: each
+ * plan whole (`ModelPlanOutput`, toolpath IR and all), for the callers that live beside the planner
+ * (the pick's `reusedOwnedPlan`, the CLI, the tests). What the worker returns and what the house
+ * writes is `EngraveGenerated`: the same fields with both plans reduced to a `PlanSummary` — a type
+ * of its own, so a reader of a result cannot name a field the summary does not carry.
  */
-export function trimmedResult(full: EngraveGenerated): EngraveGenerated {
-  return {
-    ...full,
-    plan: planSummary(full.plan) as EngraveGenerated['plan'],
-    planIdeal: planSummary(full.planIdeal) as EngraveGenerated['planIdeal'],
-  };
+export type EngraveGenerated = Omit<EngraveGeneratedFull, 'plan' | 'planIdeal'> & {
+  plan?: PlanSummary | null;
+  planIdeal?: PlanSummary | null;
+};
+
+/** The typed trim between the two: a copy with both plans summarised; the input is untouched. */
+export function trimGenerated(full: EngraveGeneratedFull): EngraveGenerated {
+  return { ...full, plan: planSummary(full.plan), planIdeal: planSummary(full.planIdeal) };
 }

@@ -349,7 +349,7 @@ New registry entries introduced here: `plan.decisionPitchMm`, `plan.estimateTole
 - **The package hash:** job fingerprint + program hashes + simulator version.
 
 Three leaks into planner internals need a stated field in place of a reach into the plan:
-- `engrave/restoredRun.ts:71-112` reads `plan.perSetup[].programs[].hopZ`, `ops[].kind` and `outcome.throughKerf`.
+- `engrave/restoredRun.ts` (#1126, resolved): reads no plan IR. Each program carries `verifyContext` (`minRapidZ`, `outsideAllowancesMm`, `throughKerf`, `boundaryMarginMm`, `itemProgram`), stored by the path that posted it from the facts its first verification used; the plan reaches the page only as a `PlanSummary` (`engine/cnc/engrave/planSummary.ts`), and `restoredRun` asks it only whether each program's setup has an entry.
 - The CLI reads `plan.ladderRows` and `perSetup[].clGrid` (`scripts/lib/casemaker/engrave.ts:1286, 1893`).
 - `src/testing/windowApi.ts` reads `plan.perSetup`.
 

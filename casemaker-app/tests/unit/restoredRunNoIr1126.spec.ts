@@ -76,6 +76,15 @@ describe('#1126 — the re-check reads verifyContext, not the plan', () => {
     expect(out.errors.map((e) => e.finding.code)).toContain('rapid-too-low');
   });
 
+  it('a plan that exists but has no entry for a program’s setup is planned again, not checked against the job’s limit', () => {
+    const generated = stored({ minRapidZ: 1, outsideAllowancesMm: [], throughKerf: [] });
+    const missingSetup: EngraveGenerated = { ...generated, plan: { outcome: null, perSetup: [] } };
+    const out = recheck(missingSetup);
+    expect(out.regenerate).toBe(true);
+    expect(out.errors).toEqual([]);
+    expect(out.generated).toBe(missingSetup);
+  });
+
   it('a result with no verifyContext is not re-checked: it asks to be planned again, unchanged', () => {
     const generated = stored(undefined);
     const out = recheck(generated);
